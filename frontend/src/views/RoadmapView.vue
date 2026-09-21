@@ -46,37 +46,10 @@
           inset
           class="rm-fold-toggle"
         />
-        <v-btn
-          color="primary"
-          variant="flat"
-          :prepend-icon="isEmptyRoadmap ? 'mdi-playlist-plus' : 'mdi-refresh'"
-          class="rm-copy-btn"
-          :aria-label="isEmptyRoadmap ? 'Copy a prompt to create the roadmap' : 'Copy a prompt to refresh the roadmap'"
-          @click="copyRoadmapPrompt"
-        >
-          {{ isEmptyRoadmap ? 'Create Roadmap' : 'Refresh Roadmap' }}
-        </v-btn>
-      </div>
-
-      <div class="rm-custom-prompt main-window-reveal main-window-delay-2">
-        <v-checkbox
-          :model-value="customPromptEnabled"
-          label="Add my own instructions"
-          color="primary"
-          density="compact"
-          hide-details
-          class="rm-custom-toggle"
-          @update:model-value="onCustomPromptToggle"
-        />
-        <v-textarea
-          v-if="customPromptEnabled"
-          v-model="customPromptText"
-          variant="outlined"
-          auto-grow
-          rows="6"
-          hide-details
-          class="rm-custom-textarea"
-          aria-label="Editable roadmap prompt"
+        <RoadmapPromptActions
+          :is-empty="isEmptyRoadmap"
+          :prompt-text="currentPromptText"
+          @copy="copyRoadmapPrompt"
         />
       </div>
 
@@ -205,7 +178,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useProductStore } from '@/stores/products'
 import { buildRoadmapPrompt as buildRoadmapPromptText } from '@/content/roadmap/prompts'
 import { useProjectStore } from '@/stores/projects'
@@ -219,6 +192,7 @@ import { useTaskCrud } from '@/composables/useTaskCrud'
 import draggable from 'vuedraggable'
 import RoadmapCard from '@/components/RoadmapCard.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import RoadmapPromptActions from '@/components/roadmap/RoadmapPromptActions.vue'
 import ProjectCreateEditDialog from '@/components/projects/ProjectCreateEditDialog.vue'
 import TaskEditDialog from './tasks/TaskEditDialog.vue'
 
@@ -238,6 +212,7 @@ const foldInTasks = ref(true)
 const projectTypes = ref([])
 
 const activeProduct = computed(() => productStore.currentProduct)
+const viewedProductId = computed(() => productStore.currentProduct?.id)
 const isEmptyRoadmap = computed(() => items.value.length === 0)
 
 const displayItems = computed(() =>
@@ -332,15 +307,9 @@ function onAgentActive() {
   persistAgentActive()
 }
 
-const customPromptEnabled = ref(false)
-const customPromptText = ref('')
-
-function onCustomPromptToggle(enabled) {
-  customPromptEnabled.value = enabled
-  if (enabled) {
-    customPromptText.value = buildRoadmapPrompt(isEmptyRoadmap.value ? 'create' : 'refresh')
-  }
-}
+const currentPromptText = computed(() =>
+  buildRoadmapPrompt(isEmptyRoadmap.value ? 'create' : 'refresh')
+)
 
 const REFETCH_UPDATE_TYPES = new Set(['status_changed', 'activated', 'deactivated', 'updated'])
 
@@ -392,9 +361,9 @@ async function copyToClipboard(text) {
   }
 }
 
-async function copyRoadmapPrompt() {
+async function copyRoadmapPrompt(editedText) {
   const mode = isEmptyRoadmap.value ? 'create' : 'refresh'
-  const text = customPromptEnabled.value ? customPromptText.value : buildRoadmapPrompt(mode)
+  const text = typeof editedText === 'string' ? editedText : buildRoadmapPrompt(mode)
   const ok = await copyToClipboard(text)
   if (ok) {
     showToast({
@@ -412,7 +381,7 @@ async function copyRoadmapPrompt() {
 async function fetchRoadmap({ notify = false } = {}) {
   loading.value = true
   try {
-    const { data } = await api.roadmap.get()
+    const { data } = await api.roadmap.get(viewedProductId.value)
     noActiveProduct.value = false
     roadmap.value = data.roadmap || null
     items.value = Array.isArray(data.items) ? [...data.items] : []
@@ -457,7 +426,7 @@ async function persistOrder(orderedArr) {
   isPersisting.value = true
   try {
     const payload = orderedArr.map((it, i) => ({ id: it.id, sort_order: i }))
-    await api.roadmap.reorder(payload)
+    await api.roadmap.reorder(payload, viewedProductId.value)
   } catch (error) {
     console.error('[ROADMAP] Failed to persist new order:', error)
     items.value = previous
@@ -473,7 +442,7 @@ async function removeItem(item) {
   const previous = items.value
   items.value = items.value.filter((it) => it.id !== item.id)
   try {
-    await api.roadmap.removeItem(item.id)
+    await api.roadmap.removeItem(item.id, viewedProductId.value)
     showToast({ message: 'Removed from roadmap', type: 'success' })
   } catch (error) {
     console.error('[ROADMAP] Failed to remove item:', error)
@@ -583,6 +552,12 @@ async function confirmConvert() {
   }
 }
 
+watch(viewedProductId, () => {
+  roadmap.value = null
+  items.value = []
+  fetchRoadmap()
+})
+
 onMounted(async () => {
   unsubRoadmap = wsStore.on('roadmap:updated', onRoadmapUpdated)
   unsubAgentActive = wsStore.on('roadmap:agent_active', onAgentActive)
@@ -634,9 +609,7 @@ defineExpose({
   onRoadmapUpdated,
   onProjectUpdated,
   buildRoadmapPrompt,
-  customPromptEnabled,
-  customPromptText,
-  onCustomPromptToggle,
+  currentPromptText,
 })
 </script>
 
@@ -687,15 +660,6 @@ defineExpose({
 
 .rm-waiting {
   margin-bottom: 20px;
-}
-
-/* FE-6240: editable custom-prompt block (checkbox + revealed textarea). */
-.rm-custom-prompt {
-  margin-bottom: 20px;
-}
-
-.rm-custom-textarea {
-  margin-top: 8px;
 }
 
 .rm-waiting-row {

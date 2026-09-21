@@ -34,6 +34,8 @@ VALID_PROJECT_STATUSES: frozenset[str] = frozenset(
 
 CHAIN_TERMINAL_PROJECT_STATUSES: frozenset[str] = frozenset({"completed", "terminated", "cancelled", "failed"})
 
+CHAIN_UNSTARTED_PROJECT_STATUSES: frozenset[str] = frozenset({"", "pending", "staged"})
+
 VALID_REVIEW_POLICIES: frozenset[str] = frozenset({"per_card", "auto_close"})
 
 __all__ = ["ACCEPTED_EXECUTION_MODES", "VALID_EXECUTION_MODES"]

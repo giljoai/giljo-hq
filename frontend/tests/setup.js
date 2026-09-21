@@ -383,6 +383,17 @@ vi.mock('@/services/api', () => {
           },
         }),
       ),
+      // FE-9629: one chain MEMBER's own orchestrator bootstrap (project-scoped).
+      chainMember: vi.fn(() =>
+        Promise.resolve({
+          data: {
+            run_id: 'run-mock',
+            project_id: 'proj-member',
+            orchestrator_job_id: 'job-member',
+            prompt: 'Mock chain member prompt',
+          },
+        }),
+      ),
     },
     templates: {
       list: vi.fn(() => Promise.resolve({ data: [] })),
@@ -608,6 +619,9 @@ vi.mock('@/services/api', () => {
       removeMember: vi.fn(() => Promise.resolve({ data: { success: true } })),
       // FE-6178: deactivate the whole chain (members -> inactive, run -> cancelled).
       deactivate: vi.fn(() => Promise.resolve({ data: { id: 'run-mock', status: 'cancelled' } })),
+      // FE-9632: stop a RUNNING chain (run -> cancelled, member underway terminated
+      // with its agent history kept, unreached members -> inactive).
+      stop: vi.fn(() => Promise.resolve({ data: { id: 'run-mock', status: 'cancelled' } })),
       // BE-9098: durable per-member review ack (returns the updated run).
       markReviewed: vi.fn(() =>
         Promise.resolve({ data: { id: 'run-mock', project_ids: [], resolved_order: [], reviewed_project_ids: [] } }),

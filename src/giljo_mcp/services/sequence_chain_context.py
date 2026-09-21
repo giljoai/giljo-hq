@@ -14,10 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.exceptions import ImplementationNotReadyError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -238,3 +240,68 @@ class SequenceChainContextResolver:
             )
             await svc.update(run_id=run_id, tenant_key=tenant_key, status="stalled")
             return True
+
+
+def chain_member_phase(project: Any) -> str:
+    launched = getattr(project, "implementation_launched_at", None) is not None
+    staging_finished = getattr(project, "staging_status", None) == "staging_complete"
+    return "implementation" if (launched and staging_finished) else "staging"
+
+
+async def resolve_chain_launch_gate(
+    session: Any,
+    *,
+    db_manager: Any,
+    tenant_manager: Any,
+    project_id: str,
+    tenant_key: str,
+    test_session: Any | None = None,
+) -> tuple[bool, Any | None]:
+    try:
+        run = await SequenceRunService(
+            db_manager=db_manager,
+            tenant_manager=tenant_manager,
+            session=test_session,
+        ).find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
+        if run is None:
+            return False, None
+
+        resolved_order: list[str] = run.get("resolved_order") or []
+        if project_id not in resolved_order:
+            return False, None
+
+        index = resolved_order.index(project_id)
+        if index <= run.get("current_index", 0):
+            return True, None
+
+        predecessor = (
+            await session.execute(
+                select(Project).where(
+                    Project.id == resolved_order[index - 1],
+                    Project.tenant_key == tenant_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if predecessor is None or predecessor.closeout_executed_at is not None:
+            return True, None
+        return True, predecessor
+    except Exception as exc:  # noqa: BLE001 — an unresolvable chain falls back to the solo guard
+        logger.warning("[CHAIN_LAUNCH_GATE] resolution failed for %s: %s", sanitize(project_id), exc)
+        return False, None
+
+
+def chain_predecessor_open_error(project: Any, predecessor: Any) -> Any:
+    alias = predecessor.alias or predecessor.name
+    return ImplementationNotReadyError(
+        reason="chain_predecessor_open",
+        message=(
+            f"Cannot start this chain member yet: {alias} is still open. Linked projects run "
+            "one at a time — the project before this one has to close out "
+            "(write_project_closeout) before this one can start."
+        ),
+        context={
+            "project_id": project.id,
+            "predecessor_project_id": predecessor.id,
+            "predecessor_alias": alias,
+        },
+    )

@@ -157,13 +157,14 @@ describe('ProjectsTable.vue — FE-6165f inChainIds prop', () => {
     expect(cb.element.checked).toBe(true)
   })
 
-  it('does NOT render a checkbox for an active (non-inactive) row, but DOES show In chain pill (FE-6221b)', () => {
-    // Active rows have no select checkbox (they can't be elected into a new chain),
-    // but FE-6221b: they DO show the "In chain" pill so chain membership remains
-    // visible throughout the member's active run phase — matching /roadmap.
+  it('does NOT render a checkbox for an active (non-inactive) row, and shows no In chain pill (FE-9628)', () => {
+    // Active rows have no select checkbox (they can't be elected into a new chain).
+    // FE-6221b used to pair their status badge with an "In chain" pill; FE-9628
+    // collapsed that to ONE chip per row — the status badge — with chain
+    // membership carried by its tooltip.
     const activeItem = { ...INACTIVE_ITEM, id: 'p-active', status: 'active' }
     const w = mountTable({ inChainIds: ['p-active'] }, activeItem)
     expect(w.find('[data-testid="project-select-checkbox"]').exists()).toBe(false) // no tickbox
-    expect(w.find('[data-testid="project-in-chain-pill"]').exists()).toBe(true)    // pill present
+    expect(w.find('[data-testid="project-in-chain-pill"]').exists()).toBe(false)   // single chip
   })
 })

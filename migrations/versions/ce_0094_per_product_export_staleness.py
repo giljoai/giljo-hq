@@ -51,6 +51,10 @@ def upgrade() -> None:
     if _TEMPLATES not in tables:
         return
 
+    if "last_exported_at" not in _columns(inspector, _TEMPLATES):
+        print("ce_0094: source column agent_templates.last_exported_at is gone (ce_0105); nothing to backfill")  # noqa: T201
+        return
+
     backfilled = bind.execute(_BACKFILL_SQL).rowcount
     print(f"ce_0094: backfilled {backfilled} per-product export timestamp(s)")  # noqa: T201
 

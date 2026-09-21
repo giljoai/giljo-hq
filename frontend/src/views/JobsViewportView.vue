@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import { useProductStore } from '@/stores/products'
 import { api } from '@/services/api'
@@ -249,6 +249,18 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+watch(
+  () => productStore.effectiveProductId,
+  async () => {
+    loading.value = true
+    try {
+      await fetchBoard()
+    } finally {
+      loading.value = false
+    }
+  },
+)
 
 defineExpose({ selectedIds, selectedProjects, launchDialogOpen, fetchBoard })
 </script>

@@ -28,7 +28,7 @@ from api.endpoints.mcp_tools._tool_annotations import _tool_hints
         "and remove params for their shape. Defaults to your default product; pass product_id "
         "for a specific one."
     ),
-    annotations=_tool_hints("save_roadmap"),
+    annotations=_tool_hints("save_roadmap", destructive=True),
 )
 async def save_roadmap(
     items: Annotated[

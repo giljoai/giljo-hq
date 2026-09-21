@@ -192,6 +192,54 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
             return project
 
+    async def terminate_project(
+        self,
+        project_id: str,
+        tenant_key: str | None = None,
+        websocket_manager: Any | None = None,
+    ) -> Project:
+        resolved_tenant = tenant_key or self.tenant_manager.get_current_tenant()
+        async with self._get_session(resolved_tenant) as session:
+            project = await self._repo.get_by_id(session, resolved_tenant, project_id)
+
+            if not project:
+                raise ResourceNotFoundError(
+                    message="Project not found or access denied",
+                    context={"project_id": project_id, "tenant_key": resolved_tenant},
+                )
+
+            if project.status == ProjectStatus.TERMINATED:
+                return project
+
+            stood_down = await self._repo.stand_down_project_agents(session, resolved_tenant, project_id)
+
+            project.status = ProjectStatus.TERMINATED
+            project.updated_at = datetime.now(UTC)
+
+            await session.commit()
+            await self._repo.refresh(session, project)
+
+            self._logger.info(
+                "Terminated project %s (agent jobs=%d, executions=%d stood down; no rows deleted)",
+                sanitize(project_id),
+                stood_down["jobs"],
+                stood_down["executions"],
+            )
+
+            ws_mgr = websocket_manager or self._websocket_manager
+            if ws_mgr:
+                try:
+                    await ws_mgr.broadcast_project_update(
+                        project_id=project.id,
+                        update_type="status_changed",
+                        project_data=_build_ws_project_data(project),
+                        tenant_key=project.tenant_key,
+                    )
+                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
+                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+
+            return project
+
     def check_staging_allowed(self, project: Project) -> None:
         self._staging.check_staging_allowed(project)
 

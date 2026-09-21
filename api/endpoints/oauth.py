@@ -75,7 +75,7 @@ class AuthorizeRequest(BaseModel):
 
     client_id: str = Field(..., max_length=256, description="OAuth client identifier")
     redirect_uri: str = Field(..., max_length=2048, description="URI to redirect after authorization")
-    code_challenge: str = Field(..., max_length=512, description="PKCE S256 code challenge")
+    code_challenge: str = Field(..., max_length=128, description="PKCE S256 code challenge")
     code_challenge_method: str = Field(
         default="S256", max_length=16, description="PKCE challenge method (must be S256)"
     )
@@ -89,7 +89,7 @@ class AuthorizeRequest(BaseModel):
             "API-key parity (guarded by the localhost redirect allowlist + consent)."
         ),
     )
-    state: str = Field(default="", max_length=512, description="Opaque state value for CSRF protection")
+    state: str = Field(default="", max_length=4096, description="Opaque state value for CSRF protection")
     response_type: str = Field(default="code", max_length=32, description="OAuth response type (must be code)")
     resource: str | None = Field(
         default=None,

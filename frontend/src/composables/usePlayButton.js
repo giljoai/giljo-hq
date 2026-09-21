@@ -1,11 +1,15 @@
 import { ref } from 'vue'
 import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { shouldShowLaunchAction } from '@/utils/actionConfig'
 import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
 
-export function usePlayButton(project, getProjectState, clipboardCopy) {
+const DEFAULT_PLAY_TOOLTIP = 'Copy prompt'
+
+export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx = null) {
   const { showToast } = useToast()
+  const sequenceRunStore = useSequenceRunStore()
 
   const reactivatedAgents = ref(new Set())
 
@@ -13,11 +17,35 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     return project?.value ?? project
   }
 
+  function _projectId() {
+    const proj = _getProject()
+    return proj?.project_id || proj?.id
+  }
+
+  function _chainTabs() {
+    const ctx = chainCtx?.value ?? chainCtx
+    return ctx?.tabs || []
+  }
+
+  function _isChainMember(agent) {
+    if (agent?.agent_display_name !== 'orchestrator') return false
+    const pid = _projectId()
+    return _chainTabs().some((tab) => tab.projectId === pid)
+  }
+
+  function _blockingPredecessorLabel() {
+    const tabs = _chainTabs()
+    const index = tabs.findIndex((tab) => tab.projectId === _projectId())
+    if (index <= 0) return null
+    const previous = tabs[index - 1]
+    return previous.taxonomyAlias || previous.name || 'the previous project'
+  }
+
   function shouldShowCopyButton(agent) {
     const proj = _getProject()
     const projectId = proj?.project_id || proj?.id
     const state = getProjectState(projectId)
-    if (!state?.stagingComplete) return false
+    if (!state?.stagingComplete && !_isChainMember(agent)) return false
 
     const executionMode = state?.execution_mode ?? proj?.execution_mode
     const claudeCodeCliMode = isSubagentExecutionMode(executionMode)
@@ -28,7 +56,16 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
   function isPlayButtonFaded(agent) {
     const jobId = agent.job_id || agent.agent_id
     if (reactivatedAgents.value.has(jobId)) return false
+    if (_isChainMember(agent) && !sequenceRunStore.isProjectStartable(_projectId())) return true
     return agent.status !== 'waiting'
+  }
+
+  function playButtonTooltip(agent) {
+    if (!_isChainMember(agent) || sequenceRunStore.isProjectStartable(_projectId())) {
+      return DEFAULT_PLAY_TOOLTIP
+    }
+    const predecessor = _blockingPredecessorLabel()
+    return predecessor ? `Starts after ${predecessor} closes out` : DEFAULT_PLAY_TOOLTIP
   }
 
   function reactivatePlay(agent) {
@@ -43,6 +80,11 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     const proj = _getProject()
 
     try {
+      if (_isChainMember(agent)) {
+        await _handleChainMemberPlay()
+        return
+      }
+
       if (agent.agent_display_name === 'orchestrator') {
         const projectId = proj?.project_id || proj?.id
         const storeState = getProjectState(projectId)
@@ -102,6 +144,42 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     }
   }
 
+  async function _handleChainMemberPlay() {
+    const projectId = _projectId()
+    if (!sequenceRunStore.isProjectStartable(projectId)) return
+
+    try {
+      await api.projects.launchImplementation(projectId)
+    } catch (gateError) {
+      const msg =
+        gateError?.response?.data?.message ||
+        gateError?.response?.data?.detail ||
+        gateError?.message ||
+        'Could not start this project.'
+      showToast({ message: msg, type: 'error', timeout: 7000 })
+      return
+    }
+
+    const { data } = await api.prompts.chainMember(projectId)
+    const prompt = data?.prompt
+    if (!prompt) throw new Error('No prompt text returned')
+
+    const clipboardOk = await clipboardCopy(prompt)
+    if (!clipboardOk) {
+      showToast({
+        message: 'Browser blocked clipboard access. Copy from the dialog manually.',
+        type: 'error',
+        timeout: 6000,
+      })
+      return
+    }
+    showToast({
+      message: 'Orchestrator prompt copied. Paste it in a fresh session to run this project.',
+      type: 'success',
+      timeout: 5000,
+    })
+  }
+
   function _titleCaseRole(name) {
     if (!name) return 'Specialist'
     return String(name).replace(/\b\w/g, (c) => c.toUpperCase())
@@ -137,6 +215,7 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     reactivatedAgents,
     shouldShowCopyButton,
     isPlayButtonFaded,
+    playButtonTooltip,
     reactivatePlay,
     handlePlay,
   }

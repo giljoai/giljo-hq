@@ -72,9 +72,6 @@ class AgentTemplate(Base):
 
     avg_generation_ms = Column(Float, nullable=True)
 
-    last_exported_at = Column(DateTime(timezone=True), nullable=True)
-    user_managed_export = Column(Boolean, default=False, server_default="false", nullable=False)
-
     description = Column(Text, nullable=True)
     version = Column(String(20), default="1.0.0")
     is_active = Column(Boolean, default=True)

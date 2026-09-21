@@ -2,9 +2,13 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 import { immutableMapSet, immutableMapDelete } from './immutableHelpers'
+import { useProductStore } from '@/stores/products'
 import api from '@/services/api'
 
 const ACTIVE_RUN_STATUSES = ['pending', 'running', 'stalled']
+const CHAIN_FINISHED_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled'])
+const CHAIN_UNSTARTED_MEMBER_STATUSES = new Set(['', 'pending', 'staged'])
+const CHAIN_RUNNING_STATUSES = new Set(['running', 'stalled'])
 
 function normalizeRun(raw) {
   if (!raw) return null
@@ -40,6 +44,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
   const loading = ref(false)
   const error = ref(null)
   const retiredRunNotice = ref(null)
+  const scopedProductId = ref(null)
 
 
   const activeRuns = computed(() => Array.from(runsById.value.values()))
@@ -73,9 +78,33 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     return run ? run.project_statuses?.[projectId] ?? null : null
   }
 
+  function isProjectStartable(projectId) {
+    if (!projectId) return false
+    const run = runForProject(projectId)
+    if (!run) return false
+    const order = run.resolved_order?.length ? run.resolved_order : run.project_ids || []
+    const index = order.indexOf(projectId)
+    if (index < 0) return false
+    if (CHAIN_FINISHED_STATUSES.has(run.project_statuses?.[projectId])) return false
+    if (index <= (run.current_index ?? 0)) return true
+    return run.project_statuses?.[order[index - 1]] === 'completed'
+  }
+
   function isProjectRunLocked(projectId) {
     const run = runForProject(projectId)
     return run ? run.locked === true : false
+  }
+
+  function isRunning(runId) {
+    if (!runId) return false
+    const run = runsById.value.get(runId) || (activeRun.value?.id === runId ? activeRun.value : null)
+    if (!run) return false
+    if (CHAIN_RUNNING_STATUSES.has(run.status)) return true
+    if (CHAIN_FINISHED_STATUSES.has(run.status)) return false
+    const order = run.resolved_order?.length ? run.resolved_order : run.project_ids || []
+    const head = order[0]
+    if (!head) return false
+    return !CHAIN_UNSTARTED_MEMBER_STATUSES.has(run.project_statuses?.[head] ?? '')
   }
 
   function isReviewed(runId, pid) {
@@ -91,8 +120,14 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     )
   }
 
+  function isOutOfViewedScope(runId) {
+    if (!runId || !scopedProductId.value) return false
+    return !runsById.value.has(runId) && !reviewPendingById.value.has(runId)
+  }
+
   const reviewPendingRun = computed(() => {
-    if (hasUnreviewedCompletedMember(activeRun.value)) return activeRun.value
+    const open = activeRun.value
+    if (open && !isOutOfViewedScope(open.id) && hasUnreviewedCompletedMember(open)) return open
     for (const r of reviewPendingById.value.values()) {
       if (hasUnreviewedCompletedMember(r)) return r
     }
@@ -131,9 +166,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     loading.value = true
     error.value = null
     try {
+      const viewedProductId = useProductStore().effectiveProductId
       const res = await api.sequenceRuns.list({
         status: statuses.join(','),
         include_review_pending: true,
+        ...(viewedProductId ? { product_id: viewedProductId } : {}),
       })
       const runs = Array.isArray(res.data) ? res.data : res.data?.sequence_runs || []
       const next = new Map()
@@ -151,8 +188,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
       }
       runsById.value = next
       reviewPendingById.value = nextPending
+      scopedProductId.value = viewedProductId || null
       if (activeRun.value && next.has(activeRun.value.id)) {
         activeRun.value = next.get(activeRun.value.id)
+      } else if (activeRun.value && isOutOfViewedScope(activeRun.value.id)) {
+        activeRun.value = null
       }
       return activeRuns.value
     } catch (err) {
@@ -168,7 +208,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     activeRun.value = normalized
     if (normalized) {
       mergeReviewedFromRun(normalized)
-      if (ACTIVE_RUN_STATUSES.includes(normalized.status)) {
+      if (ACTIVE_RUN_STATUSES.includes(normalized.status) && !isOutOfViewedScope(normalized.id)) {
         runsById.value = immutableMapSet(runsById.value, normalized.id, normalized)
       }
     }
@@ -207,8 +247,9 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
 
   async function handleSequenceUpdated(payload) {
     const runId = payload?.run_id || payload?.id
+    const openRunId = activeRun.value?.id ?? null
     await hydrate()
-    if (runId && activeRun.value && activeRun.value.id === runId) {
+    if (runId && openRunId === runId) {
       if (!runsById.value.has(runId)) {
         try {
           await fetchRun(runId)
@@ -234,6 +275,13 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     return patchRun(runId, { locked: false })
   }
 
+  async function stopChain(runId) {
+    const res = await api.sequenceRuns.stop(runId)
+    const stopped = normalizeRun(res.data)
+    await hydrate()
+    return stopped
+  }
+
   function clearActiveRun() {
     activeRun.value = null
   }
@@ -243,6 +291,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     activeRun.value = null
     reviewedProjects.value = new Map()
     reviewPendingById.value = new Map()
+    scopedProductId.value = null
     loading.value = false
     error.value = null
   }
@@ -282,6 +331,8 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     runForProject,
     projectChainStatus,
     isProjectRunLocked,
+    isProjectStartable,
+    isRunning,
     isReviewed,
     reviewPendingRun,
     hydrate,
@@ -290,6 +341,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     patchRun,
     lockRun,
     unlockRun,
+    stopChain,
     handleSequenceUpdated,
     clearRetiredRunNotice,
     clearActiveRun,

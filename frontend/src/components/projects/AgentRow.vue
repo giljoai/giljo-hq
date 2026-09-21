@@ -14,7 +14,7 @@
     <td class="play-cell">
       <div class="play-btn-slot">
         <template v-if="shouldShowCopy">
-          <v-tooltip text="Copy prompt">
+          <v-tooltip :text="playTooltip">
             <template #activator="{ props: tooltipProps }">
               <button
                 v-bind="tooltipProps"
@@ -321,6 +321,10 @@ const props = defineProps({
   playFaded: {
     type: Boolean,
     default: false,
+  },
+  playTooltip: {
+    type: String,
+    default: 'Copy prompt',
   },
 })
 

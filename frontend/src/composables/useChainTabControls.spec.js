@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 
-const { mockCopyImplPrompt, mockShowToast } = vi.hoisted(() => ({
-  mockCopyImplPrompt: vi.fn(() => Promise.resolve(true)),
+const { mockLaunchChainHead, mockShowToast } = vi.hoisted(() => ({
+  mockLaunchChainHead: vi.fn(() => Promise.resolve(true)),
   mockShowToast: vi.fn(),
 }))
 
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: mockShowToast }) }))
 vi.mock('@/composables/useChainImplementation', () => ({
-  useChainImplementation: () => ({ copyImplPrompt: mockCopyImplPrompt }),
+  useChainImplementation: () => ({ launchChainHead: mockLaunchChainHead }),
 }))
 vi.mock('@/composables/useChainLifecycle', () => ({
   useChainLifecycle: () => ({ stageChain: vi.fn(), unstageChain: vi.fn() }),
@@ -46,12 +46,12 @@ const stubRouter = () => ({ push: vi.fn(), replace: vi.fn() })
 describe('useChainTabControls — Implement wiring (BE-6177)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockCopyImplPrompt.mockClear()
-    mockCopyImplPrompt.mockResolvedValue(true)
+    mockLaunchChainHead.mockClear()
+    mockLaunchChainHead.mockResolvedValue(true)
     mockShowToast.mockClear()
   })
 
-  it('passes the head project id (resolved_order[0]) to copyImplPrompt', async () => {
+  it('passes the head project id (resolved_order[0]) to launchChainHead', async () => {
     const chainCtx = ref(makeChainCtx())
     const { handleChainImplement } = useChainTabControls({
       chainCtx,
@@ -63,7 +63,7 @@ describe('useChainTabControls — Implement wiring (BE-6177)', () => {
 
     await handleChainImplement()
 
-    expect(mockCopyImplPrompt).toHaveBeenCalledWith('run-1', 'head-pid')
+    expect(mockLaunchChainHead).toHaveBeenCalledWith('head-pid')
   })
 
   it('falls back to project_ids[0] when resolved_order is absent', async () => {
@@ -79,11 +79,11 @@ describe('useChainTabControls — Implement wiring (BE-6177)', () => {
 
     await handleChainImplement()
 
-    expect(mockCopyImplPrompt).toHaveBeenCalledWith('run-1', 'fallback-head')
+    expect(mockLaunchChainHead).toHaveBeenCalledWith('fallback-head')
   })
 
   it('flips activeTab to jobs after a SUCCESSFUL Implement (Bug 2 solo parity)', async () => {
-    mockCopyImplPrompt.mockResolvedValueOnce(true)
+    mockLaunchChainHead.mockResolvedValueOnce(true)
     const activeTab = ref('launch')
     const router = stubRouter()
     const { handleChainImplement } = useChainTabControls({
@@ -100,8 +100,8 @@ describe('useChainTabControls — Implement wiring (BE-6177)', () => {
     expect(router.replace).toHaveBeenCalledWith({ query: { via: 'jobs' } })
   })
 
-  it('leaves activeTab on launch when the Implement copy fails', async () => {
-    mockCopyImplPrompt.mockResolvedValueOnce(false)
+  it('leaves activeTab on launch when the head launch fails', async () => {
+    mockLaunchChainHead.mockResolvedValueOnce(false)
     const activeTab = ref('launch')
     const router = stubRouter()
     const { handleChainImplement } = useChainTabControls({
@@ -116,6 +116,44 @@ describe('useChainTabControls — Implement wiring (BE-6177)', () => {
 
     expect(activeTab.value).toBe('launch')
     expect(router.replace).not.toHaveBeenCalled()
+    expect(router.push).not.toHaveBeenCalled()
+  })
+
+
+  it('NAVIGATES to the head member after a successful Implement', async () => {
+    const router = stubRouter()
+    const { handleChainImplement } = useChainTabControls({
+      chainCtx: ref(makeChainCtx()),
+      projectId: ref('b-pid'),
+      router,
+      route: { query: { run: 'run-1' } },
+      activeTab: ref('launch'),
+    })
+
+    await handleChainImplement()
+
+    expect(router.push).toHaveBeenCalledWith({
+      name: 'ProjectLaunch',
+      params: { projectId: 'head-pid' },
+      query: { run: 'run-1', via: 'jobs' },
+    })
+  })
+
+  it('does not re-push when the user is ALREADY on the head member', async () => {
+    const router = stubRouter()
+    const activeTab = ref('launch')
+    const { handleChainImplement } = useChainTabControls({
+      chainCtx: ref(makeChainCtx()),
+      projectId: ref('head-pid'),
+      router,
+      route: { query: {} },
+      activeTab,
+    })
+
+    await handleChainImplement()
+
+    expect(router.push).not.toHaveBeenCalled()
+    expect(activeTab.value).toBe('jobs')
   })
 })
 
@@ -194,7 +232,7 @@ describe('useChainTabControls — handleChainReviewComplete (UI-2)', () => {
 
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockCopyImplPrompt.mockClear()
+    mockLaunchChainHead.mockClear()
     mockShowToast.mockClear()
   })
 
@@ -265,7 +303,7 @@ describe('useChainTabControls — handleChainReviewComplete persistence (BE-9098
 
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockCopyImplPrompt.mockClear()
+    mockLaunchChainHead.mockClear()
     mockShowToast.mockClear()
   })
 
@@ -326,7 +364,7 @@ describe('useChainTabControls — handleChainReviewComplete persistence (BE-9098
 describe('useChainTabControls — handleChainReviewComplete advance/return', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockCopyImplPrompt.mockClear()
+    mockLaunchChainHead.mockClear()
     mockShowToast.mockClear()
   })
 

@@ -80,7 +80,7 @@ async def update_job_mission(
         "percent and step counts. Also auto-wakes idle/sleeping/blocked agents "
         "back to 'working' status."
     ),
-    annotations=_tool_hints("report_progress"),
+    annotations=_tool_hints("report_progress", destructive=True),
 )
 async def report_progress(
     job_id: str,

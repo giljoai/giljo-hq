@@ -34,12 +34,13 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 255
+EXPECTED_ROUTE_COUNT = 258
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
         ("", frozenset()),
         ("/.well-known/mcp-server-info", frozenset({"GET"})),
+        ("/.well-known/openai-apps-challenge", frozenset({"GET"})),
         ("/.well-known/oauth-authorization-server", frozenset({"GET"})),
         ("/.well-known/oauth-protected-resource", frozenset({"GET"})),
         ("/.well-known/oauth-protected-resource/{resource_path:path}", frozenset({"GET"})),
@@ -176,6 +177,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/projects/{project_id}/unstage", frozenset({"POST"})),
         ("/api/v1/prompts/agent/{agent_id}", frozenset({"GET"})),
         ("/api/v1/prompts/chain-implementation/{run_id}", frozenset({"GET"})),
+        ("/api/v1/prompts/chain-member/{project_id}", frozenset({"GET"})),
         ("/api/v1/prompts/chain-staging/{run_id}", frozenset({"GET"})),
         ("/api/v1/prompts/implementation/{project_id}", frozenset({"GET"})),
         ("/api/v1/prompts/master", frozenset({"POST"})),
@@ -190,6 +192,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/sequence-runs/{run_id}", frozenset({"GET"})),
         ("/api/v1/sequence-runs/{run_id}", frozenset({"PATCH"})),
         ("/api/v1/sequence-runs/{run_id}/deactivate", frozenset({"POST"})),
+        ("/api/v1/sequence-runs/{run_id}/stop", frozenset({"POST"})),
         ("/api/v1/sequence-runs/{run_id}/members/{project_id}", frozenset({"DELETE"})),
         ("/api/v1/sequence-runs/{run_id}/members/{project_id}/review", frozenset({"POST"})),
         ("/api/v1/sequence-runs/{run_id}/release", frozenset({"POST"})),

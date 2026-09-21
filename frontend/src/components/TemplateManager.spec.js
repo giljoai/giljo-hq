@@ -648,9 +648,10 @@ describe('TemplateManager — FE-9203 Add default agents button', () => {
     await flushPromises()
   })
 
-  it('renders the Add Default Agents button in the toolbar', () => {
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('Add Default Agents'))
-    expect(btn).toBeTruthy()
+  it('offers Add default agents from the bulk-actions menu', () => {
+    const item = wrapper.find('[data-testid="add-default-agents"]')
+    expect(item.exists()).toBe(true)
+    expect(item.attributes('title')).toBe('Add default agents')
   })
 
   it('calls the import endpoint and refreshes templates + active count', async () => {

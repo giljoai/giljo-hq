@@ -95,21 +95,34 @@ into one autonomous back-to-back run (they paste project UUIDs or names), do NOT
 them one at a time -- start a chain run:
   `link_projects(project_ids=[...], execution_mode="subagent")`
 - Resolve any NAMES to UUIDs FIRST via `list_projects` (the tool takes `project_ids`,
-  never names). `execution_mode` is REQUIRED -- the two values are `"subagent"` (one
-  orchestrator session drives the workers; the normal headless choice) and
-  `"multi_terminal"` (one terminal per agent). A chain needs >= 2
-  distinct, non-terminal projects.
+  never names). `execution_mode` is REQUIRED and it is the USER's choice -- ask the user,
+  never guess. The two values are `"subagent"` (each project's sub-orchestrator runs its
+  workers inside this session, using your harness's own task/subagent tool) and
+  `"multi_terminal"` (one terminal per agent, coordinated over the Message Hub). Omit it
+  and the tool declines with `EXECUTION_MODE_REQUIRED` and the question to put to them.
+  A chain needs >= 2 distinct, non-terminal projects.
 - The call returns `conductor_agent_id`, a `conductor_job_id`, and a `next_action`.
   Invoking it TURNS YOUR SESSION INTO THE CONDUCTOR for the whole run -- you drive it,
   you do not hand off to anyone.
 - Bootstrap your conductor protocol with `get_staging_instructions(job_id=<the
   conductor_job_id>)`: it returns the chain-drive chapters (stand up the Hub thread,
   author the chain mission, stage each member, then complete_job to end staging). THEN
-  STOP -- report the staged plan and the chain mission to the user and WAIT for their
-  explicit GO; do NOT drive yet. After the user says go (or presses "Implement Chain"),
-  proceed and drive the run project by project, advancing on the `get_workflow_status`
+  STOP -- report the staged plan and the chain mission to the user, ASK them which GO
+  door they want (run it here: they say go / from the dashboard: they press "Implement
+  Chain"), and WAIT for their explicit GO; do NOT drive yet and do NOT pick the door for
+  them. After the user says go (or presses "Implement Chain"), proceed and drive the run
+  project by project, advancing on the `get_workflow_status`
   `ready_to_advance` gate, through to the series-summary finale.
 - A chain is multi-PROJECT, single-user -- it is NOT a Team.
+- **In `multi_terminal`, you may nudge -- but the Hub carries the message.** Each member
+  runs in its own session, so if your coding tool has its own session-to-session message
+  channel you MAY use it to nudge a peer, in addition to the Message Hub and never
+  instead of it: post what matters to the Hub thread first, then (optionally) tell the
+  peer to go read it. Treat a nudge as unacknowledged -- it is not stored anywhere, a
+  session that has already exited will not receive it, and some tools have no such
+  channel at all. Look the peer's address up again right before each send; a name you
+  saved earlier may already be stale. The Hub is what every participant reads and the
+  only record of where the run stands.
 - **Changed your mind mid-run?** `unlink_projects(run_id=<run_id>)` releases the
   projects that have not run yet and stops the group. Ones already finished stay
   finished. There is no separate "mark reviewed" step to remember: a member you
@@ -193,9 +206,12 @@ Drive it with these tools:
   coding tool/harness they're running -- that is auto-detected server-side from your MCP
   client, never a `mode` choice. ('claude'/'codex' still work as
   legacy aliases for older callers, but are not the intended values -- pass 'subagent' or
-  'multi_terminal'.) Returns the orchestrator staging prompt. When it returns, **STOP**:
-  staging never auto-executes. Tell the user to review the staged plan in the dashboard
-  and press Implement.
+  'multi_terminal'.) Returns the orchestrator staging prompt and the staging PHASES in
+  order: (1) health_check, (2) get_staging_instructions, (3) author and save the mission,
+  execution plan and worker assignments, (4) complete_job to mark staging complete, and
+  (5) only THEN stop and wait for the user's explicit approval to implement. The response
+  STARTS staging -- it does not mean staging is complete -- and staging never
+  auto-executes into implementation.
 - `get_implementation_prompt(project_id)` -- call this only AFTER the user has pressed
   Implement. If the gate has not cleared it returns a structured error
   (status='gate_not_passed') telling you the exact next action: either run

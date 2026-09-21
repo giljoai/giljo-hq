@@ -29,7 +29,12 @@
         </v-tooltip>
         <span v-else class="project-name-text">{{ localProject?.name || 'Loading...' }}</span>
       </h1>
-      <ChainModeBar v-if="chainCtx" :counter="chainCtx.counter" class="mb-0" />
+      <ChainModeBar
+      v-if="chainCtx"
+      :counter="chainCtx.counter"
+      :mode="chainScreenControls.showModeLabel ? chainScreenControls.modeLabel : ''"
+      class="mb-0"
+    />
       <p v-else class="text-body-medium project-id mb-0">
         Project ID: {{ localProject?.project_id || localProject?.id || 'N/A' }}
       </p>
@@ -61,9 +66,18 @@
         <v-icon size="18">mdi-code-braces</v-icon>
         Implementation
       </button>
+      <ChainStopControl
+        v-if="chainScreenControls.showStopChain"
+        :run="chainCtx?.run"
+        :model-value="showChainStopConfirm"
+        :stopping="chainStopping"
+        @open="openChainStopConfirm"
+        @confirm="handleChainStop"
+        @cancel="cancelChainStop"
+      />
     </div>
 
-    <div v-if="activeTab === 'launch'" class="execution-mode-row">
+    <div v-if="activeTab === 'launch' && (!chainCtx || chainScreenControls.showModeSelector)" class="execution-mode-row">
       <ExecutionModeSelector
         :execution-platform="chainCtx ? (chainCtx.run.execution_mode || null) : executionPlatform"
         :is-execution-mode-locked="chainCtx ? chainCtx.locked : isExecutionModeLocked"
@@ -73,33 +87,19 @@
     </div>
 
     <div v-if="activeTab === 'launch'" class="action-buttons-row">
-      <template v-if="chainCtx">
-        <v-btn
-          class="stage-button"
-          variant="outlined"
-          :color="chainStageColor"
-          :loading="chainStaging"
-          :disabled="chainStageDisabled"
-          :title="chainStageTitle"
-          data-testid="stage-chain-btn"
-          @click="handleChainStage"
-        >
-          {{ chainStageText }}
-        </v-btn>
+      <ChainStagingActions
+        v-if="chainCtx && chainScreenControls.showStageButton"
+        :stage-text="chainStageText"
+        :stage-title="chainStageTitle"
+        :stage-color="chainStageColor"
+        :stage-disabled="chainStageDisabled"
+        :staging="chainStaging"
+        :implement-ready="chainImplementReady"
+        @stage="handleChainStage"
+        @implement="handleChainImplement"
+      />
 
-        <v-btn
-          class="launch-button"
-          :disabled="!chainImplementReady"
-          :color="chainImplementReady ? 'yellow-darken-2' : undefined"
-          :variant="chainImplementReady ? 'flat' : 'outlined'"
-          data-testid="implement-chain-btn"
-          @click="handleChainImplement"
-        >
-          Implement
-        </v-btn>
-      </template>
-
-      <template v-else>
+      <template v-if="!chainCtx">
         <v-btn
           class="stage-button"
           variant="outlined"
@@ -221,6 +221,8 @@ import ProjectStatusBanner from './project-tabs/ProjectStatusBanner.vue'
 import ChainModeBar from './chain/ChainModeBar.vue'
 import ProjectTabStrip from './chain/ProjectTabStrip.vue'
 import ChainStagingHeader from './chain/ChainStagingHeader.vue'
+import ChainStopControl from './chain/ChainStopControl.vue'
+import ChainStagingActions from './chain/ChainStagingActions.vue'
 import { resolveTaxonomyColor, isReservedTaskAlias } from '@/utils/taxonomyBadge'
 import { buildChainAwareShowCloseout, buildReviewDispatcher, buildChainAwareProjectDoneStatus } from './reviewDispatch.js'
 
@@ -363,6 +365,7 @@ function setActiveTab(tab) {
 }
 
 const {
+  chainScreenControls,
   chainStaging,
   showChainReview,
   chainReviewTab,
@@ -377,6 +380,11 @@ const {
   handleTabSelect,
   handleTabReview,
   handleChainReviewComplete,
+  chainStopping,
+  showChainStopConfirm,
+  openChainStopConfirm,
+  cancelChainStop,
+  handleChainStop,
 } = useChainTabControls({ chainCtx: chainCtxRef, projectId, router, route, activeTab, onUserNav: markUserAction })
 
 function onModeChange(mode) {

@@ -1,33 +1,42 @@
 <template>
-  <div class="emd-row" data-test="execution-mode-default-setting">
-    <v-select
-      :model-value="executionModeDefault"
-      :items="EXECUTION_MODE_DEFAULT_OPTIONS"
-      item-title="title"
-      item-value="value"
-      variant="solo"
-      flat
-      density="compact"
-      hide-details
-      :loading="saving"
-      aria-label="Execution mode when staging a project"
-      class="emd-select"
-      data-test="execution-mode-default-select"
-      @update:model-value="save"
-    >
-      <template #item="{ props: itemProps, item }">
-        <v-list-item v-bind="itemProps" :subtitle="item?.subtitle" />
-      </template>
-    </v-select>
-    <span class="emd-label">Execution mode when staging a project</span>
-    <v-tooltip location="bottom" max-width="360">
-      <template #activator="{ props: tipProps }">
-        <v-icon v-bind="tipProps" size="16" class="emd-info">mdi-information-outline</v-icon>
-      </template>
-      How work should run when you stage a project. Leave this on Ask every time and staging
-      will put the question to you each time — from the dashboard or from your connected
-      coding agent. Pick a mode and it stops asking and always uses that mode.
-    </v-tooltip>
+  <div class="setting-row" data-test="execution-mode-default-setting">
+    <div class="setting-row-text">
+      <div class="setting-row-name">
+        Execution mode when staging a project
+        <v-tooltip location="bottom" max-width="360">
+          <template #activator="{ props: tipProps }">
+            <v-icon v-bind="tipProps" size="15" class="setting-row-info"
+              >mdi-information-outline</v-icon
+            >
+          </template>
+          How work should run when you stage a project. Leave this on Ask every time and staging
+          will put the question to you each time — from the dashboard or from your connected
+          coding agent. Pick a mode and it stops asking and always uses that mode.
+        </v-tooltip>
+      </div>
+      <div class="setting-row-help">Ask every time, or always use one mode.</div>
+    </div>
+    <div class="setting-row-control">
+      <v-select
+        :model-value="executionModeDefault"
+        :items="EXECUTION_MODE_DEFAULT_OPTIONS"
+        item-title="title"
+        item-value="value"
+        variant="solo"
+        flat
+        density="compact"
+        hide-details
+        :loading="saving"
+        aria-label="Execution mode when staging a project"
+        class="emd-select"
+        data-test="execution-mode-default-select"
+        @update:model-value="save"
+      >
+        <template #item="{ props: itemProps, item }">
+          <v-list-item v-bind="itemProps" :subtitle="item?.subtitle" />
+        </template>
+      </v-select>
+    </div>
   </div>
 </template>
 
@@ -66,38 +75,17 @@ defineExpose({ executionModeDefault, save })
 <style scoped lang="scss">
 @use '../../styles/design-tokens' as *;
 
-/* Mirrors OrchestrationToggles' .hitl-toggle-bar metrics exactly (gap 8px,
-   12px bottom rhythm, 4px lead-in, 0.875rem muted label) so the three policy
-   rows on the Agents tab read as one block. Tokens only — no hardcoded hex. */
-.emd-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-left: 4px;
-}
-
 /* Trim copied from TemplateManager's .filter-select (the Role / Status boxes on
    this same tab): the light grey-blue inset hairline plus the default radius.
    Operator direction 2026-09-04 -- this control must template off those, not
    invent its own field treatment. `--smooth-border-color` is the token; the
    rgba is the same documented fallback those rules carry. */
 .emd-select {
-  flex: 0 0 200px;
+  flex: 0 0 190px;
 }
 
 .emd-select :deep(.v-field) {
   box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255, 255, 255, 0.1));
   border-radius: $border-radius-default;
-}
-
-.emd-label {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.emd-info {
-  color: var(--text-muted);
-  cursor: help;
 }
 </style>

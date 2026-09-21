@@ -48,19 +48,34 @@
           class="filter-select"
           data-testid="products-sort"
         />
-        <v-btn color="primary" prepend-icon="mdi-plus" data-testid="products-new" @click="openNewProductDialog">
-          New Product
-        </v-btn>
         <v-btn
-          variant="outlined"
-          :color="deletedProductsCount > 0 ? 'warning' : 'grey'"
-          prepend-icon="mdi-delete-restore"
-          :disabled="deletedProductsCount === 0"
-          data-testid="products-deleted-open"
-          @click="showDeletedProductsDialog = true"
+          color="primary"
+          variant="flat"
+          icon="mdi-plus"
+          title="New product"
+          aria-label="New product"
+          data-testid="products-new"
+          @click="openNewProductDialog"
+        />
+        <v-badge
+          :content="deletedProductsCount"
+          :model-value="deletedProductsCount > 0"
+          color="warning"
+          offset-x="2"
+          offset-y="2"
+          data-testid="products-deleted-badge"
         >
-          Deleted ({{ deletedProductsCount }})
-        </v-btn>
+          <v-btn
+            variant="outlined"
+            :color="deletedProductsCount > 0 ? 'warning' : 'grey'"
+            icon="mdi-delete-restore"
+            :disabled="deletedProductsCount === 0"
+            :title="`Deleted products (${deletedProductsCount})`"
+            :aria-label="`Deleted products (${deletedProductsCount})`"
+            data-testid="products-deleted-open"
+            @click="showDeletedProductsDialog = true"
+          />
+        </v-badge>
       </div>
 
               <v-row v-if="loading" class="main-window-reveal main-window-delay-3">

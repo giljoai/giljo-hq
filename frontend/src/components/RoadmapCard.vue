@@ -62,7 +62,7 @@
 
     <div class="rm-actions">
       <span
-        v-if="isProject && inChain"
+        v-if="isProject && inChain && !statusBadge"
         class="rm-badge rm-in-chain-pill"
         data-testid="roadmap-in-chain-pill"
       >

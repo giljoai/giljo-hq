@@ -26,101 +26,22 @@
       </v-chip>
     </div>
 
-    <div class="filter-bar">
-      <v-text-field
-        v-model="search"
-        prepend-inner-icon="mdi-magnify"
-        placeholder="Search templates..."
-        variant="solo"
-        density="compact"
-        clearable
-        hide-details
-        flat
-        class="filter-search"
-      />
-      <v-select
-        v-model="filterRole"
-        :items="availableRoles"
-        placeholder="Role"
-        clearable
-        variant="solo"
-        flat
-        density="compact"
-        hide-details
-        class="filter-select"
-      />
-      <v-select
-        v-model="filterStatus"
-        :items="statusOptions"
-        placeholder="Status"
-        clearable
-        variant="solo"
-        flat
-        density="compact"
-        hide-details
-        class="filter-select"
-      />
-      <v-switch
-        :model-value="showAllProducts"
-        label="All products"
-        color="primary"
-        density="compact"
-        hide-details
-        class="filter-showall"
-        data-testid="show-all-products"
-        @update:model-value="showAllProducts = $event"
-      />
-      <v-menu>
-        <template #activator="{ props: menuProps }">
-          <v-btn
-            v-bind="menuProps"
-            variant="tonal"
-            prepend-icon="mdi-playlist-check"
-            aria-label="Bulk actions for this product"
-            data-testid="product-bulk-menu"
-            :disabled="!loadedProductId || showAllProducts"
-            :loading="bulkRunning"
-          >
-            This Product
-          </v-btn>
-        </template>
-        <v-list density="compact" min-width="240">
-          <v-list-item
-            prepend-icon="mdi-check-all"
-            title="Enable all for this product"
-            data-testid="bulk-enable-product"
-            @click="setAllHere(true)"
-          />
-          <v-list-item
-            prepend-icon="mdi-close-box-multiple-outline"
-            title="Disable all for this product"
-            data-testid="bulk-disable-product"
-            @click="setAllHere(false)"
-          />
-        </v-list>
-      </v-menu>
-      <v-btn
-        variant="tonal"
-        color="primary"
-        prepend-icon="mdi-account-multiple-plus"
-        aria-label="Add default agents"
-        data-testid="add-default-agents"
-        :disabled="!viewedProductId || showAllProducts"
-        :loading="importingDefaults"
-        @click="importDefaultAgents"
-      >
-        Add Default Agents
-      </v-btn>
-      <v-btn
-        color="primary"
-        prepend-icon="mdi-plus"
-        aria-label="Create new template"
-        :disabled="!viewedProductId || showAllProducts"
-        @click="openCreateDialog"
-      >
-        New Template
-      </v-btn>
-    </div>
+    <TemplateToolbar
+      v-model:search="search"
+      v-model:filter-role="filterRole"
+      v-model:filter-status="filterStatus"
+      v-model:scope-mode="scopeMode"
+      :available-roles="availableRoles"
+      :status-options="statusOptions"
+      :behaviour-changed-count="behaviourChangedCount"
+      :can-bulk="!!loadedProductId && !showAllProducts"
+      :can-create="!!viewedProductId && !showAllProducts"
+      :bulk-running="bulkRunning || importingDefaults"
+      @open-behaviour="behaviourDialog = true"
+      @bulk-set-all="setAllHere"
+      @add-defaults="importDefaultAgents"
+      @create="openCreateDialog"
+    />
 
     <v-card class="template-manager smooth-border">
       <v-card-text>
@@ -271,6 +192,11 @@
       </v-dialog>
 
     </v-card>
+
+    <AgentBehaviourDialog
+      v-model="behaviourDialog"
+      @update:changed-count="behaviourChangedCount = $event"
+    />
   </div>
 </template>
 
@@ -284,8 +210,10 @@ import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
 import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
 import { useProductStore } from '@/stores/products'
 import TemplatesTable from './templates/TemplatesTable.vue'
+import TemplateToolbar from './templates/TemplateToolbar.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
 import EmptyState from './common/EmptyState.vue'
+import AgentBehaviourDialog from './settings/AgentBehaviourDialog.vue'
 import {
   TEMPLATE_ROLE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
@@ -304,6 +232,16 @@ const productStore = useProductStore()
 const viewedProductId = computed(() => productStore.effectiveProductId || null)
 
 const showAllProducts = ref(false)
+
+const scopeMode = computed({
+  get: () => (showAllProducts.value ? 'all' : 'product'),
+  set: (value) => {
+    showAllProducts.value = value === 'all'
+  },
+})
+
+const behaviourDialog = ref(false)
+const behaviourChangedCount = ref(0)
 
 const {
   templates,
@@ -588,52 +526,6 @@ watch([() => productStore.effectiveProductId, showAllProducts], () => {
 
 <style scoped lang="scss">
 @use '../styles/design-tokens' as *;
-
-/* 0873: filter bar layout (matches TasksView pattern) */
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.filter-search {
-  flex: 1;
-}
-
-.filter-search :deep(.v-field) {
-  box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255, 255, 255, 0.10));
-  border-radius: $border-radius-default;
-}
-
-.filter-search :deep(.v-field:focus-within) {
-  box-shadow: inset 0 0 0 1px rgba($color-brand-yellow, 0.3);
-}
-
-.filter-select {
-  flex: 0 0 160px;
-}
-
-.filter-select :deep(.v-field) {
-  box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255, 255, 255, 0.10));
-  border-radius: $border-radius-default;
-}
-
-.filter-clear-btn {
-  color: $color-text-muted !important;
-  font-size: 0.72rem;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-@media (max-width: 960px) {
-  .filter-bar {
-    flex-wrap: wrap;
-  }
-  .filter-search {
-    max-width: 100%;
-  }
-}
 
 .template-manager {
   border: none !important;

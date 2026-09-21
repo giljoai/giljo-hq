@@ -421,10 +421,10 @@ describe('FE-9610b — house rules', () => {
   })
 
   it('the new bulk control sits in the wrapping filter bar, so the tablet band still fits', () => {
-    const source = read('./TemplateManager.vue')
+    const source = read('./templates/TemplateToolbar.vue')
     const bar = source.slice(
       source.indexOf('<div class="filter-bar">'),
-      source.indexOf('<v-card class="template-manager'),
+      source.indexOf('</template>'),
     )
     expect(bar).toContain('data-testid="product-bulk-menu"')
     expect(source).toMatch(/@media \(max-width: 960px\)[\s\S]*?flex-wrap: wrap/)
@@ -447,7 +447,10 @@ describe('FE-9610c — show all products', () => {
     })
   })
 
-  const showAll = (w) => w.find('[data-testid="show-all-products"]')
+  const setScope = async (w, value) => {
+    w.findComponent('[data-testid="show-all-products"]').vm.$emit('update:modelValue', value)
+    await flushPromises()
+  }
 
   it('scopes to the viewed product by default', async () => {
     const wrapper = mountManager()
@@ -461,8 +464,7 @@ describe('FE-9610c — show all products', () => {
     const wrapper = mountManager()
     await flushPromises()
 
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
 
     expect(api.templates.list).toHaveBeenLastCalledWith(null)
   })
@@ -470,8 +472,7 @@ describe('FE-9610c — show all products', () => {
   it('every row names its owning product', async () => {
     const wrapper = mountManager()
     await flushPromises()
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
 
     expect(wrapper.find('[data-testid="product-chip-7"]').text()).toBe('Atlas')
     expect(wrapper.find('[data-testid="product-chip-8"]').text()).toBe('Beacon')
@@ -480,8 +481,7 @@ describe('FE-9610c — show all products', () => {
   it('the owner is read from the chip, never inferred from the name suffix', async () => {
     const wrapper = mountManager()
     await flushPromises()
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
 
     expect(wrapper.find('[data-testid="product-chip-8"]').text()).toBe('Beacon')
     expect(wrapper.find('[data-testid="product-chip-8"]').text()).not.toMatch(/-?2/)
@@ -492,16 +492,14 @@ describe('FE-9610c — show all products', () => {
     await flushPromises()
     expect(wrapper.vm.headers.map((h) => h.key)).not.toContain('product_id')
 
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
     expect(wrapper.vm.headers.map((h) => h.key)).toContain('product_id')
   })
 
   it('a foreign row is read-only and names the tab that owns it', async () => {
     const wrapper = mountManager()
     await flushPromises()
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
 
     expect(wrapper.find('[data-testid="foreign-agent-8"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="template-toggle-documenter"]').exists()).toBe(true)
@@ -511,8 +509,7 @@ describe('FE-9610c — show all products', () => {
   it('product-scoped actions are unavailable in show-all', async () => {
     const wrapper = mountManager()
     await flushPromises()
-    await showAll(wrapper).setValue(true)
-    await flushPromises()
+    await setScope(wrapper, 'all')
 
     expect(wrapper.find('[data-testid="product-bulk-menu"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="add-default-agents"]').attributes('disabled')).toBeDefined()

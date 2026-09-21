@@ -481,3 +481,105 @@ def test_be6221e_go_gate_prose_absent_from_solo_render() -> None:
     blob = "\n".join(str(v) for v in solo.values())
     for needle in _BE6221E_GO_GATE_STRINGS:
         assert needle not in blob, f"BE-6221e chain-only GO-gate prose leaked into the solo render: {needle!r}"
+
+
+
+_BE9626_MARKERS = (
+    "NATIVE HARNESS NUDGE",
+    "session-to-session",
+    "best-effort",
+    "ListAgents",
+    "codex queue",
+)
+
+
+def _drive_chapter(execution_mode: str) -> str:
+    from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_chain_drive
+
+    return _build_ch_chain_drive(
+        run_id="run-9626",
+        resolved_order=["p1", "p2"],
+        current_index=0,
+        execution_mode=execution_mode,
+        conductor_agent_id="cond-9626",
+        job_id="job-9626",
+    )
+
+
+def _suborch_chapter(execution_mode: str, phase: str | None = None) -> str:
+    from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_sub_orchestrator
+
+    return _build_ch_sub_orchestrator(
+        run_id="run-9626",
+        position=2,
+        n_projects=3,
+        execution_mode=execution_mode,
+        phase=phase,
+    )
+
+
+def test_be9626_nudge_block_renders_for_multi_terminal_conductor() -> None:
+    chapter = _drive_chapter("multi_terminal")
+    for needle in _BE9626_MARKERS:
+        assert needle in chapter, f"multi_terminal conductor render is missing the nudge marker {needle!r}"
+
+
+def test_be9626_nudge_is_an_addition_to_the_hub_never_a_replacement() -> None:
+    flat = " ".join(_drive_chapter("multi_terminal").split()).lower()
+    assert "in addition to the hub" in flat, "the nudge must be framed as an addition to the Hub"
+    assert "never instead of it" in flat, "the nudge must never replace the Hub"
+    assert "unacknowledged" in flat, "a nudge must be treated as unacknowledged"
+    assert "re-discover" in flat, "the peer address must be re-discovered before every send"
+    assert "required to read" in flat, "the Hub must stay the only channel every participant must read"
+    assert "ground truth" in flat, "the Hub must stay the ground truth for run state"
+
+
+def test_be9626_hub_lines_survive_in_the_multi_terminal_conductor_render() -> None:
+    chapter = _drive_chapter("multi_terminal")
+    for needle in ("hub_thread_id", "get_thread_history", "unread_only=true", "mark_read=true", "ESCALATION SINK"):
+        assert needle in chapter, f"existing Hub prose lost on the multi_terminal render: {needle!r}"
+
+
+def test_be9626_no_worker_protocol_fork_is_reconciled() -> None:
+    chapter = _drive_chapter("multi_terminal")
+    start = chapter.find("NO WORKER-PROTOCOL FORK")
+    assert start != -1, "the NO WORKER-PROTOCOL FORK clause must still render"
+    flat = " ".join(chapter[start:].split()).lower()
+    assert "not a fork" in flat, "the fork clause must state the nudge is not a protocol fork"
+
+
+def test_be9626_nudge_absent_from_subagent_conductor_render() -> None:
+    chapter = _drive_chapter("subagent")
+    for needle in _BE9626_MARKERS:
+        assert needle not in chapter, f"nudge prose leaked into the subagent conductor render: {needle!r}"
+
+
+def test_be9626_nudge_block_renders_for_multi_terminal_suborch_both_phases() -> None:
+    for phase in (None, "staging", "implementation"):
+        chapter = _suborch_chapter("multi_terminal", phase)
+        for needle in _BE9626_MARKERS:
+            assert needle in chapter, f"sub-orch render (phase={phase}) is missing the nudge marker {needle!r}"
+        assert "hub_thread_id" in chapter, f"sub-orch render (phase={phase}) lost its Hub prose"
+
+
+def test_be9626_nudge_absent_from_subagent_suborch_render() -> None:
+    for phase in (None, "implementation"):
+        chapter = _suborch_chapter("subagent", phase)
+        for needle in _BE9626_MARKERS:
+            assert needle not in chapter, f"nudge prose leaked into the subagent sub-orch render (phase={phase})"
+
+
+def test_be9626_nudge_prose_absent_from_solo_render() -> None:
+    solo = _build()
+    blob = "\n".join(str(v) for v in solo.values())
+    for needle in _BE9626_MARKERS:
+        assert needle not in blob, f"BE-9626 chain-only nudge prose leaked into the solo render: {needle!r}"
+
+
+def test_be9626_guide_chain_section_states_the_rule() -> None:
+    from giljo_mcp.tools.giljo_guide import build_giljo_guide
+
+    flat = " ".join(build_giljo_guide()["guide"].split()).lower()
+    assert "message hub" in flat
+    assert "nudge" in flat, "the guide's chain section must describe the optional native nudge"
+    assert "never instead of it" in flat, "the guide must state the Hub is never replaced"

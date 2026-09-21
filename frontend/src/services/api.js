@@ -549,9 +549,11 @@ export const api = {
   },
 
   roadmap: {
-    get: () => apiClient.get('/api/v1/roadmap'),
-    reorder: (items) => apiClient.patch('/api/v1/roadmap/reorder', { items }),
-    removeItem: (itemId) => apiClient.delete(`/api/v1/roadmap/items/${itemId}`),
+    get: (productId) => apiClient.get('/api/v1/roadmap', { params: seriesProductIdParam(productId) }),
+    reorder: (items, productId) =>
+      apiClient.patch('/api/v1/roadmap/reorder', { items }, { params: seriesProductIdParam(productId) }),
+    removeItem: (itemId, productId) =>
+      apiClient.delete(`/api/v1/roadmap/items/${itemId}`, { params: seriesProductIdParam(productId) }),
   },
 
   sequenceRuns: sequenceRunsApi,

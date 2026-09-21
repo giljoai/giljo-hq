@@ -21,6 +21,22 @@ export function resolveJobsNavPath({ activeProject, activeProjects, activeRun } 
   return '/launch?via=jobs'
 }
 
+export function jobsNavPathToLocation(path) {
+  const [pathname, search] = String(path || '').split('?')
+  const query = Object.fromEntries(new URLSearchParams(search || ''))
+  if (pathname.startsWith('/projects/')) {
+    return {
+      name: 'ProjectLaunch',
+      params: { projectId: pathname.slice('/projects/'.length) },
+      query,
+    }
+  }
+  if (pathname === '/jobs-overview') {
+    return { name: 'JobsViewport' }
+  }
+  return null
+}
+
 export function isJobsRouteActive(path, query) {
   if (query?.via === 'jobs') return true
   if (path.startsWith('/projects/')) return true

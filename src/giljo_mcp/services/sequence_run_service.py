@@ -20,7 +20,10 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.models.projects import Project
-from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES, SequenceRun
+from giljo_mcp.models.sequence_runs import (
+    CHAIN_TERMINAL_PROJECT_STATUSES,
+    SequenceRun,
+)
 from giljo_mcp.schemas.jsonb_validators import (
     VALID_REVIEWED_VIA,
     validate_sequence_run_project_ids,
@@ -30,6 +33,7 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.conductor_job_minter import broadcast_conductor_created, mint_conductor_job
+from giljo_mcp.services.sequence_run_backout_mixin import SequenceRunBackoutMixin
 from giljo_mcp.services.sequence_run_query_mixin import SequenceRunQueryMixin
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 from giljo_mcp.services.sequence_run_validation import (
@@ -49,7 +53,7 @@ VALID_RELEASE_MODES: frozenset[str] = frozenset({"graceful", "cancel"})
 __all__ = ["MAX_CHAIN_MISSION_CHARS", "VALID_RELEASE_MODES", "SequenceRunService"]
 
 
-class SequenceRunService(SequenceRunQueryMixin):
+class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
 
     def __init__(
         self,
@@ -324,35 +328,6 @@ class SequenceRunService(SequenceRunQueryMixin):
             new_status = "cancelled"
 
         return await self.update(run_id=run_id, tenant_key=tenant_key, status=new_status)
-
-    async def deactivate_chain(
-        self,
-        *,
-        run_id: str,
-        tenant_key: str | None = None,
-    ) -> dict[str, Any]:
-        from giljo_mcp.services.project_service import ProjectService
-
-        run = await self.get(run_id=run_id, tenant_key=tenant_key)
-        member_ids: list[str] = run.get("resolved_order") or run.get("project_ids") or []
-
-        proj_svc = ProjectService(
-            db_manager=self.db_manager,
-            tenant_manager=self.tenant_manager,
-            test_session=self._session,
-        )
-        for pid in member_ids:
-            try:
-                await proj_svc.lifecycle.reset_to_prestage(pid, tenant_key=tenant_key)
-            except ResourceNotFoundError:
-                continue
-
-        return await self.update(
-            run_id=run_id,
-            tenant_key=tenant_key,
-            status="cancelled",
-            clear_conductor=True,
-        )
 
     async def purge_run(
         self,

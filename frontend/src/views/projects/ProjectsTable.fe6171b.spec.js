@@ -149,15 +149,29 @@ describe('ProjectsTable FE-6171b — D9: single "In chain" badge replaces double
     expect(wrapper.find('[data-testid="project-in-chain-pill"]').exists()).toBe(true)
   })
 
-  it('FE-6221b: renders in-chain-pill for active project in chain (active member stays identified)', () => {
+  it('FE-9628: active project in chain shows ONE chip — StatusBadge only, no pill', () => {
     const wrapper = mountTable({
       projects: [makeProject('p1', 'active')],
       total: 1,
       inChainIds: ['p1'],
       lockedChainIds: [],
     })
-    expect(wrapper.find('[data-testid="project-in-chain-pill"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="project-in-chain-pill"]').text()).toContain('In chain')
+    expect(wrapper.find('[data-testid="project-in-chain-pill"]').exists()).toBe(false)
+    expect(wrapper.findAll('.status-badge')).toHaveLength(1)
+    expect(wrapper.find('.v-tooltip').attributes('text')).toBe('active (in chain)')
+  })
+
+  it('FE-9628: completed project in chain shows ONE chip — no "In chain" beside "Completed"', () => {
+    const wrapper = mountTable({
+      projects: [makeProject('p1', 'completed', { completed_at: '2026-06-02T10:00:00Z' })],
+      total: 1,
+      inChainIds: ['p1'],
+      lockedChainIds: [],
+    })
+    expect(wrapper.find('[data-testid="project-in-chain-pill"]').exists()).toBe(false)
+    expect(wrapper.findAll('.status-badge')).toHaveLength(1)
+    expect(wrapper.find('.status-badge').text()).toBe('completed')
+    expect(wrapper.find('.v-tooltip').attributes('text')).toBe('completed (in chain)')
   })
 
   it('does NOT render in-chain-pill for inactive project NOT in chain', () => {

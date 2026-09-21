@@ -298,3 +298,53 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 })
+
+
+
+describe('sequenceRunStore.isProjectStartable (FE-9629)', () => {
+  let store
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useSequenceRunStore()
+  })
+
+  function chain(extra = {}) {
+    return run('r1', ['p1', 'p2', 'p3'], 'running', extra)
+  }
+
+  it('is true for the member at the current index', () => {
+    store._testSeedRuns([chain({ current_index: 0 })])
+    expect(store.isProjectStartable('p1')).toBe(true)
+  })
+
+  it('is false for a member past the index whose predecessor has not completed', () => {
+    store._testSeedRuns([chain({ current_index: 0, project_statuses: { p1: 'planning', p2: 'pending', p3: 'pending' } })])
+    expect(store.isProjectStartable('p2')).toBe(false)
+    expect(store.isProjectStartable('p3')).toBe(false)
+  })
+
+  it('arms the next member the moment its predecessor completes', () => {
+    store._testSeedRuns([chain({ current_index: 0, project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } })])
+    expect(store.isProjectStartable('p2')).toBe(true)
+    expect(store.isProjectStartable('p3')).toBe(false)
+  })
+
+  it('stays true for a member the index has already passed (never rewinds the affordance)', () => {
+    store._testSeedRuns([chain({ current_index: 2 })])
+    expect(store.isProjectStartable('p1')).toBe(true)
+    expect(store.isProjectStartable('p2')).toBe(true)
+  })
+
+  it('is false once the member itself has finished', () => {
+    store._testSeedRuns([chain({ current_index: 1, project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } })])
+    expect(store.isProjectStartable('p1')).toBe(false)
+  })
+
+  it('is false for a project that is in no active chain (the solo path)', () => {
+    store._testSeedRuns([chain()])
+    expect(store.isProjectStartable('solo-pid')).toBe(false)
+    expect(store.isProjectStartable('')).toBe(false)
+    expect(store.isProjectStartable(null)).toBe(false)
+  })
+})

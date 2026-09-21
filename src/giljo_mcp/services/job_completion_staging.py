@@ -48,15 +48,18 @@ _CHAIN_SUBORCH_STAGING_END_NEXT_STEP = (
 
 _CONDUCTOR_STAGING_END_ACTION = "STOP"
 _CONDUCTOR_STAGING_END_NEXT_ACTION = (
-    "Report the staged chain plan and the chain mission to the user, then STOP. Do NOT "
-    "self-launch, do NOT spawn a sub-orchestrator, and do NOT re-call get_job_mission "
-    "to start driving. Proceed only after the user's EXPLICIT GO (they say go / "
-    "implement this chain, or press 'Implement Chain' in the dashboard)."
+    "Report the staged chain plan and the chain mission to the user, then ASK THE USER "
+    "ONE question: do they want to run this chain here (they say go, and you drive it in "
+    "this session) or from the dashboard (they press 'Implement Chain')? Then STOP and "
+    "wait -- do not answer it for them. Do NOT self-launch, do NOT spawn a "
+    "sub-orchestrator, and do NOT re-call get_job_mission to start driving. Proceed only "
+    "after the user's EXPLICIT GO."
 )
 _CONDUCTOR_STAGING_END_NEXT_STEP = (
-    "Report the staged chain plan to the user and STOP. Do NOT self-launch and do NOT "
-    "re-call get_job_mission to drive. Proceed only after the user's explicit GO (they "
-    "say go / press 'Implement Chain')."
+    "Report the staged chain plan to the user, then ask the user ONE question: run it "
+    "here (they say go) or from the dashboard (they press 'Implement Chain')? Then STOP "
+    "and wait. Do NOT self-launch and do NOT re-call get_job_mission to drive. Proceed "
+    "only after the user's explicit GO."
 )
 
 _RUN_IMPL_STARTED_STATUSES: frozenset[str] = frozenset(
@@ -142,6 +145,15 @@ async def finalize_conductor_chain(
     return getattr(job, "project_id", None) is None and bool(
         (getattr(job, "job_metadata", None) or {}).get("chain_conductor")
     )
+
+
+def is_staging_phase_orchestrator(job: Any, project: Any) -> bool:
+    if job is None or project is None or getattr(job, "job_type", None) != "orchestrator":
+        return False
+    if getattr(project, "staging_status", None) not in ("staging", "staged", "staging_complete"):
+        return False
+    launched = getattr(project, "implementation_launched_at", None) is not None
+    return not (launched and project.staging_status == "staging_complete")
 
 
 async def is_staging_end_orchestrator_call(

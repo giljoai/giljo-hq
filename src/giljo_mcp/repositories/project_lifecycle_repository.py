@@ -464,3 +464,47 @@ class ProjectLifecycleRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def stand_down_project_agents(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+    ) -> dict[str, int]:
+        now = datetime.now(UTC)
+
+        job_ids_result = await session.execute(
+            select(AgentJob.job_id).where(
+                and_(
+                    AgentJob.project_id == project_id,
+                    AgentJob.tenant_key == tenant_key,
+                )
+            )
+        )
+        job_ids = [row[0] for row in job_ids_result.all()]
+        if not job_ids:
+            return {"jobs": 0, "executions": 0}
+
+        executions = await session.execute(
+            update(AgentExecution)
+            .where(
+                and_(
+                    AgentExecution.tenant_key == tenant_key,
+                    AgentExecution.job_id.in_(job_ids),
+                    AgentExecution.status.notin_(["complete", "decommissioned"]),
+                )
+            )
+            .values(status="decommissioned", completed_at=now)
+        )
+        jobs = await session.execute(
+            update(AgentJob)
+            .where(
+                and_(
+                    AgentJob.job_id.in_(job_ids),
+                    AgentJob.tenant_key == tenant_key,
+                    AgentJob.status.notin_(["completed", "cancelled"]),
+                )
+            )
+            .values(status="cancelled", completed_at=now)
+        )
+        return {"jobs": jobs.rowcount or 0, "executions": executions.rowcount or 0}

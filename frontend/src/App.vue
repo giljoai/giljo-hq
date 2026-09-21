@@ -25,6 +25,13 @@ html,
 body {
   margin: 0;
   padding: 0;
+}
+
+/* The horizontal clip lives on html ONLY. An overflow value on body makes body
+   a scroll container, and every position: sticky element in the app then binds
+   to body -- which never scrolls, because the viewport does. Pinned by
+   TemplateManager.fe9616.spec.js. */
+html {
   overflow-x: hidden;
 }
 

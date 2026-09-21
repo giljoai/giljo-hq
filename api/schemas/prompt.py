@@ -249,3 +249,23 @@ class ChainPromptResponse(BaseModel):
     prompt: str = Field(..., description="Thin conductor bootstrap prompt (fetches its chain protocol over MCP)")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChainMemberPromptResponse(BaseModel):
+    """
+    Schema for a single chain MEMBER's orchestrator prompt (FE-9629).
+    GET /api/v1/prompts/chain-member/{project_id}
+
+    A chain runs one project at a time, and each member starts from its own play
+    button the way a single project does. This is the prompt behind that button:
+    the same thin bootstrap the conductor gets, addressed to THIS member's own
+    orchestrator, which stages and implements this one project and stops when it
+    closes out. The next member's button unlocks then.
+    """
+
+    run_id: str = Field(..., description="Chain run UUID this project is a member of")
+    project_id: str = Field(..., description="Member project UUID the prompt is for")
+    orchestrator_job_id: str = Field(..., description="Job UUID of this member's own orchestrator")
+    prompt: str = Field(..., description="Thin orchestrator bootstrap prompt (fetches its protocol over MCP)")
+
+    model_config = ConfigDict(from_attributes=True)

@@ -471,8 +471,6 @@ onMounted(async () => {
   checkEdition()
   loadAccountStateUI()
 
-  sequenceRunStore.hydrate()
-
   try {
     await configService.fetchConfig()
     const ed = configService.getEdition()
@@ -491,6 +489,10 @@ watch(
   () => route.path,
   () => updateSelectedFromRoute(),
 )
+
+watch(() => productsStore.effectiveProductId, () => sequenceRunStore.hydrate(), {
+  immediate: true,
+})
 </script>
 
 <style scoped lang="scss">

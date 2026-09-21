@@ -211,3 +211,115 @@ async def test_delete_roadmap_item_cross_tenant_is_noop(api_client: AsyncClient,
 
     a_items = (await api_client.get("/api/v1/roadmap", headers=a["headers"])).json()["items"]
     assert len(a_items) == 1
+
+
+
+
+async def _seed_second_product(db_manager, tenant_key: str, *, is_default: bool = False) -> dict:
+    async with db_manager.get_session_async() as session:
+        suffix = uuid.uuid4().hex[:8]
+        product = Product(
+            id=str(uuid.uuid4()),
+            name=f"Product {suffix}",
+            description="roadmap api second product",
+            tenant_key=tenant_key,
+            is_active=True,
+            is_default=is_default,
+        )
+        session.add(product)
+        await session.flush()
+        project = Project(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant_key,
+            product_id=product.id,
+            name=f"Project {suffix}",
+            description="desc",
+            mission="mission",
+        )
+        session.add(project)
+        await session.commit()
+        return {"product_id": product.id, "project_id": project.id}
+
+
+async def _seed_two_products(db_manager) -> tuple[dict, dict]:
+    a = await _seed(db_manager)
+    b = await _seed_second_product(db_manager, a["tenant_key"], is_default=True)
+    svc = RoadmapService(db_manager=db_manager, tenant_manager=TenantManager())
+    await svc.upsert_metadata(
+        items=[{"item_type": "project", "project_id": b["project_id"], "sort_order": 0, "risk": "low"}],
+        summary="B default summary",
+        tenant_key=a["tenant_key"],
+        product_id=b["product_id"],
+    )
+    return a, b
+
+
+@pytest.mark.asyncio
+async def test_get_roadmap_scoped_to_viewed_product_not_default(api_client: AsyncClient, db_manager) -> None:
+    a, b = await _seed_two_products(db_manager)
+
+    resp = await api_client.get("/api/v1/roadmap", headers=a["headers"], params={"product_id": a["product_id"]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["product_id"] == a["product_id"]
+    assert body["roadmap"] is None
+    assert body["items"] == []
+
+    resp_b = await api_client.get("/api/v1/roadmap", headers=a["headers"], params={"product_id": b["product_id"]})
+    assert resp_b.status_code == 200, resp_b.text
+    assert resp_b.json()["roadmap"]["summary"] == "B default summary"
+
+
+@pytest.mark.asyncio
+async def test_get_roadmap_omitted_product_id_keeps_default_fallback(api_client: AsyncClient, db_manager) -> None:
+    a, b = await _seed_two_products(db_manager)
+    resp = await api_client.get("/api/v1/roadmap", headers=a["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["product_id"] == b["product_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_roadmap_foreign_product_id_is_refused_not_defaulted(api_client: AsyncClient, db_manager) -> None:
+    a, _b = await _seed_two_products(db_manager)
+    other = await _seed(db_manager)
+
+    resp = await api_client.get("/api/v1/roadmap", headers=a["headers"], params={"product_id": other["product_id"]})
+    assert 400 <= resp.status_code < 500, resp.text
+    assert resp.status_code != 200
+    assert "roadmap" not in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_reorder_and_delete_scoped_to_viewed_product(api_client: AsyncClient, db_manager) -> None:
+    a, b = await _seed_two_products(db_manager)
+    svc = RoadmapService(db_manager=db_manager, tenant_manager=TenantManager())
+    await svc.upsert_metadata(
+        items=[{"item_type": "project", "project_id": a["project_id"], "sort_order": 0, "risk": "low"}],
+        tenant_key=a["tenant_key"],
+        product_id=a["product_id"],
+    )
+    a_item = (
+        await api_client.get("/api/v1/roadmap", headers=a["headers"], params={"product_id": a["product_id"]})
+    ).json()["items"][0]["id"]
+
+    resp = await api_client.patch(
+        "/api/v1/roadmap/reorder",
+        headers=a["headers"],
+        params={"product_id": a["product_id"]},
+        json={"items": [{"id": a_item, "sort_order": 7}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["product_id"] == a["product_id"]
+    assert resp.json()["items_reordered"] == 1
+
+    resp = await api_client.delete(
+        f"/api/v1/roadmap/items/{a_item}", headers=a["headers"], params={"product_id": a["product_id"]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["product_id"] == a["product_id"]
+    assert resp.json()["removed"] == 1
+
+    b_items = (
+        await api_client.get("/api/v1/roadmap", headers=a["headers"], params={"product_id": b["product_id"]})
+    ).json()["items"]
+    assert len(b_items) == 1 and b_items[0]["sort_order"] == 0

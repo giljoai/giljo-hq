@@ -93,6 +93,20 @@ describe('RoadmapCard — "In chain" pill is a read-only badge (FE-9568 kept mem
     const wrapper = mountCard({ item: pendingTask, inChain: true })
     expect(wrapper.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
   })
+
+  it('FE-9628: a completed in-chain project shows ONE chip — COMPLETED, not COMPLETED + In chain', () => {
+    const wrapper = mountCard({ item: { ...inactiveProject, status: 'completed' }, inChain: true })
+    expect(wrapper.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('COMPLETED')
+    expect(wrapper.text()).not.toContain('In chain')
+  })
+
+  it('FE-9628: an activated in-chain project shows ONE chip — ACTIVATED, not ACTIVATED + In chain', () => {
+    const wrapper = mountCard({ item: { ...inactiveProject, status: 'active' }, inChain: true })
+    expect(wrapper.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ACTIVATED')
+    expect(wrapper.text()).not.toContain('In chain')
+  })
 })
 
 describe('RoadmapCard — kept controls (Convert / Open / Demote / Remove)', () => {
