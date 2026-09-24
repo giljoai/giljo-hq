@@ -53,17 +53,12 @@ def build_execution_mode_fields(
         example_str = ", ".join(f"'{n}'" for n in example_agents) if example_agents else "'implementer'"
 
         harness = get_harness(resolved_harness)
-        if harness is not None:
-            task_tool_mapping = harness.spawn_syntax
-            template_locations = list(harness.template_locations)
-        else:
-            task_tool_mapping = GENERIC_SUBAGENT_SPAWN_SYNTAX
-            template_locations = []
+        task_tool_mapping = harness.spawn_syntax if harness is not None else GENERIC_SUBAGENT_SPAWN_SYNTAX
 
         fields["cli_mode_rules"] = {
             "agent_name_usage": (
-                "SINGLE SOURCE OF TRUTH - binds DB record, spawning tool, and template filename. "
-                f"MUST match template filename exactly (e.g., {example_str})."
+                "SINGLE SOURCE OF TRUTH - binds the DB record to the spawning tool. "
+                f"MUST match the agent_name returned by spawn_job exactly (e.g., {example_str})."
             ),
             "agent_display_name_usage": (
                 "Dashboard label - what humans see in UI. "
@@ -76,7 +71,6 @@ def build_execution_mode_fields(
             },
             "task_tool_mapping": task_tool_mapping,
             "validation": "soft",
-            "template_locations": template_locations,
         }
 
         logger.info(

@@ -58,7 +58,7 @@ def truncation_note(
 LIMIT_ADVICE = (
     "This list is INCOMPLETE -- do not treat it as the full set. The counts block on this "
     "response states the size of the whole board, so you can choose deliberately: narrow "
-    "with status, priority, due_before or query, ask for a leaner row with mode='index', "
+    "with status, priority or query, ask for a leaner row with mode='index', "
     f"or raise limit (max {LIST_TASKS_LIMIT_MAX}) to request more on purpose."
 )
 
@@ -66,7 +66,7 @@ SIZE_ADVICE = (
     "This list is INCOMPLETE -- do not treat it as the full set. It was cut by RESPONSE "
     "SIZE rather than by row count, so a higher limit will not return more: ask for a "
     "leaner row with mode='index', pass memory_limit to shorten descriptions in "
-    "mode='full', or narrow with status, priority, due_before or query."
+    "mode='full', or narrow with status, priority or query."
 )
 
 CURSOR_ADVICE_PREFIX = (
@@ -163,7 +163,6 @@ def apply_task_filters(
     status: str | None,
     priority: str | None,
     task_type_id: str | None,
-    due_before: Any,
     hidden: bool | None,
     query: str | None,
 ) -> Any:
@@ -173,8 +172,6 @@ def apply_task_filters(
         stmt = stmt.where(Task.priority == priority)
     if task_type_id:
         stmt = stmt.where(Task.task_type_id == task_type_id)
-    if due_before is not None:
-        stmt = stmt.where(Task.due_date < due_before)
     if hidden is not None:
         stmt = stmt.where(Task.hidden == hidden)
     if query and query.strip():
@@ -198,7 +195,6 @@ async def task_counts(
     status: str | None,
     priority: str | None,
     task_type_id: str | None,
-    due_before: Any,
     hidden: bool | None,
     query: str | None,
     after_key: tuple[Any, str] | None = None,
@@ -230,7 +226,6 @@ async def task_counts(
         status=status,
         priority=priority,
         task_type_id=task_type_id,
-        due_before=due_before,
         hidden=hidden,
         query=query,
     )
@@ -309,7 +304,6 @@ def task_to_index_row(task: Task) -> dict[str, Any]:
         "name": task.title,
         "status": task.status,
         "type": task.task_type.abbreviation if task.task_type else None,
-        "due_date": task.due_date.isoformat() if task.due_date else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
 
@@ -325,7 +319,6 @@ def task_filter_fingerprint(
     status: str | None,
     priority: str | None,
     task_type_id: str | None,
-    due_before: Any,
     hidden: Any,
     query: str | None,
 ) -> str:
@@ -335,7 +328,6 @@ def task_filter_fingerprint(
             "status": status,
             "priority": priority,
             "task_type_id": task_type_id,
-            "due_before": due_before,
             "hidden": hidden,
             "query": query,
         }
@@ -385,7 +377,6 @@ def open_task_cursor_walk(
     status: str | None,
     priority: str | None,
     task_type_id: str | None,
-    due_before: Any,
     hidden: Any,
     query: str | None,
 ) -> tuple[str, tuple[Any, str] | None]:
@@ -394,7 +385,6 @@ def open_task_cursor_walk(
         status=status,
         priority=priority,
         task_type_id=task_type_id,
-        due_before=due_before,
         hidden=hidden,
         query=query,
     )

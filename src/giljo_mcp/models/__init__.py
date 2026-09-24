@@ -45,6 +45,8 @@ from .context import (
     MCPContextIndex,
 )
 
+from .mcp_tool_call_metrics import McpToolCallMetric
+
 from .notifications import (
     VALID_NOTIFICATION_SEVERITIES,
     Notification,
@@ -156,6 +158,7 @@ __all__ = [
     "LoginLockout",
     "MCPContextIndex",
     "MCPSession",
+    "McpToolCallMetric",
     "Message",
     "MessageAcknowledgment",
     "MessageCompletion",

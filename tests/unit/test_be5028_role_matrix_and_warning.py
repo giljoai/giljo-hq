@@ -93,7 +93,9 @@ def _mock_db_manager(db_session):
 
 
 ALL_MATRIX_ENTRY_TYPES = sorted(WORKER_ALLOWED_ENTRY_TYPES | ORCHESTRATOR_ONLY_ENTRY_TYPES)
-assert len(ALL_MATRIX_ENTRY_TYPES) >= 6, "Matrix sanity: at least 4 worker + 2 orchestrator"
+assert WORKER_ALLOWED_ENTRY_TYPES, "Matrix sanity: the worker-allowed side must not be empty"
+assert ORCHESTRATOR_ONLY_ENTRY_TYPES, "Matrix sanity: the orchestrator-only side must not be empty"
+assert len(ALL_MATRIX_ENTRY_TYPES) >= 5, "Matrix sanity: at least 4 worker + 1 orchestrator"
 
 
 class TestAuthorizationMatrix:
@@ -270,7 +272,7 @@ async def test_rejection_does_not_raise_exception(db_session, test_tenant_key, l
             summary="no exception",
             key_outcomes=["k"],
             decisions_made=["d"],
-            entry_type="session_handover",
+            entry_type="project_completion",
             author_job_id=worker_job.job_id,
             git_commits=[],
             tags=[],
@@ -465,8 +467,6 @@ class TestValidEntryTypeFrozenset:
 
     EXPECTED_ADMITTED: ClassVar[set[str]] = {
         "project_completion",
-        "handover_closeout",
-        "session_handover",
         "baseline",
         "decision",
         "architecture",
@@ -475,7 +475,7 @@ class TestValidEntryTypeFrozenset:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("entry_type", sorted(EXPECTED_ADMITTED))
-    async def test_admits_all_eight_canonical_entry_types(
+    async def test_admits_every_canonical_entry_type(
         self,
         entry_type,
         db_session,

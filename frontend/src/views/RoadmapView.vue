@@ -72,14 +72,15 @@
       </v-alert>
 
       <v-alert
-        v-if="roadmap && roadmap.summary"
+        v-if="showInsightBanner"
         type="info"
         variant="tonal"
         density="compact"
         icon="mdi-lightbulb-on-outline"
         class="rm-insight main-window-reveal main-window-delay-2"
       >
-        {{ roadmap.summary }}
+        <div class="font-weight-bold mb-1">{{ insightTitle }}</div>
+        <div>{{ roadmap.summary }}</div>
       </v-alert>
 
       <div v-if="loading && items.length === 0" class="rm-loading">
@@ -189,6 +190,7 @@ import api from '@/services/api'
 import { agentSavedAfter, waitIsSuperseded } from '@/utils/roadmapWaitReconcile'
 import { useToast } from '@/composables/useToast'
 import { useTaskCrud } from '@/composables/useTaskCrud'
+import { useFormatDate } from '@/composables/useFormatDate'
 import draggable from 'vuedraggable'
 import RoadmapCard from '@/components/RoadmapCard.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -201,6 +203,7 @@ const projectStore = useProjectStore()
 const wsStore = useWebSocketStore()
 const sequenceRunStore = useSequenceRunStore()
 const { showToast } = useToast()
+const { formatDate } = useFormatDate()
 
 const TASK_STATUS_OPTIONS = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled']
 
@@ -214,6 +217,12 @@ const projectTypes = ref([])
 const activeProduct = computed(() => productStore.currentProduct)
 const viewedProductId = computed(() => productStore.currentProduct?.id)
 const isEmptyRoadmap = computed(() => items.value.length === 0)
+
+const showInsightBanner = computed(() => !isEmptyRoadmap.value && !!roadmap.value?.summary)
+const insightTitle = computed(() => {
+  const at = roadmap.value?.last_generated_at
+  return at ? `Why this order · ${formatDate(at)}` : 'Why this order'
+})
 
 const displayItems = computed(() =>
   foldInTasks.value ? items.value : items.value.filter((it) => it.item_type !== 'task'),

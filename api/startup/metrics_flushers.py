@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from api.app_state import APIState
 from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.models import ApiMetrics, ServerRuntimeMetric
+from giljo_mcp.models import ApiMetrics, McpToolCallMetric, ServerRuntimeMetric
 from giljo_mcp.models.auth import User
 
 
@@ -48,11 +48,16 @@ async def _live_tenant_keys(session, tenant_keys: set[str]) -> set[str]:
 async def flush_api_metrics_once(state: APIState) -> None:
     api_counts = state.api_call_count.copy()
     mcp_counts = state.mcp_call_count.copy()
+    tool_counts = state.mcp_tool_call_count.copy()
     state.api_call_count.clear()
     state.mcp_call_count.clear()
+    state.mcp_tool_call_count.clear()
+    tool_rows: dict[str, list[tuple[str, object, int]]] = {}
+    for (buffered_tenant, tool_name, day), tool_count in tool_counts.items():
+        tool_rows.setdefault(buffered_tenant, []).append((tool_name, day, tool_count))
     try:
         async with state.db_manager.get_session_async() as session:
-            buffered = api_counts.keys() | mcp_counts.keys()
+            buffered = api_counts.keys() | mcp_counts.keys() | tool_rows.keys()
             live = await _live_tenant_keys(session, set(buffered))
             skipped = len(buffered) - len(live)
             for tenant_key in sorted(live):
@@ -77,6 +82,22 @@ async def flush_api_metrics_once(state: APIState) -> None:
                     )
                 )
                 await session.execute(stmt)
+
+                for tool_name, day, tool_count in sorted(tool_rows.get(tenant_key, ())):
+                    await session.execute(
+                        insert(McpToolCallMetric)
+                        .values(
+                            id=str(uuid4()),
+                            tenant_key=tenant_key,
+                            tool_name=tool_name,
+                            day=day,
+                            call_count=tool_count,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["tenant_key", "tool_name", "day"],
+                            set_={"call_count": McpToolCallMetric.call_count + tool_count},
+                        )
+                    )
             await session.commit()
         if skipped:
             logger.info("API metrics sync: skipped %d purged tenant(s) with buffered counts", skipped)
@@ -90,6 +111,7 @@ async def flush_api_metrics_once(state: APIState) -> None:
         logger.error(f"Error during API metrics sync: {e}", exc_info=True)
         state.api_call_count.update(api_counts)
         state.mcp_call_count.update(mcp_counts)
+        state.mcp_tool_call_count.update(tool_counts)
 
 
 async def sync_api_metrics_to_db(state: APIState):

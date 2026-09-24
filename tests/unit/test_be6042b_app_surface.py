@@ -34,7 +34,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 258
+EXPECTED_ROUTE_COUNT = 263
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -199,6 +199,9 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/settings/database", frozenset({"GET"})),
         ("/api/v1/settings/execution-mode-default", frozenset({"GET"})),
         ("/api/v1/settings/execution-mode-default", frozenset({"PUT"})),
+        ("/api/v1/settings/handover-template", frozenset({"GET"})),
+        ("/api/v1/settings/handover-template", frozenset({"PUT"})),
+        ("/api/v1/settings/handover-template/reset", frozenset({"POST"})),
         ("/api/v1/settings/general", frozenset({"GET"})),
         ("/api/v1/settings/general", frozenset({"PUT"})),
         ("/api/v1/settings/system/agent-checkin-cadence", frozenset({"GET"})),
@@ -207,6 +210,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/settings/system/agent-silence-threshold", frozenset({"PUT"})),
         ("/api/v1/stats/call-counts", frozenset({"GET"})),
         ("/api/v1/stats/dashboard", frozenset({"GET"})),
+        ("/api/v1/stats/mcp-tool-calls", frozenset({"GET"})),
         ("/api/v1/stats/system", frozenset({"GET"})),
         ("/api/v1/system/orchestrator-prompt", frozenset({"GET"})),
         ("/api/v1/system/orchestrator-prompt", frozenset({"PUT"})),
@@ -243,6 +247,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/templates/{template_id}/history", frozenset({"GET"})),
         ("/api/v1/templates/{template_id}/preview/", frozenset({"POST"})),
         ("/api/v1/templates/{template_id}/reset", frozenset({"POST"})),
+        ("/api/v1/templates/reset-all", frozenset({"POST"})),
         ("/api/v1/templates/{template_id}/reset-system", frozenset({"POST"})),
         ("/api/v1/templates/{template_id}/restore", frozenset({"POST"})),
         ("/api/v1/templates/{template_id}/restore/{archive_id}", frozenset({"POST"})),

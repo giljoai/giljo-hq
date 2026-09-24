@@ -15,7 +15,11 @@ from giljo_mcp.services.task_service._mcp_read_layer import (
     LIST_TASKS_LIMIT_MAX,
     open_task_cursor_walk,
 )
-from giljo_mcp.services.taxonomy_ops import RESERVED_TASK_TYPE_ABBR
+from giljo_mcp.services.taxonomy_ops import (
+    RESERVED_HANDOVER_TYPE_ABBR,
+    RESERVED_TASK_TYPE_ABBR,
+    VALID_TASK_TYPE_ABBRS,
+)
 
 
 def resolve_list_mode(mode: str | None, summary_only: bool | None, valid_modes: Any) -> str:
@@ -64,14 +68,15 @@ def validate_task_type_filter(task_type: str | None) -> str | None:
     if task_type is None:
         return None
     normalized = task_type.strip()
-    if normalized != RESERVED_TASK_TYPE_ABBR:
+    if normalized not in VALID_TASK_TYPE_ABBRS:
         raise ValidationError(
             message=(
-                f"Invalid task_type '{normalized}'. Valid types: {RESERVED_TASK_TYPE_ABBR} -- "
-                f"every task is tagged '{RESERVED_TASK_TYPE_ABBR}' (BE-6049c); no other value "
-                "can ever match a task."
+                f"Invalid task_type '{task_type}'. Valid types: {', '.join(VALID_TASK_TYPE_ABBRS)} -- "
+                f"'{RESERVED_TASK_TYPE_ABBR}' is an ordinary task and "
+                f"'{RESERVED_HANDOVER_TYPE_ABBR}' is a session handover; no other value can ever "
+                "match a task."
             ),
-            context={"operation": "list_tasks_for_mcp", "task_type": normalized},
+            context={"operation": "list_tasks_for_mcp", "task_type": task_type},
         )
     return normalized
 
@@ -122,7 +127,6 @@ def resolve_list_tasks_filters_and_cursor(
     status: str | None,
     priority: str | None,
     task_type_id: str | None,
-    due_before: Any,
     hidden: bool | None,
     query: str | None,
     cursor: str | None,
@@ -139,7 +143,6 @@ def resolve_list_tasks_filters_and_cursor(
         status=status,
         priority=priority,
         task_type_id=task_type_id,
-        due_before=due_before,
         hidden=hidden,
         query=query,
     )

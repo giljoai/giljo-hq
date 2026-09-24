@@ -75,7 +75,6 @@ class TestConcurrentTaxonomyAssignment:
             r = await svc.create_task_for_mcp(
                 title=f"Concurrent T {uuid4().hex[:4]}",
                 description="concurrent task",
-                task_type="BE",
                 tenant_key=tenant_key,
             )
             return r["task_id"]

@@ -253,9 +253,8 @@ Your job is to send the orchestrator everything it needs to decide what happens 
 
 Workers may write `baseline`, `decision`, `architecture`, and `discovery` entries
 when their mission explicitly assigns them. Workers MUST NOT write `project_completion`
-or `session_handover` entries — the tool will reject those with
-`ORCHESTRATOR_ONLY_ENTRY_TYPE`. To record those, send a HANDOVER or progress message
-to your orchestrator with the content.
+entries — the tool will reject those with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. To record
+that, send a HANDOVER or progress message to your orchestrator with the content.
 
 Concrete examples (one per category):
 - Worker `baseline`: `write_memory_entry(entry_type="baseline", ...)` after seeding

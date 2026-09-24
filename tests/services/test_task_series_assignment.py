@@ -60,7 +60,6 @@ class TestTaskSeriesAssignment:
         result = await task_service.create_task_for_mcp(
             title="First task",
             description="should receive series 1",
-            task_type="BE",
             tenant_key=test_tenant_key,
         )
 
@@ -102,15 +101,9 @@ class TestTaskSeriesAssignment:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        r1 = await task_service.create_task_for_mcp(
-            title="t1", description="t1", task_type="BE", tenant_key=test_tenant_key
-        )
-        r2 = await task_service.create_task_for_mcp(
-            title="t2", description="t2", task_type="BE", tenant_key=test_tenant_key
-        )
-        r3 = await task_service.create_task_for_mcp(
-            title="t3", description="t3", task_type="BE", tenant_key=test_tenant_key
-        )
+        r1 = await task_service.create_task_for_mcp(title="t1", description="t1", tenant_key=test_tenant_key)
+        r2 = await task_service.create_task_for_mcp(title="t2", description="t2", tenant_key=test_tenant_key)
+        r3 = await task_service.create_task_for_mcp(title="t3", description="t3", tenant_key=test_tenant_key)
 
         rows = (
             (await db_session.execute(select(Task).where(Task.id.in_([r1["task_id"], r2["task_id"], r3["task_id"]]))))

@@ -65,7 +65,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
         ]
 
     def _build_agent_name_line(self, agent) -> str:
-        return f"   - Agent Name: `{agent.agent_name}` (matches .claude/agents/{agent.agent_name}.md)"
+        return f"   - Agent Name: `{agent.agent_name}`"
 
     def _build_execution_directive_text(self) -> list[str]:
         return [
@@ -90,7 +90,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "",
             "```python",
             "Task(",
-            '    subagent_type="{agent_name}",  # CRITICAL: Use agent_name (template filename)',
+            '    subagent_type="{agent_name}",  # CRITICAL: Use agent_name, not agent_display_name',
             '    instructions="""',
             "    You are {agent_name} (job_id: {job_id})",
             "    ",
@@ -125,7 +125,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
                     "",
                     "**Task Tool Parameter Naming**:",
                     "- Task(subagent_type=X) uses agent_name value",
-                    "- agent_name: Template filename (e.g., 'implementer-backend')",
+                    "- agent_name: The name spawn_job returned (e.g., 'implementer-backend')",
                     "- Do NOT use agent_display_name (e.g., 'implementer') - it will fail",
                     "",
                     "### Spawning Strategy",
@@ -149,14 +149,9 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
         return [
             "## CLI Mode Constraints",
             "",
-            "**WARNING: Agent Template Files Required**",
-            "- Each agent_name needs a file: `.claude/agents/{agent_name}.md`",
-            '- If file is missing: "Subagent type not found" error',
-            '- Example: agent_name="<agent_name>" requires `.claude/agents/<agent_name>.md`',
-            "",
             "**WARNING: Exact Naming Required**",
             "- Task tool parameter `subagent_type` expects `agent_name`, NOT `agent_display_name`",
-            "- agent_name: Template filename (see allowed_agent_names in instructions)",
+            "- agent_name: The name spawn_job returned (see allowed_agent_names in instructions)",
             '- agent_display_name: Display category (e.g., "implementer")',
             '- Using agent_display_name will fail with "Subagent type not found"',
             "",

@@ -142,6 +142,31 @@ describe('TemplatesTable — render', () => {
     })
     expect(wrapper.find('[aria-label="Template actions"]').exists()).toBe(false)
   })
+
+  it('offers "Edit orchestrator prompt" on the _system row when the prompt is reachable', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ _system: true })],
+      canEditPrompt: true,
+    })
+    expect(wrapper.find('[data-testid="edit-orchestrator-prompt"]').exists()).toBe(true)
+  })
+
+  it('hides "Edit orchestrator prompt" on the _system row when the prompt is not reachable', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ _system: true })],
+      canEditPrompt: false,
+    })
+    expect(wrapper.find('[data-testid="edit-orchestrator-prompt"]').exists()).toBe(false)
+  })
+
+  it('emits edit-orchestrator-prompt when the link is clicked', async () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ _system: true })],
+      canEditPrompt: true,
+    })
+    await wrapper.find('[data-testid="edit-orchestrator-prompt"]').trigger('click')
+    expect(wrapper.emitted('edit-orchestrator-prompt')).toHaveLength(1)
+  })
 })
 
 
@@ -185,7 +210,7 @@ describe('TemplatesTable — emit: duplicate', () => {
 
 describe('TemplatesTable — emit: reset', () => {
   it('emits reset with the item when Reset to Default is clicked', async () => {
-    const tpl = makeTemplate({ id: 6, role: 'reviewer', is_default: true })
+    const tpl = makeTemplate({ id: 6, role: 'reviewer', can_reset: true })
     const wrapper = mountTable({ templates: [tpl] })
 
     await wrapper.find('[title="Reset to Default"]').trigger('click')
@@ -194,8 +219,8 @@ describe('TemplatesTable — emit: reset', () => {
     expect(wrapper.emitted('reset')[0]).toEqual([tpl])
   })
 
-  it('hides Reset to Default for a non-default (custom) template', () => {
-    const tpl = makeTemplate({ id: 7, role: 'reviewer', is_default: false })
+  it('hides Reset to Default for a custom template', () => {
+    const tpl = makeTemplate({ id: 7, role: 'reviewer', can_reset: false })
     const wrapper = mountTable({ templates: [tpl] })
 
     expect(wrapper.find('[title="Reset to Default"]').exists()).toBe(false)
@@ -307,5 +332,21 @@ describe('TemplatesTable — FE-9385c vocabulary', () => {
     })
 
     expect(wrapper.text()).not.toMatch(/retire/i)
+  })
+})
+
+describe('TemplatesTable — BE-9646: reset visibility follows factory origin', () => {
+  it('offers Reset to Default on a factory-born agent whose is_default is false', () => {
+    const tpl = makeTemplate({ id: 61, name: 'tester-2', role: 'tester', is_default: false, can_reset: true })
+    const wrapper = mountTable({ templates: [tpl] })
+
+    expect(wrapper.find('[title="Reset to Default"]').exists()).toBe(true)
+  })
+
+  it('hides Reset to Default on a user-created agent, even one flagged as default', () => {
+    const tpl = makeTemplate({ id: 62, name: 'tester-specialist', role: 'tester', is_default: true, can_reset: false })
+    const wrapper = mountTable({ templates: [tpl] })
+
+    expect(wrapper.find('[title="Reset to Default"]').exists()).toBe(false)
   })
 })

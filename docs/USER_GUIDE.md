@@ -21,7 +21,7 @@ Cards appear at the top of the page. Their content adapts based on your onboardi
 | Setup not complete | Quick Setup, Learn, New Product (as needed) |
 | No product created | New Product (with attention animation) |
 | Product exists, no projects | New Project + two starter templates (see below) |
-| Active projects running | Active Projects, Dashboard, Task Board, Look Up |
+| Active projects running | Active Projects, Dashboard, Tasks & Handovers, Look Up |
 
 Each card shows a title, description, and optional badge. Cards with a slash command badge (e.g. `/giljo add project`, `/giljo`) indicate that operation is also available from your AI coding tool. Clicking a card navigates to the relevant page or opens the relevant overlay.
 
@@ -440,15 +440,33 @@ Agents pass a conversational "turn" (the baton) as they work. The Hub shows the 
 
 ---
 
-## Tasks
+## Tasks & Handovers
 
-The Tasks page is a board for tracking technical debt, scope captures, and development notes. Tasks are separate from projects: they represent work that has been identified but not yet scheduled.
+The Tasks & Handovers page is one board holding two kinds of note. **Tasks** track technical debt, scope captures, and development notes: work that has been identified but not yet scheduled, kept separate from projects. **Handovers** record where a working session stopped, for whoever picks it up next.
 
-### Task Board
+### The board
 
-Tasks display in a filterable table. The first column is a colored **Type+Serial badge** (e.g. `BE-0042`); a task with no type assigned shows an em-dash badge. Remaining columns include Title (with description), Status, Priority, and Created date. Click any task row to open the edit dialog.
+Both kinds display in a filterable table. The first column is a colored **Type+Serial badge**: purple `TSK-0042` for a task, near-white `HND-9641` for a handover. A task with no type assigned shows an em-dash badge. Remaining columns include Title (with description), Status, Priority, and Created date. Click any row to open the edit dialog. Serials come from one shared counter, so a handover never duplicates a number a task already used.
 
-Each row's overflow menu includes an **Archive/Unarchive** action. Archived tasks are removed from the default board view but reappear when you search or toggle **Show archived** in the action bar (they carry an **Archived** badge), and they remain available to your AI tool via `/giljo`.
+Each row's overflow menu includes an **Archive/Unarchive** action. Archived items are removed from the default board view but reappear when you search or toggle **Show archived** in the action bar (they carry an **Archived** badge), and they remain available to your AI tool via `/giljo`.
+
+### Handovers
+
+A handover is written for someone who was not in the session, cannot ask the author anything, and has no way to tell a checked claim from a confident one. So it has to carry three sections, and the board refuses to save one that does not:
+
+| Section | What belongs there |
+|---|---|
+| **Verify before trusting** | Every claim, each next to the exact command that checks it. Not "the tests pass", but the command and what a passing run prints. |
+| **Waiting on the operator** | Anything that cannot move without you. |
+| **Cannot testify** | What the author did **not** verify: guesses, assumptions, things they were told, things that looked fine but were never run. |
+
+The third section is the one that matters most. A handover that lists only what went right reads exactly the same whether the author checked it or assumed it, and the next person finds out at the worst possible moment.
+
+The five statuses carry handover meanings: **Pending** is written but unread, **In Progress** means someone is verifying its claims, **Completed** means verified rather than merely read, **Blocked** means a claim turned out to be false and needs you, and **Cancelled** means a later handover superseded it.
+
+Two things a handover will not do. It is a record of work that already happened, so **Convert to Project** is not offered on one. If a handover surfaced work still to do, create that project and leave the handover as the record of where it came from. And a handover still marked **Pending** cannot be archived, because nobody has read it yet and hiding it would remove it from the list of the one person it was written for. Move it off Pending first.
+
+Your AI coding tool writes handovers for you: ask it to hand the session over, and it creates one with the three sections filled in.
 
 ### Categories and Priorities
 
@@ -674,7 +692,7 @@ The **Memory** page (in the left navigation) lets you search your product's accu
 
 When an agent discovers a deferred item — technical debt, a known issue, or a decision that cannot be resolved in the current project — it creates an explicit follow-up using `mcp__giljo_hq__create_task` (for single-step items) or `mcp__giljo_hq__create_project` (for multi-step work). The returned ID is cited in `decisions_made` at closeout so the audit trail is intact.
 
-Follow-up tasks and projects appear on your Task Board immediately and carry forward as first-class work items.
+Follow-up tasks and projects appear on your Tasks & Handovers board immediately and carry forward as first-class work items.
 
 ---
 

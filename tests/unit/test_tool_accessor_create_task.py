@@ -50,6 +50,9 @@ def _patch_active_product(product_id="prod-456"):
 
 def _patch_taxonomy(resolved_abbr="BE"):
     instance = AsyncMock()
+    instance.ensure_reserved_type = AsyncMock(
+        side_effect=lambda _tenant_key, abbreviation: _make_taxonomy_row(abbreviation)
+    )
     instance.ensure_reserved_task_type = AsyncMock(return_value=_make_taxonomy_row("TSK"))
     instance.validate = AsyncMock(return_value=_make_taxonomy_row(resolved_abbr))
     instance._valid_types_payload = AsyncMock(
@@ -105,7 +108,6 @@ class TestToolAccessorCreateTaskReturnValue:
                 title="Integration Task",
                 description="Task description here",
                 priority="high",
-                task_type="BE",
                 tenant_key="tenant-abc",
             )
             assert isinstance(result, dict)
@@ -147,7 +149,6 @@ class TestToolAccessorCreateTaskTitlePreservation:
                 title="Fix login bug",
                 description="Users cannot login with email containing special chars",
                 priority="high",
-                task_type="BUG",
                 tenant_key="tenant-abc",
             )
             mock_log_task.assert_called_once()
@@ -192,29 +193,72 @@ class TestToolAccessorCreateTaskTaskTypeResolution:
             )
             tax_instance = tax_cls.return_value
             tax_instance.validate.assert_not_called()
-            tax_instance.ensure_reserved_task_type.assert_awaited_once()
+            tax_instance.ensure_reserved_type.assert_awaited_once_with("tenant-abc", "TSK")
             assert result["task_type"] == "TSK"
             assert "valid_types" not in result
 
     @pytest.mark.asyncio
-    async def test_supplied_task_type_is_ignored_and_tsk_forced(self):
+    async def test_a_project_taxonomy_abbreviation_is_refused_not_absorbed(self):
+        from giljo_mcp.exceptions import ValidationError
+
         tool_accessor = _make_tool_accessor()
         with (
             _patch_active_product("prod-456"),
-            _patch_taxonomy("FE") as tax_cls,
+            _patch_taxonomy("FE"),
+            patch.object(tool_accessor._task_service, "log_task", new_callable=AsyncMock) as mock_log_task,
+        ):
+            mock_log_task.return_value = "task-789"
+            with pytest.raises(ValidationError, match="FE"):
+                await tool_accessor._task_service.create_task_for_mcp(
+                    title="UI work",
+                    description="Detail",
+                    task_type="FE",
+                    tenant_key="tenant-abc",
+                )
+            mock_log_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_handover_type_resolves_to_the_hnd_reserved_tag(self):
+        tool_accessor = _make_tool_accessor()
+        with (
+            _patch_active_product("prod-456"),
+            _patch_taxonomy("HND") as tax_cls,
             patch.object(tool_accessor._task_service, "log_task", new_callable=AsyncMock) as mock_log_task,
         ):
             mock_log_task.return_value = "task-789"
             result = await tool_accessor._task_service.create_task_for_mcp(
-                title="UI work",
-                description="Detail",
-                task_type="FE",
+                title="Session handover",
+                description=(
+                    "## Verify before trusting\n- x\n\n"
+                    "## Waiting on the operator\n- nothing\n\n"
+                    "## Cannot testify\n- nothing"
+                ),
+                task_type="HND",
                 tenant_key="tenant-abc",
             )
             tax_instance = tax_cls.return_value
             tax_instance.validate.assert_not_called()
-            tax_instance.ensure_reserved_task_type.assert_awaited_once()
-            assert result["task_type"] == "TSK"
+            tax_instance.ensure_reserved_type.assert_awaited_once_with("tenant-abc", "HND")
+            assert result["task_type"] == "HND"
+
+    @pytest.mark.asyncio
+    async def test_a_handover_missing_its_headings_never_reaches_the_write(self):
+        from giljo_mcp.exceptions import ValidationError
+
+        tool_accessor = _make_tool_accessor()
+        with (
+            _patch_active_product("prod-456"),
+            _patch_taxonomy("HND"),
+            patch.object(tool_accessor._task_service, "log_task", new_callable=AsyncMock) as mock_log_task,
+        ):
+            with pytest.raises(ValidationError, match="Cannot testify"):
+                await tool_accessor._task_service.create_task_for_mcp(
+                    title="Session handover",
+                    description="## Verify before trusting\n- x\n\n## Waiting on the operator\n- nothing",
+                    task_type="HND",
+                    tenant_key="tenant-abc",
+                )
+            mock_log_task.assert_not_called()
 
 
 class TestToolAccessorCreateTaskLogging:

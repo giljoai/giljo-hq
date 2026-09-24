@@ -22,6 +22,7 @@ export const useProjectStore = defineStore('projects', () => {
   const entitiesById = computed(() => Array.from(byId.value.values()))
 
   let fetchSeq = 0
+  let appliedSeq = 0
 
   const activeProjects = computed(() => projects.value.filter((p) => p.status === 'active'))
 
@@ -36,6 +37,67 @@ export const useProjectStore = defineStore('projects', () => {
     if (index !== -1) projects.value[index] = data
     useProjectStateStore().setProject(data)
     return data
+  }
+
+  function buildListParams({
+    statusFilter = null,
+    statuses = null,
+    search = null,
+    includeCompleted = false,
+    includeHidden = false,
+    hiddenOnly = false,
+    sort = null,
+    sortDir = null,
+    limit = null,
+    offset = null,
+  }) {
+    const productStore = useProductStore()
+    const params = {}
+    if (productStore.currentProductId) {
+      params.product_id = productStore.currentProductId
+    }
+    if (statusFilter) {
+      params.status_filter = statusFilter
+    } else if (Array.isArray(statuses) && statuses.length > 0) {
+      params.statuses = statuses
+    } else if (includeCompleted) {
+      params.include_completed = true
+    }
+    if (search) {
+      params.search = search
+      params.include_completed = true
+    }
+    if (includeHidden) {
+      params.include_hidden = true
+    }
+    if (hiddenOnly) {
+      params.hidden_only = true
+    }
+    if (sort) {
+      params.sort = sort
+      if (sortDir) params.sort_dir = sortDir
+    }
+    if (limit != null) {
+      params.limit = limit
+      params.offset = offset ?? 0
+    }
+    return params
+  }
+
+  async function fetchAllMatchingProjects(opts = {}, { pageSize = 200, max = 5000 } = {}) {
+    const { statuses = null, search = null, includeCompleted = false } = opts
+    if (Array.isArray(statuses) && statuses.length === 0 && !search && !includeCompleted) return []
+    const rows = []
+    for (let offset = 0; offset < max; offset += pageSize) {
+      const params = buildListParams({ ...opts, limit: pageSize, offset })
+      const response = await api.projects.list(params)
+      const page = response.data || []
+      rows.push(...page)
+      const totalHeader = response.headers?.['x-total-count']
+      const total = totalHeader != null && totalHeader !== '' ? Number(totalHeader) : null
+      if (page.length < pageSize || (total != null && rows.length >= total)) break
+    }
+    return rows.slice(0, max)
   }
 
   async function fetchProjects(opts = {}) {
@@ -60,6 +122,7 @@ export const useProjectStore = defineStore('projects', () => {
       limit = null,
       offset = null,
       includeHidden = false,
+      hiddenOnly = false,
     } = opts
     if (limit != null || Array.isArray(statuses) || search) {
       _lastListOpts = { ...opts }
@@ -69,39 +132,26 @@ export const useProjectStore = defineStore('projects', () => {
     error.value = null
     try {
       if (Array.isArray(statuses) && statuses.length === 0 && !search && !includeCompleted) {
+        appliedSeq = seq
         projects.value = []
         projectsTotal.value = 0
         return
       }
-      const productStore = useProductStore()
-      const params = {}
-      if (productStore.currentProductId) {
-        params.product_id = productStore.currentProductId
-      }
-      if (statusFilter) {
-        params.status_filter = statusFilter
-      } else if (Array.isArray(statuses) && statuses.length > 0) {
-        params.statuses = statuses
-      } else if (includeCompleted) {
-        params.include_completed = true
-      }
-      if (search) {
-        params.search = search
-        params.include_completed = true
-      }
-      if (includeHidden) {
-        params.include_hidden = true
-      }
-      if (sort) {
-        params.sort = sort
-        if (sortDir) params.sort_dir = sortDir
-      }
-      if (limit != null) {
-        params.limit = limit
-        params.offset = offset ?? 0
-      }
+      const params = buildListParams({
+        statusFilter,
+        statuses,
+        search,
+        includeCompleted,
+        includeHidden,
+        hiddenOnly,
+        sort,
+        sortDir,
+        limit,
+        offset,
+      })
       const response = await api.projects.list(params)
-      if (seq !== fetchSeq) return
+      if (seq <= appliedSeq) return
+      appliedSeq = seq
       projects.value = response.data
       const totalHeader = response.headers?.['x-total-count']
       projectsTotal.value =
@@ -500,6 +550,7 @@ export const useProjectStore = defineStore('projects', () => {
     createProject,
     updateProject,
     deleteProject,
+    fetchAllMatchingProjects,
     activateProject,
     deactivateProject,
     completeProject,

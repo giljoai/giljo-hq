@@ -2,7 +2,7 @@ import axios from 'axios'
 import { API_CONFIG, getDefaultTenantKey } from '@/config/api'
 import { parseErrorResponse, getErrorMessage } from '@/utils/errorMessages'
 import { sequenceRunsApi } from './sequenceRunsApi.js'
-import { executionModeDefaultApi } from './settingsApi.js'
+import { executionModeDefaultApi, handoverTemplateApi } from './settingsApi.js'
 import { notificationPrefsApi } from './notificationPrefsApi.js'
 import { promptsApi } from './promptsApi.js'
 import { templatesApi, assignmentsApi } from './agentsApi.js'
@@ -406,6 +406,7 @@ export const api = {
       apiClient.delete('/api/v1/user/settings/cookie-domains', { data: { domain } }),
 
     ...executionModeDefaultApi,
+    ...handoverTemplateApi,
     ...notificationPrefsApi,
 
     getHeadlessLaunch: () => apiClient.get('/api/v1/user/settings/headless-launch'),

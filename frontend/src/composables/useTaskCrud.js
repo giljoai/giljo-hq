@@ -1,11 +1,11 @@
 import { ref } from 'vue'
-import { format } from 'date-fns'
 import { useTaskStore } from '@/stores/tasks'
 import { useProductStore } from '@/stores/products'
 import { useNotificationStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import { notifyFailure } from '@/utils/notifyFailure'
+import { RESERVED_HANDOVER_TYPE_ABBR } from '@/utils/constants'
 
 const GENERIC_SAVE_FAILURE = 'Failed to save task. Please try again.'
 const GENERIC_COMPLETE_FAILURE = 'Failed to complete task. Please try again.'
@@ -17,7 +17,6 @@ const DEFAULT_TASK = () => ({
   priority: 'medium',
   task_type: null,
   series_number: null,
-  due_date: null,
 })
 
 export function useTaskCrud() {
@@ -31,6 +30,7 @@ export function useTaskCrud() {
   const editingTask = ref(null)
   const saving = ref(false)
   const currentTask = ref(DEFAULT_TASK())
+  const saveError = ref('')
 
   function editTask(task) {
     editingTask.value = task
@@ -43,6 +43,7 @@ export function useTaskCrud() {
     showCreateDialog.value = false
     editingTask.value = null
     currentTask.value = DEFAULT_TASK()
+    saveError.value = ''
   }
 
   function handleNewTask() {
@@ -51,6 +52,20 @@ export function useTaskCrud() {
     }
     editingTask.value = null
     currentTask.value = DEFAULT_TASK()
+    showTaskDialog.value = true
+    return { noProduct: false }
+  }
+
+  function openHandoverDialog(templateText) {
+    if (!productStore.effectiveProductId) {
+      return { noProduct: true }
+    }
+    editingTask.value = null
+    currentTask.value = {
+      ...DEFAULT_TASK(),
+      task_type: RESERVED_HANDOVER_TYPE_ABBR,
+      description: templateText,
+    }
     showTaskDialog.value = true
     return { noProduct: false }
   }
@@ -89,16 +104,6 @@ export function useTaskCrud() {
     }
   }
 
-  async function updateTaskDueDate(task, newDate) {
-    try {
-      const formattedDate = newDate ? format(new Date(newDate), 'yyyy-MM-dd') : null
-      await updateTask(task.id, { due_date: formattedDate })
-    } catch (error) {
-      console.error('Failed to update due date:', error)
-      throw error
-    }
-  }
-
   async function saveTask(taskForm, afterSave) {
     const form = typeof taskForm?.validate === 'function' ? taskForm : taskForm?.value
     if (!form || typeof form.validate !== 'function') {
@@ -111,6 +116,7 @@ export function useTaskCrud() {
     if (!valid) return
 
     saving.value = true
+    saveError.value = ''
     try {
       if (editingTask.value) {
         const { parent_task_id: _parent, ...taskData } = currentTask.value
@@ -132,6 +138,9 @@ export function useTaskCrud() {
       const parsed = parseErrorResponse(error)
       const message = parsed.isStructured ? parsed.message : GENERIC_SAVE_FAILURE
       showToast({ message, type: 'error' })
+      if (parsed.isStructured) {
+        saveError.value = parsed.message
+      }
     } finally {
       saving.value = false
     }
@@ -143,13 +152,14 @@ export function useTaskCrud() {
     editingTask,
     saving,
     currentTask,
+    saveError,
     editTask,
     cancelTask,
     saveTask,
     handleNewTask,
+    openHandoverDialog,
     completeTask,
     updateTask,
     updateTaskField,
-    updateTaskDueDate,
   }
 }

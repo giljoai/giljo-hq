@@ -65,17 +65,6 @@
         </template>
       </v-select>
       <v-btn
-        v-if="hiddenCount > 0 || showHidden"
-        :color="showHidden ? 'warning' : undefined"
-        :variant="showHidden ? 'flat' : 'outlined'"
-        :icon="showHidden ? 'mdi-archive' : 'mdi-archive-outline'"
-        :disabled="!activeProduct"
-        :title="showHidden ? 'Hide archived projects' : `Show archived projects (${hiddenCount})`"
-        aria-label="Toggle archived projects"
-        class="filter-cta-archive"
-        @click="onToggleShowHidden"
-      />
-      <v-btn
         color="primary"
         variant="flat"
         icon="mdi-plus"
@@ -84,16 +73,6 @@
         aria-label="Create new project"
         class="filter-cta-new"
         @click="openNewProjectDialog"
-      />
-      <v-btn
-        :color="linkMode ? 'primary' : undefined"
-        :variant="linkMode ? 'flat' : 'outlined'"
-        icon="mdi-link-variant"
-        :disabled="!activeProduct"
-        :title="linkMode ? 'Exit link mode' : 'Link projects (chain mode)'"
-        aria-label="Toggle link mode"
-        class="filter-cta-link"
-        @click="linkMode = !linkMode"
       />
       <v-btn
         :color="roadmapSortActive ? 'primary' : undefined"
@@ -113,21 +92,41 @@
       />
     </div>
 
-    <SequenceLauncher v-if="activeProduct" v-slot="{ selectedIds, toggle, electionActive }">
+    <BulkActionBar
+      v-if="activeProduct"
+      :count="bulk.count.value"
+      :page-count="projects.length"
+      :matching-total="projectsTotal"
+      :all-matching="bulk.allMatching.value"
+      :can-archive="canArchive"
+      :can-unarchive="canUnarchive"
+      show-chain
+      :chain-ready="chainReady"
+      :chain-note="chainNote"
+      :busy="bulkBusy"
+      :noun="['project', 'projects']"
+      delete-note="Deleted projects move to Deleted Projects for 10 days and can be restored during that time."
+      @archive="archiveSelected"
+      @unarchive="unarchiveSelected"
+      @delete="deleteSelected"
+      @chain="chainSelected"
+      @clear="bulk.clear"
+      @select-all-matching="selectAllMatching"
+    />
+    <ChainStartDialog v-model="showChainDialog" :projects="chainRows" @started="onChainStarted" />
+
     <ProjectsTable
+      v-if="activeProduct"
       :current-page="currentPage"
       :items-per-page="itemsPerPage"
       :sort-by="sortBy"
       :projects="projects"
       :total="projectsTotal"
       :loading="loading"
-      :selected-ids="selectedIds"
-      :election-active="electionActive"
       :in-chain-ids="sequenceRunStore.activeChainProjectIds"
-      :locked-chain-ids="lockedChainProjectIds"
-      :link-mode="linkMode || chainActive"
+      :bulk-selected-ids="bulk.selectedIds.value"
+      @update:bulk-selected-ids="(ids) => onBulkSelectedIds(ids, projects)"
       @update:options="onTableOptions"
-      @toggle-select="(item) => handleProjectToggle(item, toggle)"
       @open-project="openProject"
       @activate-launch="activateAndLaunch"
       @status-action="handleStatusAction"
@@ -137,7 +136,6 @@
       @confirm-delete="confirmDelete"
       @new-project="showCreateDialog = true"
     />
-    </SequenceLauncher>
 
     <ProjectCreateEditDialog
       ref="createEditDialogRef"
@@ -297,10 +295,12 @@ import ProjectDeletedDialog from '@/components/projects/ProjectDeletedDialog.vue
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useFormatDate } from '@/composables/useFormatDate'
-import { useProjectFilters } from '@/composables/useProjectFilters'
+import { useProjectFilters, ARCHIVED_STATUS } from '@/composables/useProjectFilters'
 import { useProjectDeletion } from '@/composables/useProjectDeletion'
 import ProjectsTable from './projects/ProjectsTable.vue'
-import SequenceLauncher from '@/components/sequence/SequenceLauncher.vue'
+import ChainStartDialog from '@/components/sequence/ChainStartDialog.vue'
+import BulkActionBar from '@/components/common/BulkActionBar.vue'
+import { useProjectBulkActions } from '@/composables/useProjectBulkActions'
 
 const router = useRouter()
 
@@ -310,13 +310,6 @@ const notificationStore = useNotificationStore()
 const projectStatusesStore = useProjectStatusesStore()
 const sequenceRunStore = useSequenceRunStore()
 const { statuses: projectStatuses } = storeToRefs(projectStatusesStore)
-
-const linkMode = ref(false)
-
-const lockedChainProjectIds = computed(() =>
-  sequenceRunStore.activeChainProjectIds.filter((pid) => sequenceRunStore.isProjectRunLocked(pid)),
-)
-const chainActive = computed(() => sequenceRunStore.activeChainProjectIds.length > 0)
 
 const resetDialog = ref({ show: false, kind: 'chain', runId: null, projectId: null })
 
@@ -369,7 +362,6 @@ const loading = computed(() => projectStore.loading)
 const deletedProjects = computed(() => projectStore.deletedProjects)
 const deletedCount = computed(() => deletedProjects.value.length)
 
-const showHidden = ref(false)
 const hiddenProjects = computed(() => projectStore.hiddenProjects)
 
 const {
@@ -379,13 +371,11 @@ const {
   itemsPerPage,
   sortBy,
   statusSelectOptions,
-  hiddenCount,
   buildServerParams,
 } = useProjectFilters({
   activeProduct,
   projectStatuses,
   hiddenProjects,
-  showHidden,
 })
 
 const ROADMAP_SORT_KEY = 'roadmap'
@@ -428,7 +418,7 @@ watch(searchQuery, () => {
 })
 
 watch(
-  [selectedStatuses, showHidden],
+  [selectedStatuses],
   () => {
     currentPage.value = 1
     fetchPage()
@@ -437,11 +427,12 @@ watch(
 )
 
 const statusSummary = computed(() => {
-  const total = statusSelectOptions.value.length
-  const n = selectedStatuses.value.length
-  if (total > 0 && n === total) return 'All statuses'
-  if (n === 0) return 'No statuses'
-  return `${n} selected`
+  const total = statusSelectOptions.value.filter((o) => o.value !== ARCHIVED_STATUS).length
+  const archived = selectedStatuses.value.includes(ARCHIVED_STATUS)
+  const n = selectedStatuses.value.length - (archived ? 1 : 0)
+  const base = total > 0 && n === total ? 'All statuses' : n === 0 ? (archived ? '' : 'No statuses') : `${n} selected`
+  if (!archived) return base
+  return base ? `${base} + archived` : 'Archived'
 })
 
 async function reloadProjects() {
@@ -469,12 +460,28 @@ const {
   executePurgeAll,
 } = useProjectDeletion({ showDeletedDialog, reloadProjects })
 
-async function onToggleShowHidden() {
-  if (!showHidden.value) {
-    await projectStore.fetchHiddenProjects()
-  }
-  showHidden.value = !showHidden.value
-}
+const {
+  bulk,
+  busy: bulkBusy,
+  canArchive,
+  canUnarchive,
+  chainReady,
+  chainNote,
+  showChainDialog,
+  chainRows,
+  onSelectedIds: onBulkSelectedIds,
+  selectAllMatching,
+  archiveSelected,
+  unarchiveSelected,
+  deleteSelected,
+  chainSelected,
+  onChainStarted,
+} = useProjectBulkActions({
+  inChainIds: computed(() => sequenceRunStore.activeChainProjectIds),
+  buildServerParams,
+  reloadProjects,
+  filterKeys: computed(() => [searchQuery.value, selectedStatuses.value]),
+})
 
 async function activateAndLaunch(projectId) {
   await projectStore.activateProject(projectId)
@@ -550,12 +557,6 @@ async function toggleHidden(project) {
     console.error('[PROJECTS] Failed to toggle hidden:', error)
     showToast({ message: 'Failed to update project visibility', type: 'error' })
   }
-}
-
-function handleProjectToggle(item, toggle) {
-  const projectId = item?.id
-  if (!projectId) return
-  if (!sequenceRunStore.isProjectInActiveChain(projectId)) toggle(item)
 }
 
 async function handleStatusAction({ action, projectId }) {

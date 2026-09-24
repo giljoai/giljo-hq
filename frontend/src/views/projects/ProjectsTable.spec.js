@@ -176,18 +176,13 @@ describe('ProjectsTable — election fade (FE-6165a)', () => {
     expect(btn.classes()).not.toContain('play-btn-disabled')
   })
 
-  it('fades + disables the play button while an election is active', () => {
-    const wrapper = mountWithRows({ electionActive: true })
+  it('play button stays enabled and emits even with rows ticked', async () => {
+    const wrapper = mountWithRows({ bulkSelectedIds: ['p1', 'p2'] })
     const btn = wrapper.find('.play-circle-btn')
-    expect(btn.exists()).toBe(true)
-    expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.classes()).toContain('play-btn-disabled')
-  })
-
-  it('does NOT emit activate-launch when the play button is clicked during an election', async () => {
-    const wrapper = mountWithRows({ electionActive: true })
-    await wrapper.find('.play-circle-btn').trigger('click')
-    expect(wrapper.emitted('activate-launch')).toBeFalsy()
+    expect(btn.attributes('disabled')).toBeUndefined()
+    expect(btn.classes()).not.toContain('play-btn-disabled')
+    await btn.trigger('click')
+    expect(wrapper.emitted('activate-launch')).toBeTruthy()
   })
 
   it('play button is enabled with no election active (the cross-project grey-out is retired)', () => {
@@ -277,47 +272,6 @@ describe('ProjectsTable — Deactivate Chain (FE-6178)', () => {
     const wrapper = mountWithMenu({ projects: staged, inChainIds: ['proj-1'] })
     expect(wrapper.find('[data-testid="reset-project-item"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="deactivate-chain-item"]').exists()).toBe(true)
-  })
-})
-
-describe('ProjectsTable — grey tickbox by membership (FE-6180)', () => {
-  const selStubs = {
-    ...stubs,
-    'v-checkbox-btn': {
-      template: '<input type="checkbox" :disabled="disabled" v-bind="$attrs" />',
-      props: ['modelValue', 'disabled'],
-    },
-    'v-data-table-server': {
-      template:
-        '<div class="v-data-table" data-table>' +
-        '<template v-for="item in items" :key="item.id">' +
-        '<slot name="item.select" :item="item" /></template></div>',
-      props: ['items', 'itemsLength', 'loading', 'headers', 'sortBy', 'page', 'itemsPerPage'],
-    },
-  }
-
-  function mountSel(props = {}) {
-    return mount(ProjectsTable, {
-      props: { projects: sampleProjects, total: 1, loading: false, linkMode: true, ...props },
-      global: { stubs: selStubs },
-    })
-  }
-
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    smAndDownRef.value = false
-  })
-
-  it('disables the tickbox for an in-chain member', () => {
-    const box = mountSel({ inChainIds: ['proj-1'] }).find('[data-testid^="project-select-checkbox"]')
-    expect(box.exists()).toBe(true)
-    expect(box.attributes('disabled')).toBeDefined()
-  })
-
-  it('leaves the tickbox enabled for a non-chain inactive project', () => {
-    const box = mountSel({ inChainIds: [] }).find('[data-testid^="project-select-checkbox"]')
-    expect(box.exists()).toBe(true)
-    expect(box.attributes('disabled')).toBeUndefined()
   })
 })
 
@@ -466,19 +420,6 @@ describe('ProjectsTable — headers (FE-6050 / FE-6176)', () => {
     expect(keys).toContain('staging_status')
   })
 
-  it('LINK full mode: select column present (after completed), quick_action dropped', () => {
-    smAndDownRef.value = false
-    const wrapper = mountTable({ linkMode: true })
-    const keys = wrapper.vm.headers.map((h) => h.key)
-    expect(keys).toContain('select')
-    expect(keys).not.toContain('quick_action')
-    const selectHeader = wrapper.vm.headers.find((h) => h.key === 'select')
-    expect(selectHeader.title).toBe('Linked')
-    const order = keys
-    expect(order.indexOf('select')).toBeGreaterThan(order.indexOf('completed_at'))
-    expect(order.indexOf('select')).toBeLessThan(order.indexOf('menu'))
-  })
-
   it('NORMAL compact mode: 4 columns with quick_action, NO select', () => {
     smAndDownRef.value = true
     const wrapper = mountTable({ linkMode: false })
@@ -489,15 +430,5 @@ describe('ProjectsTable — headers (FE-6050 / FE-6176)', () => {
     expect(keys).toContain('quick_action')
     expect(keys).toContain('menu')
     expect(keys).not.toContain('select')
-  })
-
-  it('LINK compact mode: select column present, quick_action dropped', () => {
-    smAndDownRef.value = true
-    const wrapper = mountTable({ linkMode: true })
-    const keys = wrapper.vm.headers.map((h) => h.key)
-    expect(keys).toContain('select')
-    expect(keys).not.toContain('quick_action')
-    expect(keys).toContain('series_number')
-    expect(keys).toContain('status')
   })
 })

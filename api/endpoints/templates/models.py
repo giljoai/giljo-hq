@@ -141,6 +141,7 @@ class TemplateResponse(BaseModel):
     avg_generation_ms: float | None = None
     created_by: str | None = None
     is_system_role: bool = Field(default=False, description="True when template is system managed")
+    can_reset: bool = Field(default=False, description="True when a factory default exists to reset this agent to")
 
 
 class TemplateHistoryResponse(BaseModel):
@@ -159,6 +160,27 @@ class TemplateHistoryResponse(BaseModel):
     is_restorable: bool
     usage_count_at_archive: int | None
     avg_generation_ms_at_archive: float | None
+
+
+class TemplateResetFailure(BaseModel):
+    """One agent a bulk reset could not complete, and why (BE-9646)."""
+
+    name: str
+    error: str
+
+
+class TemplateResetAllResponse(BaseModel):
+    """Per-agent outcome of resetting every factory-born agent of one product.
+
+    Three lists rather than a count, because a partial run is a real outcome the
+    user has to be told about by name: which agents went back to their default,
+    which were left alone because they have no default to return to, and which
+    failed.
+    """
+
+    reset: list[str] = Field(default_factory=list, description="Agents restored to their shipped default")
+    skipped: list[str] = Field(default_factory=list, description="Agents with no factory default to return to")
+    failed: list[TemplateResetFailure] = Field(default_factory=list, description="Agents that could not be reset")
 
 
 class TemplatePreviewRequest(BaseModel):

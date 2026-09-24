@@ -66,7 +66,6 @@ async def _query(
                 "series_number": task.series_number,
                 "subseries": task.subseries,
                 "hidden": bool(task.hidden),
-                "due_date": task.due_date.isoformat() if task.due_date else None,
                 "created_at": task.created_at.isoformat() if task.created_at else None,
             }
         )

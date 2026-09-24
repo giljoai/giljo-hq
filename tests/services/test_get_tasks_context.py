@@ -34,14 +34,12 @@ async def test_get_tasks_returns_open_tasks_only(db_session, db_manager, two_ten
     open_response = await task_service.create_task_for_mcp(
         title="Open task",
         description="still pending",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
     closed_response = await task_service.create_task_for_mcp(
         title="Closed task",
         description="done",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
@@ -88,7 +86,6 @@ async def test_get_tasks_does_not_leak_other_tenant_tasks(db_session, db_manager
     b_response = await task_service_b.create_task_for_mcp(
         title="tenant B only",
         description="x",
-        task_type="BE",
         tenant_key=tenant_b,
         db_manager=db_manager,
     )

@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [{ path: '/', name: 'Root', component: { template: '<div />' } }],
+})
 import TemplateManager from '@/components/TemplateManager.vue'
 
 vi.mock('@/services/api', () => {
@@ -59,6 +65,7 @@ function mountManager(products = [{ id: A }, { id: B }, { id: C }]) {
   return mount(TemplateManager, {
     global: {
       plugins: [
+        router,
         createTestingPinia({
           initialState: {
             user: { currentUser: { id: 1, username: 'u', role: 'admin', tenant_key: 'tk' } },

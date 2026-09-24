@@ -67,14 +67,15 @@ class ProductMemoryEntry(Base):
         nullable=False,
         comment=(
             "Entry type. Validated as a frozenset in write_360_memory.py "
-            "(no DB constraint). Admitted values: "
+            "(no DB constraint), on WRITE only. Currently admitted: "
             "project_completion (orchestrator project closeout); "
-            "handover_closeout (legacy/explicit handover entry, preserved for back-compat); "
-            "session_handover (orchestrator-to-orchestrator handover across sessions); "
             "baseline (initial seeding -- architecture snapshot, foundation context); "
             "decision (a specific choice with rationale); "
             "architecture (structural notes about the system); "
-            "discovery (surprising finding worth remembering)."
+            "discovery (surprising finding worth remembering). "
+            "Stored rows may also carry handover_closeout or session_handover, which "
+            "BE-9637 stopped accepting when handovers became HND tasks; those entries "
+            "are read and rendered normally and were deliberately not migrated."
         ),
     )
     source = Column(

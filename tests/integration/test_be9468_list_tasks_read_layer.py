@@ -510,7 +510,6 @@ class TestTheIndexRowIsLean:
                 "name",
                 "status",
                 "type",
-                "due_date",
                 "created_at",
             }, f"the index row is the list-and-sort row and nothing more, got {sorted(row)!r}"
             assert row["type"] == "TSK", (
@@ -663,7 +662,6 @@ class TestNothingThatWorksTodayStopsWorking:
                 "series_number",
                 "subseries",
                 "hidden",
-                "due_date",
                 "created_at",
             ):
                 assert key in row, f"the shipped summary row key {key!r} must survive; got {sorted(row)!r}"

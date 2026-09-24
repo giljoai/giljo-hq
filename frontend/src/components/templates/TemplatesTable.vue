@@ -110,7 +110,18 @@
     </template>
 
     <template #item.actions="{ item }">
-      <div v-if="item._system || isForeignRow(item)" />
+      <div v-if="item._system" class="d-flex align-center justify-end">
+        <span
+          v-if="canEditPrompt"
+          class="orchestrator-prompt-link"
+          data-testid="edit-orchestrator-prompt"
+          @click="$emit('edit-orchestrator-prompt')"
+        >
+          Edit orchestrator prompt
+          <v-icon size="14">mdi-arrow-right</v-icon>
+        </span>
+      </div>
+      <div v-else-if="isForeignRow(item)" />
       <div v-else class="d-flex align-center justify-center">
         <v-menu>
           <template #activator="{ props }">
@@ -136,7 +147,7 @@
               @click="$emit('duplicate', item)"
             ></v-list-item>
             <v-list-item
-              v-if="item.is_default"
+              v-if="item.can_reset"
               prepend-icon="mdi-refresh"
               title="Reset to Default"
               @click="$emit('reset', item)"
@@ -220,6 +231,10 @@ const props = defineProps({
     type: Function,
     default: () => 'Unknown product',
   },
+  canEditPrompt: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const isForeignRow = (item) =>
@@ -233,6 +248,7 @@ defineEmits([
   'delete',
   'download-profile',
   'clear-filters',
+  'edit-orchestrator-prompt',
 ])
 
 
@@ -266,6 +282,21 @@ const rowActive = (item) => templateRowActive(item)
 .foreign-row-dash {
   color: $color-text-muted;
   cursor: default;
+}
+
+.orchestrator-prompt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: $color-brand-yellow;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.orchestrator-prompt-link:hover {
+  text-decoration: underline;
 }
 
 .table-no-data {

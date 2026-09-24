@@ -1424,7 +1424,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("due_date", sa.DateTime(timezone=True), nullable=True),
             sa.Column("task_type_id", sa.String(length=36), nullable=True),
             sa.Column("series_number", sa.Integer(), nullable=True),
             sa.Column("subseries", sa.String(length=1), nullable=True),

@@ -125,7 +125,6 @@ async def test_create_task_via_mcp_yields_tsk(taxonomy_mcp_client):
                 "title": "Investigate flaky websocket test",
                 "description": "Repro and fix",
                 "priority": "high",
-                "task_type": "BE",
             },
         )
 
@@ -133,11 +132,26 @@ async def test_create_task_via_mcp_yields_tsk(taxonomy_mcp_client):
     payload = _payload(result)
     assert payload.get("success") is True
     assert payload.get("task_type") == "TSK", (
-        f"BE-6049d: every task must be auto-tagged TSK regardless of task_type; got {payload.get('task_type')!r}"
+        f"BE-6049d: a task created with no type must be auto-tagged TSK; got {payload.get('task_type')!r}"
     )
     assert str(payload.get("taxonomy_alias", "")).startswith("TSK-"), (
         f"BE-6049d: task alias must render TSK-nnnn; got {payload.get('taxonomy_alias')!r}"
     )
+
+
+async def test_create_task_via_mcp_refuses_a_project_taxonomy_type(taxonomy_mcp_client):
+    new_client, _tenant_key = taxonomy_mcp_client
+
+    async with new_client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "create_task",
+            {"title": "not a BE task", "description": "x", "task_type": "BE"},
+        )
+
+    payload = _payload(result)
+    assert payload.get("success") is False, f"a project taxonomy abbreviation must never tag a task; got {payload!r}"
+    assert payload.get("field") == "task_type", payload
+    assert "task_id" not in payload, "a refused create must not have written a row"
 
 
 async def test_create_project_via_mcp_rejects_tsk(taxonomy_mcp_client):

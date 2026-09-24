@@ -346,7 +346,7 @@ class MemoryEntryResponse(BaseModel):
 
     id: str = Field(..., description="Entry UUID")
     sequence: int = Field(..., description="Sequence number within product")
-    entry_type: str = Field(..., description="Entry type (project_closeout, session_handover, etc.)")
+    entry_type: str = Field(..., description="Entry type (project_completion, decision, discovery, etc.)")
     source: str = Field(..., description="Source tool identifier")
     timestamp: str = Field(..., description="ISO timestamp of entry creation")
     project_id: str | None = Field(None, description="Source project UUID (if applicable)")

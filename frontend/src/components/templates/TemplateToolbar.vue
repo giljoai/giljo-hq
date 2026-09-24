@@ -1,6 +1,7 @@
 <template>
   <div class="filter-bar">
     <v-text-field
+      v-if="view === 'roster'"
       v-model="search"
       prepend-inner-icon="mdi-magnify"
       placeholder="Search templates..."
@@ -12,6 +13,7 @@
       class="filter-search"
     />
     <v-select
+      v-if="view === 'roster'"
       v-model="filterRole"
       :items="availableRoles"
       placeholder="Role"
@@ -23,6 +25,7 @@
       class="filter-select"
     />
     <v-select
+      v-if="view === 'roster'"
       v-model="filterStatus"
       :items="statusOptions"
       placeholder="Status"
@@ -34,6 +37,7 @@
       class="filter-select"
     />
     <v-select
+      v-if="view === 'roster'"
       v-model="scopeMode"
       :items="SCOPE_OPTIONS"
       variant="solo"
@@ -44,26 +48,7 @@
       class="filter-select filter-scope"
       data-testid="show-all-products"
     />
-    <v-btn
-      variant="tonal"
-      prepend-icon="mdi-cog-outline"
-      title="Agent behaviour settings"
-      aria-label="Agent behaviour settings"
-      data-testid="agent-behaviour-button"
-      @click="emit('open-behaviour')"
-    >
-      Behaviour
-      <v-chip
-        v-if="behaviourChangedCount > 0"
-        size="x-small"
-        color="primary"
-        variant="flat"
-        class="ml-2"
-        data-testid="agent-behaviour-badge"
-      >
-        {{ behaviourChangedCount }}
-      </v-chip>
-    </v-btn>
+    <AgentsViewSwitcher v-model="view" :show-prompt="showPrompt" />
     <v-menu>
       <template #activator="{ props: menuProps }">
         <v-btn
@@ -101,6 +86,13 @@
           :disabled="!canCreate"
           @click="emit('add-defaults')"
         />
+        <v-list-item
+          prepend-icon="mdi-backup-restore"
+          title="Reset all agents to default"
+          data-testid="reset-all-agents"
+          :disabled="!canCreate"
+          @click="emit('reset-all')"
+        />
       </v-list>
     </v-menu>
     <v-btn
@@ -118,21 +110,23 @@
 </template>
 
 <script setup>
+import AgentsViewSwitcher from './AgentsViewSwitcher.vue'
 const search = defineModel('search', { type: String, default: '' })
 const filterRole = defineModel('filterRole', { type: String, default: null })
 const filterStatus = defineModel('filterStatus', { type: String, default: null })
 const scopeMode = defineModel('scopeMode', { type: String, default: 'product' })
+const view = defineModel('view', { type: String, default: 'roster' })
 
 defineProps({
   availableRoles: { type: Array, default: () => [] },
   statusOptions: { type: Array, default: () => [] },
-  behaviourChangedCount: { type: Number, default: 0 },
+  showPrompt: { type: Boolean, default: true },
   canBulk: { type: Boolean, default: false },
   canCreate: { type: Boolean, default: false },
   bulkRunning: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open-behaviour', 'bulk-set-all', 'add-defaults', 'create'])
+const emit = defineEmits(['bulk-set-all', 'add-defaults', 'reset-all', 'create'])
 
 const SCOPE_OPTIONS = [
   { title: 'This product', value: 'product' },

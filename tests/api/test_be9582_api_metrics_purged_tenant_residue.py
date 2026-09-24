@@ -17,10 +17,11 @@ from giljo_mcp.models.auth import User
 
 class _FakeState:
 
-    def __init__(self, db_manager, api_counts=None, mcp_counts=None):
+    def __init__(self, db_manager, api_counts=None, mcp_counts=None, tool_counts=None):
         self.db_manager = db_manager
         self.api_call_count = dict(api_counts or {})
         self.mcp_call_count = dict(mcp_counts or {})
+        self.mcp_tool_call_count = dict(tool_counts or {})
 
 
 async def _make_user(db_manager, tenant_key: str) -> None:

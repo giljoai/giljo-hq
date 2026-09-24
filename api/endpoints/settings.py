@@ -18,6 +18,15 @@ from giljo_mcp.execution_mode_default import (
     STAGE_MODE_ASK,
 )
 from giljo_mcp.models import User
+from giljo_mcp.services.handover_template import (
+    DEFAULT_HANDOVER_TEMPLATE,
+    HANDOVER_TEMPLATE_MAX_CHARS,
+    HANDOVER_TEMPLATE_SETTING_KEY,
+    normalize_handover_template,
+    require_template_within_cap,
+    resolve_handover_template,
+    template_is_default,
+)
 from giljo_mcp.services.settings_service import (
     DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES,
     SettingsService,
@@ -107,6 +116,34 @@ class ExecutionModeDefaultUpdate(BaseModel):
         if value not in EXECUTION_MODE_DEFAULT_CHOICES:
             raise ValueError(f"must be one of {list(EXECUTION_MODE_DEFAULT_CHOICES)}")
         return value
+
+
+class HandoverTemplateResponse(BaseModel):
+    """The account's handover template, as it will be used (BE-9643a).
+
+    ``handover_template`` is what BOTH doors start a handover from -- the dialog
+    pre-fills it and the generated retirement prompt carries it -- so it is always
+    returned with the required headings present, whatever the stored row holds.
+    ``is_default`` is the server's answer to "is this account on the shipped text",
+    so the dashboard does not need a second definition of default to decide whether
+    to offer Reset.
+    """
+
+    handover_template: str = Field(description="The template every new handover on this account starts from.")
+    is_default: bool = Field(description="True when the account has never set one, or has reset to the shipped text.")
+
+
+class HandoverTemplateUpdate(BaseModel):
+    """Replace the account's handover template."""
+
+    handover_template: str = Field(
+        description=(
+            "Free text every handover starts from. Add whatever sections you want; the three "
+            "headings the server requires are appended if you leave one out, so the template "
+            "can never ask for a handover the server would refuse. Limit "
+            f"{HANDOVER_TEMPLATE_MAX_CHARS} characters."
+        ),
+    )
 
 
 
@@ -339,3 +376,99 @@ async def update_execution_mode_default(
     await service.update_settings("general", general)
 
     return ExecutionModeDefaultResponse(execution_mode_default=request.execution_mode_default)
+
+
+@router.get(
+    "/handover-template",
+    response_model=HandoverTemplateResponse,
+    summary="Get the account handover template",
+    description="The text every new handover on this account starts from.",
+)
+async def get_handover_template(
+    current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db_session)
+) -> HandoverTemplateResponse:
+    """Read the account's handover template (all authenticated users).
+
+    Readable by anyone who can see the account, exactly like the execution-mode
+    default next to it: the handover dialog pre-fills from this, and a read that
+    403s would leave the author with an empty editor and no way to know why. The
+    WRITES below are admin-gated.
+
+    Never returns the raw stored row. A row written by hand, or before this endpoint
+    existed, can be missing a required heading; completing it on read is what stops
+    one such row from breaking every handover written after it.
+    """
+    logger.debug("User %s retrieving the handover template", sanitize(current_user.username))
+
+    service = SettingsService(db, current_user.tenant_key)
+    stored = await service.get_setting_value("general", HANDOVER_TEMPLATE_SETTING_KEY, default="")
+
+    return HandoverTemplateResponse(
+        handover_template=resolve_handover_template(stored),
+        is_default=template_is_default(stored),
+    )
+
+
+@router.put(
+    "/handover-template",
+    response_model=HandoverTemplateResponse,
+    summary="Set the account handover template",
+    description="Replace the text every new handover starts from. Required headings are added if omitted.",
+)
+async def update_handover_template(
+    request: HandoverTemplateUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> HandoverTemplateResponse:
+    """Set the account's handover template (admin only, like every other write here).
+
+    The operator may add sections; the three required headings are not theirs to
+    remove. One missing is APPENDED rather than refused -- a template that omitted
+    one would hand every author a document the server then rejects, for a reason the
+    author, who did exactly what the template said, cannot see.
+
+    Read-modify-write, for the same reason the execution-mode default does it: the
+    `general` category holds other keys and a blind category overwrite would drop
+    every one of them.
+    """
+    logger.info("Admin %s updating the handover template", sanitize(current_user.username))
+
+    require_template_within_cap(request.handover_template, operation="update_handover_template")
+    stored = normalize_handover_template(request.handover_template)
+
+    service = SettingsService(db, current_user.tenant_key)
+    general = await service.get_settings("general")
+    general[HANDOVER_TEMPLATE_SETTING_KEY] = stored
+    await service.update_settings("general", general)
+
+    return HandoverTemplateResponse(
+        handover_template=resolve_handover_template(stored),
+        is_default=template_is_default(stored),
+    )
+
+
+@router.post(
+    "/handover-template/reset",
+    response_model=HandoverTemplateResponse,
+    summary="Reset the account handover template",
+    description="Restore the shipped default template.",
+)
+async def reset_handover_template(
+    current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)
+) -> HandoverTemplateResponse:
+    """Restore the shipped default (admin only).
+
+    Its own path rather than "PUT the default text back": the caller would have to
+    hold a copy of the default to do that, which is a second definition of the
+    default living in the frontend, drifting the first time either changes. The key
+    is CLEARED rather than written with the default, so an account that resets keeps
+    tracking the shipped text as it improves instead of freezing today's copy.
+    """
+    logger.info("Admin %s reset the handover template to the default", sanitize(current_user.username))
+
+    service = SettingsService(db, current_user.tenant_key)
+    general = await service.get_settings("general")
+    general.pop(HANDOVER_TEMPLATE_SETTING_KEY, None)
+    await service.update_settings("general", general)
+
+    return HandoverTemplateResponse(handover_template=DEFAULT_HANDOVER_TEMPLATE, is_default=True)

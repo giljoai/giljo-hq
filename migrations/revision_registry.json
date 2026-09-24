@@ -159,6 +159,8 @@
     "ce_0102_be9540_sequence_run_reviewed_via",
     "ce_0103_be9605b_template_model_effort",
     "ce_0104_be9610a_product_owned_agent_copies",
-    "ce_0105_db9607_drop_template_export_columns"
+    "ce_0105_db9607_drop_template_export_columns",
+    "ce_0106_be9637_mcp_tool_call_metrics",
+    "ce_0107_db9639_drop_tasks_due_date"
   ]
 }

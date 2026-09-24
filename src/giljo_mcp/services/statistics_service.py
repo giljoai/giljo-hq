@@ -5,6 +5,7 @@
 
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +76,17 @@ class StatisticsService:
     ) -> Any:
         async with self._get_session(tenant_key) as session:
             return await self._job_repo.get_api_metrics(session, tenant_key)
+
+    async def get_mcp_tool_call_counts(
+        self,
+        tenant_key: str,
+        days: int = 30,
+    ) -> list[dict[str, Any]]:
+        window = max(1, min(int(days), 365))
+        since = datetime.now(UTC).date() - timedelta(days=window - 1)
+        async with self._get_session(tenant_key) as session:
+            rows = await self._job_repo.get_mcp_tool_call_counts(session, tenant_key, since)
+        return [{"tool_name": name, "total_calls": count} for name, count in rows]
 
 
     async def get_system_stats(

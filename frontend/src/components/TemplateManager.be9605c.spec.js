@@ -2,6 +2,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [{ path: '/', name: 'Root', component: { template: '<div />' } }],
+})
 
 import TemplateManager from './TemplateManager.vue'
 
@@ -51,6 +57,7 @@ function mountManager() {
   return mount(TemplateManager, {
     global: {
       plugins: [
+        router,
         createTestingPinia({
           initialState: {
             user: { currentUser: { id: 1, username: 'u', role: 'admin', tenant_key: 'tk' } },

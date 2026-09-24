@@ -17,7 +17,11 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
-from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError, validate_git_commits
+from giljo_mcp.schemas.jsonb_validators import (
+    GitCommitShaRequiredError,
+    GitCommitTitleRequiredError,
+    validate_git_commits,
+)
 from giljo_mcp.services.dto import MemoryEntryCreateParams
 from giljo_mcp.services.product_memory_service import (
     ProductMemoryService,
@@ -40,9 +44,23 @@ from giljo_mcp.tools._prelaunch_workproduct_detector import check_and_emit_prela
 logger = logging.getLogger(__name__)
 
 WORKER_ALLOWED_ENTRY_TYPES = frozenset({"baseline", "decision", "architecture", "discovery"})
-ORCHESTRATOR_ONLY_ENTRY_TYPES = frozenset({"project_completion", "session_handover"})
+ORCHESTRATOR_ONLY_ENTRY_TYPES = frozenset({"project_completion"})
 
-CLOSEOUT_FAMILY_ENTRY_TYPES = frozenset({"project_completion", "handover_closeout"})
+CLOSEOUT_FAMILY_ENTRY_TYPES = frozenset({"project_completion"})
+
+VALID_ENTRY_TYPES = frozenset(
+    {
+        "project_completion",
+        "baseline",
+        "decision",
+        "architecture",
+        "discovery",
+    }
+)
+
+ENTRY_TYPE_ALIASES = {"project_closeout": "project_completion"}
+
+RETIRED_ENTRY_TYPES = frozenset({"session_handover", "handover_closeout"})
 
 
 async def _ack_closeout_todos(
@@ -343,22 +361,10 @@ async def write_360_memory(
     decisions_made = validated.decisions_made
     validated_tags = validated.tags
 
-    entry_type_aliases = {"project_closeout": "project_completion"}
-    entry_type = entry_type_aliases.get(entry_type, entry_type)
+    entry_type = ENTRY_TYPE_ALIASES.get(entry_type, entry_type)
 
-    valid_entry_types = frozenset(
-        {
-            "project_completion",
-            "handover_closeout",
-            "session_handover",
-            "baseline",
-            "decision",
-            "architecture",
-            "discovery",
-        }
-    )
-    if entry_type not in valid_entry_types:
-        raise ValidationError(f"Invalid entry_type '{entry_type}'. Must be one of: {sorted(valid_entry_types)}")
+    if entry_type not in VALID_ENTRY_TYPES:
+        raise ValidationError(f"Invalid entry_type '{entry_type}'. Must be one of: {sorted(VALID_ENTRY_TYPES)}")
 
     try:
         owns_session = session is None
@@ -554,6 +560,9 @@ async def write_360_memory(
 
             return result
 
+    except GitCommitShaRequiredError as exc:
+        logger.info("write_360_memory rejected: %s", exc)
+        raise
     except (RuntimeError, ValueError, KeyError) as exc:
         logger.exception("Failed to write 360 memory entry", extra={"error": str(exc)})
         raise

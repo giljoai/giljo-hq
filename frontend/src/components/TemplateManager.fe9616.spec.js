@@ -3,7 +3,16 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import TemplateManager from '@/components/TemplateManager.vue'
+
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/tools', name: 'Tools', component: { template: '<div />' } },
+  ],
+})
 
 vi.mock('@/services/api', () => {
   const apiObj = {
@@ -35,6 +44,20 @@ vi.mock('@/services/api', () => {
       getAgentCheckinCadence: vi.fn(() =>
         Promise.resolve({ data: { agent_checkin_cadence_minutes: 10 } }),
       ),
+      getHandoverTemplate: vi.fn(() =>
+        Promise.resolve({ data: { handover_template: 'Stored template', is_default: false } }),
+      ),
+      updateHandoverTemplate: vi.fn(() =>
+        Promise.resolve({ data: { handover_template: 'Stored template', is_default: false } }),
+      ),
+      resetHandoverTemplate: vi.fn(() =>
+        Promise.resolve({ data: { handover_template: 'Default template', is_default: true } }),
+      ),
+    },
+    system: {
+      getOrchestratorPrompt: vi.fn(() => Promise.resolve({ data: { content: '' } })),
+      updateOrchestratorPrompt: vi.fn(() => Promise.resolve({ data: { content: '' } })),
+      resetOrchestratorPrompt: vi.fn(() => Promise.resolve({ data: { content: '' } })),
     },
   }
   return { api: apiObj, default: apiObj }
@@ -58,18 +81,15 @@ const selectStub = {
     <option v-for="i in (items || [])" :key="i.value ?? i" :value="i.value ?? i" :selected="(i.value ?? i) === modelValue">{{ i.title ?? i }}</option>
   </select>`,
 }
-const behaviourDialogStub = {
-  props: ['modelValue'],
-  template: `<div class="agent-behaviour-dialog-stub" :data-open="String(modelValue)" />`,
-}
-
 const A = 'prod-a'
 const PRODUCTS = [{ id: A, name: 'Atlas', is_active: true }]
 
-function mountManager({ currentProductId = A } = {}) {
+async function mountManager({ currentProductId = A } = {}) {
+  await router.push('/tools')
   return mount(TemplateManager, {
     global: {
       plugins: [
+        router,
         createTestingPinia({
           initialState: {
             user: { currentUser: { id: 1, username: 'u', role: 'admin', tenant_key: 'tk' } },
@@ -88,7 +108,6 @@ function mountManager({ currentProductId = A } = {}) {
           template: '<div><slot name="activator" :props="{}" /><slot />{{ text }}</div>',
         },
         'v-dialog': { template: '<div><slot /></div>' },
-        AgentBehaviourDialog: behaviourDialogStub,
         Teleport: true,
       },
     },
@@ -107,35 +126,51 @@ beforeEach(() => {
   api.assignments.list.mockResolvedValue({ data: { assignments: [], count: 0 } })
 })
 
-describe('FE-9616 — the behaviour dialog opens from the toolbar', () => {
-  it('starts shut, and the button opens it', async () => {
-    const wrapper = mountManager()
+describe('FE-9643b — the Agents view switcher (operator decisions 1/2/7, 2026-09-23)', () => {
+  it('starts on Roster, and the Behaviour button switches the view', async () => {
+    const wrapper = await mountManager()
     await flushPromises()
 
-    const dialog = wrapper.find('.agent-behaviour-dialog-stub')
-    expect(dialog.attributes('data-open')).toBe('false')
+    expect(wrapper.find('.template-manager').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agents-view-roster"]').attributes('color')).toBe('primary')
 
-    await wrapper.find('[data-testid="agent-behaviour-button"]').trigger('click')
+    await wrapper.find('[data-testid="agents-view-behaviour"]').trigger('click')
+    await flushPromises()
 
-    expect(wrapper.find('.agent-behaviour-dialog-stub').attributes('data-open')).toBe('true')
+    expect(wrapper.find('[data-testid="agents-view-behaviour"]').attributes('color')).toBe(
+      'primary',
+    )
+    expect(wrapper.find('.template-manager').exists()).toBe(false)
   })
 
-  it('shows no badge until a setting differs from its default', async () => {
-    const wrapper = mountManager()
+  it('hides only the roster filters off the Roster view -- the kebab and + stay', async () => {
+    const wrapper = await mountManager()
+    await flushPromises()
+    expect(scopeSelect(wrapper).exists()).toBe(true)
+
+    await wrapper.find('[data-testid="agents-view-handover"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="agent-behaviour-badge"]').exists()).toBe(false)
+    expect(scopeSelect(wrapper).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="product-bulk-menu"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="new-template"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agents-view-handover"]').exists()).toBe(true)
+  })
 
-    wrapper.findComponent(behaviourDialogStub).vm.$emit('update:changed-count', 3)
+  it('tracks the active view in the URL query string', async () => {
+    const wrapper = await mountManager()
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="agent-behaviour-badge"]').text()).toBe('3')
+    await wrapper.find('[data-testid="agents-view-prompt"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.query.view).toBe('prompt')
   })
 })
 
 describe('FE-9616 — the scope dropdown', () => {
   it('offers exactly this product and all products, scoped to the product by default', async () => {
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
 
     const options = scopeSelect(wrapper).findAll('option')
@@ -144,7 +179,7 @@ describe('FE-9616 — the scope dropdown', () => {
   })
 
   it('choosing all products widens the read, and choosing back narrows it', async () => {
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
 
     await setScope(wrapper, 'all')
@@ -156,8 +191,8 @@ describe('FE-9616 — the scope dropdown', () => {
 })
 
 describe('FE-9616 — the bulk menu and the new-template button', () => {
-  it('carries the three product-wide actions, and nothing else', async () => {
-    const wrapper = mountManager()
+  it('carries the four product-wide actions, and nothing else', async () => {
+    const wrapper = await mountManager()
     await flushPromises()
 
     const titles = wrapper.findAll('.v-list-item').map((i) => i.attributes('title'))
@@ -165,6 +200,7 @@ describe('FE-9616 — the bulk menu and the new-template button', () => {
       'Enable all for this product',
       'Disable all for this product',
       'Add default agents',
+      'Reset all agents to default',
     ])
   })
 
@@ -172,7 +208,7 @@ describe('FE-9616 — the bulk menu and the new-template button', () => {
     ['product-bulk-menu', 'Bulk actions for this product'],
     ['new-template', 'New template'],
   ])('%s names itself with a native title, not a tooltip', async (testid, label) => {
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
 
     const btn = wrapper.find(`[data-testid="${testid}"]`)
@@ -188,7 +224,7 @@ describe('FE-9616 — the bulk menu and the new-template button', () => {
       }),
     )
 
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
 
     const itemDisabled = (id) => wrapper.find(`[data-testid="${id}"]`).attributes('disabled')
@@ -204,7 +240,7 @@ describe('FE-9616 — the bulk menu and the new-template button', () => {
   })
 
   it('Add default agents still calls the import endpoint', async () => {
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
 
     await wrapper.find('[data-testid="add-default-agents"]').trigger('click')
@@ -214,7 +250,7 @@ describe('FE-9616 — the bulk menu and the new-template button', () => {
   })
 
   it('disables the product-scoped controls under All products', async () => {
-    const wrapper = mountManager()
+    const wrapper = await mountManager()
     await flushPromises()
     expect(wrapper.find('[data-testid="new-template"]').attributes('disabled')).toBeUndefined()
 

@@ -18,7 +18,12 @@ from giljo_mcp.services.taxonomy_ops import (
 class TestDefaultTaxonomyTypes:
 
     def test_has_expected_count(self):
-        assert len(DEFAULT_TAXONOMY_TYPES) == 11
+        assert len(DEFAULT_TAXONOMY_TYPES) == 12
+
+    def test_includes_reserved_hnd_tag(self):
+        hnd = next((pt for pt in DEFAULT_TAXONOMY_TYPES if pt["abbr"] == "HND"), None)
+        assert hnd is not None, "HND reserved handover tag must be in DEFAULT_TAXONOMY_TYPES"
+        assert hnd["label"] == "Handover"
 
     def test_includes_reserved_tsk_tag(self):
         tsk = next((pt for pt in DEFAULT_TAXONOMY_TYPES if pt["abbr"] == "TSK"), None)

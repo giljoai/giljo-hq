@@ -22,6 +22,7 @@ from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptB
 from giljo_mcp.prompts.staging_prompt_builder import StagingPromptBuilder
 from giljo_mcp.prompts.subagent_prompt_builder import SubagentPromptBuilder
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
+from giljo_mcp.services.handover_template import resolve_handover_template
 from giljo_mcp.thin_prompt_lifecycle import SUBAGENT_EXECUTION_PROMPT_TYPE, ThinClientLifecycleMixin
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -77,9 +78,17 @@ FIRST ACTIONS (DO NOT RE-STAGE):
        categories=["memory_360"],
        depth_config={{"memory_360": {{"shape": "full"}}}}
    )
-   -> Look for the most recent "handover_closeout" entry (authored by job {job_id})
-   -> Contains: previous progress, current status, next steps
-   -> "full" shape required: handover bodies are needed in full, not headlines.
+   -> Background on the product; the session handover itself is a TASK, read next.
+
+3b. Read the handover your predecessor left:
+   list_tasks(product_id="{product_param}", task_type="HND")
+   -> Take the most recent one. It carries previous progress, current status and
+      next steps, under three headings: what to verify before trusting it, what it
+      is waiting on the operator for, and what it could not testify to.
+   -> VERIFY ITS CLAIMS BEFORE ACTING ON THEM. Each claim in "Verify before
+      trusting" is written next to the command that checks it -- run those. If a
+      claim turns out to be false, set that task to Blocked and say which claim.
+      Mark it Completed once you have verified it, not once you have read it.
 
 4. Check messages + retrieve execution plan (can run in parallel):
    get_thread_history(as_participant="{agent_id}", unread_only=true, mark_read=true) on your coordination thread
@@ -101,7 +110,7 @@ AFTER CONTEXT GATHERING — decide next action based on workflow status:
 CRITICAL RULES:
 - Do NOT call get_staging_instructions() to re-stage
 - Do NOT re-write the project mission
-- Read 360 Memory handover_closeout for context from previous session
+- Read the HND handover task for context from the previous session, and verify its claims
 - You are CONTINUING work, not starting from scratch
 - Agents were NOT terminated during handover — they kept working. Expect them to be in the same or
   more advanced state than described in the handover. Check workflow_status for current truth.
@@ -146,8 +155,10 @@ def build_retirement_prompt(
     project_name: str | None = None,
     git_enabled: bool = False,
     project_taxonomy: str = "",
+    handover_template: str | None = None,
 ) -> str:
     project_display = f' "{project_name}"' if project_name else ""
+    template_block = resolve_handover_template(handover_template).strip()
 
     git_closeout_section = ""
     if git_enabled:
@@ -202,52 +213,50 @@ report_progress(
     todo_items=[...mark your own items appropriately...]
 )
 
-STEP 4 — Write 360 Memory handover (append-only, previous entries are preserved)
+STEP 4 — Write the handover as a task
 
-The server enforces hard caps. Compose your handover to fit:
-- summary: max 1500 chars (2-3 sentence headline of the session and the handoff context)
-- key_outcomes: max 5 items, each max 250 chars
-- decisions_made: max 5 items, each max 250 chars
-- tags: max 8, from controlled vocabulary (see below). Over-cap fields are REJECTED with
-  a structured error pointing to the limit — do NOT retry with the same payload, re-trim.
+A handover is a TASK of type HND. It gets a serial your successor can name, a status
+you can both see, and it can be set Blocked if your successor finds one of your claims
+to be false. Write it for someone who does not trust you yet, because they should not.
 
-Distribute content across fields rather than packing everything into summary. Use
-key_outcomes for COMPLETED WORK items, decisions_made for COORDINATION CONTEXT and
-NEXT-STEPS items. If you have more team-state detail than fits, send a separate message
-to the continuation orchestrator with the overflow rather than busting the cap.
+The server REFUSES an HND whose description does not carry all three of these headings.
+This is a gate, not a style note:
 
-Controlled tag vocabulary (16, pick ≤ 8): feature, bug-fix, refactor, perf, security,
-docs, test, chore, frontend, backend, database, api, infrastructure, ui-ux, integration,
-migration. Use 'chore' if nothing else fits.
+  ## Verify before trusting
+  Every claim you make, each one next to the exact command that checks it. Not "tests
+  pass" — the command, and what a passing run prints. A claim with no check beside it
+  is the one that will be wrong.
 
-write_memory_entry(
-    project_id="{project_id}",
-    entry_type="handover_closeout",
-    author_job_id="{job_id}",
-    summary="<2-3 sentence headline: what session covered, why handoff is happening,
-              and the most critical thing the continuation orchestrator must know first.
-              Max 500 chars.>",
-    key_outcomes=[
-      "<concrete completed outcome 1, max 250 chars>",
-      "<concrete completed outcome 2>",
-      "<in-progress work + where you stopped>",
-      "<team state highlights — name agents, statuses, pending work>",
-      "<known blockers if any>"
-    ],
-    decisions_made=[
-      "<architectural/design decision + rationale, max 250 chars>",
-      "<next coordination action the continuation orchestrator should take>",
-      "<messages you were expecting from agents>",
-      "<decisions you were about to make>"
-    ],
-    tags=["<pick from the 16-tag vocab above, ≤ 8 total>"]
+  ## Waiting on the operator
+  Anything that cannot move without a human. Say who, what, and what happens if the
+  answer is no. Write "nothing" if there is nothing.
+
+  ## Cannot testify
+  What you did NOT verify. Guesses, assumptions, things you were told, things that
+  looked fine but you never ran. This section is what makes the other two trustworthy.
+  Write "nothing" only if it is genuinely empty, which it rarely is.
+
+create_task(
+    product_id=<your product UUID -- it is in your mission header; pass it explicitly
+               rather than omitting it, or the task lands on whichever product is
+               active at that moment, which another session can change under you>,
+    task_type="HND",
+    title="<session handover: what this session was and where it stopped>",
+    priority="high",
+    description=<one string, laid out exactly like this>
 )
+
+The description, verbatim shape. This is YOUR ACCOUNT'S handover template -- your
+operator wrote it, and it is what every handover here is expected to look like. Keep
+every heading it carries, fill each one in, and add sections this session needs:
+
+{template_block}
 {git_closeout_section}
 STEP 5 — Confirm to user
 
-Print: "Session context saved to 360 Memory. You may now end this session and start the continuation prompt in a new agent session (terminal, desktop, or web tab). Other agents are unaffected and will continue working."
+Print: "Session handover saved as an HND task. You may now end this session and start the continuation prompt in a new agent session (terminal, desktop, or web tab). Other agents are unaffected and will continue working."
 
-CRITICAL: Do NOT skip the memory write. The continuation session depends on this context.
+CRITICAL: Do NOT skip the handover task. The continuation session depends on this context.
 CRITICAL: Do NOT call complete_job() on YOUR OWN job. You are NOT done — your work continues in a new agent session.
 CRITICAL: Do NOT modify other agents in any way — no force-complete, no message draining, no todo changes.
 """

@@ -118,7 +118,6 @@ def _stub_task(**overrides):
         "series_number": 42,
         "subseries": None,
         "hidden": False,
-        "due_date": None,
         "created_at": None,
         "description": "a" * 50,
         "task_type_id": "tt-1",
@@ -168,7 +167,7 @@ def test_index_row_carries_no_embedded_type_block():
     row = read_layer.task_to_index_row(_stub_task())
     assert row["type"] == "TSK"
     assert row["name"] == "Ship the thing"
-    assert set(row) == {"task_id", "taxonomy_alias", "name", "status", "type", "due_date", "created_at"}
+    assert set(row) == {"task_id", "taxonomy_alias", "name", "status", "type", "created_at"}
     assert read_layer.task_to_index_row(_stub_task(task_type=None))["type"] is None
 
 

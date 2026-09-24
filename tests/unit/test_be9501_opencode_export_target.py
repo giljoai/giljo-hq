@@ -87,6 +87,6 @@ class TestTheDoorTheFixDidNotClose:
                 "running in that tool cannot know to pass it and will take the default"
             )
 
-    def test_every_harness_reports_where_its_agent_templates_live(self) -> None:
-        empty = sorted(h.tool_type for h in HARNESSES if not h.template_locations)
-        assert not empty, f"harness(es) {empty} report no agent-template locations to an orchestrator"
+    def test_no_harness_reports_an_agent_template_directory(self) -> None:
+        carriers = sorted(h.tool_type for h in HARNESSES if hasattr(h, "template_locations"))
+        assert not carriers, f"harness(es) {carriers} carry a retired agent-template location field"

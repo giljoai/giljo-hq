@@ -8,7 +8,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -163,6 +163,14 @@ class RoadmapService:
                 roadmap.last_generated_at = datetime.now(UTC)
                 if summary is not None:
                     roadmap.summary = summary
+
+                remaining = await session.scalar(
+                    select(func.count())
+                    .select_from(RoadmapItem)
+                    .where(RoadmapItem.tenant_key == effective_tenant_key, RoadmapItem.roadmap_id == roadmap.id)
+                )
+                if remaining == 0:
+                    roadmap.summary = None
 
                 await session.commit()
                 roadmap_id = roadmap.id

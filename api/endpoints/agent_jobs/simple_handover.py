@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import Project, User
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.services.handover_template import HANDOVER_TEMPLATE_SETTING_KEY
 from giljo_mcp.services.settings_service import SettingsService
 from giljo_mcp.thin_prompt_generator import build_continuation_prompt, build_retirement_prompt
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -120,8 +121,11 @@ async def simple_handover(
     project_result = await db.execute(project_stmt)
     project = project_result.scalar_one_or_none()
 
-    git_enabled = await SettingsService(db, current_user.tenant_key).git_integration_enabled()
+    settings_service = SettingsService(db, current_user.tenant_key)
+    git_enabled = await settings_service.git_integration_enabled()
     project_taxonomy = project.taxonomy_alias if project else ""
+
+    handover_template = await settings_service.get_setting_value("general", HANDOVER_TEMPLATE_SETTING_KEY, default="")
 
     await db.commit()
 
@@ -132,6 +136,7 @@ async def simple_handover(
         project_name=project.name if project else None,
         git_enabled=git_enabled,
         project_taxonomy=project_taxonomy,
+        handover_template=handover_template,
     )
 
     continuation_prompt = build_continuation_prompt(

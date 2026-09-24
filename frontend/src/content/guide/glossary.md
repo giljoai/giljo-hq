@@ -8,7 +8,8 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 |---|---|
 | **Product** | The software you are building. A product is the top-level container: every project, task, agent, and memory belongs to one product. It holds your context — description, tech stack, architecture, testing strategy — which agents read at the start of each session. You can work on several products at once, each in its own tab. |
 | **Project** | A focused unit of work inside a product, such as a feature, a refactor, or a bug fix. A project is the thing you run: it has a description, an agent team, a mission, and a closeout that writes a 360 Memory entry. |
-| **Task** | A note about work you have identified but not yet scheduled. Tasks live on the Task Board and are for capturing ideas, technical debt, and follow-ups. A task does not run agents; convert it to a project when you are ready to build it. |
+| **Task** | A note about work you have identified but not yet scheduled. Tasks live on the Tasks & Handovers board and are for capturing ideas, technical debt, and follow-ups. A task does not run agents; convert it to a project when you are ready to build it. |
+| **Handover** | A record of where a working session stopped, written for whoever picks it up next. It lives on the same board as your tasks, with its own serial, and it must say three things: which claims to verify and the command that checks each one, what is waiting on you, and what the author could not confirm. That last part is what makes the rest worth trusting. A handover is never converted to a project, and one nobody has read yet cannot be archived. |
 | **Job** | A single agent's assignment within a running project — its role, mission, and to-do list. The Jobs page shows one row per job so you can watch each agent's status and progress. |
 
 **Running a project — staging and implementation:**
@@ -63,5 +64,5 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Archived** | Hidden from the default view without being deleted — used for tasks and similar items behind an Archive/Unarchive action. Archived items come back via search or a "Show archived" toggle. |
+| **Archived** | Hidden from the default view without being deleted — used for tasks and similar items behind an Archive/Unarchive action. Archived items come back via search or a "Show archived" toggle. A handover that nobody has read yet cannot be archived, so it stays where the next person will see it. |
 | **Trash** | Deleted items are not gone right away. Projects, threads, tasks, vision documents, and agent templates move to a recoverable deleted state first — each area has its own restore view — before a scheduled purge removes them for good. |

@@ -285,17 +285,36 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 
 ### create_task `mcp:write`
 
-**Purpose:** Create a task (a single-step deferral / technical debt item), bound by
-default to the active product. Every task is tagged `TSK` (a `taxonomy_alias` like
-`TSK-0067`, auto-assigned from the counter shared with projects) — `task_type` is
-accepted for backward compatibility only and has no effect.
+**Purpose:** Create a task (a single-step deferral / technical debt item), or a
+session handover, bound by default to the active product. The serial
+(`taxonomy_alias`, e.g. `TSK-0067` or `HND-9641`) is auto-assigned from one counter
+shared with projects; there is no per-type numbering.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | title | str | Yes | Task title. |
 | description | str | Yes | Detailed task description. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. Default `medium`. |
-| task_type | str | No | Ignored — kept for backward compatibility. Every task is auto-tagged `TSK`; no other type is ever assigned. |
+| task_type | str | No | `TSK` (default) for an ordinary task, or `HND` for a session handover. Any other value is refused, naming the valid ones. An `HND` is additionally refused unless its `description` carries all three of these headings (see below). |
+
+**Handover shape (`task_type="HND"`).** A handover is read by someone who was not
+there, cannot ask you anything, and has no way to tell a verified claim from a
+confident one. The server refuses to store one whose description does not carry:
+
+| Heading | What belongs under it |
+|---|---|
+| `## Verify before trusting` | Every claim, each next to the exact command that checks it. Not "tests pass", but the command and what a passing run prints. |
+| `## Waiting on the operator` | Anything that cannot move without a human. Write "nothing" if there is nothing. |
+| `## Cannot testify` | What you did **not** verify: guesses, assumptions, things you were told, things that looked fine but you never ran. |
+
+The refusal is a `VALIDATION_ERROR` naming every heading that is missing. The third
+section is the load-bearing one: a handover listing only what went right reads
+identically whether you checked it or assumed it, and your successor finds out at
+the worst possible moment.
+
+A handover **cannot be converted to a project** (`HANDOVER_NOT_CONVERTIBLE`) and a
+**pending** one cannot be archived (`PENDING_HANDOVER_NOT_ARCHIVABLE`); see
+`update_task`.
 | assigned_to | str | No | Agent or user to assign the task to. |
 | product_id | str | No | Product UUID to bind the task to. Omit to use the active product — but the active product is shared, mutable state, so pass this explicitly when you know your product: another session, or the user switching products in the dashboard, changes the active product mid-session and an omitted `product_id` follows that change. A `product_id` that does not belong to your account is rejected outright; it never silently falls back to the active product. |
 
@@ -303,10 +322,16 @@ accepted for backward compatibility only and has no effect.
 
 ### update_task `mcp:write`
 
-**Purpose:** Update task metadata (title, description, status, priority, due date,
+**Purpose:** Update task metadata (title, description, status, priority,
 hidden flag), or promote the task to a project. Omitted fields remain unchanged; the
 task type is immutable. To **complete** a task, set `status=completed` (this stamps
 `completed_at`); pass `completion_notes` to append an audit-trail entry as it completes.
+
+**Status vocabulary for a handover (`HND`).** The same five values, read as the
+lifecycle of a handover: **Pending** = written, nobody has read it. **In Progress** =
+the successor is verifying its claims. **Completed** = verified, not merely read.
+**Blocked** = the successor found a claim that is false and needs the operator.
+**Cancelled** = superseded by a later handover.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -315,11 +340,10 @@ task type is immutable. To **complete** a task, set `status=completed` (this sta
 | description | str | No | New description. |
 | status | str | No | `pending` / `in_progress` / `completed` / `blocked` / `cancelled`. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. |
-| task_type | str | No | Ignored — the task type is immutable (`TSK`). Any value passed is not written. |
-| due_date | str | No | ISO-8601 due date. |
-| hidden | str | No | UI declutter flag. |
+| task_type | str | No | A task's type is fixed at creation and cannot be changed. Passing the task's own current type is a harmless no-op; passing a different one is refused with a `VALIDATION_ERROR` on field `task_type`, and the whole call writes nothing (any other fields in the same call are not applied either). Create a new task of the type you want instead. |
+| hidden | str | No | UI declutter flag (the UI calls it "archived"). Setting it on a **pending** handover is refused with `PENDING_HANDOVER_NOT_ARCHIVABLE`: a handover nobody has read must not leave the list. Move it off `pending` first. |
 | completion_notes | str | No | Note appended to the audit trail when `status=completed` (folds in the retired `complete_task` tool); a no-op otherwise. |
-| convert_to_project | bool | No | Promote this task to a project in one atomic step — the same conversion the dashboard's task-to-project wizard runs. A project is created from the task, any subtasks and roadmap card re-point to it at the same roadmap position, and **the task row is deleted** (its `task_id` stops resolving). The new project is **inactive and untyped** — tag it afterward with `update_project(project_id, project_type=...)`. It lands on the task's own product, not whichever product is active, and the response names that product. Only `title` may be combined with this flag (to name the new project); any other field combined with it is refused and changes nothing, since the task row is gone before it could apply. Default `false`. |
+| convert_to_project | bool | No | Promote this task to a project in one atomic step — the same conversion the dashboard's task-to-project wizard runs. A project is created from the task, any subtasks and roadmap card re-point to it at the same roadmap position, and **the task row is deleted** (its `task_id` stops resolving). The new project is **inactive and untyped** — tag it afterward with `update_project(project_id, project_type=...)`. It lands on the task's own product, not whichever product is active, and the response names that product. Only `title` may be combined with this flag (to name the new project); any other field combined with it is refused and changes nothing, since the task row is gone before it could apply. **Refused outright for a handover** (`HANDOVER_NOT_CONVERTIBLE`): a handover records a session that already happened, and since the conversion deletes the task row, converting one would destroy the record. Default `false`. |
 
 ---
 
@@ -333,8 +357,7 @@ pagination. Agents see hidden and non-hidden rows alike by default.
 | mode | str | No | `""` | `index` (leanest — the list-and-sort row, typically 35-40% smaller than `summary`, depending on title length) / `summary` / `full`. `""` defaults to `summary` unless `summary_only` says otherwise. When passed explicitly, `mode` wins over `summary_only`. |
 | status | str | No | `""` | Filter by exact status (e.g. `"pending"`); an unrecognized value is refused, naming the valid ones, rather than silently matching nothing. |
 | priority | str | No | `""` | Filter by priority (`low`/`medium`/`high`/`critical`); same refuse-on-typo behavior as `status`. |
-| task_type | str | No | `""` | Only `"TSK"` matches — every task carries that type. Any other value is refused rather than silently returned empty. |
-| due_before | str | No | `""` | ISO-8601 upper bound on due date. |
+| task_type | str | No | `""` | `"TSK"` (ordinary tasks) or `"HND"` (session handovers, which is how a successor finds the handover left for it). Any other value is refused rather than silently returned empty. |
 | hidden | str | No | `""` | Tri-state: `"true"`/`"false"`/`""`. An unrecognized value is refused, naming the accepted ones. |
 | summary_only | bool | No | `false` | Alias for `mode="summary"`. Ignored when `mode` is also passed explicitly. |
 | memory_limit | int | No | `0` | Truncates description length in `full` mode. |
@@ -804,7 +827,7 @@ to the product's `sequential_history`.
 | summary | str | Yes | Brief 2-3 sentence headline of what was accomplished or handed over. **Send this argument LAST in your call** — anything ordered after a long free-text argument like this one can be silently absorbed into it and never arrive as its own argument. |
 | key_outcomes | list[str] | Yes | Concrete outcomes delivered. |
 | decisions_made | list[str] | Yes | Architectural/design decisions made (cite any deferred task/project IDs). |
-| entry_type | str | No | `baseline` (foundation context) / `decision` (a choice with rationale) / `architecture` (structural notes) / `discovery` (surprising finding worth remembering) — any specialist agent may write these. `project_completion` (closeout) and `session_handover` (orchestrator-to-orchestrator across sessions) are **orchestrator-only**; a specialist passing either is refused with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. `handover_closeout` is a legacy alias kept for back-compat. Default `project_completion`. |
+| entry_type | str | No | `baseline` (foundation context) / `decision` (a choice with rationale) / `architecture` (structural notes) / `discovery` (surprising finding worth remembering) — any specialist agent may write these. `project_completion` (closeout) is **orchestrator-only**; a specialist passing it is refused with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. `project_closeout` is accepted as an alias for it. Default `project_completion`. **To hand a session over, create a task of type `HND` instead** — `session_handover` and `handover_closeout` are no longer accepted here. Entries already stored under those types are untouched and still read back normally. |
 | author_job_id | str | No | Job ID of the authoring agent (usually the orchestrator's `job_id`). |
 | git_commits | list[dict] | No | Commit records. Every entry must carry a non-empty commit title — a titleless entry is refused with `GIT_COMMIT_TITLE_REQUIRED`. Pass `{sha, message, author?, pr_url?}` dicts (preferred), or tab-delimited porcelain strings (`git log --format='%H%x09%s%x09%an' <base>..HEAD`). |
 | tags | list[str] | No | Max 8 tags, each from the server-enforced 16-tag vocabulary: change-type (`feature`/`bug-fix`/`refactor`/`perf`/`security`/`docs`/`test`/`chore`), domain (`frontend`/`backend`/`database`/`api`/`infrastructure`/`ui-ux`/`integration`), operational (`migration`). |

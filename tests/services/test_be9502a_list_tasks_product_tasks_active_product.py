@@ -41,7 +41,6 @@ async def test_scopes_to_the_active_product_when_product_id_omitted(db_session, 
     active_task = await task_service.create_task_for_mcp(
         title="On the active product",
         description="x",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
         product_id=str(product_a.id),
@@ -49,7 +48,6 @@ async def test_scopes_to_the_active_product_when_product_id_omitted(db_session, 
     inactive_task = await task_service.create_task_for_mcp(
         title="On the inactive product",
         description="x",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
         product_id=str(product_a2.id),
@@ -78,7 +76,6 @@ async def test_falls_back_to_empty_list_with_no_active_product(db_session, db_ma
     await task_service.create_task_for_mcp(
         title="Orphaned by deactivation",
         description="x",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
         product_id=str(product_a.id),

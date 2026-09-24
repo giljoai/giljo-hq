@@ -132,18 +132,21 @@ class TaxonomyService:
                     sort_order=sort_order,
                 )
 
-    async def ensure_reserved_task_type(self, tenant_key: str) -> TaxonomyType:
+    async def ensure_reserved_type(self, tenant_key: str, abbreviation: str) -> TaxonomyType:
         if not tenant_key:
             raise ValidationError(
                 "tenant_key is required",
-                context={"operation": "taxonomy.ensure_reserved_task_type"},
+                context={"operation": "taxonomy.ensure_reserved_type", "abbreviation": abbreviation},
             )
         if self._session is not None:
             with tenant_session_context(self._session, tenant_key):
-                return await taxonomy_ops.ensure_reserved_task_type(self._session, tenant_key)
+                return await taxonomy_ops.ensure_reserved_type(self._session, tenant_key, abbreviation)
         async with self._db_manager.get_session_async(tenant_key=tenant_key) as session:
             with tenant_session_context(session, tenant_key):
-                return await taxonomy_ops.ensure_reserved_task_type(session, tenant_key)
+                return await taxonomy_ops.ensure_reserved_type(session, tenant_key, abbreviation)
+
+    async def ensure_reserved_task_type(self, tenant_key: str) -> TaxonomyType:
+        return await self.ensure_reserved_type(tenant_key, taxonomy_ops.RESERVED_TASK_TYPE_ABBR)
 
     async def _valid_types_payload(self, tenant_key: str) -> list[dict[str, Any]]:
         rows = await self.list_types(tenant_key)

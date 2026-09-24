@@ -109,3 +109,27 @@ async def test_broadcast_agent_auto_failed_omits_product_id_when_none():
     )
 
     assert "product_id" not in spy.calls[0]["event"]["data"]
+
+
+async def test_broadcast_agent_auto_failed_logs_designed_cleanup_below_error(caplog):
+    spy = _SpyManager()
+    module = "giljo_mcp.services.agent_health_ws_broadcast"
+
+    with caplog.at_level("DEBUG", logger=module):
+        await broadcast_agent_auto_failed(
+            spy,
+            tenant_key="tenant-a",
+            job_id="job-1",
+            agent_display_name="implementer",
+            reason="Abandoned 1445m — auto-decommissioned",
+        )
+
+    records = [r for r in caplog.records if r.name == module]
+    assert records, "the broadcast must still log the auto-fail — silence is the opposite failure"
+    assert not [r for r in records if r.levelno >= 40], (
+        "designed auto-cleanup must not log at ERROR: "
+        f"{[(r.levelname, r.getMessage()) for r in records if r.levelno >= 40]!r}"
+    )
+    assert any("broadcast_auto_failed" in r.getMessage() for r in records), (
+        f"the auto-fail line must still be logged, got: {[r.getMessage() for r in records]!r}"
+    )

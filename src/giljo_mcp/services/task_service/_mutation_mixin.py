@@ -5,7 +5,6 @@
 
 
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +17,14 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.models import Task
 from giljo_mcp.schemas.service_responses import TaskUpdateResult
+from giljo_mcp.services.task_service._handover_guards import (
+    require_handover_description_shape_of,
+    resolve_create_task_type,
+)
+from giljo_mcp.services.task_type_immutability import (
+    TaskTypeImmutableError,
+    require_no_task_type_change,
+)
 from giljo_mcp.services.text_field_validation import require_non_blank
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -30,7 +37,6 @@ _ALLOWED_TASK_UPDATE_FIELDS: frozenset[str] = frozenset(
         "priority",
         "estimated_effort",
         "actual_effort",
-        "due_date",
         "project_id",
         "parent_task_id",
         "converted_to_project_id",
@@ -60,7 +66,6 @@ class _TaskMutationMixin:
         created_by_user_id: str | None = None,
         estimated_effort: float | None = None,
         actual_effort: float | None = None,
-        due_date: Any = None,
         validate_product: bool = False,
     ) -> str:
         try:
@@ -83,7 +88,6 @@ class _TaskMutationMixin:
                     created_by_user_id=created_by_user_id,
                     estimated_effort=estimated_effort,
                     actual_effort=actual_effort,
-                    due_date=due_date,
                     validate_product=validate_product,
                 )
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
@@ -111,7 +115,6 @@ class _TaskMutationMixin:
         created_by_user_id: str | None = None,
         estimated_effort: float | None = None,
         actual_effort: float | None = None,
-        due_date: Any = None,
         validate_product: bool = False,
     ) -> str:
         if not tenant_key:
@@ -188,7 +191,6 @@ class _TaskMutationMixin:
             status=status,
             estimated_effort=estimated_effort,
             actual_effort=actual_effort,
-            due_date=due_date,
             created_by_user_id=created_by_user_id,
         )
 
@@ -239,7 +241,7 @@ class _TaskMutationMixin:
         priority: str = "medium",
         estimated_effort: float | None = None,
         actual_effort: float | None = None,
-        due_date: Any = None,
+        task_type: str | None = None,
     ) -> Task:
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         if not effective_tenant_key:
@@ -248,10 +250,12 @@ class _TaskMutationMixin:
                 context={"operation": "create_task_for_rest"},
             )
 
+        requested_type = resolve_create_task_type(task_type, description)
+
         from giljo_mcp.services.taxonomy_service import TaxonomyService
 
         taxonomy = TaxonomyService(db_manager=self.db_manager, session=self._session)
-        reserved_type = await taxonomy.ensure_reserved_task_type(effective_tenant_key)
+        reserved_type = await taxonomy.ensure_reserved_type(effective_tenant_key, requested_type)
         task_type_id = reserved_type.id
 
         task_id = await self.log_task(
@@ -269,7 +273,6 @@ class _TaskMutationMixin:
             created_by_user_id=created_by_user_id,
             estimated_effort=estimated_effort,
             actual_effort=actual_effort,
-            due_date=due_date,
             validate_product=True,
         )
 
@@ -300,7 +303,13 @@ class _TaskMutationMixin:
             async with self._get_session() as session:
                 return await self._update_task_impl(session, task_id, **kwargs)
 
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except (
+            BaseGiljoError,
+            ResourceNotFoundError,
+            ValidationError,
+            AuthorizationError,
+            TaskTypeImmutableError,
+        ):
             raise
         except Exception as e:
             self._logger.exception("Failed to update task")
@@ -339,6 +348,15 @@ class _TaskMutationMixin:
 
         if "title" in kwargs:
             require_non_blank(kwargs["title"], field="title", operation="update_task", entity="Task", task_id=task_id)
+
+        require_handover_description_shape_of(task, kwargs.get("description"))
+
+        if "task_type" in kwargs:
+            require_no_task_type_change(
+                current_type=getattr(task.task_type, "abbreviation", None) if task.task_type else None,
+                requested_type=kwargs.pop("task_type"),
+                task_id=task_id,
+            )
 
         updated_fields = []
         for key, value in kwargs.items():

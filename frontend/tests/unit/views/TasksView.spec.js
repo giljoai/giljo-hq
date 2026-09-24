@@ -24,6 +24,7 @@ import TaskEditDialog from '@/views/tasks/TaskEditDialog.vue'
 import api from '@/services/api'
 import { useTaskStore } from '@/stores/tasks'
 import { useNotificationStore } from '@/stores/notifications'
+import { useProductStore } from '@/stores/products'
 
 // Mock API
 vi.mock('@/services/api', () => ({
@@ -39,6 +40,11 @@ vi.mock('@/services/api', () => ({
     },
     agents: {
       list: vi.fn().mockResolvedValue({ data: [] }),
+    },
+    settings: {
+      getHandoverTemplate: vi.fn().mockResolvedValue({
+        data: { handover_template: '## Verify before trusting\n- <fill this in>', is_default: true },
+      }),
     },
   },
 }))
@@ -328,6 +334,43 @@ describe('TasksView - currentTask binding (silent-save regression)', () => {
 
     expect(api.tasks.create).not.toHaveBeenCalled()
   })
+
+  // FE-9643c decision 4: the server's VALIDATION_ERROR message must be
+  // readable IN the dialog itself, not only as a toast (EM_114 ruling,
+  // 2026-09-24) -- proven end to end through the real save path and the
+  // real (unstubbed) TaskEditDialog child, not just at the composable layer.
+  it('a VALIDATION_ERROR on save renders the server message verbatim inside the dialog', async () => {
+    const serverMessage =
+      "A handover task (task_type='HND') must carry these headings in its description, " +
+      "and is missing '## Cannot testify'."
+    api.tasks.create.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 422'), {
+        response: {
+          status: 422,
+          data: { error_code: 'VALIDATION_ERROR', message: serverMessage, context: {} },
+        },
+      }),
+    )
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+
+    wrapper.findComponent(TaskEditDialog).vm.$emit('update:currentTask', {
+      ...wrapper.vm.currentTask,
+      title: 'A handover missing a section',
+    })
+    await flushPromises()
+
+    const formRef = { value: { validate: async () => ({ valid: true }) } }
+    await wrapper.vm.saveTask(formRef)
+    await flushPromises()
+
+    // Not just "the composable knows the message" -- the actual rendered
+    // dialog HTML contains the server's own words, verbatim.
+    const dialog = wrapper.findComponent(TaskEditDialog)
+    expect(dialog.props('saveError')).toBe(serverMessage)
+    expect(dialog.text()).toContain(serverMessage)
+    expect(dialog.find('[data-test="dialog-save-error"]').text()).toBe(serverMessage)
+  })
 })
 
 describe('TasksView - Filter Controls', () => {
@@ -362,6 +405,91 @@ describe('TasksView - Filter Controls', () => {
     // reader) actually gets, so that is what the test pins.
     const btn = wrapper.find('[aria-label="Create new task"]')
     expect(btn.exists()).toBe(true)
+  })
+})
+
+// FE-9643c: the "+" control is now a menu offering "New task" (unchanged
+// behavior) and "New Agent Handover" (pre-fills from the live template).
+describe('TasksView - New Agent Handover menu entry (FE-9643c)', () => {
+  let vuetify
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vuetify = createVuetify({ components, directives })
+    vi.clearAllMocks()
+    api.settings.getHandoverTemplate.mockResolvedValue({
+      data: { handover_template: '## Verify before trusting\n- <fill this in>', is_default: true },
+    })
+  })
+
+  it('offers a "New Agent Handover" menu entry alongside New task', async () => {
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-task-menu-item"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="new-handover-menu-item"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('New Agent Handover')
+  })
+
+  it('New task menu entry still opens an ordinary (non-HND) dialog', async () => {
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+    useProductStore().currentProductId = 'product-1'
+
+    await wrapper.find('[data-testid="new-task-menu-item"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.vm.showTaskDialog).toBe(true)
+    expect(wrapper.vm.currentTask.task_type).toBeNull()
+    expect(api.settings.getHandoverTemplate).not.toHaveBeenCalled()
+  })
+
+  it('New Agent Handover fetches the live template and opens the dialog pre-filled', async () => {
+    api.settings.getHandoverTemplate.mockResolvedValue({
+      data: {
+        handover_template: '## Verify before trusting\n- checked with pytest',
+        is_default: false,
+      },
+    })
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+    useProductStore().currentProductId = 'product-1'
+
+    await wrapper.find('[data-testid="new-handover-menu-item"]').trigger('click')
+    await flushPromises()
+
+    expect(api.settings.getHandoverTemplate).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.showTaskDialog).toBe(true)
+    expect(wrapper.vm.currentTask.task_type).toBe('HND')
+    expect(wrapper.vm.currentTask.description).toBe('## Verify before trusting\n- checked with pytest')
+  })
+
+  it('New Agent Handover shows the No Product dialog instead of fetching when no product is open', async () => {
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+    // The shared test-setup pinia instance (tests/setup.js) outlives any single
+    // test, so a prior test's product selection can still be sitting there --
+    // force the "no product open" precondition explicitly rather than assume it.
+    useProductStore().currentProductId = null
+    useProductStore().activeProduct = null
+
+    await wrapper.find('[data-testid="new-handover-menu-item"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.vm.showNoProductDialog).toBe(true)
+    expect(wrapper.vm.showTaskDialog).toBe(false)
+    expect(api.settings.getHandoverTemplate).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a toast and does not open the dialog when the template fetch fails', async () => {
+    api.settings.getHandoverTemplate.mockRejectedValueOnce(new Error('network down'))
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+    useProductStore().currentProductId = 'product-1'
+
+    await wrapper.find('[data-testid="new-handover-menu-item"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.vm.showTaskDialog).toBe(false)
   })
 })
 
@@ -531,21 +659,6 @@ describe('TasksView - save/mutation failures become notifications (FE-9466)', ()
     await flushPromises()
 
     await wrapper.vm.updateTaskField({ id: 'task-88', title: 'x' }, 'status', 'pending')
-    await flushPromises()
-
-    const notificationStore = useNotificationStore()
-    expect(notificationStore.notifications.some((n) => n.message === serverMessage)).toBe(true)
-  })
-
-  it('updateTaskDueDate: surfaces the server reason as a persistent notification', async () => {
-    const serverMessage = 'Due date cannot be in the past.'
-    api.tasks.update.mockRejectedValueOnce(
-      structuredServerError(serverMessage, 'INVALID_DUE_DATE', 422),
-    )
-    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
-    await flushPromises()
-
-    await wrapper.vm.updateTaskDueDate({ id: 'task-99', title: 'x' }, '2020-01-01')
     await flushPromises()
 
     const notificationStore = useNotificationStore()

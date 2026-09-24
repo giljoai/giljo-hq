@@ -20,7 +20,8 @@ export function buildRoadmapPrompt(mode, product, host = '') {
       '   (e.g. "needs the auth gate from BE-6077 first"). Leave blocked false for ready items.',
       `5. Save the roadmap by calling the save_roadmap MCP tool with${scope ? ` ${scope} and` : ''}`,
       '   items: [{item_type: "project"|"task", project_id OR task_id, sort_order, risk, complexity,',
-      '   blocked, blocked_reason}] plus an optional one-line summary.',
+      '   blocked, blocked_reason}] plus an optional summary: ONE sentence explaining the ranking',
+      '   order (why this order), not a status note.',
       '',
       'Make sure you are connected to the account/product shown above before saving.',
     ].join('\n')
@@ -37,7 +38,8 @@ export function buildRoadmapPrompt(mode, product, host = '') {
     '   on a dependency or gate (often noted in its description); clear blocked once it is unblocked.',
     `5. Save by calling save_roadmap with${scope ? ` ${scope} and` : ''}`,
     '   items: [{item_type: "project"|"task", project_id OR task_id, sort_order, risk, complexity,',
-    '   blocked, blocked_reason}] plus an optional one-line summary.',
+    '   blocked, blocked_reason}] plus an optional summary: ONE sentence explaining the ranking',
+    '   order (why this order), not a status note.',
     '',
     'Make sure you are connected to the account/product shown above before saving.',
   ].join('\n')

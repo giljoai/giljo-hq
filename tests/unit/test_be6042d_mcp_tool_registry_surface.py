@@ -109,7 +109,6 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "completion_notes",
             "convert_to_project",
             "description",
-            "due_date",
             "hidden",
             "priority",
             "status",
@@ -123,7 +122,6 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "fn": "list_tasks",
         "params": [
             "cursor",
-            "due_before",
             "hidden",
             "limit",
             "memory_limit",

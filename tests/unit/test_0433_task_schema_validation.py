@@ -4,8 +4,6 @@
 # [CE] Community Edition.
 
 
-from datetime import UTC
-
 import pytest
 from pydantic import ValidationError
 
@@ -58,10 +56,6 @@ def test_task_create_minimal_valid_data():
 
 
 def test_task_create_with_all_fields():
-    from datetime import datetime
-
-    due_date = datetime.now(UTC)
-
     task = TaskCreate(
         title="Complete Task",
         description="Full task data",
@@ -71,7 +65,6 @@ def test_task_create_with_all_fields():
         product_id="product-xyz",
         project_id="project-123",
         parent_task_id="parent-456",
-        due_date=due_date,
         estimated_effort=5.5,
         actual_effort=3.2,
     )
@@ -84,7 +77,6 @@ def test_task_create_with_all_fields():
     assert task.product_id == "product-xyz"
     assert task.project_id == "project-123"
     assert task.parent_task_id == "parent-456"
-    assert task.due_date == due_date
     assert task.estimated_effort == 5.5
     assert task.actual_effort == 3.2
 

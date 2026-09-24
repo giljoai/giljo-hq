@@ -317,3 +317,29 @@ async def test_get_roadmap_no_active_product_surfaces_error(roadmap_mcp_client, 
 
     assert result.is_error is True
     assert "active product" in _error_text(result).lower()
+
+
+async def test_removing_last_item_clears_summary_through_transport(roadmap_mcp_client, db_session):
+    new_client, switch = roadmap_mcp_client
+    seed = await _seed_active_product(db_session, switch.value)
+
+    async with new_client() as session:
+        await session.call_tool(
+            "save_roadmap",
+            {
+                "items": [{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0}],
+                "summary": "Ships the foundation project first.",
+            },
+        )
+        write = await session.call_tool("get_roadmap", {})
+        assert _payload(write)["roadmap"]["summary"] == "Ships the foundation project first."
+
+        await session.call_tool(
+            "save_roadmap",
+            {"items": [], "remove": [{"item_type": "project", "project_id": seed["project_id"]}]},
+        )
+        read = await session.call_tool("get_roadmap", {})
+
+    payload = _payload(read)
+    assert payload["items"] == []
+    assert payload["roadmap"]["summary"] is None

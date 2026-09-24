@@ -154,8 +154,36 @@
 
     <component :is="DangerZoneRestore" v-if="isSaas && DangerZoneRestore" />
 
-    <div v-if="canEditPrompt" class="prompt-section" data-test="orchestrator-prompt-section">
-      <SystemPromptTab />
+    <div
+      v-if="canEditPrompt"
+      class="prompt-section danger-card danger-card--enabled smooth-border"
+      data-test="orchestrator-prompt-section"
+      :style="{ '--card-accent': 'var(--brand-yellow)' }"
+    >
+      <div
+        class="danger-card-icon"
+        :style="{ background: 'rgba(255,195,0,0.12)', color: 'var(--brand-yellow)' }"
+      >
+        <v-icon size="20">mdi-file-document-edit-outline</v-icon>
+      </div>
+      <div class="danger-card-body">
+        <div class="danger-card-title">Orchestrator prompt</div>
+        <div class="danger-card-desc">
+          The orchestrator-prompt editor moved to Tools &gt; Agents, beside the other
+          account-wide agent settings.
+        </div>
+      </div>
+      <div class="danger-card-action">
+        <v-btn
+          color="warning"
+          variant="flat"
+          data-test="orchestrator-prompt-link"
+          @click="goToOrchestratorPrompt"
+        >
+          Open in Tools &gt; Agents
+          <v-icon end>mdi-arrow-right</v-icon>
+        </v-btn>
+      </div>
     </div>
 
     <component
@@ -169,12 +197,18 @@
 
 <script setup>
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import configService from '@/services/configService'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useUserStore } from '@/stores/user'
-import SystemPromptTab from '@/components/settings/tabs/SystemPromptTab.vue'
+
+const router = useRouter()
+
+function goToOrchestratorPrompt() {
+  router.push({ path: '/tools', query: { tab: 'agents', view: 'prompt' } })
+}
 
 const showDeleteDialog = ref(false)
 const DeleteAccountDialog = shallowRef(null)

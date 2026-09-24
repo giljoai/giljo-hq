@@ -95,7 +95,6 @@ class TestSharedSeriesCounter:
         task_result = await task_service.create_task_for_mcp(
             title="T1",
             description="t1",
-            task_type="BE",
             tenant_key=test_tenant_key,
         )
 
@@ -120,7 +119,6 @@ class TestSharedSeriesCounter:
         task_result = await task_service.create_task_for_mcp(
             title="T1",
             description="t1",
-            task_type="BE",
             tenant_key=test_tenant_key,
         )
         project = await project_service.create_project(
@@ -217,7 +215,6 @@ class TestGlobalSerialCounter:
         task_result = await task_service.create_task_for_mcp(
             title="BE-T",
             description="t",
-            task_type="BE",
             tenant_key=test_tenant_key,
         )
         task = (await db_session.execute(select(Task).where(Task.id == task_result["task_id"]))).scalar_one()
@@ -291,7 +288,6 @@ class TestGlobalSerialCounter:
             await task_service.create_task_for_mcp(
                 title="Overflow task",
                 description="t",
-                task_type="BE",
                 tenant_key=test_tenant_key,
             )
 

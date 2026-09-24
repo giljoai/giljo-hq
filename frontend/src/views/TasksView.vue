@@ -2,7 +2,7 @@
   <v-container>
     <v-row class="align-center mb-4">
       <v-col>
-        <h1 class="text-headline-large">Tasks</h1>
+        <h1 class="text-headline-large">Tasks &amp; Handovers</h1>
         <p class="text-body-medium text-muted-a11y mt-1">
           Use the /giljo skill to have the AI coding agent add ideas and thoughts to the Task dashboard, or read tasks back (filter by status, task_type, or priority).
           <v-tooltip location="bottom start" max-width="600">
@@ -45,7 +45,7 @@
       />
       <v-select
         v-model="statusFilter"
-        :items="statusSelectOptions"
+        :items="statusFilterOptions"
         placeholder="Status"
         variant="solo"
         density="compact"
@@ -66,24 +66,37 @@
         class="filter-select"
       />
       <v-btn variant="text" class="filter-clear-btn" @click="clearFilters">Clear Filters</v-btn>
-      <v-btn
-        v-if="hiddenCount > 0 || showHidden"
-        :color="showHidden ? 'warning' : undefined"
-        :variant="showHidden ? 'flat' : 'outlined'"
-        :icon="showHidden ? 'mdi-archive' : 'mdi-archive-outline'"
-        :title="showHidden ? 'Hide archived tasks' : `Show archived tasks (${hiddenCount})`"
-        aria-label="Toggle archived tasks"
-        class="filter-cta-archive"
-        @click="showHidden = !showHidden"
-      />
-      <v-btn
-        color="primary"
-        variant="flat"
-        icon="mdi-plus"
-        title="New task"
-        aria-label="Create new task"
-        @click="handleNewTask"
-      />
+      <v-menu>
+        <template #activator="{ props: menuActivatorProps }">
+          <v-btn
+            v-bind="menuActivatorProps"
+            color="primary"
+            variant="flat"
+            icon="mdi-plus"
+            title="Add"
+            aria-label="Add task or agent handover"
+            data-testid="add-task-menu-btn"
+          />
+        </template>
+        <v-list density="compact">
+          <v-list-item
+            title="New task"
+            aria-label="Create new task"
+            data-testid="new-task-menu-item"
+            @click="handleNewTask"
+          >
+            <v-list-item-title>New task</v-list-item-title>
+          </v-list-item>
+          <v-list-item
+            title="New Agent Handover"
+            aria-label="Create new agent handover"
+            data-testid="new-handover-menu-item"
+            @click="handleNewHandover"
+          >
+            <v-list-item-title>New Agent Handover</v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-menu>
       <v-btn
         variant="outlined"
         icon="mdi-delete-restore"
@@ -94,8 +107,26 @@
       />
     </div>
 
+    <BulkActionBar
+      :count="bulk.count.value"
+      :page-count="pageCount"
+      :matching-total="hierarchicalTasks.length"
+      :all-matching="bulk.allMatching.value"
+      :can-archive="canArchive"
+      :can-unarchive="canUnarchive"
+      :busy="bulkBusy"
+      :noun="['task', 'tasks']"
+      delete-note="Deleted tasks can be restored from Deleted tasks."
+      @archive="archiveSelected"
+      @unarchive="unarchiveSelected"
+      @delete="deleteSelected"
+      @clear="bulk.clear"
+      @select-all-matching="selectAllMatching"
+    />
+
     <TasksTable
       :tasks="hierarchicalTasks"
+      :selected-ids="bulk.selectedIds.value"
       :loading="loading"
       :status-select-options="statusSelectOptions"
       :priority-options="priorityOptions"
@@ -106,7 +137,8 @@
       @toggle-hidden="toggleHidden"
       @delete-task="deleteTask"
       @update-field="updateTaskField"
-      @update-due-date="updateTaskDueDate"
+      @update:selected-ids="onSelectedIds"
+      @page-count="onPageCount"
     />
 
     <TaskEditDialog
@@ -114,6 +146,7 @@
       :editing-task="editingTask"
       :current-task="currentTask"
       :saving="saving"
+      :save-error="saveError"
       :status-select-options="statusSelectOptions"
       @cancel="cancelTask"
       @save="saveTask"
@@ -213,6 +246,8 @@ import { notifyFailure } from '@/utils/notifyFailure'
 import TasksTable from './tasks/TasksTable.vue'
 import TaskEditDialog from './tasks/TaskEditDialog.vue'
 import TaskDeletedDialog from '@/components/tasks/TaskDeletedDialog.vue'
+import BulkActionBar from '@/components/common/BulkActionBar.vue'
+import { useTaskBulkActions } from '@/composables/useTaskBulkActions'
 
 const taskStore = useTaskStore()
 const productStore = useProductStore()
@@ -263,9 +298,8 @@ const {
   search,
   statusFilter,
   priorityFilter,
-  showHidden,
-  hiddenCount,
   statusSelectOptions,
+  statusFilterOptions,
   filteredTasks,
   clearFilters,
 } = useTaskFilters(userFilteredTasks)
@@ -273,18 +307,39 @@ const {
 const hierarchicalTasks = computed(() => filteredTasks.value)
 
 const {
+  bulk,
+  busy: bulkBusy,
+  pageCount,
+  canArchive,
+  canUnarchive,
+  onSelectedIds,
+  selectAllMatching,
+  archiveSelected,
+  unarchiveSelected,
+  deleteSelected,
+} = useTaskBulkActions({
+  visibleTasks: hierarchicalTasks,
+  filterKeys: computed(() => [search.value, statusFilter.value, priorityFilter.value]),
+})
+
+function onPageCount(n) {
+  pageCount.value = n
+}
+
+const {
   showTaskDialog,
   showCreateDialog,
   editingTask,
   saving,
   currentTask,
+  saveError,
   editTask,
   cancelTask,
   saveTask: _saveTask,
   handleNewTask: _handleNewTask,
+  openHandoverDialog,
   completeTask: _completeTask,
   updateTaskField: _updateTaskField,
-  updateTaskDueDate: _updateTaskDueDate,
 } = useTaskCrud()
 
 async function completeTask(task) {
@@ -310,6 +365,20 @@ function handleNewTask() {
   }
 }
 
+async function handleNewHandover() {
+  if (!productStore.effectiveProductId) {
+    showNoProductDialog.value = true
+    return
+  }
+  try {
+    const response = await api.settings.getHandoverTemplate()
+    openHandoverDialog(response?.data?.handover_template || '')
+  } catch (error) {
+    console.error('[TASKS] Failed to load the handover template:', error)
+    showToast({ message: 'Failed to load the handover template. Please try again.', type: 'error' })
+  }
+}
+
 async function updateTaskField(task, field, value) {
   try {
     await _updateTaskField(task, field, value)
@@ -322,22 +391,6 @@ async function updateTaskField(task, field, value) {
       error,
       fallbackMessage: errorMessage.value,
       title: 'Task not updated',
-    })
-  }
-}
-
-async function updateTaskDueDate(task, newDate) {
-  try {
-    await _updateTaskDueDate(task, newDate)
-  } catch (error) {
-    errorMessage.value = 'Failed to update due date. Please try again.'
-    showErrorDialog.value = true
-    notifyFailure(notificationStore, {
-      operation: 'task.updateDueDate',
-      entityId: task.id,
-      error,
-      fallbackMessage: errorMessage.value,
-      title: 'Due date not updated',
     })
   }
 }

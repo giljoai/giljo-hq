@@ -15,6 +15,10 @@ export const RESERVED_TASK_TYPE_ABBR = 'TSK'
 
 export const TSK_TYPE_COLOR = '#8b5cf6'
 
+export const RESERVED_HANDOVER_TYPE_ABBR = 'HND'
+
+export const HND_TYPE_COLOR = '#e6ecf7'
+
 export const PROJECT_TYPE_COLOR_SWATCHES = [
   '#4CAF50', '#2196F3', '#FF9800', '#9C27B0',
   '#00BCD4', '#795548', '#607D8B', '#F44336',

@@ -6,16 +6,22 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.exceptions import BaseGiljoError
 from giljo_mcp.models import User
-from giljo_mcp.services.template_service import TemplateService
+from giljo_mcp.services.template_service import TemplateService, factory_default_for
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .dependencies import get_template_service
-from .models import TemplateHistoryResponse, TemplateResponse
+from .models import (
+    TemplateHistoryResponse,
+    TemplateResetAllResponse,
+    TemplateResetFailure,
+    TemplateResponse,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -137,6 +143,62 @@ async def reset_template(
     from .crud import _convert_to_response
 
     return _convert_to_response(template)
+
+
+@router.post("/reset-all", response_model=TemplateResetAllResponse)
+async def reset_all_templates(
+    product_id: str = Query(..., description="Product whose agents are being reset"),
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    template_service: TemplateService = Depends(get_template_service),
+) -> TemplateResetAllResponse:
+    """Reset every factory-born agent of one product back to its shipped default.
+
+    Scoped to the product named here, never the whole account: the roster is one
+    tab per product and a bulk action has to mean what the screen it was pressed
+    on shows.
+
+    Agents the user made are left alone -- they have no factory default to return
+    to -- as are the system-managed roles, whose identity is server-injected rather
+    than stored on the row.
+
+    Each agent is archived and then reset through the SAME single writer the
+    per-agent reset uses, one agent at a time, so a failure part-way through leaves
+    the agents already done correctly reset instead of rolling the batch back. The
+    response names what happened to each one rather than collapsing a partial run
+    into one word.
+    """
+    logger.info("User %s resetting all agents of product %s", sanitize(current_user.username), sanitize(product_id))
+
+    templates = await template_service.list_templates_with_filters(
+        session, current_user.tenant_key, product_id=product_id
+    )
+
+    reset: list[str] = []
+    skipped: list[str] = []
+    failed: list[TemplateResetFailure] = []
+
+    for template in templates:
+        if template_service._is_system_managed_role(template.role) or factory_default_for(template) is None:
+            skipped.append(template.name)
+            continue
+        try:
+            await template_service.create_template_archive(
+                session,
+                template,
+                archive_reason="Reset all agents",
+                archive_type="auto",
+                archived_by=current_user.username,
+            )
+            await template_service.reset_template_to_defaults(session, template)
+            await template_service.commit_and_refresh_template(session, template)
+        except BaseGiljoError as exc:
+            await session.rollback()
+            failed.append(TemplateResetFailure(name=template.name, error=exc.message))
+        else:
+            reset.append(template.name)
+
+    return TemplateResetAllResponse(reset=reset, skipped=skipped, failed=failed)
 
 
 @router.post("/{template_id}/reset-system", response_model=TemplateResponse)

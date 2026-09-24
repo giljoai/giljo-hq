@@ -203,7 +203,6 @@ class TestCLIModeRules:
             "agent_name_usage",
             "task_tool_mapping",
             "validation",
-            "template_locations",
         ]
 
         for field in required_fields:
@@ -211,8 +210,7 @@ class TestCLIModeRules:
 
         assert cli_rules["validation"] == "soft", "validation should be 'soft'"
 
-        assert isinstance(cli_rules["template_locations"], list), "template_locations should be a list"
-        assert len(cli_rules["template_locations"]) >= 2, "template_locations should have at least 2 entries"
+        assert "template_locations" not in cli_rules, "retired template_locations is back in cli_mode_rules"
 
     async def test_cli_mode_response_includes_spawning_examples(
         self,

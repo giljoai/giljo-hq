@@ -8,6 +8,10 @@
       class="elevation-0 scrollable-table"
       data-table
       item-value="id"
+      show-select
+      :model-value="selectedIds"
+      @update:model-value="$emit('update:selected-ids', $event)"
+      @update:current-items="$emit('page-count', $event.length)"
     >
         <template #loading>
           <div class="text-center pa-4">
@@ -125,46 +129,10 @@
           </div>
         </template>
 
-        <template #item.due_date="{ item }">
-          <v-menu
-            :close-on-content-click="false"
-            transition="scale-transition"
-            :offset="[0, 50]"
-            location="bottom"
-          >
-            <template #activator="{ props }">
-              <div v-bind="props" class="date-text-clickable cursor-pointer">
-                <v-icon
-                  v-if="item.due_date && isOverdue(item.due_date)"
-                  color="error"
-                  size="x-small"
-                  class="mr-1"
-                >
-                  mdi-alert
-                </v-icon>
-                <span v-if="item.due_date">{{ formatDate(item.due_date) }}</span>
-                <span v-else class="text-muted-a11y">Set date</span>
-              </div>
-            </template>
-            <v-card class="compact-date-picker">
-              <v-card-title class="py-2 px-3 bg-primary">
-                <span class="text-title-small">Select Date</span>
-              </v-card-title>
-              <v-date-picker
-                :model-value="item.due_date ? new Date(item.due_date) : null"
-                color="primary"
-                hide-header
-                width="280"
-                @update:model-value="(newDate) => $emit('update-due-date', item, newDate)"
-              />
-            </v-card>
-          </v-menu>
-        </template>
-
         <template #item.convert="{ item }">
           <div class="d-flex justify-center">
             <button
-              v-if="item.status !== 'completed' && !item.converted_project_id"
+              v-if="item.status !== 'completed' && !item.converted_project_id && !isHandoverRow(item)"
               class="row-action icon-interactive convert-action"
               aria-label="Convert to project"
               @click.stop="$emit('convert-task', item)"
@@ -189,7 +157,10 @@
                 <v-list-item-title>Edit</v-list-item-title>
               </v-list-item>
 
-              <v-list-item v-if="item.status !== 'completed'" @click="$emit('convert-task', item)">
+              <v-list-item
+                v-if="item.status !== 'completed' && !isHandoverRow(item)"
+                @click="$emit('convert-task', item)"
+              >
                 <template #prepend>
                   <v-icon>mdi-folder-arrow-up</v-icon>
                 </template>
@@ -203,11 +174,18 @@
                 <v-list-item-title>Mark Complete</v-list-item-title>
               </v-list-item>
 
-              <v-list-item data-test="task-hide-action" @click="$emit('toggle-hidden', item)">
+              <v-list-item
+                data-test="task-hide-action"
+                :disabled="isPendingHandover(item)"
+                @click="$emit('toggle-hidden', item)"
+              >
                 <template #prepend>
                   <v-icon>{{ item.hidden ? 'mdi-archive-arrow-up' : 'mdi-archive' }}</v-icon>
                 </template>
                 <v-list-item-title>{{ item.hidden ? 'Unarchive' : 'Archive' }}</v-list-item-title>
+                <v-tooltip v-if="isPendingHandover(item)" activator="parent" location="start">
+                  Nobody has read this handover yet. Mark it in progress or completed first.
+                </v-tooltip>
               </v-list-item>
 
               <v-divider />
@@ -239,8 +217,7 @@
 import { useFormatDate } from '@/composables/useFormatDate'
 import { getAgentColor } from '@/config/agentColors'
 import { TEXT_MUTED } from '@/config/colorTokens'
-import { taxonomyBadgeStyle, resolveTaxonomyColor } from '@/utils/taxonomyBadge'
-import { format, isAfter } from 'date-fns'
+import { taxonomyBadgeStyle, resolveTaxonomyColor, isHandoverRow } from '@/utils/taxonomyBadge'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
@@ -265,9 +242,26 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selectedIds: {
+    type: Array,
+    default: () => [],
+  },
 })
 
-defineEmits(['edit-task', 'convert-task', 'complete-task', 'toggle-hidden', 'delete-task', 'update-field', 'update-due-date'])
+defineEmits([
+  'edit-task',
+  'convert-task',
+  'complete-task',
+  'toggle-hidden',
+  'delete-task',
+  'update-field',
+  'update:selected-ids',
+  'page-count',
+])
+
+function isPendingHandover(item) {
+  return isHandoverRow(item) && item?.status === 'pending'
+}
 
 const { formatDateWithTime } = useFormatDate()
 
@@ -301,16 +295,6 @@ function getStatusIcon(status) {
     cancelled: 'mdi-cancel',
   }
   return icons[status] || 'mdi-help'
-}
-
-function formatDate(date) {
-  if (!date) return ''
-  return format(new Date(date), 'MMM dd, yyyy')
-}
-
-function isOverdue(date) {
-  if (!date) return false
-  return isAfter(new Date(), new Date(date))
 }
 </script>
 
@@ -441,37 +425,38 @@ function isOverdue(date) {
   white-space: nowrap !important;
 }
 
-/* Centered columns: everything except Task (4). */
-:deep(.v-data-table__thead th:not(:nth-child(4))),
-:deep(.v-data-table__tr td:not(:nth-child(4))) {
+/* Column positions count the FE-9641 select column: 1 select, 2 Status,
+   3 Priority, 4 Serial, 5 Task. Centered: everything except Task (5). */
+:deep(.v-data-table__thead th:not(:nth-child(5))),
+:deep(.v-data-table__tr td:not(:nth-child(5))) {
   text-align: center !important;
 }
 
 /* Center the title+sort-icon group inside the header cell */
-:deep(.v-data-table__thead th:not(:nth-child(4)) .v-data-table-header__content) {
+:deep(.v-data-table__thead th:not(:nth-child(5)) .v-data-table-header__content) {
   justify-content: center !important;
   position: relative;
 }
 
 /* Float the sort arrow out of the flex flow */
-:deep(.v-data-table__thead th:not(:nth-child(4)) .v-data-table-header__content > i) {
+:deep(.v-data-table__thead th:not(:nth-child(5)) .v-data-table-header__content > i) {
   position: absolute !important;
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
 }
 
-/* Left-aligned: Task (4). */
-:deep(.v-data-table__thead th:nth-child(4)),
-:deep(.v-data-table__tr td:nth-child(4)) {
+/* Left-aligned: Task (5). */
+:deep(.v-data-table__thead th:nth-child(5)),
+:deep(.v-data-table__tr td:nth-child(5)) {
   text-align: left !important;
 }
 
 /* Tighten cell padding on the badge columns (Priority, Serial). */
-:deep(.v-data-table__thead th:nth-child(2)),
 :deep(.v-data-table__thead th:nth-child(3)),
-:deep(.v-data-table__tr td:nth-child(2)),
-:deep(.v-data-table__tr td:nth-child(3)) {
+:deep(.v-data-table__thead th:nth-child(4)),
+:deep(.v-data-table__tr td:nth-child(3)),
+:deep(.v-data-table__tr td:nth-child(4)) {
   padding-left: 4px !important;
   padding-right: 4px !important;
 }
@@ -541,36 +526,9 @@ function isOverdue(date) {
   overflow: visible;
 }
 
-/* Compact date picker styling */
-.compact-date-picker {
-  max-width: 280px;
-}
-
-.compact-date-picker :deep(.v-date-picker-month) {
-  padding: 8px;
-}
-
-.compact-date-picker :deep(.v-date-picker-header) {
-  padding: 4px 8px;
-}
-
 /* Hide arrow indicator for category column */
 .inline-select-no-arrow :deep(.v-field__append-inner) {
   display: none;
-}
-
-/* Date text clickable styling */
-.date-text-clickable {
-  padding: 4px 8px;
-  border-radius: $border-radius-sharp;
-  display: inline-block;
-  transition: background-color $transition-normal ease;
-  font-size: 0.72rem;
-  color: $color-text-secondary;
-}
-
-.date-text-clickable:hover {
-  background-color: rgba(255, 255, 255, 0.04);
 }
 
 .task-row-content {

@@ -11,6 +11,7 @@ from pydantic import Field
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
+    CONSTRAINT_INVALID_CHOICE,
     CURSOR_DESC,
     MCP_DESCRIPTION_MAX,
     MCP_ID_MAX,
@@ -20,13 +21,54 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     blank_text_rejection,
     mcp,
+    validation_rejection,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.handover_validation import (
+    HANDOVER_CONTENT_CONSTRAINT,
+    HANDOVER_SHAPE_CONSTRAINT,
+    HANDOVER_TYPE_ABBR,
+    handover_shape_error,
+)
 from giljo_mcp.services.task_service._mcp_read_layer import (
     LIST_TASKS_LIMIT_DEFAULT,
     LIST_TASKS_LIMIT_MAX,
 )
+from giljo_mcp.services.task_type_immutability import TaskTypeImmutableError
+from giljo_mcp.services.taxonomy_ops import resolve_task_type_abbr
+
+
+def _task_type_rejection(task_type: str) -> dict[str, Any] | None:
+    try:
+        resolve_task_type_abbr(task_type, operation="create_task")
+    except ValidationError as exc:
+        return validation_rejection(field="task_type", constraint=CONSTRAINT_INVALID_CHOICE, message=str(exc))
+    return None
+
+
+_HANDOVER_SHAPE_CONSTRAINTS = frozenset({HANDOVER_SHAPE_CONSTRAINT, HANDOVER_CONTENT_CONSTRAINT})
+
+
+def _handover_shape_rejection(description: str) -> dict[str, Any] | None:
+    error = handover_shape_error(description, operation="create_task")
+    if error is None:
+        return None
+    return validation_rejection(
+        field=error.context["field"],
+        constraint=error.context["constraint"],
+        message=error.message,
+    )
+
+
+def _handover_shape_rejection_from(exc: ValidationError) -> dict[str, Any] | None:
+    if exc.context.get("constraint") not in _HANDOVER_SHAPE_CONSTRAINTS:
+        return None
+    return validation_rejection(
+        field=exc.context["field"],
+        constraint=exc.context["constraint"],
+        message=exc.message,
+    )
 
 
 @mcp.tool(
@@ -37,8 +79,9 @@ from giljo_mcp.services.task_service._mcp_read_layer import (
         "unknown one. Omitting it falls back to the default product only for a single-product "
         "tenant; a tenant that owns more than one product gets a structured PRODUCT_AMBIGUOUS "
         "rejection instead (the product list is in the error) -- nothing is created on a bare "
-        "guess. Every task is auto-tagged 'TSK' (task_type is accepted-but-ignored); the serial "
-        "auto-assigns in the TSK-nnnn form. The response names the product the task landed on. "
+        "guess. task_type is 'TSK' (default) or 'HND' (a session handover -- see that "
+        "parameter); the serial auto-assigns from one shared counter. The response names the "
+        "product the task landed on. "
         "Use create_project instead for actionable multi-step work. See get_giljo_guide for the "
         "full task-vs-project routing recipe."
     ),
@@ -60,8 +103,9 @@ async def create_task(
         Field(
             max_length=MCP_NAME_MAX,
             description=(
-                "Ignored. Tasks are always tagged 'TSK' (auto-assigned). Kept for backward "
-                "compatibility; any value passed has no effect."
+                "'TSK' (default) or 'HND' (session handover); any other value is refused. "
+                "An HND description must carry the headings '## Verify before trusting', "
+                "'## Waiting on the operator' and '## Cannot testify', or it is refused."
             ),
         ),
     ] = "",
@@ -86,6 +130,10 @@ async def create_task(
 ) -> dict[str, Any]:
     if not title.strip():
         return blank_text_rejection("title", entity="Task")
+    if (rejection := _task_type_rejection(task_type)) is not None:
+        return rejection
+    if task_type.strip() == HANDOVER_TYPE_ABBR and ((rejection := _handover_shape_rejection(description)) is not None):
+        return rejection
     kwargs: dict[str, Any] = {"title": title, "description": description, "priority": priority}
     if task_type:
         kwargs["task_type"] = task_type
@@ -99,8 +147,9 @@ async def create_task(
 @mcp.tool(
     title="Update Task",
     description=(
-        "Update task metadata (title, description, status, priority, due_date). Only provided "
-        "fields are written. task_type is immutable ('TSK'). Pass status='completed' to complete "
+        "Update task metadata (title, description, status, priority). Only provided "
+        "fields are written. task_type is fixed at creation: a different one is refused and "
+        "nothing is written. Pass status='completed' to complete "
         "it (stamps completed_at); pass completion_notes to append an audit note as it completes. "
         "Pass convert_to_project=true to PROMOTE the task to a project instead of editing it -- "
         "same conversion the dashboard wizard runs, and it DELETES the task row. Tenant-scoped."
@@ -125,11 +174,11 @@ async def update_task(
         str,
         Field(
             max_length=MCP_NAME_MAX,
-            description="Ignored -- the task type is immutable ('TSK'). Any value passed is not written.",
+            description=(
+                "Fixed at creation. Passing the task's own current type is a no-op; a different "
+                "type is refused and the whole call writes nothing -- create a new task instead."
+            ),
         ),
-    ] = "",
-    due_date: Annotated[
-        str, Field(max_length=MCP_ID_MAX, description="ISO 8601 due date; empty string keeps current.")
     ] = "",
     hidden: Annotated[
         str, Field(max_length=8, description="Per-row UI declutter flag: 'true'/'false'/'' (empty keeps current).")
@@ -178,8 +227,6 @@ async def update_task(
         params["priority"] = priority
     if task_type:
         params["task_type"] = task_type
-    if due_date:
-        params["due_date"] = due_date
     if hidden != "":
         h = str(hidden).lower()
         if h in ("true", "1", "yes"):
@@ -191,7 +238,14 @@ async def update_task(
     if convert_to_project:
         params["convert_to_project"] = True
         params["user_id"] = _base._resolve_user_id(ctx)
-    return await _call_tool(ctx, "update_task", params)
+    try:
+        return await _call_tool(ctx, "update_task", params)
+    except ValidationError as exc:
+        if (rejection := _handover_shape_rejection_from(exc)) is not None:
+            return rejection
+        raise
+    except TaskTypeImmutableError as exc:
+        return validation_rejection(field=exc.field, constraint=exc.constraint, message=str(exc))
 
 
 @mcp.tool(
@@ -209,9 +263,9 @@ async def update_task(
         "constant across a walk -- ignores `cursor`), `remaining` (rows still ahead of `cursor` "
         "that match, only when walking; equals `matched` on the first page) and `returned` (rows "
         "here) -- so you can size a request before making it. Use `query` to "
-        "find a task by a word in its title, description or TSK-nnnn alias. Every task is tagged "
-        "'TSK' -- task_type accepts only 'TSK' (a harmless no-op filter) and refuses any other "
-        "value rather than silently matching nothing; normally omit it. hidden is UI declutter "
+        "find a task by a word in its title, description or TSK-nnnn alias. task_type filters by "
+        "tag: 'TSK' (ordinary) or 'HND' (session handovers); any other value is refused. "
+        "hidden is UI declutter "
         "only (does not affect default visibility). Defaults to your default product; pass "
         "product_id to list a specific product's tasks instead. See "
         "get_giljo_guide for read-vs-write routing."
@@ -238,13 +292,11 @@ async def list_tasks(
         str,
         Field(
             description=(
-                "Filter by taxonomy abbreviation. Only 'TSK' matches -- every task is tagged "
-                "'TSK' and no other type is ever assigned to one, so 'TSK' is a harmless no-op "
-                "filter and any other value is refused rather than silently matching nothing."
+                "Filter by task tag: 'TSK' (ordinary) or 'HND' (session handovers -- how you "
+                "find the handover left for you). Any other value is refused."
             )
         ),
     ] = "",
-    due_before: Annotated[str, Field(description="ISO date; tasks with due_date < value.")] = "",
     hidden: Annotated[str, Field(description="'true'/'false'/'' (empty = no filter, default).")] = "",
     summary_only: Annotated[
         bool, Field(description="Alias for mode='summary'. Ignored when mode is also passed explicitly.")
@@ -295,8 +347,6 @@ async def list_tasks(
         kwargs["priority"] = priority
     if task_type:
         kwargs["task_type"] = task_type
-    if due_before:
-        kwargs["due_before"] = due_before
     if hidden != "":
         h = str(hidden).lower()
         if h in ("true", "1", "yes"):
