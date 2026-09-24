@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+from datetime import date
 from typing import Any
 
 
@@ -40,6 +41,7 @@ class APIState:
         self.silence_detector: Any = None
         self.api_call_count: dict[str, int] = {}
         self.mcp_call_count: dict[str, int] = {}
+        self.mcp_tool_call_count: dict[tuple[str, str, date], int] = {}
         self.system_prompt_service: Any = None
         self.startup_complete: bool = False
         self.degraded_services: list[str] = []

@@ -81,8 +81,6 @@ _DATE_PARAMS: frozenset[str] = frozenset(
         "created_before",
         "completed_after",
         "completed_before",
-        "due_before",
-        "due_date",
     }
 )
 

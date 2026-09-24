@@ -22,6 +22,7 @@ from mcp.server.request_state import RequestStateSecurity
 from pydantic import BaseModel
 from starlette.requests import Request as StarletteRequest
 
+from api.endpoints.mcp_tools._call_metrics import record_tool_call
 from api.endpoints.mcp_tools._harness import (  # noqa: F401
     _HARNESS_PARAM_DESCRIPTION,
     _detected_harness,
@@ -34,6 +35,7 @@ from api.endpoints.mcp_tools._silence_scope import NON_SILENCE_CLEARING_TOOLS, S
 from giljo_mcp import __version__ as _giljo_version
 from giljo_mcp import branding
 from giljo_mcp.exceptions import BaseGiljoError, ValidationError
+from giljo_mcp.schemas.jsonb_validators import GitCommitShaRequiredError
 from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS as _INTENTIONAL_LONGPOLL_MAX_SECONDS
 from giljo_mcp.services._mcp_wire_bounds import CursorRejectedError
 from giljo_mcp.services.debounce import should_run
@@ -261,6 +263,7 @@ def _resolve_tool_func(accessor: Any, method_name: str) -> Callable[..., Awaitab
 
 VALIDATION_ERROR = "VALIDATION_ERROR"
 CONSTRAINT_NON_EMPTY = "non_empty"
+CONSTRAINT_INVALID_CHOICE = "invalid_choice"
 
 
 def validation_rejection(*, field: str, constraint: str, message: str) -> dict[str, Any]:
@@ -310,13 +313,19 @@ def _held_tool_ceiling_response(method_name: str) -> dict[str, Any]:
     }
 
 
+
+
+
+def _missing_commit_identifier_response(exc: GitCommitShaRequiredError, method_name: str) -> dict[str, Any]:
+    logger.info("MCP tool '%s' refused a commit with no identifier", method_name)
+    return validation_rejection(field=exc.field, constraint=exc.constraint, message=str(exc))
+
+
 async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> Any:
     tenant_key = _resolve_tenant(ctx)
     _set_tenant_context(tenant_key)
 
-    from api.app_state import state as app_state
-
-    app_state.mcp_call_count[tenant_key] = app_state.mcp_call_count.get(tenant_key, 0) + 1
+    record_tool_call(tenant_key, method_name)
 
     accessor = _get_tool_accessor()
     tool_func = _resolve_tool_func(accessor, method_name)
@@ -334,6 +343,8 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     except CursorRejectedError as exc:
         logger.info("MCP tool '%s' refused a continuation cursor: %s", method_name, exc.code)
         return {"success": False, "error": exc.code, "message": str(exc)}
+    except GitCommitShaRequiredError as exc:
+        return _missing_commit_identifier_response(exc, method_name)
     except ProductAmbiguousError as exc:
         logger.info("MCP tool '%s' refused an ambiguous create: %s", method_name, exc.code)
         return {"success": False, "error": exc.code, "message": exc.message, "products": exc.products}
@@ -359,7 +370,6 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     except Exception as exc:
         logger.exception("MCP tool dispatch '%s' raised an unexpected error", method_name)
         raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
-
 
     job_id = kwargs.get("job_id")
     if job_id and should_run("mcp_posthooks", job_id, _POSTHOOK_DEBOUNCE_SECONDS):

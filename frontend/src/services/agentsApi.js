@@ -15,6 +15,8 @@ export const templatesApi = {
   },
   preview: (id, data = {}) => apiClient.post(`/api/v1/templates/${id}/preview/`, data),
   reset: (id) => apiClient.post(`/api/v1/templates/${id}/reset/`),
+  resetAll: (productId) =>
+    apiClient.post('/api/v1/templates/reset-all', null, { params: { product_id: productId } }),
   activeCount: (productId) =>
     apiClient.get('/api/v1/templates/stats/active-count', { params: { product_id: productId } }),
   profileDownloadUrl: (id) => `/api/v1/templates/${id}/profile.md`,

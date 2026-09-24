@@ -83,7 +83,7 @@ async def broadcast_agent_auto_failed(
 
     await websocket_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
-    _module_logger.error(
+    _module_logger.warning(
         "broadcast_auto_failed job_id=%s reason=%s",
         job_id,
         reason,

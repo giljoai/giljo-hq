@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
@@ -24,7 +25,30 @@ RESERVED_TASK_TYPE_ABBR = "TSK"
 
 RESERVED_CHAT_THREAD_TYPE_ABBR = "CHT"
 
-RESERVED_TYPE_ABBRS = frozenset({RESERVED_TASK_TYPE_ABBR, RESERVED_CHAT_THREAD_TYPE_ABBR})
+RESERVED_HANDOVER_TYPE_ABBR = "HND"
+
+RESERVED_TYPE_ABBRS = frozenset({RESERVED_TASK_TYPE_ABBR, RESERVED_CHAT_THREAD_TYPE_ABBR, RESERVED_HANDOVER_TYPE_ABBR})
+
+VALID_TASK_TYPE_ABBRS: tuple[str, ...] = (RESERVED_TASK_TYPE_ABBR, RESERVED_HANDOVER_TYPE_ABBR)
+
+
+def resolve_task_type_abbr(task_type: str | None, *, operation: str) -> str:
+    normalized = (task_type or "").strip()
+    if not normalized:
+        return RESERVED_TASK_TYPE_ABBR
+    if normalized not in VALID_TASK_TYPE_ABBRS:
+        raise ValidationError(
+            message=(
+                f"Invalid task_type '{task_type}'. Valid types: "
+                f"{', '.join(VALID_TASK_TYPE_ABBRS)} -- "
+                f"'{RESERVED_TASK_TYPE_ABBR}' for an ordinary task (the default) and "
+                f"'{RESERVED_HANDOVER_TYPE_ABBR}' for a session handover. Project taxonomy "
+                "abbreviations are not task types."
+            ),
+            context={"operation": operation, "field": "task_type", "task_type": task_type},
+        )
+    return normalized
+
 
 DEFAULT_TAXONOMY_TYPES: list[dict[str, Any]] = [
     {"abbr": "BE", "label": "Backend", "color": "#4CAF50"},
@@ -38,6 +62,7 @@ DEFAULT_TAXONOMY_TYPES: list[dict[str, Any]] = [
     {"abbr": "CTX", "label": "Context Update", "color": "#9E9E9E"},
     {"abbr": RESERVED_TASK_TYPE_ABBR, "label": "Task", "color": "#8b5cf6"},
     {"abbr": RESERVED_CHAT_THREAD_TYPE_ABBR, "label": "Chat Thread", "color": "#1565C0"},
+    {"abbr": RESERVED_HANDOVER_TYPE_ABBR, "label": "Handover", "color": "#e6ecf7"},
 ]
 
 
@@ -61,26 +86,30 @@ async def ensure_default_types_seeded(session: AsyncSession, tenant_key: str) ->
     await _repo.flush(session)
 
 
-async def ensure_reserved_task_type(session: AsyncSession, tenant_key: str) -> TaxonomyType:
-    spec = next(t for t in DEFAULT_TAXONOMY_TYPES if t["abbr"] == RESERVED_TASK_TYPE_ABBR)
+async def ensure_reserved_type(session: AsyncSession, tenant_key: str, abbreviation: str) -> TaxonomyType:
+    spec = next(t for t in DEFAULT_TAXONOMY_TYPES if t["abbr"] == abbreviation)
     stmt = (
         pg_insert(TaxonomyType.__table__)
         .values(
             id=generate_uuid(),
             tenant_key=tenant_key,
-            abbreviation=RESERVED_TASK_TYPE_ABBR,
+            abbreviation=abbreviation,
             label=spec["label"],
             color=spec["color"],
-            sort_order=len(DEFAULT_TAXONOMY_TYPES),
+            sort_order=len(DEFAULT_TAXONOMY_TYPES) + DEFAULT_TAXONOMY_TYPES.index(spec),
         )
         .on_conflict_do_nothing(constraint="uq_taxonomy_type_abbr")
     )
     await session.execute(stmt)
 
-    row = await _repo.get_by_abbreviation(session, tenant_key, RESERVED_TASK_TYPE_ABBR)
+    row = await _repo.get_by_abbreviation(session, tenant_key, abbreviation)
     if row is None:  # pragma: no cover - insert+select within one tx always resolves
-        raise RuntimeError(f"Failed to ensure reserved task type for tenant {sanitize(tenant_key)}")
+        raise RuntimeError(f"Failed to ensure reserved type {abbreviation} for tenant {sanitize(tenant_key)}")
     return row
+
+
+async def ensure_reserved_task_type(session: AsyncSession, tenant_key: str) -> TaxonomyType:
+    return await ensure_reserved_type(session, tenant_key, RESERVED_TASK_TYPE_ABBR)
 
 
 async def list_taxonomy_types(session: AsyncSession, tenant_key: str) -> list[Any]:

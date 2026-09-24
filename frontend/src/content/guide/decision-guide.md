@@ -6,7 +6,7 @@ Giljo HQ gives you a few choices when you start work. This chapter helps you pic
 
 A **task** and a **project** are different kinds of work item.
 
-- A **task** is a note: work you have identified but not yet scheduled. Tasks live on the Task Board, cost nothing to create, and are ideal for capturing ideas, technical debt, and follow-ups mid-session. A task does not run agents on its own.
+- A **task** is a note: work you have identified but not yet scheduled. Tasks live on the Tasks & Handovers board, cost nothing to create, and are ideal for capturing ideas, technical debt, and follow-ups mid-session. A task does not run agents on its own.
 - A **project** is work you actually run. It has a description, an agent team, a mission, and a closeout that writes a 360 Memory entry. Create a project when you are ready to build something.
 
 | Use a task when… | Use a project when… |
@@ -17,6 +17,27 @@ A **task** and a **project** are different kinds of work item.
 | You do not need a plan or agents yet | You want a 360 Memory entry at the end |
 
 Start with a task when in doubt — it is the cheaper choice. When a task is ready to become real work, open it and choose **Convert to Project**. That creates a new inactive project from the task without disturbing whatever project is currently active; you activate the new one yourself when you are ready.
+
+### Handovers
+
+A **handover** is the third kind of item on that board, and it answers a different
+question: not "what should we do" but "where did we stop, and what of this can you
+trust". Write one when a session ends with work still in flight.
+
+Because the person reading it cannot ask you anything, a handover has to carry three
+sections, and the board will not accept one that does not:
+
+- **Verify before trusting** — every claim next to the command that checks it. Not
+  "the tests pass", but the command to run and what a passing run prints.
+- **Waiting on the operator** — anything that needs you before it can move.
+- **Cannot testify** — what the author did not verify. This is the section that makes
+  the other two believable.
+
+Its status means something slightly different from a task's: **Pending** is written
+but unread, **In Progress** means someone is checking it, **Completed** means verified
+rather than merely read, and **Blocked** means a claim turned out to be false and needs
+you. A handover is a record, so it is never converted into a project, and one nobody
+has read yet cannot be archived out of the list.
 
 You can create either from your AI coding tool with `/giljo` — for example, `/giljo add a task for the three things we just discussed` or `/giljo add a project for the authentication gaps`.
 

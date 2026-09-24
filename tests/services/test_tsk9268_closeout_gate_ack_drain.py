@@ -275,7 +275,7 @@ async def test_three_readers_agree_on_unread_count(db_manager, db_session: Async
         summary="Handover while a directed action-required DM is still undrained.",
         key_outcomes=["state recorded"],
         decisions_made=["none"],
-        entry_type="session_handover",
+        entry_type="decision",
         author_job_id=orch_job.job_id,
         db_manager=db_manager,
         session=db_session,

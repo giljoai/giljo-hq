@@ -31,6 +31,26 @@ from giljo_mcp.tenant import TenantManager
 
 logger = logging.getLogger(__name__)
 
+
+FACTORY_ORIGIN_TAG = "default"
+
+
+def factory_default_for(template: AgentTemplate) -> dict | None:
+    from giljo_mcp.template_seeder import _get_default_templates_v103
+
+    defaults = _get_default_templates_v103()
+    by_name = {t["name"]: t for t in defaults}
+    if template.name in by_name:
+        return by_name[template.name]
+
+    by_role = {t["role"]: t for t in defaults}
+    if FACTORY_ORIGIN_TAG in (template.tags or []):
+        return by_role.get(template.role)
+    if not (template.user_instructions or "").strip():
+        return by_role.get(template.role)
+    return None
+
+
 USER_MANAGED_AGENT_LIMIT = 15
 
 _ALLOWED_TEMPLATE_UPDATE_FIELDS: frozenset[str] = frozenset(
@@ -302,13 +322,15 @@ class TemplateService:
         session: AsyncSession,
         template: AgentTemplate,
     ) -> None:
-        from giljo_mcp.template_seeder import _get_default_templates_v103
-
-        default_def = {t["name"]: t for t in _get_default_templates_v103()}.get(template.name)
+        default_def = factory_default_for(template)
         template.user_instructions = default_def["user_instructions"] if default_def else None
         template.tags = ["default", "tenant"] if default_def else []
-        template.behavioral_rules = validate_behavioral_rules([])
-        template.success_criteria = validate_success_criteria([])
+        template.behavioral_rules = validate_behavioral_rules(
+            default_def.get("behavioral_rules", []) if default_def else []
+        )
+        template.success_criteria = validate_success_criteria(
+            default_def.get("success_criteria", []) if default_def else []
+        )
 
     async def reset_system_instructions(
         self,

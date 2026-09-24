@@ -43,7 +43,6 @@ async def test_create_task_for_mcp_forces_tsk_tag(db_session, two_tenant_service
         title="Investigate flaky test",
         description="Repro and fix the websocket flake",
         priority="high",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
@@ -55,7 +54,26 @@ async def test_create_task_for_mcp_forces_tsk_tag(db_session, two_tenant_service
     assert "valid_types" not in response
 
 
-async def test_create_task_for_mcp_unknown_task_type_is_ignored_not_rejected(db_session, two_tenant_service_setup):
+async def test_create_task_for_mcp_unknown_task_type_is_refused(db_session, two_tenant_service_setup):
+    tenant_a = two_tenant_service_setup["tenant_a"]
+    db_manager = two_tenant_service_setup["db_manager"]
+    task_service_a = two_tenant_service_setup["task_service_a"]
+
+    await _seed_taxonomy_for(db_session, tenant_a, db_manager)
+
+    with pytest.raises(ValidationError, match="MADEUP") as excinfo:
+        await task_service_a.create_task_for_mcp(
+            title="garbage type",
+            description="an unknown task_type is refused, not absorbed",
+            task_type="MADEUP",
+            tenant_key=tenant_a,
+            db_manager=db_manager,
+        )
+    assert "TSK" in excinfo.value.message
+    assert "HND" in excinfo.value.message
+
+
+async def test_create_task_for_mcp_accepts_the_handover_type(db_session, two_tenant_service_setup):
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     task_service_a = two_tenant_service_setup["task_service_a"]
@@ -63,15 +81,21 @@ async def test_create_task_for_mcp_unknown_task_type_is_ignored_not_rejected(db_
     await _seed_taxonomy_for(db_session, tenant_a, db_manager)
 
     response = await task_service_a.create_task_for_mcp(
-        title="garbage type",
-        description="unknown task_type no longer errors",
-        task_type="MADEUP",
+        title="Session handover",
+        description=(
+            "Stopped at the rebase.\n\n"
+            "## Verify before trusting\n- branch is green -- check with: pytest -q\n\n"
+            "## Waiting on the operator\n- nothing\n\n"
+            "## Cannot testify\n- the concurrency behaviour"
+        ),
+        task_type="HND",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
 
     assert response["success"] is True
-    assert response["task_type"] == "TSK"
+    assert response["task_type"] == "HND"
+    assert response["taxonomy_alias"].startswith("HND-")
 
 
 async def test_create_task_for_mcp_omitted_task_type_still_forces_tsk(db_session, two_tenant_service_setup):
@@ -104,7 +128,6 @@ async def _create_seed_task(db_session, two_tenant_service_setup) -> str:
     response = await task_service_a.create_task_for_mcp(
         title="seed task",
         description="for status updates",
-        task_type="BE",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
@@ -144,7 +167,6 @@ async def test_update_task_blocks_cross_tenant_task(db_session, two_tenant_servi
     response = await task_service_b.create_task_for_mcp(
         title="tenant b task",
         description="x",
-        task_type="BE",
         tenant_key=tenant_b,
         db_manager=db_manager,
     )
@@ -186,7 +208,6 @@ async def test_update_task_task_type_is_immutable(db_session, two_tenant_service
     response = await task_service_a.update_task_for_mcp(
         task_id=task_id,
         tenant_key=tenant_a,
-        task_type="FE",
     )
 
     assert "task_type_id" not in response["updated_fields"]
@@ -200,7 +221,6 @@ async def test_update_task_ignores_task_type_immutable(db_session, two_tenant_se
     result = await task_service_a.update_task_for_mcp(
         task_id=task_id,
         tenant_key=tenant_a,
-        task_type="BOGUS",
         title="renamed",
     )
     assert "title" in result["updated_fields"]
@@ -248,7 +268,7 @@ async def test_list_tasks_summary_mode_returns_compact_rows(db_session, two_tena
     assert "tasks" in response
     assert len(response["tasks"]) >= 1
     row = response["tasks"][0]
-    expected_keys = {"task_id", "title", "status", "priority", "task_type", "due_date", "created_at"}
+    expected_keys = {"task_id", "title", "status", "priority", "task_type", "created_at"}
     assert expected_keys.issubset(set(row.keys()))
 
 
@@ -313,7 +333,6 @@ async def test_list_tasks_is_tenant_scoped(db_session, two_tenant_service_setup)
     b = await task_service_b.create_task_for_mcp(
         title="tenant_b task",
         description="x",
-        task_type="BE",
         tenant_key=tenant_b,
         db_manager=db_manager,
     )

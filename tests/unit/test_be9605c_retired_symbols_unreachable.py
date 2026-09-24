@@ -48,6 +48,16 @@ _RETIRED = (
     "build_agent_install_block",
 )
 
+_RETIRED_AGENT_DIRS = (
+    ".claude/agents/",
+    ".codex/agents/",
+    ".opencode/agents/",
+)
+
+_AGENT_DIR_ALLOWED = {
+    "src/giljo_mcp/services/mission_assembly.py",
+}
+
 _DROPPED_COLUMNS = ("last_exported_at", "user_managed_export")
 
 _MIGRATION_ALLOWED = {
@@ -139,3 +149,8 @@ def test_retired_modules_do_not_import(module):
 def test_retired_installer_scripts_are_gone():
     for name in ("install_agent_templates.sh", "install_agent_templates.ps1"):
         assert not (_ROOT / "installer" / "templates" / name).exists(), name
+
+
+def test_retired_agent_directories_are_not_named_in_agent_facing_prose():
+    hits = _hits(_RETIRED_AGENT_DIRS, allowed=_AGENT_DIR_ALLOWED)
+    assert hits == [], "agent-facing prose still points at a retired agent-definition directory:\n" + "\n".join(hits)

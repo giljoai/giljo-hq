@@ -31,8 +31,9 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: showToastMock }),
 }))
 
+const routerPushMock = vi.fn()
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerPushMock }),
 }))
 
 const editionRef = { value: 'community' }
@@ -70,7 +71,6 @@ async function mountPage() {
           template: '<div class="v-progress-linear-stub" :data-value="modelValue" />',
           props: ['modelValue', 'indeterminate', 'color', 'height'],
         },
-        SystemPromptTab: { template: '<div data-test="orchestrator-prompt-stub" />' },
       },
     },
   })
@@ -83,6 +83,7 @@ describe('DangerPage — Download My Data section (BE-5062)', () => {
     wsOnMock.mockClear()
     exportMyDataMock.mockReset()
     showToastMock.mockClear()
+    routerPushMock.mockClear()
     editionRef.value = 'community'
     userIsAdminRef.value = false
   })
@@ -175,20 +176,35 @@ describe('DangerPage — Download My Data section (BE-5062)', () => {
     expect(status.text()).toContain('10')
   })
 
-  it('shows the orchestrator-prompt section for an admin', async () => {
+  it('shows the orchestrator-prompt pointer card for an admin', async () => {
     editionRef.value = 'community'
     userIsAdminRef.value = true
     const wrapper = await mountPage()
     await flushPromises()
     expect(wrapper.find('[data-test="orchestrator-prompt-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="orchestrator-prompt-link"]').exists()).toBe(true)
   })
 
-  it('hides the orchestrator-prompt section for a non-admin', async () => {
+  it('hides the orchestrator-prompt pointer card for a non-admin', async () => {
     editionRef.value = 'saas'
     userIsAdminRef.value = false
     const wrapper = await mountPage()
     await flushPromises()
     expect(wrapper.find('[data-test="orchestrator-prompt-section"]').exists()).toBe(false)
+  })
+
+  it('sends the admin to Tools > Agents > Orchestrator prompt', async () => {
+    editionRef.value = 'community'
+    userIsAdminRef.value = true
+    const wrapper = await mountPage()
+    await flushPromises()
+
+    await wrapper.find('[data-test="orchestrator-prompt-link"]').trigger('click')
+
+    expect(routerPushMock).toHaveBeenCalledWith({
+      path: '/tools',
+      query: { tab: 'agents', view: 'prompt' },
+    })
   })
 
   it('shows a download link when the export completes', async () => {

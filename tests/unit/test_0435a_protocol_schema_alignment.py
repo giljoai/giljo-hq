@@ -7,6 +7,11 @@
 import pytest
 
 from api.endpoints.mcp_sdk_server import _PLACEHOLDER_JOB_IDS
+from giljo_mcp.tools.write_memory_entry import (
+    ENTRY_TYPE_ALIASES,
+    RETIRED_ENTRY_TYPES,
+    VALID_ENTRY_TYPES,
+)
 
 
 
@@ -14,45 +19,24 @@ from api.endpoints.mcp_sdk_server import _PLACEHOLDER_JOB_IDS
 class TestEntryTypeAliasNormalization:
 
     def test_alias_map_normalizes_project_closeout(self):
-
-        aliases = {"project_closeout": "project_completion"}
-        valid = {
-            "project_completion",
-            "handover_closeout",
-            "session_handover",
-            "baseline",
-            "decision",
-            "architecture",
-            "discovery",
-        }
-
-        entry_type = "project_closeout"
-        entry_type = aliases.get(entry_type, entry_type)
-        assert entry_type == "project_completion"
-        assert entry_type in valid
+        assert ENTRY_TYPE_ALIASES.get("project_closeout") == "project_completion"
+        assert "project_completion" in VALID_ENTRY_TYPES
 
     def test_canonical_values_unchanged(self):
-        aliases = {"project_closeout": "project_completion"}
-        valid = {
-            "project_completion",
-            "handover_closeout",
-            "session_handover",
-            "baseline",
-            "decision",
-            "architecture",
-            "discovery",
-        }
+        for canonical in sorted(VALID_ENTRY_TYPES):
+            assert ENTRY_TYPE_ALIASES.get(canonical, canonical) == canonical
 
-        for canonical in valid:
-            result = aliases.get(canonical, canonical)
-            assert result == canonical
-            assert result in valid
+    def test_every_alias_points_at_an_accepted_value(self):
+        for alias, target in ENTRY_TYPE_ALIASES.items():
+            assert target in VALID_ENTRY_TYPES, f"alias {alias!r} resolves to unaccepted {target!r}"
+
+    def test_retired_values_are_not_accepted_and_not_aliased_back_in(self):
+        assert not (RETIRED_ENTRY_TYPES & VALID_ENTRY_TYPES)
+        assert not (RETIRED_ENTRY_TYPES & set(ENTRY_TYPE_ALIASES))
 
     def test_invalid_entry_type_not_aliased(self):
-        aliases = {"project_closeout": "project_completion"}
-        entry_type = "totally_invalid"
-        result = aliases.get(entry_type, entry_type)
-        assert result == "totally_invalid"
+        assert ENTRY_TYPE_ALIASES.get("totally_invalid", "totally_invalid") == "totally_invalid"
+        assert "totally_invalid" not in VALID_ENTRY_TYPES
 
 
 

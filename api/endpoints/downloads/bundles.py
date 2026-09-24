@@ -146,7 +146,8 @@ async def download_install_script(
 
     Args:
         extension: Script extension (sh or ps1)
-        script_type: Type of script (slash-commands or agent-templates)
+        script_type: The bundle the script installs. Only "slash-commands" is
+            accepted; any other value returns 400.
 
     Returns:
         Response with script file download

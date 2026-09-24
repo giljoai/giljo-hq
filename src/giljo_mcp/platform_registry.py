@@ -69,7 +69,6 @@ class Harness:
     cli_binary: str
     display_label: str
     spawn_syntax: str
-    template_locations: tuple[str, ...]
     export_platform: str | None = None
     launch_shell: str = "pwsh"
     launch_prompt_flag: str | None = None
@@ -87,7 +86,6 @@ HARNESSES: tuple[Harness, ...] = (
         "claude",
         "Claude Code",
         spawn_syntax="Task(subagent_type=X) where X = agent_name from spawn_job.",
-        template_locations=("{project}/.claude/agents/", "~/.claude/agents/"),
         export_platform=EXPORT_CLAUDE_CODE,
         autonomy_flag="--dangerously-skip-permissions",
     ),
@@ -100,7 +98,6 @@ HARNESSES: tuple[Harness, ...] = (
             "spawn_agent(agent='gil-{agent_name}') where agent_name comes from spawn_job. "
             "CRITICAL: prepend 'gil-' to every agent_name when using Codex CLI."
         ),
-        template_locations=("~/.codex/agents/", "{project}/.codex/agents/"),
         export_platform=EXPORT_CODEX_CLI,
         autonomy_flag="--dangerously-bypass-approvals-and-sandbox",
     ),
@@ -113,7 +110,6 @@ HARNESSES: tuple[Harness, ...] = (
             "Use your harness's own subagent/delegate mechanism to spawn the agent named "
             "by spawn_job (agent_name used as-is); if none exists, self-adopt the role."
         ),
-        template_locations=("{project}/.opencode/agents/", "~/.config/opencode/agents/"),
         export_platform=EXPORT_OPENCODE,
         launch_shell="cmd",
         launch_prompt_flag="--prompt",

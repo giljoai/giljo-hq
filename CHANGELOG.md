@@ -2,6 +2,32 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.5.0] — 2026-09-24
+
+### Added
+
+- **Session handovers.** Tasks is now Tasks & Handovers. When a working session ends, your agent writes a handover for whoever picks up next: where things stand, what to verify and how, what is waiting on you, and what it could not confirm. Each handover has its own serial and a status that shows whether it has been read, verified, or needs your attention. Start one yourself with New Agent Handover from the plus button, or ask your coding agent to hand the session over.
+- **Your own handover template.** Shape every handover on your account from Tools then Agents. Add the sections you care about, keep the essentials built in, and restore the original with one click.
+- **Bulk actions on Projects and Tasks.** Tick the rows you want and an action bar appears: archive, restore or delete them in one go, across every matching row if you like. Each action reports exactly what it did.
+- **Build a chain from the same tick boxes.** Tick two to five projects, choose Chain, and preview the run order before anything starts.
+- **Reset all agents in one click.** Put every agent that came with a product back to its original wording, with a copy of each saved in version history first. Agents you built yourself stay as they are.
+
+### Changed
+
+- Tools then Agents now has four views side by side: Roster, Behaviour, Handover template and Orchestrator prompt.
+- Archived projects and tasks are one pick away in the Status filter.
+- The task dialog is simpler: the unused due date field is gone.
+- Handovers now live on the task board, where they can be tracked and verified, instead of in 360 memory. Earlier handover entries in memory stay readable.
+
+### Fixed
+
+- Reset to Default now restores every agent that came with your product, including renamed ones.
+- Handovers created from the Tasks list are filed and checked as handovers.
+- Clearer messages when a task's type cannot be changed.
+- The Projects list stays current after a refresh is interrupted.
+- The roadmap's "why this order" note shows only when there is a roadmap, with the date it was generated.
+- Billing now uses a fixed version of the payment provider's API, so subscriptions and checkout keep working through the provider's upcoming changes.
+
 ## [2.4.0] — 2026-09-21
 
 ### Added

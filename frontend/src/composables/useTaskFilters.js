@@ -8,6 +8,8 @@ const TASK_STATUS_OPTIONS = [
   { title: 'Cancelled', value: 'cancelled' },
 ]
 
+export const ARCHIVED_FILTER = '__archived'
+
 export function useTaskFilters(tasks) {
   const search = ref('')
   const statusFilter = ref(null)
@@ -17,6 +19,12 @@ export function useTaskFilters(tasks) {
   const hiddenCount = computed(() => (tasks.value || []).filter((t) => t.hidden).length)
 
   const statusSelectOptions = computed(() => TASK_STATUS_OPTIONS.slice())
+
+  const statusFilterOptions = computed(() => [
+    ...TASK_STATUS_OPTIONS,
+    { title: `Archived (${hiddenCount.value})`, value: ARCHIVED_FILTER },
+  ])
+  const archivedView = computed(() => statusFilter.value === ARCHIVED_FILTER)
 
   const filteredTasks = computed(() => {
     let list = tasks.value
@@ -31,7 +39,9 @@ export function useTaskFilters(tasks) {
       )
     }
 
-    if (statusFilter.value) {
+    if (archivedView.value) {
+      list = list.filter((t) => t.hidden)
+    } else if (statusFilter.value) {
       list = list.filter((t) => t.status === statusFilter.value)
     }
 
@@ -39,7 +49,7 @@ export function useTaskFilters(tasks) {
       list = list.filter((t) => t.priority === priorityFilter.value)
     }
 
-    if (!search.value && !showHidden.value) {
+    if (!search.value && !showHidden.value && !archivedView.value) {
       list = list.filter((t) => !t.hidden)
     }
 
@@ -59,6 +69,8 @@ export function useTaskFilters(tasks) {
     showHidden,
     hiddenCount,
     statusSelectOptions,
+    statusFilterOptions,
+    archivedView,
     filteredTasks,
     clearFilters,
   }

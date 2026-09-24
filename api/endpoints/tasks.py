@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.endpoints.dependencies import get_task_service
+from api.endpoints.mcp_tools._base import CONSTRAINT_INVALID_CHOICE, validation_rejection
 from api.schemas.task import (
     ProjectConversionResponse,
     StatusUpdate,
@@ -21,11 +22,15 @@ from api.schemas.task import (
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models import Task, User
+from giljo_mcp.services.handover_validation import HANDOVER_CONTENT_CONSTRAINT, HANDOVER_SHAPE_CONSTRAINT
 from giljo_mcp.services.task_service import TaskService
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
+
+_ARGUMENT_CONSTRAINTS = frozenset({HANDOVER_SHAPE_CONSTRAINT, HANDOVER_CONTENT_CONSTRAINT})
+
 router = APIRouter()
 
 
@@ -36,6 +41,27 @@ def can_delete_task(task: Task, user: User) -> bool:
         return task.tenant_key == user.tenant_key
 
     return task.tenant_key == user.tenant_key and task.created_by_user_id == user.id
+
+
+def _argument_rejection(exc: ValidationError) -> HTTPException | None:
+    context = exc.context or {}
+    constraint = context.get("constraint")
+    if constraint in _ARGUMENT_CONSTRAINTS:
+        field = context["field"]
+    elif context.get("field") == "task_type":
+        field, constraint = "task_type", CONSTRAINT_INVALID_CHOICE
+    else:
+        return None
+    rejection = validation_rejection(field=field, constraint=constraint, message=exc.message)
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "error_code": rejection["error"],
+            "message": rejection["message"],
+            "field": rejection["field"],
+            "constraint": rejection["constraint"],
+        },
+    )
 
 
 def task_to_response(task: Task) -> TaskResponse:
@@ -62,7 +88,6 @@ def task_to_response(task: Task) -> TaskResponse:
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
-        due_date=task.due_date,
         estimated_effort=task.estimated_effort,
         actual_effort=task.actual_effort,
         deleted_at=task.deleted_at,
@@ -180,11 +205,14 @@ async def create_task(
             priority=task_create.priority or "medium",
             estimated_effort=task_create.estimated_effort,
             actual_effort=task_create.actual_effort,
-            due_date=task_create.due_date,
+            task_type=task_create.task_type,
         )
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except ValidationError as e:
+        rejection = _argument_rejection(e)
+        if rejection is not None:
+            raise rejection from e
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message) from e
 
     logger.info("Created task %s by user %s", task.id, sanitize(current_user.username))
@@ -323,7 +351,13 @@ async def update_task(
                 },
             )
 
-    await task_service.update_task(task_id, **update_data)
+    try:
+        await task_service.update_task(task_id, **update_data)
+    except ValidationError as e:
+        rejection = _argument_rejection(e)
+        if rejection is None:
+            raise
+        raise rejection from e
 
     if completion_notes and update_data.get("status") == "completed":
         await task_service.append_completion_notes(task_id, completion_notes)

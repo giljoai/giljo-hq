@@ -13,6 +13,15 @@ import { Page, expect } from '@playwright/test'
 
 const API_BASE_URL = 'http://localhost:7272'
 
+// The API applies a per-IP limiter (API_RATE_LIMIT, 300 requests/minute by
+// default). One login plus one list view costs roughly 33 API calls, so a
+// handful of back-to-back spec runs saturates it. A throttled run does not
+// announce itself: the 429 surfaces as an empty list, a missing row or a
+// detached element, which reads like a product fault. Name it instead.
+const RATE_LIMIT_HINT =
+  '(the API per-IP rate limit is saturated -- space the runs about a minute apart, ' +
+  'or start the backend with DISABLE_RATE_LIMIT=true)'
+
 // ============================================
 // AUTHENTICATION HELPERS
 // ============================================
@@ -205,23 +214,49 @@ export async function waitForAgentStatus(
  */
 export async function createTestProject(
   page: Page,
-  projectData: { name?: string; description?: string } = {}
+  projectData: { name?: string; description?: string; product_id?: string } = {}
 ): Promise<string> {
   const token = await getAuthToken(page)
+  const csrf = (await page.context().cookies()).find((c) => c.name === 'csrf_token')?.value ?? ''
+
+  let productId = projectData.product_id
+  if (!productId) {
+    const productsResponse = await page.request.get(`${API_BASE_URL}/api/v1/products/`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    // Report the status before parsing. A throttled lookup (429) returns a body
+    // with no products, which used to surface as "the test user has no product"
+    // and sent readers hunting for a data problem that was never there.
+    if (!productsResponse.ok()) {
+      throw new Error(
+        `Failed to create test project: product lookup returned ${productsResponse.status()}` +
+          (productsResponse.status() === 429 ? ` ${RATE_LIMIT_HINT}` : '')
+      )
+    }
+    const body = await productsResponse.json()
+    const products: Array<{ id: string; is_active?: boolean }> = Array.isArray(body) ? body : body.products ?? []
+    productId = (products.find((p) => p.is_active) ?? products[0])?.id
+    if (!productId) throw new Error('Failed to create test project: the test user has no product')
+  }
 
   const response = await page.request.post(`${API_BASE_URL}/api/v1/projects/`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'X-CSRF-Token': csrf,
     },
     data: {
       name: projectData.name || `E2E Test Project ${Date.now()}`,
       description: projectData.description || 'Automated E2E test project',
+      product_id: productId,
     },
   })
 
   if (!response.ok()) {
-    throw new Error(`Failed to create test project: ${response.status()}`)
+    throw new Error(
+      `Failed to create test project: ${response.status()}` +
+        (response.status() === 429 ? ` ${RATE_LIMIT_HINT}` : '')
+    )
   }
 
   const data = await response.json()
@@ -239,10 +274,12 @@ export async function deleteTestProject(
   projectId: string
 ): Promise<void> {
   const token = await getAuthToken(page)
+  const csrf = (await page.context().cookies()).find((c) => c.name === 'csrf_token')?.value ?? ''
 
   await page.request.delete(`${API_BASE_URL}/api/v1/projects/${projectId}/`, {
     headers: {
       'Authorization': `Bearer ${token}`,
+      'X-CSRF-Token': csrf,
     },
   })
 }
@@ -570,4 +607,19 @@ export async function cleanupTestData(
   }
 
   // Note: User deletion may require special admin permissions
+}
+
+/**
+ * Log every throttled response so a rate-limited run says so in the output.
+ *
+ * Call from a spec's beforeEach. See RATE_LIMIT_HINT above for why.
+ *
+ * @param page - Playwright page instance
+ */
+export function reportRateLimiting(page: Page): void {
+  page.on('response', (response) => {
+    if (response.status() === 429) {
+      console.warn(`[e2e] 429 ${response.request().method()} ${response.url()} ${RATE_LIMIT_HINT}`)
+    }
+  })
 }

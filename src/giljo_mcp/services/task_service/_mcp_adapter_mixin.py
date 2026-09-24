@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -15,7 +14,14 @@ from giljo_mcp.domain.task_status import VALID_TASK_STATUSES
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import Task
 from giljo_mcp.services._mcp_wire_bounds import worst_case_cursor_charge
+from giljo_mcp.services.handover_validation import HANDOVER_TYPE_ABBR, require_handover_shape
 from giljo_mcp.services.next_action import task_list_next_action_field
+from giljo_mcp.services.task_service._handover_guards import (
+    handover_not_convertible,
+    handover_state,
+    pending_handover_not_archivable,
+    require_handover_description_shape,
+)
 from giljo_mcp.services.task_service._mcp_filter_validators import (
     resolve_active_product_for_list_tasks,
     resolve_list_mode,
@@ -31,31 +37,13 @@ from giljo_mcp.services.task_service._mcp_read_layer import (
     task_keyset_after,
     task_to_index_row,
 )
+from giljo_mcp.services.task_type_immutability import require_unchanged_task_type
+from giljo_mcp.services.taxonomy_ops import resolve_task_type_abbr
 from giljo_mcp.tenant import current_tenant
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
 _VALID_LIST_MODES = ("index", "summary", "full")
-
-
-def _parse_due_date(value: Any, *, operation: str, field: str = "due_date", task_id: str = "") -> datetime:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            pass
-    context: dict[str, Any] = {"operation": operation}
-    if task_id:
-        context["task_id"] = task_id
-    raise ValidationError(
-        message=(
-            f"Invalid {field} {value!r}. Pass an ISO 8601 date or datetime, "
-            "e.g. '2026-07-15' or '2026-07-15T09:00:00+00:00'."
-        ),
-        context=context,
-    )
 
 
 class McpAdapterMixin:
@@ -88,8 +76,12 @@ class McpAdapterMixin:
         product_id = bound_product.id
         product_name = bound_product.name
 
+        requested_type = resolve_task_type_abbr(task_type, operation="create_task")
+        if requested_type == HANDOVER_TYPE_ABBR:
+            require_handover_shape(description, operation="create_task")
+
         taxonomy = TaxonomyService(db_manager=effective_db, session=self._session)
-        reserved_type = await taxonomy.ensure_reserved_task_type(effective_tenant_key)
+        reserved_type = await taxonomy.ensure_reserved_type(effective_tenant_key, requested_type)
         task_type_id = reserved_type.id
         resolved_type_label = reserved_type.abbreviation
 
@@ -148,7 +140,6 @@ class McpAdapterMixin:
         status: str | None = None,
         priority: str | None = None,
         task_type: str | None = None,
-        due_date: Any = None,
         project_id: str | None = None,
         estimated_effort: float | None = None,
         actual_effort: float | None = None,
@@ -174,7 +165,6 @@ class McpAdapterMixin:
                     "description": description,
                     "status": status,
                     "priority": priority,
-                    "due_date": due_date,
                     "project_id": project_id,
                     "estimated_effort": estimated_effort,
                     "actual_effort": actual_effort,
@@ -203,8 +193,6 @@ class McpAdapterMixin:
             update_kwargs["status"] = status
         if priority is not None:
             update_kwargs["priority"] = priority
-        if due_date is not None:
-            update_kwargs["due_date"] = _parse_due_date(due_date, operation="update_task_for_mcp", task_id=task_id)
         if project_id is not None:
             update_kwargs["project_id"] = project_id
         if estimated_effort is not None:
@@ -217,8 +205,15 @@ class McpAdapterMixin:
                     message="hidden must be a boolean",
                     context={"operation": "update_task_for_mcp", "task_id": task_id},
                 )
+            if hidden:
+                is_handover, task_status = await handover_state(self.get_task, task_id)
+                if is_handover and task_status == "pending":
+                    return pending_handover_not_archivable(task_id)
             update_kwargs["hidden"] = hidden
 
+        await require_handover_description_shape(self.get_task, task_id, description)
+
+        await require_unchanged_task_type(self.get_task, task_id, task_type)
 
         will_append_notes = bool(completion_notes) and status == "completed"
 
@@ -260,6 +255,10 @@ class McpAdapterMixin:
         user_id: str | None,
         supplied: dict[str, Any],
     ) -> dict[str, Any]:
+        is_handover, _status = await handover_state(self.get_task, task_id)
+        if is_handover:
+            return handover_not_convertible(task_id)
+
         conflicting = sorted(name for name, value in supplied.items() if value is not None)
         if conflicting:
             return {
@@ -344,7 +343,6 @@ class McpAdapterMixin:
         status: str | None = None,
         priority: str | None = None,
         task_type: str | None = None,
-        due_before: Any = None,
         summary_only: bool | None = None,
         memory_limit: int | None = None,
         hidden: bool | None = None,
@@ -370,9 +368,6 @@ class McpAdapterMixin:
 
         mode = resolve_list_mode(mode, summary_only, _VALID_LIST_MODES)
 
-        if due_before is not None:
-            due_before = _parse_due_date(due_before, operation="list_tasks_for_mcp", field="due_before")
-
         task_type_id = await resolve_task_type_id(
             task_type, db_manager=self.db_manager, session=self._session, tenant_key=effective_tenant_key
         )
@@ -382,7 +377,6 @@ class McpAdapterMixin:
             status=status,
             priority=priority,
             task_type_id=task_type_id,
-            due_before=due_before,
             hidden=hidden,
             query=query,
             cursor=cursor,
@@ -398,7 +392,6 @@ class McpAdapterMixin:
                 status=status,
                 priority=priority,
                 task_type_id=task_type_id,
-                due_before=due_before,
                 hidden=hidden,
                 query=query,
                 limit=effective_limit + 1,
@@ -410,7 +403,6 @@ class McpAdapterMixin:
                 status=status,
                 priority=priority,
                 task_type_id=task_type_id,
-                due_before=due_before,
                 hidden=hidden,
                 query=query,
                 after_key=after_key,
@@ -458,7 +450,6 @@ class McpAdapterMixin:
         status: str | None,
         priority: str | None,
         task_type_id: str | None,
-        due_before: Any,
         hidden: bool | None = None,
         query: str | None = None,
         limit: int | None = None,
@@ -477,7 +468,6 @@ class McpAdapterMixin:
             status=status,
             priority=priority,
             task_type_id=task_type_id,
-            due_before=due_before,
             hidden=hidden,
             query=query,
         )
@@ -512,7 +502,6 @@ class McpAdapterMixin:
             "series_number": task.series_number,
             "subseries": task.subseries,
             "hidden": bool(task.hidden),
-            "due_date": task.due_date.isoformat() if task.due_date else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,
         }
 
@@ -538,7 +527,6 @@ class McpAdapterMixin:
             "parent_task_id": task.parent_task_id,
             "estimated_effort": task.estimated_effort,
             "actual_effort": task.actual_effort,
-            "due_date": task.due_date.isoformat() if task.due_date else None,
             "started_at": task.started_at.isoformat() if task.started_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,

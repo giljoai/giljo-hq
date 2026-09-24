@@ -4,12 +4,15 @@
 # [CE] Community Edition.
 
 
+from datetime import date
+
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.config import ApiMetrics
+from giljo_mcp.models.mcp_tool_call_metrics import McpToolCallMetric
 
 
 class JobStatisticsRepository:
@@ -26,6 +29,25 @@ class JobStatisticsRepository:
         stmt = select(ApiMetrics).where(ApiMetrics.tenant_key == tenant_key)
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_mcp_tool_call_counts(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        since: date,
+    ) -> list[tuple[str, int]]:
+        total = func.sum(McpToolCallMetric.call_count).label("total")
+        stmt = (
+            select(McpToolCallMetric.tool_name, total)
+            .where(
+                McpToolCallMetric.tenant_key == tenant_key,
+                McpToolCallMetric.day >= since,
+            )
+            .group_by(McpToolCallMetric.tool_name)
+            .order_by(total.desc(), McpToolCallMetric.tool_name)
+        )
+        result = await session.execute(stmt)
+        return [(name, int(count or 0)) for name, count in result.all()]
 
 
     async def count_total_agents(

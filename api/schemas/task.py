@@ -29,7 +29,12 @@ class TaskCreate(BaseModel):
     task_type: str | None = Field(
         None,
         max_length=4,
-        description="Taxonomy type abbreviation (e.g. BE, FE, INF). Replaces the legacy category field.",
+        description=(
+            "'TSK' (default, an ordinary task) or 'HND' (a session handover). No other value is "
+            "accepted -- BE/FE/INF and the rest are PROJECT types. An 'HND' description must "
+            "carry the headings '## Verify before trusting', '## Waiting on the operator' and "
+            "'## Cannot testify', each with at least one line under it."
+        ),
     )
     series_number: int | None = Field(
         None,
@@ -43,7 +48,6 @@ class TaskCreate(BaseModel):
     product_id: str = Field(..., description="Product ID (required - Handover 0433)")
     project_id: str | None = Field(None, description="Associated project ID")
     parent_task_id: str | None = Field(None, description="Parent task ID for hierarchy")
-    due_date: datetime | None = Field(None, description="Task due date")
     estimated_effort: float | None = Field(None, ge=0, description="Estimated effort in hours")
     actual_effort: float | None = Field(None, ge=0, description="Actual effort in hours")
 
@@ -69,11 +73,15 @@ class TaskUpdate(BaseModel):
     task_type: str | None = Field(
         None,
         max_length=4,
-        description="Taxonomy type abbreviation (e.g. BE, FE, INF). Replaces the legacy category field.",
+        description=(
+            "'TSK' (default, an ordinary task) or 'HND' (a session handover). No other value is "
+            "accepted -- BE/FE/INF and the rest are PROJECT types. An 'HND' description must "
+            "carry the headings '## Verify before trusting', '## Waiting on the operator' and "
+            "'## Cannot testify', each with at least one line under it."
+        ),
     )
     estimated_effort: float | None = Field(None, ge=0, description="Estimated effort in hours")
     actual_effort: float | None = Field(None, ge=0, description="Actual effort in hours")
-    due_date: datetime | None = Field(None, description="Task due date")
     parent_task_id: str | None = Field(None, description="Parent task ID for hierarchy changes")
     product_id: str | None = Field(None, description="Update product scope")
     project_id: str | None = Field(None, description="Update associated project")
@@ -139,7 +147,7 @@ class TaskResponse(BaseModel):
     id: str = Field(..., description="Task ID")
     title: str = Field(..., description="Task title")
     description: str | None = Field(None, description="Task description")
-    task_type: str | None = Field(None, description="Taxonomy type abbreviation (BE, FE, INF, ...)")
+    task_type: str | None = Field(None, description="'TSK' (an ordinary task) or 'HND' (a session handover).")
     task_type_id: str | None = Field(None, description="FK to taxonomy_types row")
     task_type_color: str | None = Field(
         None,
@@ -176,7 +184,6 @@ class TaskResponse(BaseModel):
     created_at: datetime = Field(..., description="Task creation timestamp")
     started_at: datetime | None = Field(None, description="Task start timestamp")
     completed_at: datetime | None = Field(None, description="Task completion timestamp")
-    due_date: datetime | None = Field(None, description="Task due date")
     deleted_at: datetime | None = Field(None, description="Soft-delete timestamp (NULL for live tasks)")
 
     estimated_effort: float | None = Field(None, description="Estimated effort in hours")

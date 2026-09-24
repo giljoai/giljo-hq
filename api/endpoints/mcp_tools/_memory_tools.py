@@ -40,8 +40,6 @@ _DECISIONS_CAP_TEXT = f"Max {MEMORY_DECISIONS_COUNT} items, each max {MEMORY_DEC
 _EntryType = Literal[
     "project_completion",
     "project_closeout",
-    "handover_closeout",
-    "session_handover",
     "baseline",
     "decision",
     "architecture",
@@ -163,15 +161,11 @@ async def write_memory_entry(
         _EntryType,
         Field(
             description=(
-                "Entry type. Workers may write: "
-                "baseline (foundation context); "
-                "decision (a specific choice with rationale); "
-                "architecture (structural notes); "
-                "discovery (surprising finding worth remembering). "
-                "Orchestrator-only (rejected with ORCHESTRATOR_ONLY_ENTRY_TYPE for workers): "
-                "project_completion (project closeout); "
-                "session_handover (orchestrator-to-orchestrator across sessions). "
-                "Legacy: handover_closeout (preserved for back-compat)."
+                "Entry type. Workers may write: baseline (foundation context); "
+                "decision (a choice with rationale); architecture (structural notes); "
+                "discovery (surprising finding worth remembering). project_completion "
+                "is orchestrator-only (workers get ORCHESTRATOR_ONLY_ENTRY_TYPE). "
+                "To hand a session over, create a task of type HND instead."
             )
         ),
     ] = "project_completion",

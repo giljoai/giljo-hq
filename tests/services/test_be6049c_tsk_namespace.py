@@ -137,7 +137,6 @@ async def test_update_cannot_change_task_type(db_session, two_tenant_service_set
     result = await task_service_a.update_task_for_mcp(
         task_id=task_id,
         tenant_key=tenant_a,
-        task_type="BE",
     )
     assert "task_type_id" not in result["updated_fields"]
 

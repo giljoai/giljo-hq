@@ -13,25 +13,14 @@
         must-sort
         class="elevation-0"
         item-key="id"
+        item-value="id"
         fixed-header
         :item-props="getRowProps"
+        show-select
+        :model-value="bulkSelectedIds"
+        @update:model-value="$emit('update:bulk-selected-ids', $event)"
         @update:options="$emit('update:options', $event)"
       >
-        <template #item.select="{ item }">
-          <div v-if="normalizeStatus(item.status) === 'inactive'" class="select-cell">
-            <v-checkbox-btn
-              :model-value="selectedIds.includes(item.id) || inChainIds.includes(item.id)"
-              :disabled="inChainIds.includes(item.id)"
-              density="compact"
-              hide-details
-              :aria-label="`Select ${item.taxonomy_alias || item.name} for a sequential run`"
-              :data-testid="`project-select-checkbox-${item.id}`"
-              @click.stop
-              @update:model-value="$emit('toggle-select', item)"
-            />
-          </div>
-        </template>
-
         <template #item.name="{ item }">
           <div class="py-2">
             <span class="project-name-text">{{ item.name }}</span>
@@ -72,16 +61,14 @@
         </template>
 
         <template #item.quick_action="{ item }">
-          <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="electionActive ? 'Projects are elected — use Run Sequential to launch them' : (isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch')">
+          <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch'">
             <template #activator="{ props: ttProps }">
               <button
                 v-bind="ttProps"
                 type="button"
                 class="play-circle-btn icon-interactive-play"
-                :class="{ 'play-btn-disabled': electionActive }"
-                :disabled="electionActive"
                 aria-label="Activate project"
-                @click.stop="!electionActive && $emit('activate-launch', item.id)"
+                @click.stop="$emit('activate-launch', item.id)"
               >
                 <v-icon size="18">mdi-play</v-icon>
               </button>
@@ -276,25 +263,13 @@ const props = defineProps({
     type: Array,
     default: () => [{ key: 'created_at', order: 'desc' }],
   },
-  selectedIds: {
-    type: Array,
-    default: () => [],
-  },
-  electionActive: {
-    type: Boolean,
-    default: false,
-  },
   inChainIds: {
     type: Array,
     default: () => [],
   },
-  lockedChainIds: {
+  bulkSelectedIds: {
     type: Array,
     default: () => [],
-  },
-  linkMode: {
-    type: Boolean,
-    default: false,
   },
 })
 
@@ -308,7 +283,7 @@ const emit = defineEmits([
   'confirm-delete',
   'new-project',
   'update:options',
-  'toggle-select',
+  'update:bulk-selected-ids',
 ])
 
 const showSupersedeModal = ref(false)
@@ -339,39 +314,23 @@ const { smAndDown } = useDisplay()
 
 const itemsPerPageOptions = [10, 25, 50, 100, API_MAX_PAGE_SIZE]
 
-const FULL_BASE = [
+const FULL_HEADERS = [
   { title: 'Serial', key: 'series_number', sortable: true, width: '10%' },
   { title: 'Name', key: 'name', sortable: true, width: '28%' },
   { title: 'Status', key: 'status', sortable: true, width: '14%', align: 'center' },
   { title: 'Staged', key: 'staging_status', sortable: true, width: '9%', align: 'center' },
   { title: 'Created', key: 'created_at', sortable: true, width: '13%' },
   { title: 'Completed', key: 'completed_at', sortable: true, width: '13%', align: 'center' },
-]
-const FULL_HEADERS_NORMAL = [
-  ...FULL_BASE,
   { title: 'Actions', key: 'quick_action', sortable: false, width: '5%', align: 'center' },
   { title: '', key: 'menu', sortable: false, width: '3%', align: 'center' },
 ]
-const FULL_HEADERS_LINK = [
-  ...FULL_BASE,
-  { title: 'Linked', key: 'select', sortable: false, width: '8%', align: 'center' },
-  { title: '', key: 'menu', sortable: false, width: '3%', align: 'center' },
-]
-const COMPACT_HEADERS_NORMAL = [
+const COMPACT_HEADERS = [
   { title: 'Serial', key: 'series_number', sortable: true, width: '40%' },
   { title: 'Status', key: 'status', sortable: true, width: '30%', align: 'center' },
   { title: 'Actions', key: 'quick_action', sortable: false, width: '20%', align: 'center' },
   { title: '', key: 'menu', sortable: false, width: '10%', align: 'center' },
 ]
-const COMPACT_HEADERS_LINK = [
-  { title: 'Serial', key: 'series_number', sortable: true, width: '45%' },
-  { title: 'Status', key: 'status', sortable: true, width: '30%', align: 'center' },
-  { title: 'Linked', key: 'select', sortable: false, width: '25%', align: 'center' },
-]
-const headers = computed(() => {
-  if (smAndDown.value) return props.linkMode ? COMPACT_HEADERS_LINK : COMPACT_HEADERS_NORMAL
-  return props.linkMode ? FULL_HEADERS_LINK : FULL_HEADERS_NORMAL
-})
+const headers = computed(() => (smAndDown.value ? COMPACT_HEADERS : FULL_HEADERS))
 
 function getRowProps({ item }) {
   const rowProps = { 'data-testid': 'project-card' }
@@ -542,15 +501,9 @@ function getStatusActions(item) {
   font-size: 0.85rem;
 }
 
-/* Force center alignment on Staged column cells (3rd column) */
-.project-table-card :deep(td:nth-child(3)) {
+/* Force center alignment on the Status cell (4th: FE-9641's select column is 1st). */
+.project-table-card :deep(td:nth-child(4)) {
   text-align: center;
-}
-
-/* FE-6165f: select cell wrapper (checkbox only — pill moved to status col in FE-6170). */
-.select-cell {
-  display: flex;
-  align-items: center;
 }
 
 /* FE-6165f / FE-6170: "In chain" badge (now in Status column). Tinted badge —
@@ -584,12 +537,6 @@ function getStatusActions(item) {
 
 .play-circle-btn :deep(.v-icon) {
   color: $color-brand-yellow;
-}
-
-.play-btn-disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  pointer-events: none;
 }
 
 /* ── Responsive compact elements ── */

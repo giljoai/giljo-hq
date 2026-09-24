@@ -4,6 +4,8 @@ const STATUS_STORAGE_KEY = 'giljo.projects.selectedStatuses'
 
 export const API_MAX_PAGE_SIZE = 200
 
+export const ARCHIVED_STATUS = '__archived'
+
 function loadPersistedStatuses() {
   try {
     const raw = localStorage.getItem(STATUS_STORAGE_KEY)
@@ -30,9 +32,10 @@ export function useProjectFilters({
     (projectStatuses.value || []).filter((s) => s.value !== 'deleted'),
   )
 
-  const statusSelectOptions = computed(() =>
-    _selectableStatuses.value.map((s) => ({ title: s.label, value: s.value })),
-  )
+  const statusSelectOptions = computed(() => [
+    ..._selectableStatuses.value.map((s) => ({ title: s.label, value: s.value })),
+    { title: `Archived (${hiddenCount.value})`, value: ARCHIVED_STATUS },
+  ])
 
   const allStatusValues = computed(() => _selectableStatuses.value.map((s) => s.value))
 
@@ -70,6 +73,8 @@ export function useProjectFilters({
     ).length
   })
 
+  const archivedSelected = computed(() => selectedStatuses.value.includes(ARCHIVED_STATUS))
+
   function buildServerParams() {
     const requested = itemsPerPage.value
     const limit = requested > 0 ? Math.min(requested, API_MAX_PAGE_SIZE) : API_MAX_PAGE_SIZE
@@ -87,9 +92,14 @@ export function useProjectFilters({
       params.search = q
       params.includeHidden = true
     } else {
-      params.statuses = [...selectedStatuses.value]
+      params.statuses = selectedStatuses.value.filter((v) => v !== ARCHIVED_STATUS)
+      if (archivedSelected.value && params.statuses.length === 0) {
+        delete params.statuses
+        params.hiddenOnly = true
+        params.includeCompleted = true
+      }
     }
-    if (showHidden.value) {
+    if (showHidden.value || archivedSelected.value) {
       params.includeHidden = true
     }
     return params
@@ -104,6 +114,7 @@ export function useProjectFilters({
     sortBy,
     statusSelectOptions,
     hiddenCount,
+    archivedSelected,
     buildServerParams,
   }
 }

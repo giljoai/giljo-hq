@@ -52,7 +52,7 @@ async def save_roadmap(
         str,
         Field(
             max_length=MCP_SHORT_TEXT_MAX,
-            description="Optional AI insight banner copy for the roadmap. Empty string leaves it unchanged.",
+            description="One-sentence AI insight banner: why this order, not status notes. Empty=unchanged.",
         ),
     ] = "",
     remove: Annotated[

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ref, nextTick } from 'vue'
-import { useProjectFilters } from './useProjectFilters'
+import { useProjectFilters, ARCHIVED_STATUS } from './useProjectFilters'
 
 describe('useProjectFilters (BE-6076 server-driven params)', () => {
   const makeProjectStatuses = () => [
@@ -147,7 +147,7 @@ describe('useProjectFilters (BE-6076 server-driven params)', () => {
   it('statusSelectOptions excludes "deleted" (Deleted dialog) and the "hidden" pseudo-option', () => {
     const { statusSelectOptions } = make()
     const values = statusSelectOptions.value.map((o) => o.value)
-    expect(values).toEqual(['inactive', 'active', 'completed', 'cancelled', 'terminated'])
+    expect(values).toEqual(['inactive', 'active', 'completed', 'cancelled', 'terminated', ARCHIVED_STATUS])
     expect(values).not.toContain('deleted')
     expect(values).not.toContain('hidden')
   })

@@ -52,6 +52,7 @@ def boundary(monkeypatch):
         db_manager = _FakeDbManager()
         websocket_manager = None
         mcp_call_count: dict[str, int] = {}
+        mcp_tool_call_count: dict[tuple[str, str, object], int] = {}
         tool_accessor = object()
 
     from api import app_state as app_state_module

@@ -89,50 +89,6 @@ function mountTable(props = {}) {
   })
 }
 
-describe('ProjectsTable FE-6171b — D5: tickbox locked by lockedChainIds, NOT inChainIds', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    smAndDownRef.value = false
-  })
-
-  it('tickbox enabled when in-chain but NOT locked (Editing tier)', () => {
-    const wrapper = mountTable({
-      inChainIds: ['p1'],
-      lockedChainIds: [],
-    })
-    const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    const p1Checkbox = checkboxes.find((cb) => cb.element.closest('[data-project-id="p1"]'))
-    if (p1Checkbox) {
-      expect(p1Checkbox.attributes('disabled')).toBeUndefined()
-    }
-    expect(wrapper.exists()).toBe(true)
-  })
-
-  it('tickbox disabled when in-chain AND locked (Staged tier)', () => {
-    const wrapper = mountTable({
-      inChainIds: ['p1'],
-      lockedChainIds: ['p1'],
-    })
-    expect(wrapper.exists()).toBe(true)
-    const locked = wrapper.find('[data-testid="select-chain-checkbox-p1"]')
-    if (locked.exists()) {
-      expect(locked.attributes('disabled')).toBeDefined()
-    }
-  })
-
-  it('tickbox for non-chain project is never disabled by lockedChainIds', () => {
-    const wrapper = mountTable({
-      inChainIds: ['p1'],
-      lockedChainIds: ['p1'],
-    })
-    const p2Checkbox = wrapper.find('[data-testid="select-chain-checkbox-p2"]')
-    if (p2Checkbox.exists()) {
-      expect(p2Checkbox.attributes('disabled')).toBeUndefined()
-    }
-    expect(wrapper.exists()).toBe(true)
-  })
-})
-
 describe('ProjectsTable FE-6171b — D9: single "In chain" badge replaces double badge', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

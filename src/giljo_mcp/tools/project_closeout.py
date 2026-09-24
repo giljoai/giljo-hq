@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import BaseGiljoError, ProjectStateError, ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
-from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError, validate_git_commits
+from giljo_mcp.schemas.jsonb_validators import (
+    GitCommitShaRequiredError,
+    GitCommitTitleRequiredError,
+    validate_git_commits,
+)
 from giljo_mcp.schemas.service_responses import AgentStatusChangeEvent
 from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
 from giljo_mcp.services.dto import MemoryEntryCreateParams
@@ -452,15 +456,19 @@ async def close_project_and_update_memory(
 
         return response
 
-    except BaseGiljoError as exc:
-        if exc.default_status_code < 500:
-            logger.info("close_project rejected: %s — %s", exc.error_code, exc.message)
-            raise
-        logger.exception("Failed to close project and update memory", extra={"error": str(exc)})
-        raise
     except Exception as exc:
-        logger.exception("Failed to close project and update memory", extra={"error": str(exc)})
+        _log_closeout_failure(exc)
         raise
+
+
+def _log_closeout_failure(exc: Exception) -> None:
+    is_rejection = isinstance(exc, GitCommitShaRequiredError) or (
+        isinstance(exc, BaseGiljoError) and exc.default_status_code < 500
+    )
+    if is_rejection:
+        logger.info("close_project rejected: %s", exc)
+        return
+    logger.exception("Failed to close project and update memory", extra={"error": str(exc)})
 
 
 async def _idempotent_closeout_response(

@@ -85,7 +85,6 @@ class TestMatchedPairSearchFieldGap:
             status=None,
             priority=None,
             task_type_id=None,
-            due_before=None,
             hidden=None,
             query=_TOKEN,
         )

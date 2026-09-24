@@ -166,4 +166,66 @@ describe('projects store — IMP-1002 status-filter re-fetch params', () => {
     expect(store.projects).toHaveLength(2)
     expect(store.projects.map((p) => p.status)).toContain('completed')
   })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 6. The other half of the same race: the NEWER fetch FAILS.
+  //
+  // The seq guard above drops an older response because a newer one was
+  // dispatched. It must not drop it because a newer one was dispatched and then
+  // came back empty-handed: a refused request (a 429 under a saturated rate
+  // limiter, an offline blip) applies nothing, so discarding the good older
+  // payload leaves the list showing whatever it held before -- indefinitely,
+  // because nothing refetches. Newer data must beat older data; NO data must
+  // beat neither.
+  // ────────────────────────────────────────────────────────────────────────────
+  it('an older fetch still applies when the newer fetch that superseded it fails', async () => {
+    let resolveFirst
+    let rejectSecond
+    const firstResponse = new Promise((r) => {
+      resolveFirst = r
+    })
+    const secondResponse = new Promise((_r, reject) => {
+      rejectSecond = reject
+    })
+
+    mockList.mockReturnValueOnce(firstResponse)
+    mockList.mockReturnValueOnce(secondResponse)
+
+    const p1 = store.fetchProjects({ includeCompleted: true }) // seq 1
+    const p2 = store.fetchProjects({ includeCompleted: true }) // seq 2, supersedes it
+
+    // The newer request is refused, so it never has a payload to apply...
+    rejectSecond(new Error('Request failed with status code 429'))
+    // ...and only then does the older, still-valid response land.
+    resolveFirst({ data: [ACTIVE_PROJ, COMPLETED_PROJ] })
+
+    await Promise.all([p1, p2])
+
+    expect(store.projects).toHaveLength(2)
+    expect(store.projects.map((p) => p.status)).toContain('completed')
+  })
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 7. The empty multi-select short-circuit applies a payload too.
+  //
+  // Unticking every status empties the list without issuing a request. That is
+  // still an applied result, so a slower fetch dispatched BEFORE it must not
+  // land afterwards and refill the list the user just emptied.
+  // ────────────────────────────────────────────────────────────────────────────
+  it('an in-flight older fetch does not refill a list the empty multi-select just cleared', async () => {
+    let resolveSlow
+    mockList.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveSlow = r
+      })
+    )
+
+    const slow = store.fetchProjects({ includeCompleted: true }) // seq 1, in flight
+    const cleared = store.fetchProjects({ statuses: [] }) // seq 2, applies [] with no request
+
+    resolveSlow({ data: [ACTIVE_PROJ, COMPLETED_PROJ] })
+    await Promise.all([slow, cleared])
+
+    expect(store.projects).toHaveLength(0)
+  })
 })

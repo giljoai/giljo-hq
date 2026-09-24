@@ -11,6 +11,7 @@ from giljo_mcp.schemas.jsonb_validators import (
     SETTINGS_CATEGORY_VALIDATORS,
     AgentExecutionResult,
     AgentJobMetadata,
+    GitCommitShaRequiredError,
     GitCommitTitleRequiredError,
     GitIntegrationSettings,
     IntegrationsSettingsData,
@@ -191,8 +192,13 @@ class TestValidateGitCommits:
         assert out[0]["sha"] == "abc123"
 
     def test_rejects_missing_sha(self):
-        with pytest.raises(ValidationError):
+        with pytest.raises(GitCommitShaRequiredError):
             validate_git_commits([{"message": "no sha"}])
+
+    def test_accepts_hash_as_alias_for_sha(self):
+        out = validate_git_commits([{"hash": "abc123", "message": "aliased key"}])
+        assert out[0]["sha"] == "abc123"
+        assert "hash" not in out[0]
 
     def test_rejects_missing_message(self):
         with pytest.raises(GitCommitTitleRequiredError):

@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [{ path: '/', name: 'Root', component: { template: '<div />' } }],
+})
 import TemplateManager from '@/components/TemplateManager.vue'
 import { useProductStore } from '@/stores/products'
 
@@ -74,6 +80,7 @@ function mountManager({ products = PRODUCTS, currentProductId = A } = {}) {
   return mount(TemplateManager, {
     global: {
       plugins: [
+        router,
         createTestingPinia({
           initialState: {
             user: { currentUser: { id: 1, username: 'u', role: 'admin', tenant_key: 'tk' } },
@@ -423,7 +430,7 @@ describe('FE-9610b — house rules', () => {
   it('the new bulk control sits in the wrapping filter bar, so the tablet band still fits', () => {
     const source = read('./templates/TemplateToolbar.vue')
     const bar = source.slice(
-      source.indexOf('<div class="filter-bar">'),
+      source.indexOf('class="filter-bar"'),
       source.indexOf('</template>'),
     )
     expect(bar).toContain('data-testid="product-bulk-menu"')

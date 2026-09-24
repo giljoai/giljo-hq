@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="tab-header mb-4 d-flex align-center">
+    <div v-if="activeView === 'roster'" class="tab-header mb-4 d-flex align-center">
       <h2 class="text-title-large">Agent Template Manager</h2>
       <v-tooltip location="bottom" max-width="360">
         <template #activator="{ props }">
@@ -31,19 +31,26 @@
       v-model:filter-role="filterRole"
       v-model:filter-status="filterStatus"
       v-model:scope-mode="scopeMode"
+      v-model:view="activeView"
       :available-roles="availableRoles"
       :status-options="statusOptions"
-      :behaviour-changed-count="behaviourChangedCount"
+      :show-prompt="canEditPrompt"
       :can-bulk="!!loadedProductId && !showAllProducts"
       :can-create="!!viewedProductId && !showAllProducts"
       :bulk-running="bulkRunning || importingDefaults"
-      @open-behaviour="behaviourDialog = true"
       @bulk-set-all="setAllHere"
       @add-defaults="importDefaultAgents"
+      @reset-all="confirmResetAll"
       @create="openCreateDialog"
     />
 
-    <v-card class="template-manager smooth-border">
+    <AgentBehaviourView v-if="activeView === 'behaviour'" />
+
+    <HandoverTemplateView v-if="activeView === 'handover'" />
+
+    <SystemPromptTab v-if="activeView === 'prompt' && canEditPrompt" />
+
+    <v-card v-if="activeView === 'roster'" class="template-manager smooth-border">
       <v-card-text>
         <EmptyState
           v-if="!viewedProductId && !showAllProducts"
@@ -104,6 +111,7 @@
             :product-name-for="productNameFor"
             :remaining-user-slots="remainingUserSlots"
             :user-agent-limit="userAgentLimit"
+            :can-edit-prompt="canEditPrompt"
             @toggle-active="handleToggleActive"
             @edit="editTemplate"
             @duplicate="duplicateTemplate"
@@ -111,6 +119,7 @@
             @delete="confirmDelete"
             @download-profile="downloadProfile"
             @clear-filters="clearFilters"
+            @edit-orchestrator-prompt="activeView = 'prompt'"
           />
         </template>
       </v-card-text>
@@ -170,16 +179,13 @@
           </div>
           <v-card-text>
             <p class="mb-4">
-              Are you sure you want to reset the template "{{ resettingTemplate?.name }}" to the
-              system default?
+              Are you sure you want to reset the agent "{{ resettingTemplate?.name }}" to the
+              default?
             </p>
-            <v-alert type="warning" variant="tonal" class="mb-4">
-              This will overwrite your customizations with the latest system template. Your current
-              version will be archived and can be restored later from the version history.
+            <v-alert type="warning" variant="tonal" class="mb-4" data-testid="reset-warning">
+              This replaces this agent's instructions, rules and success criteria with the current
+              default. Your customizations will be lost. A copy is kept in version history.
             </v-alert>
-            <p class="text-body-small text-muted-a11y">
-              This action creates a backup in version history before resetting.
-            </p>
           </v-card-text>
           <div class="dlg-footer">
             <v-spacer />
@@ -191,29 +197,67 @@
         </v-card>
       </v-dialog>
 
-    </v-card>
+      <v-dialog v-model="resetAllDialog" max-width="600px" persistent retain-focus>
+        <v-card v-draggable class="smooth-border">
+          <div class="dlg-header dlg-header--warning">
+            <v-icon class="dlg-icon">mdi-alert</v-icon>
+            <span class="dlg-title">Reset All Agents to Default</span>
+            <v-btn icon variant="text" class="dlg-close" aria-label="Close" @click="resetAllDialog = false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </div>
+          <v-card-text>
+            <p class="mb-4" data-testid="reset-all-count">
+              This resets {{ resettableCount }}
+              {{ resettableCount === 1 ? 'agent' : 'agents' }} in this product.
+            </p>
+            <v-alert type="warning" variant="tonal" class="mb-4">
+              This replaces each agent's instructions, rules and success criteria with the current
+              default. Your customizations will be lost. A copy of each is kept in version history.
+            </v-alert>
+            <p class="text-body-small text-muted-a11y">
+              Agents you created yourself have no default to return to and are left alone.
+            </p>
+          </v-card-text>
+          <div class="dlg-footer">
+            <v-spacer />
+            <v-btn variant="text" @click="resetAllDialog = false">Cancel</v-btn>
+            <v-btn
+              color="warning"
+              variant="flat"
+              :loading="resettingAll"
+              :disabled="resettableCount === 0"
+              data-testid="reset-all-confirm"
+              @click="resetAllAgents"
+            >
+              Reset {{ resettableCount }} {{ resettableCount === 1 ? 'Agent' : 'Agents' }}
+            </v-btn>
+          </div>
+        </v-card>
+      </v-dialog>
 
-    <AgentBehaviourDialog
-      v-model="behaviourDialog"
-      @update:changed-count="behaviourChangedCount = $event"
-    />
+    </v-card>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api'
+import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { useTemplateData } from '@/composables/useTemplateData'
 import { useProductAgentAssignments } from '@/composables/useProductAgentAssignments'
 import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
 import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
 import { useProductStore } from '@/stores/products'
+import { useUserStore } from '@/stores/user'
 import TemplatesTable from './templates/TemplatesTable.vue'
 import TemplateToolbar from './templates/TemplateToolbar.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
 import EmptyState from './common/EmptyState.vue'
-import AgentBehaviourDialog from './settings/AgentBehaviourDialog.vue'
+import AgentBehaviourView from './settings/AgentBehaviourView.vue'
+import HandoverTemplateView from './settings/tabs/HandoverTemplateView.vue'
+import SystemPromptTab from './settings/tabs/SystemPromptTab.vue'
 import {
   TEMPLATE_ROLE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
@@ -240,8 +284,30 @@ const scopeMode = computed({
   },
 })
 
-const behaviourDialog = ref(false)
-const behaviourChangedCount = ref(0)
+const router = useRouter()
+const activeView = ref(router.currentRoute.value.query.view || 'roster')
+watch(activeView, (view) => {
+  const query = { ...router.currentRoute.value.query }
+  if (view === 'roster') delete query.view
+  else query.view = view
+  router.replace({ query })
+})
+watch(
+  () => router.currentRoute.value.query.view,
+  (view) => {
+    activeView.value = view || 'roster'
+  },
+)
+
+const userStore = useUserStore()
+const canEditPrompt = computed(() => userStore.isAdmin)
+watch(
+  canEditPrompt,
+  (allowed) => {
+    if (!allowed && activeView.value === 'prompt') activeView.value = 'roster'
+  },
+  { immediate: true },
+)
 
 const {
   templates,
@@ -310,9 +376,11 @@ const {
 const saving = ref(false)
 const deleting = ref(false)
 const resetting = ref(false)
+const resettingAll = ref(false)
 
 const deleteDialog = ref(false)
 const resetDialog = ref(false)
+const resetAllDialog = ref(false)
 
 const deletingTemplate = ref(null)
 const resettingTemplate = ref(null)
@@ -501,6 +569,44 @@ const resetTemplate = async () => {
     console.error('Failed to reset template:', error)
   } finally {
     resetting.value = false
+  }
+}
+
+const resettableCount = computed(
+  () => templates.value.filter((t) => t.can_reset && !t._system).length,
+)
+
+const confirmResetAll = () => {
+  resetAllDialog.value = true
+}
+
+const resetAllAgents = async () => {
+  resettingAll.value = true
+  try {
+    const { data } = await api.templates.resetAll(viewedProductId.value)
+    await reloadTemplates()
+    resetAllDialog.value = false
+
+    if (data.failed.length) {
+      showToast({
+        message: `${data.failed.length} could not be reset: ${data.failed.map((f) => f.name).join(', ')}`,
+        type: 'error',
+        title: 'Partly applied',
+      })
+    }
+    const n = `${data.reset.length} agent${data.reset.length === 1 ? '' : 's'}`
+    showToast({
+      message: data.reset.length ? `Reset ${n} to default` : 'No agents had a default to return to',
+      type: data.reset.length ? 'success' : 'info',
+    })
+  } catch (error) {
+    showToast({
+      message: error.response?.data?.detail || 'Failed to reset agents',
+      type: 'error',
+      title: 'Error',
+    })
+  } finally {
+    resettingAll.value = false
   }
 }
 

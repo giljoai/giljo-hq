@@ -90,21 +90,19 @@ async def test_rest_create_task_without_type_forces_tsk_and_serial(
 
 
 @pytest.mark.asyncio
-async def test_rest_create_task_ignores_inbound_type(api_client: AsyncClient, seeded_product: dict) -> None:
+async def test_rest_create_task_refuses_an_inbound_project_type(api_client: AsyncClient, seeded_product: dict) -> None:
     resp = await api_client.post(
         "/api/v1/tasks/",
         headers=seeded_product["headers"],
         json={
             "title": "legacy-typed task",
-            "description": "task_type must be ignored",
+            "description": "task_type must be refused, not ignored",
             "product_id": seeded_product["product_id"],
             "task_type": "BE",
         },
     )
-    assert resp.status_code in (200, 201), resp.text
-    body = resp.json()
-    assert body["task_type"] == "TSK"
-    assert (body["taxonomy_alias"] or "").startswith("TSK-")
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error_code"] == "VALIDATION_ERROR", resp.text
 
 
 @pytest.mark.asyncio

@@ -109,28 +109,9 @@ describe('ProjectsTable.vue — FE-6165f inChainIds prop', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders the checkbox ticked AND disabled for a row in inChainIds (FE-6180: disabled = inChainIds membership, back-out via kebab)', () => {
-    // FE-6180: once a project is in an active chain its tickbox is a PASSIVE
-    // indicator — force-ticked + DISABLED by membership (inChainIds). Back-out
-    // is via the kebab (Deactivate Chain), never by unticking.
-    const w = mountTable({ inChainIds: ['p-inactive'], lockedChainIds: ['p-inactive'] })
-    const cb = w.find('[data-testid="project-select-checkbox-p-inactive"]')
-    expect(cb.exists()).toBe(true)
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(true)
-  })
-
-  it('renders the checkbox ticked AND disabled for a row in inChainIds even when lockedChainIds is empty (FE-6180: in-chain => force-ticked + disabled, back-out via kebab)', () => {
-    // FE-6180: disable is driven by inChainIds membership alone — there is no
-    // "Editing tier" exception. Any in-chain project is disabled regardless of
-    // lockedChainIds. The "Editing tier keeps it enabled" premise no longer exists.
-    const w = mountTable({ inChainIds: ['p-inactive'], lockedChainIds: [] })
-    const cb = w.find('[data-testid="project-select-checkbox-p-inactive"]')
-    expect(cb.exists()).toBe(true)
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(true)
-  })
-
+  // FE-9641 retired the force-ticked, disabled chain tick box: the tick boxes
+  // are one shared selection (Vuetify show-select) and chain membership is
+  // carried by the "In chain" chip below and the kebab's Deactivate Chain.
   it('renders the "In chain" pill for a row in inChainIds', () => {
     const w = mountTable({ inChainIds: ['p-inactive'] })
     const pill = w.find('[data-testid="project-in-chain-pill"]')
@@ -143,28 +124,12 @@ describe('ProjectsTable.vue — FE-6165f inChainIds prop', () => {
     expect(w.find('[data-testid="project-in-chain-pill"]').exists()).toBe(false)
   })
 
-  it('renders the checkbox ticked but NOT disabled when selected-only (not in chain)', () => {
-    const w = mountTable({ selectedIds: ['p-inactive'], inChainIds: [] })
-    const cb = w.find('[data-testid="project-select-checkbox-p-inactive"]')
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(false)
-  })
-
-  it('checkbox model-value = (selectedIds.includes || inChainIds.includes)', () => {
-    // selected=false, inChain=true → checked
-    const w = mountTable({ selectedIds: [], inChainIds: ['p-inactive'] })
-    const cb = w.find('[data-testid="project-select-checkbox-p-inactive"]')
-    expect(cb.element.checked).toBe(true)
-  })
-
-  it('does NOT render a checkbox for an active (non-inactive) row, and shows no In chain pill (FE-9628)', () => {
-    // Active rows have no select checkbox (they can't be elected into a new chain).
+  it('shows no In chain pill for an active row in a chain (FE-9628)', () => {
     // FE-6221b used to pair their status badge with an "In chain" pill; FE-9628
     // collapsed that to ONE chip per row — the status badge — with chain
     // membership carried by its tooltip.
     const activeItem = { ...INACTIVE_ITEM, id: 'p-active', status: 'active' }
     const w = mountTable({ inChainIds: ['p-active'] }, activeItem)
-    expect(w.find('[data-testid="project-select-checkbox"]').exists()).toBe(false) // no tickbox
     expect(w.find('[data-testid="project-in-chain-pill"]').exists()).toBe(false)   // single chip
   })
 })

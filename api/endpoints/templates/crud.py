@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import AuthorizationError, ProjectStateError, TemplateNotFoundError, ValidationError
 from giljo_mcp.models import AgentTemplate, User
-from giljo_mcp.services.template_service import USER_MANAGED_AGENT_LIMIT, TemplateService
+from giljo_mcp.services.template_service import USER_MANAGED_AGENT_LIMIT, TemplateService, factory_default_for
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -61,6 +61,7 @@ def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
         avg_generation_ms=template.avg_generation_ms,
         created_by=template.created_by,
         is_system_role=_is_system_managed_role(template.role),
+        can_reset=factory_default_for(template) is not None,
     )
 
 

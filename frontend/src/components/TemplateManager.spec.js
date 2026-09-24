@@ -2,6 +2,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [{ path: '/', name: 'Root', component: { template: '<div />' } }],
+})
 import TemplateManager from '@/components/TemplateManager.vue'
 
 vi.mock('@/services/api', () => {
@@ -20,6 +26,7 @@ vi.mock('@/services/api', () => {
       history: vi.fn(() => Promise.resolve({ data: [] })),
       restore: vi.fn(() => Promise.resolve({ data: { success: true } })),
       reset: vi.fn(() => Promise.resolve({ data: { success: true } })),
+      resetAll: vi.fn(() => Promise.resolve({ data: { reset: [], skipped: [], failed: [] } })),
       importDefaults: vi.fn(() =>
         Promise.resolve({ data: { added: [], added_as_duplicate: [], skipped_identical: [] } })
       ),
@@ -107,6 +114,7 @@ function mountTemplateManager(options = {}) {
   return mount(TemplateManager, {
     global: {
       plugins: [
+        router,
         createTestingPinia({
           initialState: {
             user: {
@@ -333,7 +341,7 @@ describe('TemplateManager — row action: reset to default', () => {
     const api = (await import('@/services/api')).default
     vi.clearAllMocks()
     mockShowToast = vi.fn()
-    const tpl = makeTemplate({ id: 6, role: 'documenter', name: 'My Docs', is_default: true })
+    const tpl = makeTemplate({ id: 6, role: 'documenter', name: 'My Docs', can_reset: true })
     api.templates.list.mockResolvedValue({ data: [tpl] })
     const wrapper = mountTemplateManager()
     await flushPromises()
@@ -721,5 +729,80 @@ describe('TemplateManager — FE-9203 Add default agents button', () => {
     resolveImport({ data: { added: [], added_as_duplicate: [], skipped_identical: [] } })
     await pending
     expect(wrapper.vm.importingDefaults).toBe(false)
+  })
+})
+
+
+describe('TemplateManager — BE-9646: reset all agents to default', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+  })
+
+  async function mountWithRoster(templates) {
+    const api = (await import('@/services/api')).default
+    api.templates.list.mockResolvedValue({ data: templates })
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('warns exactly what a per-agent reset replaces and what survives it', async () => {
+    const wrapper = await mountWithRoster([makeTemplate({ id: 1, name: 'tester-2', can_reset: true })])
+
+    await wrapper.find('[title="Reset to Default"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.find('[data-testid="reset-warning"]').text().replace(/\s+/g, ' ').trim()
+    expect(warning).toBe(
+      "This replaces this agent's instructions, rules and success criteria with the current " +
+        'default. Your customizations will be lost. A copy is kept in version history.'
+    )
+  })
+
+  it('names the number of agents the reset would affect, counting only resettable ones', async () => {
+    const wrapper = await mountWithRoster([
+      makeTemplate({ id: 1, name: 'tester-2', can_reset: true }),
+      makeTemplate({ id: 2, name: 'implementer-2', can_reset: true }),
+      makeTemplate({ id: 3, name: 'my-own-agent', can_reset: false }),
+    ])
+
+    await wrapper.find('[data-testid="reset-all-agents"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.vm.resetAllDialog).toBe(true)
+    expect(wrapper.find('[data-testid="reset-all-count"]').text()).toContain('2 agents')
+  })
+
+  it('resets the VIEWED product only, through the bulk endpoint', async () => {
+    const api = (await import('@/services/api')).default
+    const wrapper = await mountWithRoster([makeTemplate({ id: 1, name: 'tester-2', can_reset: true })])
+
+    await wrapper.find('[data-testid="reset-all-agents"]').trigger('click')
+    await wrapper.find('[data-testid="reset-all-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(api.templates.resetAll).toHaveBeenCalledTimes(1)
+    expect(api.templates.resetAll).toHaveBeenCalledWith(wrapper.vm.viewedProductId)
+    expect(wrapper.vm.resetAllDialog).toBe(false)
+  })
+
+  it('names the agents that failed instead of collapsing a partial run', async () => {
+    const api = (await import('@/services/api')).default
+    api.templates.resetAll.mockResolvedValue({
+      data: { reset: ['tester-2'], skipped: [], failed: [{ name: 'reviewer-2', error: 'nope' }] },
+    })
+    const wrapper = await mountWithRoster([
+      makeTemplate({ id: 1, name: 'tester-2', can_reset: true }),
+      makeTemplate({ id: 2, name: 'reviewer-2', can_reset: true }),
+    ])
+
+    await wrapper.find('[data-testid="reset-all-agents"]').trigger('click')
+    await wrapper.find('[data-testid="reset-all-confirm"]').trigger('click')
+    await flushPromises()
+
+    const messages = mockShowToast.mock.calls.map((c) => c[0].message).join(' | ')
+    expect(messages).toContain('reviewer-2')
+    expect(messages).toContain('Reset 1 agent to default')
   })
 })

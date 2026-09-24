@@ -29,7 +29,6 @@ async def _create_task(two_tenant_service_setup, db_session, *, priority: str = 
     response = await task_service_a.create_task_for_mcp(
         title="BE-9469 filter validation seed task",
         description="seed",
-        task_type="BE",
         priority=priority,
         tenant_key=tenant_a,
         db_manager=db_manager,

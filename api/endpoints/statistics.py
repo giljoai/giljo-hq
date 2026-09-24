@@ -5,7 +5,7 @@
 
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -43,6 +43,16 @@ class SystemStatsResponse(BaseModel):
 class CallCountsResponse(BaseModel):
     total_api_calls: int
     total_mcp_calls: int
+
+
+class McpToolCallCount(BaseModel):
+    tool_name: str
+    total_calls: int
+
+
+class McpToolCallCountsResponse(BaseModel):
+    window_days: int
+    tools: list[McpToolCallCount]
 
 
 startup_time = datetime.now(UTC)
@@ -127,6 +137,43 @@ async def get_call_counts(request: Request, current_user: User = Depends(get_cur
     return CallCountsResponse(
         total_api_calls=db_api_calls + in_memory_api_calls,
         total_mcp_calls=db_mcp_calls + in_memory_mcp_calls,
+    )
+
+
+@router.get("/mcp-tool-calls", response_model=McpToolCallCountsResponse)
+async def get_mcp_tool_call_counts(
+    request: Request,
+    days: int = Query(30, ge=1, le=365, description="Trailing window in days."),
+    current_user: User = Depends(get_current_active_user),
+):
+    """How many times each MCP tool was called, over a trailing window.
+
+    Read the bottom of the list: a tool with no calls over a long window is one
+    nobody uses, and its description is costing every agent on every call.
+    """
+    from api.app_state import state
+
+    tenant_key = getattr(request.state, "tenant_key", None)
+    if not tenant_key:
+        raise HTTPException(status_code=400, detail="Tenant key not found in request state")
+
+    if not state.db_manager:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    stats_service = StatisticsService(state.db_manager)
+    tools = {
+        row["tool_name"]: row["total_calls"] for row in await stats_service.get_mcp_tool_call_counts(tenant_key, days)
+    }
+
+    cutoff = datetime.now(UTC).date() - timedelta(days=days - 1)
+    for (buffered_tenant, tool_name, day), count in state.mcp_tool_call_count.items():
+        if buffered_tenant == tenant_key and day >= cutoff:
+            tools[tool_name] = tools.get(tool_name, 0) + count
+
+    ordered = sorted(tools.items(), key=lambda item: (-item[1], item[0]))
+    return McpToolCallCountsResponse(
+        window_days=days,
+        tools=[McpToolCallCount(tool_name=name, total_calls=count) for name, count in ordered],
     )
 
 

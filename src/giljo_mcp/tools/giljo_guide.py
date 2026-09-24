@@ -44,9 +44,16 @@ so every future session in that repo passes `product_id` automatically and never
 `PRODUCT_AMBIGUOUS` again.
 
 - **Task** (`create_task`): technical debt, a TODO, a bug, a small fix, a scope-creep
-  punt. Every task is auto-tagged the reserved **`TSK`** type -- there is no task
-  type to choose and `task_type` is accepted-but-ignored. The serial is
-  auto-assigned (you do NOT pick the number).
+  punt. `task_type` is **`TSK`** (the default, an ordinary task) or **`HND`** (a
+  session handover) -- those two and nothing else; any other value is refused by name.
+  The serial is auto-assigned from one shared counter (you do NOT pick the number), so
+  a handover is `HND-9641`, not `HND-0001`.
+- **Session handover** (`create_task(task_type="HND")`): what you write when YOUR
+  session is ending and a successor picks the work up. The server REFUSES one whose
+  description does not carry `## Verify before trusting`, `## Waiting on the operator`
+  and `## Cannot testify`, each with at least one line under it ("nothing" is a valid
+  line). They exist so your successor can check your claims instead of trusting them.
+  Find them again with `list_tasks(task_type="HND")`.
 - **Project** (`create_project`): an actionable, multi-step body of dev work. Pass a
   `project_type` (FE/BE/INF/IMP/...), NEVER `TSK` (task-only, excluded from
   `valid_types`). Numbering is automatic -- omit `series_number`; the serial
@@ -157,14 +164,16 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
   ranked headlines. Distinct from `get_context(["memory_360"])` (recent-N by recency,
   not search) and `list_threads` (Hub chat, not memory).
 - **Tasks** -> `list_tasks(mode="summary", filters={...})`; `mode="full"` for bodies.
-  Every task is `TSK`, so a non-TSK `task_type` filter returns nothing -- normally
-  omit it. `hidden` is UI declutter only; agents see hidden and visible alike.
+  `task_type` filters by tag: `"TSK"` (ordinary tasks) or `"HND"` (session handovers);
+  any other value is refused. Omit it to see both. `hidden` is UI declutter only;
+  agents see hidden and visible alike.
 - **Roadmap** -> `get_roadmap(product_id?)` reads the ranked board; `save_roadmap
   (items=[...])` bulk-upserts sort_order/risk/complexity (agent does the ranking, server
   just validates + stores). `patch_fields=true` touches only the fields you send.
-- **Serials -- the prefix tells task from project:** **`TSK-nnnn` is ALWAYS
-  a task** (`create_task` forces the reserved `TSK` tag; every task renders `TSK-nnnn`).
-  **A typed non-TSK alias (`BE-`, `FE-`, `INF-`, ...) is ALWAYS a project.** Converting a
+- **Serials -- the prefix tells task from project:** **`TSK-nnnn` and `HND-nnnn` are
+  both TASKS** -- `TSK` an ordinary one, `HND` a session handover, and those are the
+  only two tags `create_task` accepts.
+  **A typed alias that is neither (`BE-`, `FE-`, `INF-`, ...) is ALWAYS a project.** Converting a
   task to a project **strips the type** -- the new project is UNTYPED and renders a bare
   serial (e.g. `0017`) until the user tags it, so a bare-serial alias = a project
   converted from a task, awaiting a taxonomy. `create_project` rejects `TSK`, so a project

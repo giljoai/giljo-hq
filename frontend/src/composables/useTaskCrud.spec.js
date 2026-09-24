@@ -68,7 +68,6 @@ describe('useTaskCrud', () => {
     expect(crud.currentTask.value.status).toBe('pending')
     expect(crud.currentTask.value.priority).toBe('medium')
     expect(crud.currentTask.value.task_type).toBeNull()
-    expect(crud.currentTask.value.due_date).toBeNull()
   })
 
   it('editTask sets editingTask and opens dialog', () => {
@@ -78,7 +77,6 @@ describe('useTaskCrud', () => {
       status: 'pending',
       priority: 'high',
       task_type: 'BE',
-      due_date: null,
     }
     crud.editTask(task)
     expect(crud.editingTask.value).toEqual(task)
@@ -100,6 +98,18 @@ describe('useTaskCrud', () => {
   it('handleNewTask opens dialog when product is active', () => {
     crud.handleNewTask()
     expect(crud.showTaskDialog.value).toBe(true)
+  })
+
+  describe('openHandoverDialog', () => {
+    it('opens the dialog with task_type HND and the given template text', () => {
+      const result = crud.openHandoverDialog('## Verify before trusting\n- x')
+      expect(result).toEqual({ noProduct: false })
+      expect(crud.showTaskDialog.value).toBe(true)
+      expect(crud.editingTask.value).toBeNull()
+      expect(crud.currentTask.value.task_type).toBe('HND')
+      expect(crud.currentTask.value.description).toBe('## Verify before trusting\n- x')
+      expect(crud.currentTask.value.title).toBe('')
+    })
   })
 
   it('updateTask delegates to taskStore.updateTask with the given fields', async () => {
@@ -136,19 +146,6 @@ describe('useTaskCrud', () => {
     expect(mockUpdateTask).toHaveBeenCalledWith(5, { status: 'in_progress' })
   })
 
-  it('updateTaskDueDate formats and routes through updateTask', async () => {
-    const task = { id: 7, title: 'task' }
-    const localDate = new Date(2025, 5, 15)
-    await crud.updateTaskDueDate(task, localDate)
-    expect(mockUpdateTask).toHaveBeenCalledWith(7, { due_date: '2025-06-15' })
-  })
-
-  it('updateTaskDueDate passes null when no date provided', async () => {
-    const task = { id: 8, title: 'task' }
-    await crud.updateTaskDueDate(task, null)
-    expect(mockUpdateTask).toHaveBeenCalledWith(8, { due_date: null })
-  })
-
   describe('saveTask error surfacing (FE-9461)', () => {
     it('renders the server reason when the save fails with a structured error', async () => {
       const serverMessage = "'TSK' is a reserved tag and cannot be selected."
@@ -170,6 +167,47 @@ describe('useTaskCrud', () => {
         message: 'Failed to save task. Please try again.',
         type: 'error',
       })
+    })
+
+    it('exposes the verbatim structured message on saveError for the dialog to render', async () => {
+      const serverMessage =
+        "A handover task (task_type='HND') must carry these headings in its description, and is missing '## Cannot testify'."
+      mockUpdateTask.mockRejectedValueOnce(structuredServerError(serverMessage, 'VALIDATION_ERROR'))
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high', task_type: 'HND' })
+
+      await crud.saveTask(stubForm())
+
+      expect(crud.saveError.value).toBe(serverMessage)
+    })
+
+    it('does not set saveError for an unstructured failure (the generic toast already covers it)', async () => {
+      mockUpdateTask.mockRejectedValueOnce(unstructuredError())
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high' })
+
+      await crud.saveTask(stubForm())
+
+      expect(crud.saveError.value).toBe('')
+    })
+
+    it('clears a stale saveError at the start of the next save attempt', async () => {
+      mockUpdateTask.mockRejectedValueOnce(structuredServerError('first failure', 'VALIDATION_ERROR'))
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high' })
+      await crud.saveTask(stubForm())
+      expect(crud.saveError.value).toBe('first failure')
+
+      mockUpdateTask.mockResolvedValueOnce({ id: 1 })
+      await crud.saveTask(stubForm())
+      expect(crud.saveError.value).toBe('')
+    })
+
+    it('clears saveError on cancelTask', async () => {
+      mockUpdateTask.mockRejectedValueOnce(structuredServerError('failure', 'VALIDATION_ERROR'))
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high' })
+      await crud.saveTask(stubForm())
+      expect(crud.saveError.value).toBe('failure')
+
+      crud.cancelTask()
+      expect(crud.saveError.value).toBe('')
     })
   })
 

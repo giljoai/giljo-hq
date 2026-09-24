@@ -189,13 +189,13 @@ def test_heal_then_upgrade_ends_with_the_columns_gone(scratch_engine):
 @pytest.mark.integration
 def test_upgrade_is_a_no_op_on_rerun(scratch_engine):
     _drop_all_objects(scratch_engine)
-    built = _run_alembic("upgrade", "head")
+    built = _run_alembic("upgrade", _REV)
     assert built.returncode == 0, f"chain build failed:\n{built.stdout}\n{built.stderr}"
     assert _columns_present(scratch_engine) == set()
 
     stamped = _run_alembic("stamp", _PRE)
     assert stamped.returncode == 0, f"stamp back failed:\n{stamped.stderr}"
-    rerun = _run_alembic("upgrade", "head")
+    rerun = _run_alembic("upgrade", _REV)
 
     assert rerun.returncode == 0, f"re-running the drop over an already-dropped schema failed:\n{rerun.stderr}"
     assert _columns_present(scratch_engine) == set()
@@ -206,7 +206,7 @@ def test_upgrade_is_a_no_op_on_rerun(scratch_engine):
 @pytest.mark.integration
 def test_downgrade_restores_all_three_nullable(scratch_engine):
     _drop_all_objects(scratch_engine)
-    built = _run_alembic("upgrade", "head")
+    built = _run_alembic("upgrade", _REV)
     assert built.returncode == 0, f"chain build failed:\n{built.stdout}\n{built.stderr}"
 
     down = _run_alembic("downgrade", "-1")
@@ -218,6 +218,6 @@ def test_downgrade_restores_all_three_nullable(scratch_engine):
         col = next(c for c in insp.get_columns(table) if c["name"] == column)
         assert col["nullable"], f"{table}.{column} came back NOT NULL; the downgrade cannot honour that honestly"
 
-    up = _run_alembic("upgrade", "head")
+    up = _run_alembic("upgrade", _REV)
     assert up.returncode == 0, f"re-upgrade after downgrade failed:\n{up.stderr}"
     assert _columns_present(scratch_engine) == set()

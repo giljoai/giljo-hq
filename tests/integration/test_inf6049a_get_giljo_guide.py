@@ -136,3 +136,28 @@ async def test_guide_carries_hub_etiquette_and_status_vocabulary():
     for word in ("open", "resolved", "closed"):
         assert word in guide, word
     assert "Status vocabulary" in guide
+
+
+
+
+async def test_guide_knows_that_a_task_can_be_a_handover():
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("get_giljo_guide", {})
+
+    guide = _payload(result)["guide"]
+
+    assert "HND" in guide, "the guide never mentions the handover type"
+    assert "accepted-but-ignored" not in guide
+    assert "Every task is `TSK`" not in guide
+    assert "every task renders `TSK-nnnn`" not in guide
+
+
+async def test_guide_routes_a_session_handover_to_create_task():
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("get_giljo_guide", {})
+
+    guide = _payload(result)["guide"]
+
+    assert 'task_type="HND"' in guide
+    assert "## Cannot testify" in guide, "the guide does not name the headings the server requires"
+    assert 'list_tasks(task_type="HND")' in guide

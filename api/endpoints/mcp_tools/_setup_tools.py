@@ -20,6 +20,7 @@ from api.endpoints.mcp_tools._base import (
     mcp,
     validation_rejection,
 )
+from api.endpoints.mcp_tools._call_metrics import record_untenanted_tool_call
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.platform_registry import (
     EXPORT_PLATFORMS,
@@ -40,6 +41,8 @@ from giljo_mcp.utils.log_sanitizer import sanitize
     annotations=_tool_hints("health_check"),
 )
 async def health_check(ctx: Context = None) -> dict[str, Any]:
+    record_untenanted_tool_call(ctx, "health_check")
+
     from giljo_mcp.services.orchestration_service import OrchestrationService
 
     return await OrchestrationService.health_check()
@@ -56,6 +59,8 @@ async def health_check(ctx: Context = None) -> dict[str, Any]:
     annotations=_tool_hints("get_giljo_guide"),
 )
 async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
+    record_untenanted_tool_call(ctx, "get_giljo_guide")
+
     from giljo_mcp.tools.giljo_guide import build_giljo_guide
 
     return build_giljo_guide()

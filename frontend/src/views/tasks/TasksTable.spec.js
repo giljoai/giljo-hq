@@ -7,6 +7,8 @@ vi.mock('@/utils/taxonomyBadge', () => ({
   DEFAULT_PROJECT_TYPE_COLOR: '#646464',
   resolveTaxonomyColor: ({ color } = {}) => color || '#646464',
   isReservedTaskAlias: (alias) => typeof alias === 'string' && /^TSK(?=[-\d])/.test(alias),
+  isHandoverRow: (row) =>
+    !!row && (row.task_type?.abbreviation === 'HND' || /^HND(?=[-\d])/.test(row.taxonomy_alias || '')),
 }))
 vi.mock('@/composables/useFormatDate', () => ({
   useFormatDate: () => ({
@@ -53,7 +55,6 @@ const sampleTasks = [
     taxonomy_alias: 'BE-0001',
     task_type_color: '#ff6b6b',
     created_at: '2026-06-01T10:00:00Z',
-    due_date: null,
     converted_project_id: null,
     hidden: false,
   },
@@ -139,5 +140,90 @@ describe('TasksTable', () => {
       global: { stubs: titleSlotStubs },
     })
     expect(wrapper.find('[data-test="task-archived-badge"]').exists()).toBe(false)
+  })
+})
+
+
+
+describe('TasksTable handover controls (BE-9637)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  const actionStubs = {
+    ...stubs,
+    'v-data-table': {
+      template:
+        '<div class="v-data-table" data-table><slot name="item.actions" :item="items[0]" /><slot name="item.convert" :item="items[0]" /></div>',
+      props: ['items', 'loading', 'headers'],
+    },
+    'v-list-item': {
+      template: '<div class="v-list-item" v-bind="$attrs" @click="$emit(\'click\')"><slot /><slot name="prepend" /></div>',
+    },
+  }
+
+  function mountWith(task) {
+    return mount(TasksTable, {
+      props: {
+        tasks: [task],
+        loading: false,
+        statusSelectOptions: ['pending'],
+        priorityOptions: ['low', 'medium', 'high', 'critical'],
+      },
+      global: { stubs: actionStubs },
+    })
+  }
+
+  const handover = {
+    ...sampleTasks[0],
+    id: 'hnd-1',
+    taxonomy_alias: 'HND-9641',
+    task_type: { abbreviation: 'HND' },
+    status: 'pending',
+    hidden: false,
+  }
+
+  it('hides Convert to Project on a handover row', () => {
+    const wrapper = mountWith(handover)
+    expect(wrapper.text()).not.toContain('Convert to Project')
+  })
+
+  it('still offers Convert to Project on an ordinary task', () => {
+    const wrapper = mountWith({ ...sampleTasks[0], status: 'pending' })
+    expect(wrapper.text()).toContain('Convert to Project')
+  })
+
+  it('hides the convert icon button on a handover row', () => {
+    const wrapper = mountWith(handover)
+    expect(wrapper.find('.convert-action').exists()).toBe(false)
+  })
+
+  it('keeps the convert icon button on an ordinary task', () => {
+    const wrapper = mountWith({ ...sampleTasks[0], status: 'pending' })
+    expect(wrapper.find('.convert-action').exists()).toBe(true)
+  })
+
+  const isDisabled = (el) => el.attributes('disabled') === 'true' || el.attributes('disabled') === ''
+
+  it('disables Archive while a handover is still pending', () => {
+    const wrapper = mountWith(handover)
+    const action = wrapper.find('[data-test="task-hide-action"]')
+    expect(action.exists()).toBe(true)
+    expect(isDisabled(action)).toBe(true)
+  })
+
+  it('re-enables Archive once the handover is no longer pending', () => {
+    const wrapper = mountWith({ ...handover, status: 'completed' })
+    expect(isDisabled(wrapper.find('[data-test="task-hide-action"]'))).toBe(false)
+  })
+
+  it('never disables Archive on an ordinary pending task', () => {
+    const wrapper = mountWith({ ...sampleTasks[0], status: 'pending' })
+    expect(isDisabled(wrapper.find('[data-test="task-hide-action"]'))).toBe(false)
+  })
+
+  it('recognises a handover from the alias alone, when the type record was trimmed', () => {
+    const wrapper = mountWith({ ...handover, task_type: undefined })
+    expect(wrapper.find('.convert-action').exists()).toBe(false)
   })
 })

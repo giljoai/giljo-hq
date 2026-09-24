@@ -166,7 +166,6 @@ async def test_create_task_happy_path_returns_task_id(task_mcp_client, db_sessio
                 "title": "wire transport tests",
                 "description": "exercise wrapper at line 584",
                 "priority": "high",
-                "task_type": "BE",
             },
         )
 
@@ -176,7 +175,7 @@ async def test_create_task_happy_path_returns_task_id(task_mcp_client, db_sessio
     assert payload.get("task_type") == "TSK"
 
 
-async def test_create_task_ignores_task_type_param_and_forces_tsk(task_mcp_client, db_session, primary_tenant_key):
+async def test_create_task_refuses_an_unknown_task_type(task_mcp_client, db_session, primary_tenant_key):
     new_client, _switch = task_mcp_client
     await _seed_product(db_session, primary_tenant_key)
     await _seed_taxonomy(db_session, primary_tenant_key)
@@ -185,16 +184,19 @@ async def test_create_task_ignores_task_type_param_and_forces_tsk(task_mcp_clien
         result = await session.call_tool(
             "create_task",
             {
-                "title": "bogus type is ignored",
-                "description": "unknown task_type no longer errors",
+                "title": "bogus type is refused",
+                "description": "an unknown task_type is refused, not absorbed",
                 "task_type": "MADEUP",
             },
         )
 
-    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
-    assert payload["task_id"]
-    assert payload.get("task_type") == "TSK"
+    assert payload["success"] is False, f"an unknown task_type was absorbed: {payload}"
+    assert payload["error"] == "VALIDATION_ERROR"
+    assert payload["field"] == "task_type"
+    assert "MADEUP" in payload["message"]
+    assert "TSK" in payload["message"] and "HND" in payload["message"]
+    assert "task_id" not in payload, "a refused create must not have written a row"
 
 
 
@@ -208,7 +210,6 @@ async def _create_seed_task(new_client, db_session, tenant_key) -> str:
             {
                 "title": "seed",
                 "description": "seed for update/complete",
-                "task_type": "BE",
             },
         )
     assert result.is_error is False, _error_text(result)
@@ -314,47 +315,6 @@ async def test_update_task_completion_notes_without_completed_is_noop(task_mcp_c
 
 
 
-async def test_update_task_due_date_string_via_transport(task_mcp_client, db_session, primary_tenant_key):
-    new_client, _switch = task_mcp_client
-    task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
-
-    async with new_client() as session:
-        result = await session.call_tool(
-            "update_task",
-            {"task_id": task_id, "due_date": "2026-07-15"},
-        )
-
-    assert result.is_error is False, _error_text(result)
-    payload = _payload(result)
-    assert payload["task_id"] == task_id
-    assert "due_date" in payload["updated_fields"]
-
-    async with new_client() as session:
-        full = await session.call_tool("list_tasks", {"mode": "full"})
-    row = next(r for r in _payload(full)["tasks"] if r["task_id"] == task_id)
-    assert row["due_date"] is not None
-    parsed = datetime.fromisoformat(row["due_date"])
-    assert (parsed.year, parsed.month, parsed.day) == (2026, 7, 15)
-
-
-async def test_update_task_due_date_garbage_is_actionable_error_via_transport(
-    task_mcp_client, db_session, primary_tenant_key
-):
-    new_client, _switch = task_mcp_client
-    task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
-
-    async with new_client() as session:
-        result = await session.call_tool(
-            "update_task",
-            {"task_id": task_id, "due_date": "next tuesday"},
-        )
-
-    assert result.is_error is True
-    assert "due_date" in _error_text(result)
-
-
-
-
 async def test_list_tasks_summary_mode_field_shape(task_mcp_client, db_session, primary_tenant_key):
     new_client, _switch = task_mcp_client
     await _create_seed_task(new_client, db_session, primary_tenant_key)
@@ -367,7 +327,7 @@ async def test_list_tasks_summary_mode_field_shape(task_mcp_client, db_session, 
     assert "tasks" in payload
     assert len(payload["tasks"]) >= 1
     row = payload["tasks"][0]
-    expected = {"task_id", "title", "status", "priority", "task_type", "due_date", "created_at"}
+    expected = {"task_id", "title", "status", "priority", "task_type", "created_at"}
     assert expected.issubset(set(row.keys()) | {"id"})
 
 
@@ -412,7 +372,7 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
     async with new_client() as session:
         b_result = await session.call_tool(
             "create_task",
-            {"title": "tenant_b task", "description": "x", "task_type": "BE"},
+            {"title": "tenant_b task", "description": "x"},
         )
     assert b_result.is_error is False, _error_text(b_result)
     b_task_id = _payload(b_result)["task_id"]
@@ -490,7 +450,7 @@ async def test_list_tasks_hidden_filter_via_wrapper(task_mcp_client, db_session,
     async with new_client() as session:
         h_create = await session.call_tool(
             "create_task",
-            {"title": "hidden task", "description": "x", "task_type": "BE"},
+            {"title": "hidden task", "description": "x"},
         )
     assert h_create.is_error is False, _error_text(h_create)
     hidden_id = _payload(h_create)["task_id"]
@@ -515,46 +475,6 @@ async def test_list_tasks_hidden_filter_via_wrapper(task_mcp_client, db_session,
     ids_v = {r["task_id"] for r in _payload(only_visible)["tasks"]}
     assert visible_id in ids_v
     assert hidden_id not in ids_v
-
-
-
-
-async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_session, primary_tenant_key):
-    new_client, _switch = task_mcp_client
-    task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
-
-    async with new_client() as session:
-        set_due = await session.call_tool(
-            "update_task",
-            {"task_id": task_id, "due_date": "2026-07-10T00:00:00+00:00"},
-        )
-    assert set_due.is_error is False, _error_text(set_due)
-
-    async with new_client() as session:
-        result = await session.call_tool("list_tasks", {"due_before": "2026-07-15"})
-
-    assert result.is_error is False, _error_text(result)
-    ids = {row["task_id"] for row in _payload(result)["tasks"]}
-    assert task_id in ids
-
-    async with new_client() as session:
-        earlier = await session.call_tool("list_tasks", {"due_before": "2026-07-01"})
-    assert earlier.is_error is False, _error_text(earlier)
-    ids_earlier = {row["task_id"] for row in _payload(earlier)["tasks"]}
-    assert task_id not in ids_earlier
-
-
-async def test_list_tasks_due_before_garbage_is_actionable_error_via_transport(
-    task_mcp_client, db_session, primary_tenant_key
-):
-    new_client, _switch = task_mcp_client
-    await _create_seed_task(new_client, db_session, primary_tenant_key)
-
-    async with new_client() as session:
-        result = await session.call_tool("list_tasks", {"due_before": "next tuesday"})
-
-    assert result.is_error is True
-    assert "due_before" in _error_text(result)
 
 
 _ = random

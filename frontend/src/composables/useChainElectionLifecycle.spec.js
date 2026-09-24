@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 
 const {
@@ -56,7 +55,6 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: mockRouterPush }) }))
 import { useChainLifecycle } from '@/composables/useChainLifecycle'
 import { useSequenceRunner } from '@/composables/useSequenceRunner'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
-import SequenceBulkBar from '@/components/sequence/SequenceBulkBar.vue'
 
 
 describe('FE-6171b (redef): unstageChain = UNLOCK, not dissolve', () => {
@@ -142,23 +140,7 @@ describe('FE-6170 (b): untick removes a participant (toggle-off in Electing stat
   })
 })
 
-describe('FE-6170 (c): count < 2 disables the Run Sequential button', () => {
-  it('disables the run button when count=1 (under the 2-project minimum)', () => {
-    const wrapper = mount(SequenceBulkBar, { props: { count: 1 } })
-    expect(wrapper.find('[data-testid="seq-bulk-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="seq-bulk-hint"]').exists()).toBe(true)
-    const btn = wrapper.find('[data-testid="seq-run-btn"]')
-    expect(btn.exists()).toBe(true)
-    expect(btn.attributes('disabled')).toBeDefined()
-  })
-
-  it('enables the run button when count=2 (meets the minimum)', () => {
-    const wrapper = mount(SequenceBulkBar, { props: { count: 2 } })
-    expect(wrapper.find('[data-testid="seq-bulk-hint"]').exists()).toBe(false)
-    const btn = wrapper.find('[data-testid="seq-run-btn"]')
-    expect(btn.attributes('disabled')).toBeUndefined()
-  })
-
+describe('FE-6170 (c): the 2-project election threshold', () => {
   it('electionActive stays false with 1 elected (keeps single-project play usable)', () => {
     const runner = useSequenceRunner()
     runner.toggle({ id: 'proj-A', name: 'Alpha' })
@@ -167,10 +149,6 @@ describe('FE-6170 (c): count < 2 disables the Run Sequential button', () => {
     expect(runner.electionActive.value).toBe(true)
   })
 
-  it('SequenceBulkBar bar hidden when count=0 (no election)', () => {
-    const wrapper = mount(SequenceBulkBar, { props: { count: 0 } })
-    expect(wrapper.find('[data-testid="seq-bulk-bar"]').exists()).toBe(false)
-  })
 })
 
 describe('FE-6170 (d): emptied election hides the bulk-bar (no-jobs state)', () => {
@@ -178,11 +156,6 @@ describe('FE-6170 (d): emptied election hides the bulk-bar (no-jobs state)', () 
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockApiRoadmapGet.mockResolvedValue({ data: { items: [] } })
-  })
-
-  it('bulk bar is hidden when selection is cleared', () => {
-    const wrapper = mount(SequenceBulkBar, { props: { count: 0 } })
-    expect(wrapper.find('[data-testid="seq-bulk-bar"]').exists()).toBe(false)
   })
 
   it('clear() empties selection so count drops to 0', () => {

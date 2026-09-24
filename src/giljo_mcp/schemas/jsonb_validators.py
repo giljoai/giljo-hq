@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from giljo_mcp.schemas.jsonb_notification_payloads import (  # noqa: F401
     NOTIFICATION_PAYLOAD_VALIDATORS,
@@ -110,11 +110,18 @@ class GitCommitEntry(BaseModel):
     ``pr_url`` (BE-9256) is freeform and stored verbatim -- never parsed --
     so this shape stays correct for GitHub, Gitea, GitLab, or any other host.
     Length caps (BE-9256 #3) restore the old 64-char sha cap + message/author/pr_url caps -- hard rejection.
+
+    BE-9634: ``sha`` also accepts the input key ``hash``. It is the natural word
+    for that field and what several git JSON formats emit, and ``extra="ignore"``
+    silently DROPPED it -- so a caller that wrote ``hash`` got "sha Field
+    required" for a value it had supplied, and a real closeout failed on prod
+    (Sentry GILJOAI-BACKEND-11). The alias is INPUT-only: ``model_dump()`` still
+    emits ``sha``, so nothing downstream of validation changes.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    sha: str = Field(max_length=64)
+    sha: str = Field(max_length=64, validation_alias=AliasChoices("sha", "hash"))
     message: str = Field(max_length=500)
     author: str | None = Field(default=None, max_length=200)
     date: str | None = None
@@ -337,6 +344,22 @@ class GitCommitTitleRequiredError(ValueError):
         )
 
 
+class GitCommitShaRequiredError(ValueError):
+
+    field = "git_commits[].sha"
+    constraint = "missing_commit_identifier"
+
+    def __init__(self, offending: object):
+        self.offending = offending
+        self.hint = f"Run: {GIT_LOG_TITLED_COMMAND_HINT}"
+        super().__init__(
+            f"git_commits entry has no commit identifier: {offending!r}. Every commit needs "
+            f"its revision id under either the key 'sha' or the key 'hash' (both are "
+            f"accepted and mean the same thing), together with a non-empty 'message'. "
+            f"{self.hint}"
+        )
+
+
 def _parse_porcelain_commit_line(line: str) -> dict[str, str]:
     parts = line.split("\t")
     sha = parts[0].strip() if parts else ""
@@ -365,6 +388,9 @@ def validate_git_commits(data: list | None) -> list | None:
             message = entry.get("message")
             if not isinstance(message, str) or not message.strip():
                 raise GitCommitTitleRequiredError(entry)
+            identifier = entry.get("sha") or entry.get("hash")
+            if not isinstance(identifier, str) or not identifier.strip():
+                raise GitCommitShaRequiredError(entry)
             normalized.append(GitCommitEntry(**entry).model_dump())
         else:
             raise TypeError(f"git_commits entries must be a dict or SHA/porcelain string, got {type(entry).__name__}")

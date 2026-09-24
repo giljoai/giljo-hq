@@ -218,7 +218,7 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
             summary="Sprint completed with HITL closeout",
             key_outcomes=["Implemented closeout checklist"],
             decisions_made=["Used HITL mode by default"],
-            entry_type="handover_closeout",
+            entry_type="decision",
             author_job_id=job_id,
             git_commits=[],
             tags=["chore"],
