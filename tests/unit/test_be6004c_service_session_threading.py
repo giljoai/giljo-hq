@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
-from giljo_mcp.services.agent_job_manager import AgentJobManager
 from giljo_mcp.services.project_summary_service import ProjectSummaryService
 from giljo_mcp.tenant import TenantManager, current_tenant
 
@@ -108,29 +107,6 @@ async def test_get_project_summary_succeeds_without_ambient_contextvar(db_sessio
         assert result.completion_percentage == 100.0
         assert result.product_name.startswith("BE6004C-3 Product")
         assert TenantManager.get_current_tenant() is None
-
-
-@pytest.mark.asyncio
-async def test_list_team_agents_succeeds_without_ambient_contextvar(db_session: AsyncSession) -> None:
-    tenant_key = TenantManager.generate_tenant_key()
-    project_id, _product_id = await _seed_project_with_agents(db_session, tenant_key)
-
-    job_id = (
-        (await db_session.execute(AgentJob.__table__.select().where(AgentJob.project_id == project_id))).first().job_id
-    )
-
-    manager = AgentJobManager(
-        db_manager=None,  # type: ignore[arg-type]
-        tenant_manager=TenantManager(),
-        test_session=db_session,
-    )
-
-    with _no_ambient_tenant():
-        members = await manager.list_team_agents(job_id=job_id, tenant_key=tenant_key, include_inactive=True)
-
-    assert len(members) == 1
-    assert members[0]["job_id"] == job_id
-    assert members[0]["tenant_key"] == tenant_key
 
 
 @pytest.mark.asyncio

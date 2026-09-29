@@ -96,26 +96,19 @@ describe('sequenceRunStore — reviewPendingRun getter', () => {
     expect(store.reviewPendingRun).toBeNull()
   })
 
-  it('resolver integration — finished+unreviewed run resolves to chain review path, not /launch dead end', () => {
+  it('board integration — a finished+unreviewed run is still the run the board reads, then releases', () => {
     store._testSetActiveRun({
       id: 'run-1',
       resolved_order: ['p1', 'p2'],
       project_statuses: { p1: 'completed', p2: 'completed' },
     })
 
-    const target = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
-    })
-    expect(target).toBe('/projects/p1?run=run-1')
+    expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toMatchObject({ id: 'run-1' })
+    expect(resolveJobsNavPath()).toBe('/jobs-overview')
 
     store.markReviewed('run-1', 'p1')
     store.markReviewed('run-1', 'p2')
-    const released = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
-    })
-    expect(released).toBe('/launch?via=jobs')
+    expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toBeNull()
   })
 
   it('ordering: in-flight run in activeRuns[0] takes precedence; reviewPendingRun is not consulted (?? short-circuits)', () => {
@@ -137,11 +130,9 @@ describe('sequenceRunStore — reviewPendingRun getter', () => {
     expect(store.activeRuns[0]).toBeDefined()
     expect(store.activeRuns[0].id).toBe('run-active')
 
-    const target = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
+    expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toMatchObject({
+      id: 'run-active',
     })
-    expect(target).toBe('/projects/pX?run=run-active')
   })
 
   it('returns null when activeRun is null (no solo or chain run open)', () => {
@@ -174,14 +165,12 @@ describe('sequenceRunStore — FE-9104 cold-refresh review reachability', () => 
     expect(store.reviewPendingRun).not.toBeNull()
     expect(store.reviewPendingRun.id).toBe('run-term')
 
-    const target = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
+    expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toMatchObject({
+      id: 'run-term',
     })
-    expect(target).toBe('/projects/p1?run=run-term')
   })
 
-  it('release: after every completed member reviewed → reviewPendingRun releases + nav → /launch (no bounce)', () => {
+  it('release: after every completed member reviewed → reviewPendingRun releases (no bounce)', () => {
     store._testSeedReviewPending([termRun()])
     expect(store.reviewPendingRun).not.toBeNull()
 
@@ -189,11 +178,7 @@ describe('sequenceRunStore — FE-9104 cold-refresh review reachability', () => 
     store.markReviewed('run-term', 'p2')
 
     expect(store.reviewPendingRun).toBeNull()
-    const released = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
-    })
-    expect(released).toBe('/launch?via=jobs')
+    expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toBeNull()
   })
 
   it('hydrate splits runs: active → runsById (locks checkbox), terminal review-pending → reviewPendingById (does NOT re-lock)', async () => {
@@ -222,23 +207,13 @@ describe('sequenceRunStore — FE-9104 cold-refresh review reachability', () => 
     })
   })
 
-  it('solo deletion test: empty hydrate → reviewPendingRun null, nav byte-identical', async () => {
+  it('solo deletion test: empty hydrate → no run to review, and the Jobs landing is still the board', async () => {
     api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
     await store.hydrate()
 
     expect(store.reviewPendingRun).toBeNull()
-    expect(
-      resolveJobsNavPath({
-        activeProject: null,
-        activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
-      }),
-    ).toBe('/launch?via=jobs')
-    expect(
-      resolveJobsNavPath({
-        activeProject: { id: 'solo' },
-        activeRun: store.activeRuns[0] ?? store.reviewPendingRun ?? null,
-      }),
-    ).toBe('/projects/solo?via=jobs')
+    expect(store.activeRuns).toHaveLength(0)
+    expect(resolveJobsNavPath()).toBe('/jobs-overview')
   })
 
   it('$reset clears reviewPendingById', () => {

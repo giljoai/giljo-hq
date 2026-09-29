@@ -5,6 +5,7 @@
 
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
@@ -12,6 +13,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.principal import PrincipalValidationError, validate_principal
+from giljo_mcp.exceptions import AuthorizationError
 from giljo_mcp.models import APIKey, User
 
 
@@ -127,7 +129,11 @@ async def get_current_user(
     )
 
 
-async def get_current_active_user(current_user: User | None = Depends(get_current_user)) -> User:
+async def get_current_active_user(
+    request: Request,
+    current_user: User | None = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> User:
     if current_user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,11 +143,67 @@ async def get_current_active_user(current_user: User | None = Depends(get_curren
     if not current_user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is inactive")
 
+    route = request.scope.get("route")
+    route_name = getattr(route, "name", None) or request.url.path
+    violation = await act_first_gate_violation(
+        must_change_password=current_user.must_change_password,
+        tenant_key=current_user.tenant_key,
+        db=db,
+        route=route_name,
+        browser_session=is_browser_session(request),
+    )
+    if violation is not None:
+        raise violation
+
     from api.observability.sentry_init import set_tenant_context
 
     set_tenant_context(tenant_key=current_user.tenant_key, user_id=str(current_user.id))
 
     return current_user
+
+
+ACT_FIRST_GATE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "complete_first_login",
+        "change_password",
+        "reaccept_terms",
+        "get_account_status",
+        "health_check",
+    }
+)
+
+TermsAcceptedCheck = Callable[[AsyncSession, str], Awaitable[bool]]
+_terms_accepted_check: TermsAcceptedCheck | None = None
+
+
+def register_terms_accepted_check(check: TermsAcceptedCheck) -> None:
+    global _terms_accepted_check  # noqa: PLW0603
+    _terms_accepted_check = check
+
+
+async def act_first_gate_violation(
+    *,
+    must_change_password: bool,
+    tenant_key: str,
+    db: AsyncSession | None,
+    route: str,
+    browser_session: bool,
+) -> AuthorizationError | None:
+    if route in ACT_FIRST_GATE_ALLOWLIST:
+        return None
+    if must_change_password:
+        return AuthorizationError(
+            message="A password change is required before continuing.",
+            error_code="PASSWORD_CHANGE_REQUIRED",
+        )
+    if browser_session and _terms_accepted_check is not None:
+        accepted = await _terms_accepted_check(db, tenant_key=tenant_key)
+        if not accepted:
+            return AuthorizationError(
+                message="Updated Terms of Service must be accepted before continuing.",
+                error_code="TERMS_REACCEPTANCE_REQUIRED",
+            )
+    return None
 
 
 async def require_admin(current_user: User = Depends(get_current_active_user)) -> User:

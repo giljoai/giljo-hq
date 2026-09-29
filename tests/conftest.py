@@ -42,6 +42,8 @@ from tests.fixtures.base_fixtures import (  # noqa: E402
     db_manager,
     db_session,
     restored_global_client_resolver,
+    restored_global_protected_surface_patterns,
+    restored_global_terms_accepted_check,
     restored_global_wake_relay,
     test_project,
 )
@@ -171,6 +173,31 @@ def _auth_rate_limit_test_bypass(request):
         set_test_bypass(False)
 
 
+@pytest.fixture
+def real_rate_limiter():
+    from api.middleware.rate_limiter import set_test_bypass
+
+    set_test_bypass(False)
+    try:
+        yield
+    finally:
+        set_test_bypass(False)
+
+
+@pytest.fixture(autouse=True)
+def _general_rate_limit_test_bypass(request):
+    from api.middleware.rate_limiter import set_test_bypass
+
+    if "real_rate_limiter" in request.fixturenames:
+        yield
+        return
+    set_test_bypass(True)
+    try:
+        yield
+    finally:
+        set_test_bypass(False)
+
+
 @pytest.fixture(autouse=True)
 def _restore_global_wake_relay():
     with restored_global_wake_relay():
@@ -180,6 +207,18 @@ def _restore_global_wake_relay():
 @pytest.fixture(autouse=True)
 def _restore_global_client_resolver():
     with restored_global_client_resolver():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_terms_accepted_check():
+    with restored_global_terms_accepted_check():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_protected_surface_patterns():
+    with restored_global_protected_surface_patterns():
         yield
 
 

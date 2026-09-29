@@ -404,7 +404,7 @@ async def fenced_gate_client(db_manager, db_session, monkeypatch):
 
 
 class TestDecideApprovalDefaultHeadlessFence:
-    async def test_no_row_advertises_decide_approval_in_tools_list(self, fenced_gate_client):
+    async def test_no_row_hides_decide_approval_from_tools_list(self, fenced_gate_client):
         new_client, holder, _service = fenced_gate_client
         holder.state = _jwt_orchestrator_state(holder.tenant_key)
 
@@ -412,11 +412,11 @@ class TestDecideApprovalDefaultHeadlessFence:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
-        assert "decide_approval" in advertised, "platform default must advertise decide_approval"
+        assert "decide_approval" not in advertised, "unset tenant must default to HITL (hidden)"
         assert "request_approval" in advertised
         assert "spawn_job" in advertised
 
-    async def test_no_row_allows_decide_approval_call(self, fenced_gate_client, db_session):
+    async def test_no_row_blocks_decide_approval_call(self, fenced_gate_client, db_session):
         new_client, holder, service = fenced_gate_client
         seed = await _seed_approval_context(db_session, holder.tenant_key)
         pending = await _create_pending(service, seed, holder.tenant_key)
@@ -426,7 +426,7 @@ class TestDecideApprovalDefaultHeadlessFence:
             result = await session.call_tool("decide_approval", {"approval_id": pending.id, "option_id": "approve"})
 
         joined = _error_text(result)
-        assert "HITL mode" not in joined, f"platform default must not be HITL-fenced, got: {joined!r}"
+        assert "HITL mode" in joined, f"unset tenant must be HITL-fenced, got: {joined!r}"
 
     async def test_explicit_false_still_hides_decide_approval_from_tools_list(self, fenced_gate_client, db_manager):
         new_client, holder, _service = fenced_gate_client

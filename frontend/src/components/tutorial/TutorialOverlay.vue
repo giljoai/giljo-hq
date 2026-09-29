@@ -272,18 +272,4 @@ function goManual() {
 .tutorial--reduced :deep(*) {
   animation: none !important;
 }
-
-/* Responsive: rail stacks above content on narrow viewports */
-@media (max-width: 720px) {
-  .tutorial-panel {
-    flex-direction: column;
-    height: auto;
-    max-height: calc(100vh - 48px);
-    overflow-y: auto;
-  }
-
-  .tutorial-content {
-    padding: 24px 20px 0;
-  }
-}
 </style>

@@ -15,7 +15,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
-CSP_STYLE_HASH = "'sha256-pR5eQD+pcfGctW0ZvPpp3UToUJkVDBclZbDZVJBZoBU='"
 CSP_SCRIPT_HASH_1 = "'sha256-LRJOHmw/kARrWFQNFXTam7BNVjtucN2V1FzuxKtEUg0='"
 CSP_SCRIPT_HASH_2 = "'sha256-T+y4FnL+BP2aiGWNs6H5HdyLosVMnGaNc9v+5DaNNJM='"
 
@@ -168,8 +167,8 @@ class SecurityHeadersMiddleware:
             script_src += " 'unsafe-eval'"
 
         nonce = getattr(request.state, "csp_nonce", "")
-        style_hashes = " ".join([CSP_STYLE_HASH, *_EXTRA_CSP_STYLE_HASHES])
-        style_src = f"'self' 'nonce-{nonce}' {style_hashes}" if nonce else "'self' 'unsafe-inline'"
+        style_hashes = "".join(f" {h}" for h in sorted(_EXTRA_CSP_STYLE_HASHES))
+        style_src = f"'self' 'nonce-{nonce}'{style_hashes}" if nonce else "'self' 'unsafe-inline'"
         if _EXTRA_CSP_STYLE_ORIGINS:
             style_src += " " + " ".join(sorted(_EXTRA_CSP_STYLE_ORIGINS))
 

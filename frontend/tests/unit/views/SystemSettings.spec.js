@@ -17,6 +17,7 @@ import * as directives from 'vuetify/directives'
 import { createPinia, setActivePinia } from 'pinia'
 import SystemSettings from '@/views/SystemSettings.vue'
 import configService from '@/services/configService'
+import api from '@/services/api'
 
 // Mock the api service
 // FE-9553: local hoisted toast spy -- see the same note in the RoadmapView and
@@ -30,6 +31,7 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/services/api', () => ({
   default: {
     settings: {
+      getDatabase: vi.fn().mockResolvedValue({ data: { host: 'localhost', port: 5432 } }),
       getCookieDomains: vi.fn().mockResolvedValue({ data: { domains: [] } }),
       addCookieDomain: vi.fn().mockResolvedValue({ data: { success: true } }),
       removeCookieDomain: vi.fn().mockResolvedValue({ data: { success: true } }),
@@ -564,45 +566,59 @@ describe('SystemSettings.vue', () => {
     })
   })
 
-  // ── FE-9553: loadDatabaseSettings is silent unless a click asked ─────────
-  //
-  // It runs from onMounted AND from the retry button. Only the retry follows a
-  // click, so only the retry may speak. Both directions asserted, because a
-  // silence test alone would be satisfied by a guard that is always off.
-  //
-  // Note the retry button had to change too: `@click="loadDatabaseSettings"`
-  // hands the MouseEvent in as the options object, which would have made
-  // `notify` undefined and the retry silent. It now calls explicitly.
-  describe('the notify opt-in (FE-9553)', () => {
-    function mountIt() {
-      return mount(SystemSettings, {
-        global: {
-          plugins: [vuetify, router, pinia],
-          stubs: {
-            DatabaseConnection: { template: '<div>Database Connection Mock</div>' },
-            UserManager: { template: '<div>User Manager Mock</div>' },
-          },
-        },
+  // The Reload from Config button re-reads the database settings through the
+  // DatabaseConnection form it sits in. The form's own mount-time read stays
+  // silent; only a failed click raises the error toast.
+  describe('Reload from Config', () => {
+    async function mountOnDatabaseTab() {
+      const w = mount(SystemSettings, {
+        global: { plugins: [vuetify, router, pinia] },
       })
+      w.vm.activeTab = 'database'
+      await flushPromises()
+      return w
     }
 
-    it('says NOTHING when the mount-time database read fails', async () => {
-      global.fetch.mockRejectedValue(new Error('Network error'))
+    function reloadButton(w) {
+      return w.findAll('button').find((b) => b.text().includes('Reload from Config'))
+    }
+
+    function shownHost(w) {
+      return w.find('[data-test="db-host"]').attributes('modelvalue')
+    }
+
+    it('re-reads the database settings into the form when clicked', async () => {
+      api.settings.getDatabase
+        .mockResolvedValueOnce({ data: { host: 'db-before', port: 5432 } })
+        .mockResolvedValueOnce({ data: { host: 'db-after', port: 6543 } })
+
+      wrapper = await mountOnDatabaseTab()
+      expect(api.settings.getDatabase).toHaveBeenCalledTimes(1)
+      expect(shownHost(wrapper)).toBe('db-before')
+
+      await reloadButton(wrapper).trigger('click')
+      await flushPromises()
+
+      expect(api.settings.getDatabase).toHaveBeenCalledTimes(2)
+      expect(shownHost(wrapper)).toBe('db-after')
+      expect(showToastSpy).not.toHaveBeenCalled()
+    })
+
+    it('says nothing when the mount-time database read fails', async () => {
+      api.settings.getDatabase.mockRejectedValueOnce(new Error('Network error'))
       showToastSpy.mockClear()
 
-      wrapper = mountIt()
-      await flushPromises()
+      wrapper = await mountOnDatabaseTab()
 
       expect(showToastSpy).not.toHaveBeenCalled()
     })
 
-    it('DOES speak up when the retry button asked for it', async () => {
-      wrapper = mountIt()
-      await flushPromises()
-
-      global.fetch.mockRejectedValue(new Error('Network error'))
+    it('shows the error toast when a clicked reload fails', async () => {
+      wrapper = await mountOnDatabaseTab()
+      api.settings.getDatabase.mockRejectedValueOnce(new Error('Network error'))
       showToastSpy.mockClear()
-      await wrapper.vm.loadDatabaseSettings({ notify: true })
+
+      await reloadButton(wrapper).trigger('click')
       await flushPromises()
 
       expect(showToastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))

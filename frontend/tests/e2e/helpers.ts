@@ -5,7 +5,7 @@
  * authentication, and test data management.
  */
 
-import { Page, expect } from '@playwright/test'
+import { Page, APIRequestContext, expect } from '@playwright/test'
 
 // ============================================
 // CONFIGURATION
@@ -101,6 +101,15 @@ export async function loginAsTestUser(
 /**
  * Login as default test user (uses TEST_USER and TEST_PASSWORD env vars)
  */
+/**
+ * FE-9685: the Jobs board opens Compact (every card folded) in a fresh browser.
+ * Specs that drive an open card's controls call this before the first page
+ * load so the board opens under Detailed, the way a user who picked it sees it.
+ */
+export async function openBoardCardsDetailed(page: Page): Promise<void> {
+  await page.addInitScript(() => window.localStorage.setItem('jobs.density.v2', 'detailed'))
+}
+
 export async function loginAsDefaultTestUser(page: Page): Promise<void> {
   await loginAsTestUser(page)
 }
@@ -276,7 +285,7 @@ export async function deleteTestProject(
   const token = await getAuthToken(page)
   const csrf = (await page.context().cookies()).find((c) => c.name === 'csrf_token')?.value ?? ''
 
-  await page.request.delete(`${API_BASE_URL}/api/v1/projects/${projectId}/`, {
+  await page.request.delete(`${API_BASE_URL}/api/v1/projects/${projectId}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'X-CSRF-Token': csrf,
@@ -396,7 +405,8 @@ export async function navigateToProject(
   })
 
   // Navigate to project
-  const fullUrl = `http://localhost:7274/projects/${projectId}`
+  // FE-9681: the project page is retired; a project opens on its Jobs board card.
+  const fullUrl = `http://localhost:7274/jobs-overview?project=${projectId}`
   console.log('[navigateToProject] Navigating to:', fullUrl)
 
   await page.goto(fullUrl, {
@@ -477,16 +487,13 @@ export async function navigateToTab(
     await route.continue({ headers })
   })
 
-  // Get current URL
-  const currentUrl = new URL(page.url())
-
-  // Update tab query param
-  currentUrl.searchParams.set('tab', tabName)
-
-  console.log('[navigateToTab] Navigating to:', currentUrl.toString())
-
-  // Navigate to URL with new tab param
-  await page.goto(currentUrl.toString())
+  // FE-9681: the tabs are the Jobs board's two sides now ('launch' = Staging,
+  // 'jobs' = Implementation); any other name is a no-op on the board.
+  const side = tabName === 'launch' ? 'staging' : tabName === 'jobs' ? 'implementation' : null
+  console.log('[navigateToTab] Switching side:', side, 'on', page.url())
+  if (side) {
+    await page.locator(`[data-testid="jobs-side-${side}"]`).click()
+  }
 
   // Verify final URL (should not be login page)
   const finalUrl = page.url()
@@ -587,7 +594,7 @@ export async function cleanupTestData(
   // Delete projects
   if (resourceIds.projectIds) {
     for (const projectId of resourceIds.projectIds) {
-      await page.request.delete(`${API_BASE_URL}/api/v1/projects/${projectId}/`, {
+      await page.request.delete(`${API_BASE_URL}/api/v1/projects/${projectId}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       }).catch(() => {
         // Ignore errors during cleanup
@@ -622,4 +629,60 @@ export function reportRateLimiting(page: Page): void {
       console.warn(`[e2e] 429 ${response.request().method()} ${response.url()} ${RATE_LIMIT_HINT}`)
     }
   })
+}
+
+/** JSON headers for a REST call as the logged-in user (JWT + CSRF). */
+export async function authHeaders(page: Page): Promise<Record<string, string>> {
+  const token = await getAuthToken(page)
+  const csrf = (await page.context().cookies()).find((c) => c.name === 'csrf_token')?.value ?? ''
+  return { Authorization: `Bearer ${token}`, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' }
+}
+
+/** Minimal streamable-HTTP MCP client: initialize once, then tools/call. */
+export class McpClient {
+  private sessionId = ''
+  private version = '2025-06-18'
+  private nextId = 1
+
+  constructor(private request: APIRequestContext, private apiKey: string) {}
+
+  private async rpc(method: string, params: object, notification = false) {
+    const headers: Record<string, string> = {
+      'X-API-Key': this.apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    }
+    if (this.sessionId) headers['mcp-session-id'] = this.sessionId
+    if (method !== 'initialize') headers['mcp-protocol-version'] = this.version
+    const body = notification ? { jsonrpc: '2.0', method, params } : { jsonrpc: '2.0', id: this.nextId++, method, params }
+    const res = await this.request.post(`${API_BASE_URL}/mcp`, { headers, data: body })
+    if (!res.ok() && res.status() !== 202) throw new Error(`MCP ${method} failed: ${res.status()} ${await res.text()}`)
+    const sid = res.headers()['mcp-session-id']
+    if (sid) this.sessionId = sid
+    if (notification) return null
+    const text = await res.text()
+    const json = text.trim().startsWith('{')
+      ? JSON.parse(text)
+      : JSON.parse(text.split('\n').filter((l) => l.startsWith('data:')).pop()!.slice(5))
+    if (json.error) throw new Error(`MCP ${method} error: ${JSON.stringify(json.error)}`)
+    return json.result
+  }
+
+  async init() {
+    const result = await this.rpc('initialize', {
+      protocolVersion: this.version,
+      capabilities: {},
+      clientInfo: { name: 'e2e-helpers', version: '1.0' },
+    })
+    this.version = result?.protocolVersion || this.version
+    await this.rpc('notifications/initialized', {}, true)
+  }
+
+  async tool(name: string, args: object) {
+    const result = await this.rpc('tools/call', { name, arguments: args })
+    if (result?.isError) throw new Error(`${name}: ${JSON.stringify(result.content)}`)
+    if (result?.structuredContent) return result.structuredContent
+    const text = result?.content?.[0]?.text
+    return text ? JSON.parse(text) : result
+  }
 }

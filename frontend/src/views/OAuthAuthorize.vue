@@ -210,6 +210,7 @@ import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import { apiClient } from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import configService from '@/services/configService'
 import { useGiljoMode } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
@@ -378,15 +379,41 @@ async function handleAuthorize() {
   }
 }
 
-function handleDeny() {
-  const params = oauthParams.value
-  const redirectUri = new URL(params.redirect_uri)
-  redirectUri.searchParams.set('error', 'access_denied')
-  redirectUri.searchParams.set('error_description', 'The user denied the authorization request')
-  if (params.state) {
-    redirectUri.searchParams.set('state', params.state)
+function isHttpUrl(value) {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol)
+  } catch {
+    return false
   }
-  window.location.href = redirectUri.toString()
+}
+
+async function handleDeny() {
+  error.value = ''
+
+  try {
+    const response = await apiClient.post('/api/oauth/authorize/deny', {
+      client_id: oauthParams.value.client_id,
+      redirect_uri: oauthParams.value.redirect_uri,
+      response_type: oauthParams.value.response_type,
+      code_challenge: oauthParams.value.code_challenge,
+      code_challenge_method: oauthParams.value.code_challenge_method,
+      scope: oauthParams.value.scope,
+      state: oauthParams.value.state,
+      resource: oauthParams.value.resource,
+    })
+    const redirectUrl = response.data?.redirect_uri
+    if (isHttpUrl(redirectUrl)) {
+      window.location.href = redirectUrl
+      return
+    }
+    error.value = 'Access was denied, but the application could not be notified. You can close this window.'
+  } catch (err) {
+    if (err.code === 'ERR_NETWORK' || !err.response) {
+      error.value = 'Network error. Please check your connection and try again.'
+    } else {
+      error.value = parseErrorResponse(err).message
+    }
+  }
 }
 
 onMounted(async () => {

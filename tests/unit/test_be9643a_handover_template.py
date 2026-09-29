@@ -29,6 +29,13 @@ def test_the_default_template_carries_the_references_section() -> None:
     assert "## References" in DEFAULT_HANDOVER_TEMPLATE
 
 
+def test_every_required_heading_carries_a_prompt_of_its_own() -> None:
+    for heading in REQUIRED_HANDOVER_HEADINGS:
+        index = DEFAULT_HANDOVER_TEMPLATE.index(heading)
+        after = DEFAULT_HANDOVER_TEMPLATE[index + len(heading) :].lstrip("\n")
+        assert after.strip(), f"{heading} has no hint under it"
+
+
 def test_the_default_template_fits_the_cap_it_ships_with() -> None:
     require_template_within_cap(DEFAULT_HANDOVER_TEMPLATE, operation="default")
 

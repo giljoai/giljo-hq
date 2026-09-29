@@ -85,7 +85,10 @@ HARNESSES: tuple[Harness, ...] = (
         "claude",
         "claude",
         "Claude Code",
-        spawn_syntax="Task(subagent_type=X) where X = agent_name from spawn_job.",
+        spawn_syntax=(
+            'Task(subagent_type="general-purpose") with instructions that open "You are {agent_name} '
+            '(job_id: {job_id}). First action: get_job_mission(job_id)".'
+        ),
         export_platform=EXPORT_CLAUDE_CODE,
         autonomy_flag="--dangerously-skip-permissions",
     ),

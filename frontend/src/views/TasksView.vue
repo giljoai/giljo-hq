@@ -15,7 +15,7 @@
               <div><span class="font-weight-medium">title (required):</span> Free text</div>
               <div class="mt-1"><span class="font-weight-medium">description (recommended):</span> Free text</div>
               <div class="mt-1"><span class="font-weight-medium">status (optional):</span></div>
-              <div class="ml-2 text-body-small">pending · in_progress · completed · blocked · cancelled</div>
+              <div class="ml-2 text-body-small">pending · in_progress · on_hold · completed · blocked · cancelled</div>
               <div class="mt-1"><span class="font-weight-medium">priority (optional):</span></div>
               <div class="ml-2 text-body-small">low · medium · high · critical</div>
               <div class="mt-1"><span class="font-weight-medium">task_type (optional):</span></div>
@@ -237,6 +237,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useProductStore } from '@/stores/products'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useTaskFilters } from '@/composables/useTaskFilters'
 import { useTaskCrud } from '@/composables/useTaskCrud'
@@ -425,7 +426,7 @@ async function confirmConversion() {
     showSuccessDialog.value = true
   } catch (error) {
     console.error('Error converting task to project:', error)
-    errorMessage.value = error.response?.data?.detail || 'Failed to convert task to project'
+    errorMessage.value = parseErrorResponse(error).message || 'Failed to convert task to project'
     showErrorDialog.value = true
   }
 

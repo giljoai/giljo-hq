@@ -35,7 +35,6 @@ const LIFECYCLE = new Set([
   'agent:update',
   'job:progress_update',
   'sequence:updated',
-  'orchestrator:handover_initiated',
   'orchestrator:prompt_generated',
   'thread_message',
   'thread_update',

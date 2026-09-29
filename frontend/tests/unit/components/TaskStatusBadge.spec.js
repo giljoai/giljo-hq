@@ -6,7 +6,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import { useTaskStatusesStore } from '@/stores/taskStatusesStore'
 
-// Canonical six task statuses (FE-5041 Phase 1: backend `TaskStatus` enum).
+// Canonical task statuses (FE-5041 Phase 1: backend `TaskStatus` enum; FE-9675
+// added on_hold), plus the retired `converted` value.
 // `expectedHex` mirrors the CSS custom properties in
 // `frontend/src/styles/main.scss` which mirror SCSS tokens in
 // `design-tokens.scss`. Hex values appear here only for assertion purposes —
@@ -24,6 +25,13 @@ const STATUSES = [
     label: 'In Progress',
     color_token: 'color-agent-implementer',
     expectedHex: '#6db3e4',
+    is_lifecycle_finished: false,
+  },
+  {
+    value: 'on_hold',
+    label: 'On hold',
+    color_token: 'color-agent-reviewer',
+    expectedHex: '#ac80cc',
     is_lifecycle_finished: false,
   },
   {

@@ -44,7 +44,7 @@ describe('useChainLifecycle — FE-6171b stageChain', () => {
 
   it('returns null and does not throw when PATCH fails', async () => {
     api.sequenceRuns.update.mockRejectedValueOnce({
-      response: { data: { detail: 'update failed' } },
+      response: { status: 400, data: { error_code: 'VALIDATIONERROR', message: 'update failed' } },
     })
 
     const { stageChain } = useChainLifecycle()
@@ -112,7 +112,7 @@ describe('useChainLifecycle — FE-6171b unstageChain (UNLOCK, not dissolve)', (
 
   it('returns null when BE responds with 422 (ultralock tier)', async () => {
     api.sequenceRuns.update.mockRejectedValueOnce({
-      response: { status: 422, data: { detail: 'Cannot unlock: run is ultralocked' } },
+      response: { status: 422, data: { error_code: 'VALIDATIONERROR', message: 'Cannot unlock: run is ultralocked' } },
     })
 
     const { unstageChain } = useChainLifecycle()

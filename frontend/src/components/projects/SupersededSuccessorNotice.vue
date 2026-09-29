@@ -68,7 +68,7 @@ watch(
 
 function openSuccessor() {
   if (!props.successorId) return
-  router.push({ name: 'ProjectLaunch', params: { projectId: props.successorId } })
+  router.push({ name: 'JobsViewport', query: { project: props.successorId } })
   emit('navigate')
 }
 </script>

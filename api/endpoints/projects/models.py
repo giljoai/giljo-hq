@@ -262,6 +262,25 @@ class ProjectCloseOutResponse(BaseModel):
     project_status: str
 
 
+class CloseoutWithoutSummaryRequest(BaseModel):
+    """Close out a project whose agents stopped without writing a closeout (FE-9651)."""
+
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Why the project is being closed without an agent summary. Saved in project memory.",
+    )
+
+
+class CloseoutWithoutSummaryResponse(BaseModel):
+    """Result of closing out a project without an agent summary (FE-9651)."""
+
+    success: bool
+    sequence_number: int | None = None
+    message: str = ""
+
+
 class ContinueWorkingResponse(BaseModel):
     """Response for continue working operation (Handover 0113)."""
 

@@ -255,7 +255,7 @@ async def test_a_product_that_enabled_nothing_serves_nothing(mission_boundary_cl
     )
 
 
-async def test_thin_prompt_carries_the_launch_line_and_hints(mission_boundary_client) -> None:
+async def test_thin_prompt_carries_the_hints_but_no_launch_line_in_subagent_mode(mission_boundary_client) -> None:
     new_client, tenant_key, db_session = mission_boundary_client
     project_id, product_id = await _seed_project(db_session, tenant_key, "subagent")
     template = await _seed_template(
@@ -265,6 +265,7 @@ async def test_thin_prompt_carries_the_launch_line_and_hints(mission_boundary_cl
     spawned = await _spawn(new_client, project_id, template.name)
     prompt = spawned["agent_prompt"]
 
-    assert "codex --dangerously-bypass-approvals-and-sandbox" in prompt
+    assert "## HARNESS" not in prompt
+    assert "--dangerously-bypass-approvals-and-sandbox" not in prompt
     assert "Model hint: gpt-5" in prompt
     assert "Effort hint: high" in prompt

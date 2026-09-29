@@ -192,6 +192,7 @@ import { useProductFormTabs } from '@/composables/useProductFormTabs'
 import { useProductStore } from '@/stores/products'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import ProductSetupTab from './product-form/ProductSetupTab.vue'
 import ProductInfoTab from './product-form/ProductInfoTab.vue'
 import ProductTechTab from './product-form/ProductTechTab.vue'
@@ -484,7 +485,7 @@ async function confirmCtxLaunch() {
   } catch (err) {
     console.error('[FE-5073] CTX launch failed:', err)
     showToast({
-      message: err?.response?.data?.detail || 'Failed to create context-update project.',
+      message: parseErrorResponse(err).message || 'Failed to create context-update project.',
       type: 'error',
     })
   } finally {

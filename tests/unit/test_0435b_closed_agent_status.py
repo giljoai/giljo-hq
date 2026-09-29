@@ -93,12 +93,18 @@ class TestCloseJobTransition:
         project_result.scalar_one_or_none.return_value = mock_project
         undrained_result = MagicMock()
         undrained_result.scalars.return_value.all.return_value = []
-        mock_session.execute = AsyncMock(side_effect=[exec_result, job_result, project_result, undrained_result])
+        caller_result = MagicMock()
+        caller_result.scalar_one_or_none.return_value = MagicMock(job_type="orchestrator", project_id="proj-456")
+        mock_session.execute = AsyncMock(
+            side_effect=[exec_result, job_result, caller_result, project_result, undrained_result]
+        )
         mock_session.flush = AsyncMock()
 
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))
 
-        result = await state_service.close_job(job_id="test-job-123", tenant_key="test_tenant")
+        result = await state_service.close_job(
+            job_id="test-job-123", tenant_key="test_tenant", caller_job_id="orch-job-1"
+        )
 
         assert mock_execution.status == "closed"
         assert result["old_status"] == "complete"

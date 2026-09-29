@@ -17,9 +17,8 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ImplementationNotReadyError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
-from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.services.sequence_run_service import SequenceRunService, active_chain_run
 from giljo_mcp.tenant import TenantManager
-from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -39,13 +38,8 @@ class ChainContext:
 
 
 async def chain_execution_mode_for_project(session: AsyncSession, *, project_id: str, tenant_key: str) -> str | None:
-    try:
-        svc = SequenceRunService(db_manager=None, tenant_manager=None, session=session)
-        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-        return run.get("execution_mode") if run else None
-    except Exception:  # noqa: BLE001 - best-effort; never break the spawn path
-        logger.warning("[BE-9335] chain execution-mode lookup failed (non-fatal); using the project's own mode")
-        return None
+    run = await active_chain_run(session, project_id, tenant_key)
+    return run.get("execution_mode") if run else None
 
 
 async def renders_multi_terminal(session: AsyncSession, *, project: Any, project_id: str, tenant_key: str) -> bool:
@@ -248,46 +242,30 @@ def chain_member_phase(project: Any) -> str:
     return "implementation" if (launched and staging_finished) else "staging"
 
 
-async def resolve_chain_launch_gate(
-    session: Any,
-    *,
-    db_manager: Any,
-    tenant_manager: Any,
-    project_id: str,
-    tenant_key: str,
-    test_session: Any | None = None,
-) -> tuple[bool, Any | None]:
-    try:
-        run = await SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=test_session,
-        ).find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-        if run is None:
-            return False, None
-
-        resolved_order: list[str] = run.get("resolved_order") or []
-        if project_id not in resolved_order:
-            return False, None
-
-        index = resolved_order.index(project_id)
-        if index <= run.get("current_index", 0):
-            return True, None
-
-        predecessor = (
-            await session.execute(
-                select(Project).where(
-                    Project.id == resolved_order[index - 1],
-                    Project.tenant_key == tenant_key,
-                )
-            )
-        ).scalar_one_or_none()
-        if predecessor is None or predecessor.closeout_executed_at is not None:
-            return True, None
-        return True, predecessor
-    except Exception as exc:  # noqa: BLE001 — an unresolvable chain falls back to the solo guard
-        logger.warning("[CHAIN_LAUNCH_GATE] resolution failed for %s: %s", sanitize(project_id), exc)
+async def resolve_chain_launch_gate(session: Any, *, project_id: str, tenant_key: str) -> tuple[bool, Any | None]:
+    run = await active_chain_run(session, project_id, tenant_key)
+    if run is None:
         return False, None
+
+    resolved_order: list[str] = run.get("resolved_order") or []
+    if project_id not in resolved_order:
+        return False, None
+
+    index = resolved_order.index(project_id)
+    if index <= run.get("current_index", 0):
+        return True, None
+
+    predecessor = (
+        await session.execute(
+            select(Project).where(
+                Project.id == resolved_order[index - 1],
+                Project.tenant_key == tenant_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if predecessor is None or predecessor.closeout_executed_at is not None:
+        return True, None
+    return True, predecessor
 
 
 def chain_predecessor_open_error(project: Any, predecessor: Any) -> Any:

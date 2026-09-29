@@ -6,7 +6,6 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,36 +106,3 @@ class AgentJobManager:
         except Exception as e:
             self._logger.exception("Failed to complete job")
             raise BaseGiljoError(message=str(e), context={"operation": "complete_job"}) from e
-
-    async def list_team_agents(
-        self,
-        job_id: str,
-        tenant_key: str,
-        include_inactive: bool = False,
-    ) -> list[dict[str, Any]]:
-        try:
-            repo = AgentJobRepository(None)
-            async with self._get_session(tenant_key) as session:
-                executions = await repo.list_team_executions(session, tenant_key, job_id, include_inactive)
-
-                team_members = [
-                    {
-                        "agent_id": execution.agent_id,
-                        "job_id": execution.job_id,
-                        "agent_display_name": execution.agent_display_name,
-                        "status": execution.status,
-                        "agent_name": execution.agent_name,
-                        "tenant_key": execution.tenant_key,
-                    }
-                    for execution in executions
-                ]
-
-                self._logger.info(
-                    f"Found {len(team_members)} teammates for job {job_id} (include_inactive={include_inactive})"
-                )
-
-                return team_members
-
-        except Exception as _exc:
-            self._logger.exception("Failed to list team agents")
-            return []

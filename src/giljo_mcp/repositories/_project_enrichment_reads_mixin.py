@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,7 +19,28 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message
 
 
+def project_not_trashed():
+    return or_(Project.deleted_at.is_(None), Project.status != ProjectStatus.DELETED)
+
+
 class ProjectEnrichmentReadsMixin:
+
+
+    async def get_not_deleted(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+    ) -> Project | None:
+        stmt = select(Project).where(
+            and_(
+                Project.id == project_id,
+                Project.tenant_key == tenant_key,
+                project_not_trashed(),
+            )
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
 
     async def get_active_projects(
@@ -28,9 +49,14 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         product_id: str | None = None,
     ) -> list[Project]:
-        conditions = [Project.tenant_key == tenant_key, Project.status == ProjectStatus.ACTIVE]
-        if product_id is not None:
-            conditions.append(Project.product_id == product_id)
+        conditions = self._build_list_conditions(
+            tenant_key,
+            ProjectStatus.ACTIVE.value,
+            include_cancelled=False,
+            product_id=product_id,
+            hidden=None,
+            search=None,
+        )
         stmt = (
             select(Project)
             .options(selectinload(Project.project_type))

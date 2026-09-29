@@ -10,7 +10,8 @@ from __future__ import annotations
 _CLOSING_JOBS_REFERENCE = """CLOSING JOBS (FINAL ACCEPTANCE):
 
 After verifying all deliverables from a completed agent:
-- Call finalize_job(job_id=...) for each agent whose work is accepted
+- Call finalize_job(job_id=..., caller_job_id=<your own job_id>) for each agent
+  whose work is accepted. Only you can: a worker is refused (ORCHESTRATOR_ONLY)
 - Agents marked 'closed' will not be auto-reactivated on new messages
 - Use 'decommissioned' only for failed/replaced/abandoned agents
 - Lifecycle: working → complete (agent self-reports) → closed (orchestrator accepts)
@@ -33,7 +34,8 @@ execution, and 'silent' is not terminal:
    Skipping this returns COMPLETION_BLOCKED naming the stranded items.
 3. complete_job(job_id=<stalled job>, result={"summary": ..., "commits": [...]})
    — record what it actually delivered, not what it claimed.
-4. finalize_job(job_id=<stalled job>) → 'closed'. Accepted, not failed.
+4. finalize_job(job_id=<stalled job>, caller_job_id=<your own job_id>) → 'closed'.
+   Accepted, not failed.
 
 Do NOT use write_project_closeout(force=true) to get past a stalled agent. It
 does not refuse on a specialist's account — it DECOMMISSIONS it, permanently

@@ -217,6 +217,7 @@
 import { useFormatDate } from '@/composables/useFormatDate'
 import { getAgentColor } from '@/config/agentColors'
 import { TEXT_MUTED } from '@/config/colorTokens'
+import { STATUS_COLORS } from '@/utils/statusConfig'
 import { taxonomyBadgeStyle, resolveTaxonomyColor, isHandoverRow } from '@/utils/taxonomyBadge'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -277,19 +278,21 @@ const headers = [
 
 function getStatusColor(status) {
   const colors = {
-    pending: 'grey',
+    pending: STATUS_COLORS.PENDING,
     in_progress: getAgentColor('implementer').hex,
+    on_hold: getAgentColor('reviewer').hex,
     completed: getAgentColor('documenter').hex,
     blocked: getAgentColor('analyzer').hex,
     cancelled: TEXT_MUTED,
   }
-  return colors[status] || 'grey'
+  return colors[status] || STATUS_COLORS.PENDING
 }
 
 function getStatusIcon(status) {
   const icons = {
     pending: 'mdi-clock-outline',
     in_progress: 'mdi-progress-clock',
+    on_hold: 'mdi-pause-circle-outline',
     completed: 'mdi-check-circle',
     blocked: 'mdi-block-helper',
     cancelled: 'mdi-cancel',

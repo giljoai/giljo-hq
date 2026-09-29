@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import {
+  STATUS_COLORS,
   isAwaitingUser,
   getStatusLabel,
   getStatusColor
@@ -39,8 +42,8 @@ describe('statusConfig.js', () => {
       expect(getStatusColor('awaiting_user')).toBe('#ffc107');
     });
 
-    it('returns orange for blocked', () => {
-      expect(getStatusColor('blocked')).toBe('#ff9800');
+    it('returns red for blocked (FE-9687: orange is kept for a decision)', () => {
+      expect(getStatusColor('blocked')).toBe('#f44336');
     });
   });
 
@@ -78,6 +81,52 @@ describe('statusConfig.js', () => {
       expect(getStatusLabel('sleeping', 'wake_mode=signal | wake_in_minutes=5')).toBe(
         'Waiting for wake'
       );
+    });
+  });
+
+  describe('STATUS_COLORS is the one status colour map', () => {
+    const SCSS_NAME = {
+      WAITING: 'waiting',
+      WORKING: 'working',
+      BLOCKED: 'blocked',
+      SILENT: 'silent',
+      COMPLETE: 'complete',
+      IDLE: 'idle',
+      SLEEPING: 'sleeping',
+      HANDED_OVER: 'handed-over',
+      CLOSED: 'closed',
+      DECOMMISSIONED: 'decommissioned',
+      CLOSEOUT: 'staged',
+      PENDING: 'pending',
+    };
+
+    function readTokens(file, re) {
+      const text = readFileSync(resolve(__dirname, '../../../src/styles', file), 'utf-8');
+      return Object.fromEntries([...text.matchAll(re)].map((m) => [m[1], m[2].toLowerCase()]));
+    }
+
+    const scss = readTokens('design-tokens.scss', /\$color-status-([a-z-]+):\s*(#[0-9a-fA-F]{6})/g);
+    const css = readTokens('main.scss', /--color-status-([a-z-]+):\s*(#[0-9a-fA-F]{6})/g);
+
+    it('has a design-tokens.scss $color-status-* twin for every status key', () => {
+      const drift = Object.entries(SCSS_NAME)
+        .filter(([key, name]) => scss[name] !== STATUS_COLORS[key]?.toLowerCase())
+        .map(([key, name]) => `${key}=${STATUS_COLORS[key]} vs $color-status-${name}=${scss[name]}`);
+      expect(drift).toEqual([]);
+    });
+
+    it('keeps the main.scss --color-status-* mirrors equal to the SCSS tokens', () => {
+      const statusNames = new Set(Object.values(SCSS_NAME));
+      const drift = Object.entries(css)
+        .filter(([name]) => statusNames.has(name))
+        .filter(([name, hex]) => scss[name] !== hex)
+        .map(([name, hex]) => `--color-status-${name}=${hex} vs ${scss[name]}`);
+      expect(drift).toEqual([]);
+    });
+
+    it('covers every key the map defines except the unknown-status fallback', () => {
+      const keys = Object.keys(STATUS_COLORS).filter((k) => k !== 'FALLBACK').sort();
+      expect(keys).toEqual(Object.keys(SCSS_NAME).sort());
     });
   });
 });

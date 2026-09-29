@@ -47,6 +47,17 @@ def restored_global_client_resolver():
         set_client_resolver(original)
 
 
+@contextlib.contextmanager
+def restored_global_terms_accepted_check():
+    import giljo_mcp.auth.dependencies as dependencies_mod
+
+    original = dependencies_mod._terms_accepted_check
+    try:
+        yield
+    finally:
+        dependencies_mod._terms_accepted_check = original
+
+
 class TestData:
 
     @staticmethod
@@ -170,3 +181,14 @@ async def test_project(db_session) -> Project:
     return project
 
 
+
+
+@contextlib.contextmanager
+def restored_global_protected_surface_patterns():
+    import giljo_mcp.services.job_completion_closeout_gate as gate
+
+    original = gate._edition_patterns
+    try:
+        yield
+    finally:
+        gate._edition_patterns = original

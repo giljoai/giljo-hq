@@ -444,12 +444,6 @@ function handleGitIntegrationUpdate(data) {
   }
 }
 
-@media (max-width: $breakpoint-mobile) {
-  .startup-cards {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Integration page section labels (IBM Plex Mono uppercase) */
 .integration-section-label {
   font-family: 'IBM Plex Mono', monospace;
@@ -556,5 +550,4 @@ function handleGitIntegrationUpdate(data) {
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
 }
-
 </style>

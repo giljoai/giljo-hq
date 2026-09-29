@@ -200,7 +200,7 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
   | Entity  | Values |
   |---------|--------|
   | project | `active` `inactive` `parked` `completed` `cancelled` `superseded` (`terminated`/`deleted` are set by the system, never passed) |
-  | task    | `pending` `in_progress` `blocked` `completed` `cancelled` |
+  | task    | `pending` `in_progress` `on_hold` `blocked` `completed` `cancelled` |
   | thread  | `open` `active` `resolved` `closed` |
 
 ## 6. Lifecycle (orchestrated work)
@@ -228,7 +228,11 @@ Drive it with these tools:
   no bypass -- the human gate is intentional.
 - `launch_implementation(project_id, mission)` -- records the user's goal and their
   explicit authorization in one call, then opens the implementation gate. Requires human
-  authorization at call time. Idempotent.
+  authorization at call time. Idempotent. Gated by the account's Headless setting, OFF
+  by default: a human presses Implement in the dashboard unless an admin turns Headless
+  on, which declares the harness's own permission prompt for this call to BE that human's
+  approval -- running that harness with a bypass/skip-permissions flag removes the ask.
+  When off, this call returns a structured refusal naming the setting, not an error.
 
 **Workers get their role from the server, not from your disk.** Every spawned agent's
 `get_job_mission` response carries an `agent_profile` (role, description, harness,
@@ -353,6 +357,10 @@ choice (closeout with deferred findings, an ambiguous decision) -- `options` is 
   first either way, so the dashboard remains able to clear it. In practice very few clients
   negotiate 2026-07-28 today, so treat inline elicitation as an optional enhancement --
   `decide_approval` (or the dashboard) is the path to rely on.
+- **Where a decision is answered follows the Headless setting.** Headless ON: the user may
+  answer in the terminal (the inline choice or `decide_approval`). Headless OFF: only the
+  dashboard can answer; `request_approval` returns `decide_in: "dashboard"` with no inline
+  choice, and you wait. Do not ask the user in chat.
 """
 
 

@@ -60,7 +60,7 @@ _CONDUCTOR_CLOSEOUT_NOTE = (
 
 
 _SUBAGENT_SPAWN_BY_TOOL: dict[str, str] = {
-    "claude-code": "Task(subagent_type=...)",
+    "claude-code": 'Task(subagent_type="general-purpose")',
     "codex": "spawn_agent(name=...)",
 }
 _SUBAGENT_SPAWN_GENERIC = "your CLI's in-process subagent syntax"
@@ -191,6 +191,13 @@ def _apply_conductor_body_trims(body: str) -> str:
     return _apply_anchor_slice(body, _PHASE3_CLOSEOUT_START, _ORCHESTRATOR_CONSTRAINTS_ANCHOR, _CONDUCTOR_CLOSEOUT_NOTE)
 
 
+LAUNCH_PROMPT_RULE = (
+    "LAUNCH PROMPT: start every agent with the prompt the server issued for its job (the "
+    "agent_prompt spawn_job returned), verbatim, as its first message; a hand-written work "
+    "order may add to it, never replace it."
+)
+
+
 def _build_orchestrator_protocol_body(
     job_id: str,
     tenant_key: str,
@@ -272,6 +279,8 @@ lists.
 ### PHASE 2 — ACTIVE COORDINATION (TODO-driven — work your list on every wake-up)
 
 {wake_pattern}
+
+**{LAUNCH_PROMPT_RULE}**
 
 **THE COORDINATION LOOP (execute on EVERY wake-up or trigger):**
 
@@ -415,7 +424,8 @@ re-verify before closeout.
 
 ## ORCHESTRATOR CONSTRAINTS
 {git_commit_constraint}
-- **Handover-on-context-exhaustion does NOT apply.** If context is exhausted, tell the user.
+- **Low on context?** Write a handover task (`create_task(task_type="HND", ...)`), then tell
+  the user its serial so a fresh session can continue from it.
 - **You operate with the user's delegated authority.** Decide and document in
   `decisions_made`. Escalate via `request_approval` only when the choice is
   irreversible, materially changes scope, or has no clear default.
@@ -447,9 +457,8 @@ the first move — reach for it ONLY when your harness genuinely has no way to s
 
 Run one agent per job order IN PARALLEL. spawn_job(...) ALWAYS comes first — it
 mints the job_id + the dashboard audit record — then you launch the agent seeded
-with the thin prompt get_job_mission(job_id='...'). That prompt already ends with a
-HARNESS block for the agent's own harness (launch line + model/effort hints), and the
-role itself arrives in the get_job_mission agent_profile — nothing to look up, nothing
+with the thin prompt get_job_mission(job_id='...'). The role and its model/effort
+hints arrive in the get_job_mission agent_profile — nothing to look up, nothing
 to install. Use whichever launch mechanism your session supports:
 
 OPTION A — ONE TERMINAL PER AGENT (best: true parallelism, like Multi-Terminal).

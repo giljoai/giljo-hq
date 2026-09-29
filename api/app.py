@@ -343,6 +343,8 @@ def create_app() -> FastAPI:
     from giljo_mcp import __version__ as giljo_version
     from giljo_mcp import branding
 
+    docs_enabled = GILJO_MODE in ("ce", "")
+
     app = FastAPI(
         title=f"{branding.PRODUCT_NAME} API v{giljo_version} - Community Edition",
         description=f"""
@@ -371,9 +373,9 @@ def create_app() -> FastAPI:
         """,
         version=giljo_version,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
         openapi_tags=[
             {
                 "name": "projects",

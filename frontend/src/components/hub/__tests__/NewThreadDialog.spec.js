@@ -132,7 +132,9 @@ describe('NewThreadDialog', () => {
   })
 
   it('surfaces a create failure and does not emit created', async () => {
-    createThreadMock.mockRejectedValue({ response: { data: { detail: 'nope' } } })
+    createThreadMock.mockRejectedValue({
+      response: { status: 400, data: { error_code: 'VALIDATIONERROR', message: 'nope' } },
+    })
     const wrapper = mountDialog()
     await createWith(wrapper, 'Doomed')
 

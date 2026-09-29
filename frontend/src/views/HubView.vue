@@ -175,6 +175,7 @@ import { useUserStore } from '@/stores/user'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import ThreadList from '@/components/hub/ThreadList.vue'
 import DeletedCountButton from '@/components/common/DeletedCountButton.vue'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
@@ -317,7 +318,7 @@ async function loadDeletedThreads({ notify = false } = {}) {
     deletedThreads.value = res.data.threads ?? []
   } catch (err) {
     if (!notify) return
-    const msg = err?.response?.data?.detail ?? 'Failed to load deleted threads.'
+    const msg = parseErrorResponse(err).message || 'Failed to load deleted threads.'
     showToast({ type: 'error', message: msg })
   }
 }
@@ -335,7 +336,7 @@ async function onRestoreThread(thread) {
     showToast({ type: 'success', message: `${threadDisplayName(thread)} restored.` })
     await commHub.loadThreads(commHub.filters)
   } catch (err) {
-    const msg = err?.response?.data?.detail ?? 'Failed to restore thread.'
+    const msg = parseErrorResponse(err).message || 'Failed to restore thread.'
     showToast({ type: 'error', message: msg })
   } finally {
     restoringId.value = null

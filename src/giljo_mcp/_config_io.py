@@ -4,14 +4,10 @@
 # [CE] Community Edition.
 
 
-import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-
-logger = logging.getLogger(__name__)
 
 
 def get_config_path() -> Path:
@@ -22,12 +18,8 @@ def read_config(config_path: Path | None = None) -> dict[str, Any]:
     path = config_path or get_config_path()
     if not path.exists():
         return {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except (yaml.YAMLError, OSError):
-        logger.exception("Failed to read %s", path)
-        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def write_config(config: dict[str, Any], config_path: Path | None = None) -> None:

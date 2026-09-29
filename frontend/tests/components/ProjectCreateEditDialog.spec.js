@@ -121,3 +121,57 @@ describe('ProjectCreateEditDialog - validate-on-click (silent-disable regression
     expect(wrapper.vm.descriptionHintPersistent).toBe(true)
   })
 })
+
+// FE-9681 relay finding B2: the retired project page's edit dialog let the
+// operator edit the orchestrator mission by hand. The board hosts this dialog
+// now, so the mission must stay writable here, through the same writer.
+describe('ProjectCreateEditDialog - the mission is editable (FE-9681 B2)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  // The dialog loads the project when it OPENS (a watch on modelValue), so
+  // mount closed and open it, the way the board does.
+  async function mountEditing() {
+    const vuetify = createVuetify()
+    const wrapper = mount(ProjectCreateEditDialog, {
+      global: { plugins: [vuetify] },
+      props: {
+        modelValue: false,
+        editingProject: { id: 'p-1', name: 'Edit me', description: 'desc', mission: 'The mission the orchestrator wrote.', product_id: 'prod-1' },
+        activeProduct: { id: 'prod-1', name: 'Product 1' },
+        projectTypes: [],
+      },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('the mission field is not read-only', async () => {
+    const wrapper = await mountEditing()
+    const mission = wrapper.find('textarea[aria-label="Orchestrator mission"]')
+    expect(mission.exists()).toBe(true)
+    expect(mission.attributes('readonly')).toBeUndefined()
+  })
+
+  it('an edited mission reaches projectStore.updateProject, the same writer the old dialog used', async () => {
+    const wrapper = await mountEditing()
+    const store = useProjectStore()
+    const updateSpy = vi.spyOn(store, 'updateProject').mockResolvedValue({ id: 'p-1' })
+    vi.spyOn(store, 'fetchProjects').mockResolvedValue([])
+    expect(wrapper.vm.localData.mission).toBe('The mission the orchestrator wrote.')
+    wrapper.vm.projectFormRef = { validate: vi.fn().mockResolvedValue({ valid: true }) }
+
+    // The field is proven writable above; the value path is localData, the
+    // same binding the existing save tests drive.
+    wrapper.vm.localData.mission = 'The mission, edited by hand.'
+    await wrapper.vm.save()
+    await flushPromises()
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy.mock.calls[0][0]).toBe('p-1')
+    expect(updateSpy.mock.calls[0][1]).toMatchObject({ mission: 'The mission, edited by hand.' })
+  })
+})

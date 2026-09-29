@@ -16,7 +16,7 @@ The dashboard's **Stage Project → Staging… → Implement** flow (see **Proje
 
 ### Chains
 
-A chain's **conductor** (see **Chain Projects**) is always harness-driven — the dashboard cannot spawn agents, so an agent connected through your coding tool has to pick up a queued chain and run it. From your terminal, that same agent can also end a chain early or mark a finished member reviewed, without you opening the Projects page at all. The dashboard's chain tab strip and status badges keep tracking the run either way.
+A chain's **conductor** (see **Chain Projects**) is always harness-driven — the dashboard cannot spawn agents, so an agent connected through your coding tool has to pick up a queued chain and run it. From your terminal, that same agent can also end a chain early or mark a finished member reviewed, without you opening the Projects page at all. The chain's group on the Jobs board keeps tracking the run either way.
 
 ### Multiple Products
 

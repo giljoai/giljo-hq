@@ -135,6 +135,7 @@ import { useCommHubStore } from '@/stores/commHubStore'
 import { useToast } from '@/composables/useToast'
 import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { agentStatusDot } from '@/composables/useAgentStatusDot'
 import MarkHandledToggle from '@/components/hub/MarkHandledToggle.vue'
 import { useMarkHandled } from '@/components/hub/useMarkHandled'
@@ -254,7 +255,7 @@ async function onSend() {
     content.value = ''
     showToast({ type: 'success', message: 'Message sent.' })
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Failed to send message.'
+    const msg = parseErrorResponse(err).message || 'Failed to send message.'
     showToast({ type: 'error', message: msg })
   } finally {
     sending.value = false

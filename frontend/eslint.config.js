@@ -8,6 +8,15 @@ import { createRequire } from 'node:module'
 const requireCjs = createRequire(import.meta.url)
 const giljoInternal = requireCjs('./eslint-rules/index.cjs')
 
+// A failed request's reason lives in `message`, not `detail` -- route through parseErrorResponse().
+const noResponseDataDetail = [
+  'error',
+  {
+    selector: "MemberExpression[property.name='detail'][object.property.name='data']",
+    message: 'Read the server error via parseErrorResponse(err).message, not response.data.detail.',
+  },
+]
+
 export default [
   {
     ignores: [
@@ -75,6 +84,7 @@ export default [
       'prefer-template': 'error',
       'prefer-arrow-callback': 'error',
       'no-var': 'error',
+      'no-restricted-syntax': noResponseDataDetail,
       // IMP-0013 Phase 4: anti-pattern rules
       'giljo-internal/no-manual-api-url-composition': 'error',
       'giljo-internal/no-vite-ignore-saas-import': 'error',
@@ -152,6 +162,7 @@ export default [
       'prefer-template': 'error',
       'prefer-arrow-callback': 'error',
       'no-var': 'error',
+      'no-restricted-syntax': noResponseDataDetail,
       'giljo-internal/no-manual-api-url-composition': 'error',
       'giljo-internal/no-vite-ignore-saas-import': 'error',
       'giljo-internal/vue-router-install-after-routes': 'error',
@@ -225,6 +236,32 @@ export default [
         ...globals.node,
         ...globals.vitest,
       },
+    },
+  },
+  {
+    // Auth/OAuth screens and SaaS billing still read response.data.detail directly, pending security review.
+    files: [
+      'src/utils/errorMessages.js',
+      'src/services/api.js',
+      'src/components/ForgotPasswordPin.vue',
+      'src/components/navigation/NavigationDrawer.vue',
+      'src/views/Login.vue',
+      'src/views/OAuthAuthorize.vue',
+      'src/views/FirstLogin.vue',
+      'src/views/CreateAdminAccount.vue',
+      'src/saas/components/ForgotPasswordEmail.vue',
+      'src/saas/views/PasswordResetPage.vue',
+      'src/saas/views/RegisterView.vue',
+      'src/saas/components/auth/SocialLoginButtons.vue',
+      'src/saas/views/InvoiceHistory.vue',
+      'src/saas/components/SubscriptionDashboard.vue',
+      'src/saas/composables/useBillingSubscription.js',
+      'src/saas/composables/useTrialGuard.js',
+      'src/saas/billing/**',
+      'src/saas/services/billing.js',
+    ],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
 ]

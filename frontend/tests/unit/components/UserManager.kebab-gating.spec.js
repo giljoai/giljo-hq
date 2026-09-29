@@ -235,7 +235,7 @@ describe('UserManager — reset-link action (FE-6008 D)', () => {
     const mockAxiosPost = vi.fn().mockRejectedValue({
       response: {
         status: 403,
-        data: { detail: 'Admin access required to trigger a password reset.' },
+        data: { error_code: 'AUTHORIZATION_ERROR', message: 'Admin access required to trigger a password reset.' },
       },
     })
 
@@ -254,7 +254,7 @@ describe('UserManager — reset-link action (FE-6008 D)', () => {
     const mockAxiosPost = vi.fn().mockRejectedValue({
       response: {
         status: 404,
-        data: { detail: 'User not found.' },
+        data: { error_code: 'RESOURCE_NOT_FOUND', message: 'User not found.' },
       },
     })
 

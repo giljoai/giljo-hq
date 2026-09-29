@@ -110,17 +110,24 @@ async def test_anonymous_health_redis_failure_carries_no_exception_text(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_authenticated_system_status_surfaces_the_detail(monkeypatch):
+async def test_authenticated_system_status_carries_a_fixed_code_not_raw_text(monkeypatch, caplog):
+    import logging
+
     from giljo_mcp.auth.dependencies import get_current_active_user
 
-    app = _build_app(monkeypatch, giljo_mode="ce", db_manager=_FailingDbManager())
+    app = _build_app(monkeypatch, giljo_mode="saas", db_manager=_FailingDbManager())
     app.dependency_overrides[get_current_active_user] = object
 
-    await _get(app, "/health")
+    with caplog.at_level(logging.WARNING, logger="api.app"):
+        await _get(app, "/health")
     response = await _get(app, "/api/system/status")
     body = response.json()
 
-    assert DB_SENTINEL in body["health_detail"]["database"]
+    assert DB_SENTINEL not in response.text, (
+        f"raw exception text leaked to an authenticated non-operator SaaS user: {response.text}"
+    )
+    assert body["health_detail"]["database"] == "unreachable"
+    assert DB_SENTINEL in caplog.text, "the original exception text must still be logged server-side"
     assert "pending_migration" in body
     assert "update_available" in body
 

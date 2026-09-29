@@ -50,6 +50,7 @@ import { ref } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useProjectBoundThread } from '@/composables/useProjectBoundThread'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 
 const props = defineProps({
@@ -92,12 +93,6 @@ async function resolveProjectThread() {
   return resolveProjectBoundThread(props.projectId)
 }
 
-async function resolveConductorThread() {
-  const results = await commHub.searchThreads(props.chainRunId)
-  const subject = `Chain run ${props.chainRunId} coordination hub`
-  return results.find((t) => t.subject === subject) || results[0] || null
-}
-
 async function sendMessage() {
   if (!messageText.value.trim()) {
     showToast({ message: 'Message cannot be empty', type: 'warning', timeout: 3000 })
@@ -109,7 +104,7 @@ async function sendMessage() {
 
   try {
     if (selectedRecipient.value === 'orchestrator' && conductorReady()) {
-      const thread = await resolveConductorThread()
+      const thread = await commHub.resolveChainHub(props.chainRunId)
       if (!thread) {
         showToast({
           message: "The conductor hasn't set up its coordination thread yet — try again shortly.",
@@ -142,7 +137,7 @@ async function sendMessage() {
     emit('message-sent')
   } catch (error) {
     console.error('[MessageComposer] Send message failed:', error)
-    const msg = error.response?.data?.detail || error.message || 'Failed to send message'
+    const msg = parseErrorResponse(error).message || 'Failed to send message'
     showToast({ message: `Failed to send message: ${msg}`, type: 'error', timeout: 5000 })
   } finally {
     sending.value = false
@@ -176,21 +171,6 @@ async function sendMessage() {
     align-items: center;
     min-width: 0;
     order: 1;
-  }
-
-  @media (max-width: 576px) {
-    flex-wrap: wrap;
-
-    .composer-channels {
-      order: 2;
-      width: 100%;
-    }
-
-    .composer-input {
-      order: 1;
-      width: 100%;
-      flex-basis: 100%;
-    }
   }
 
   .recipient-btn,

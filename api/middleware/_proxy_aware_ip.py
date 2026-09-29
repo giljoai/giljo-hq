@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Protocol
 
+from ._cloudflare_ip_ranges import is_cloudflare_edge_ip
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +103,25 @@ class ProxyAwareIpResolver:
         return peer_ip
 
     def _resolve_behind_always_trust(self, request: _RequestLike) -> str | None:
+        nearest_untrusted_hop = self._nearest_untrusted_xff_hop(request)
+
         cf_ip = request.headers.get("CF-Connecting-IP")
-        if cf_ip and cf_ip.strip():
+        if (
+            cf_ip
+            and cf_ip.strip()
+            and nearest_untrusted_hop is not None
+            and is_cloudflare_edge_ip(nearest_untrusted_hop)
+        ):
             return cf_ip.strip()
 
+        return nearest_untrusted_hop
+
+    def _nearest_untrusted_xff_hop(self, request: _RequestLike) -> str | None:
         forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            for hop in reversed(forwarded.split(",")):
-                candidate = hop.strip()
-                if candidate and not self.peer_is_trusted_proxy(candidate):
-                    return candidate
+        if not forwarded:
+            return None
+        for hop in reversed(forwarded.split(",")):
+            candidate = hop.strip()
+            if candidate and not self.peer_is_trusted_proxy(candidate):
+                return candidate
         return None

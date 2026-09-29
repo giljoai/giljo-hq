@@ -1,8 +1,7 @@
 <template>
   <v-dialog
     :model-value="show"
-    :fullscreen="isMobile"
-    :max-width="isMobile ? undefined : '1000'"
+    max-width="1000"
     persistent
     role="dialog"
     aria-labelledby="review-modal-title"
@@ -378,7 +377,6 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useDisplay } from 'vuetify'
 import { useClipboard } from '@/composables/useClipboard'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { getAgentColor } from '@/config/agentColors'
@@ -405,8 +403,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 
-const { mobile } = useDisplay()
-const isMobile = computed(() => mobile.value)
 const { copy: clipboardCopy, copied } = useClipboard()
 
 const copiedField = ref(null)

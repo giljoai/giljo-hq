@@ -146,24 +146,6 @@ def maybe_build_ctx_self_close_directive(ctx: dict[str, Any]) -> dict[str, Any] 
     }
 
 
-async def is_chain_member(
-    session: Any, project_id: str, tenant_key: str, *, db_manager: Any, tenant_manager: Any
-) -> bool:
-    try:
-        from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=session,
-        )
-        run = await svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-        return run is not None
-    except Exception:  # noqa: BLE001 - best-effort chain detection; never break staging
-        logger.warning("[BE-6198] chain-member check failed (non-fatal); falling back to solo staging redirect")
-        return False
-
-
 def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool = False) -> dict[str, Any] | None:
     if project.staging_status == "staging_complete":
         identity = {
@@ -221,7 +203,7 @@ def build_identity_source_line(ctx: dict[str, Any]) -> str:
     )
 
 
-def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str, tenant_key: str) -> dict[str, Any]:
+def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str) -> dict[str, Any]:
     project = ctx["project"]
     product = ctx.get("product")
     return {
@@ -232,7 +214,6 @@ def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str, tenan
         "product_id": str(product.id) if product is not None else None,
         "product_name": getattr(product, "name", None) if product is not None else None,
         "identity_source": build_identity_source_line(ctx),
-        "tenant_key": tenant_key,
         "id_glossary": {
             "job_id": "Use for: report_progress, complete_job, set_agent_status",
             "agent_id": "Use for: post_to_thread(from_agent), get_thread_history(as_participant)",

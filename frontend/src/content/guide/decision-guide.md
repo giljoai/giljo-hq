@@ -16,7 +16,7 @@ A **task** and a **project** are different kinds of work item.
 | You are capturing debt or an idea mid-flow | You have a clear goal and want a plan |
 | You do not need a plan or agents yet | You want a 360 Memory entry at the end |
 
-Start with a task when in doubt — it is the cheaper choice. When a task is ready to become real work, open it and choose **Convert to Project**. That creates a new inactive project from the task without disturbing whatever project is currently active; you activate the new one yourself when you are ready.
+Start with a task when in doubt — it is the cheaper choice. If you have not decided on a task yet, set it to **On hold**: it stays on the board as open work, and unlike **In Progress** it does not record a start time. When a task is ready to become real work, open it and choose **Convert to Project**. That creates a new inactive project from the task without disturbing whatever project is currently active; you activate the new one yourself when you are ready.
 
 ### Handovers
 
@@ -52,10 +52,9 @@ When you stage a project, you choose how its agents run.
 |---|---|---|
 | Terminals you open | One per agent | One |
 | Who launches each agent | You | The orchestrator |
-| Auto Check-In slider | Available | Not shown (orchestrator handles it) |
 | Best for | Hands-on supervision, agents across machines | A single guided session |
 
-In multi-terminal mode, phases run one after another and the agents within a phase run in parallel. In subagent mode, the orchestrator spawns its agents together and coordinates them directly; once your tool connects, a read-only **"detected: {tool}"** chip confirms which harness GiljoAI recognized. The **Auto Check-In** slider (Jobs page) only appears in multi-terminal mode, where it nudges sleeping agents on a cadence you set.
+In multi-terminal mode, phases run one after another and the agents within a phase run in parallel. In subagent mode, the orchestrator spawns its agents together and coordinates them directly; once your tool connects, a read-only **"detected: {tool}"** chip confirms which harness GiljoAI recognized. How often a waiting agent checks in for new work is one account setting, **Check-in cadence**, under **Tools > Agents**; it applies in both modes.
 
 ### One Project or a Chain?
 

@@ -132,7 +132,7 @@ describe('ApprovalCard.vue (FE-5017 Phase C)', () => {
 
   it('shows an error and emits "error" when decide rejects', async () => {
     api.approvals.decide.mockRejectedValueOnce({
-      response: { data: { detail: 'Already decided' } },
+      response: { status: 409, data: { error_code: 'PROJECTSTATEERROR', message: 'Already decided' } },
     })
 
     const wrapper = mountCard()

@@ -779,12 +779,6 @@ function handleDismiss() {
   gap: 12px;
 }
 
-@media (max-width: 640px) {
-  .tools-grid--six {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Row card: icon well + name/method + check ring. */
 .tool-card--row {
   position: relative;
@@ -1016,38 +1010,5 @@ function handleDismiss() {
   color: $color-brand-yellow;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-/* Responsive: rail collapses above content on narrow viewports */
-@media (max-width: 720px) {
-  .wizard-rail-panel {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-
-  .wizard-rail {
-    border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .spine,
-  .spine-fill {
-    display: none;
-  }
-}
-
-/* Responsive: mobile */
-@media (max-width: 599px) {
-  .setup-wizard-overlay {
-    padding: 12px;
-  }
-
-  .wizard-rail {
-    padding: 18px 16px;
-  }
-
-  .wizard-main {
-    padding: 18px 16px 16px;
-  }
 }
 </style>

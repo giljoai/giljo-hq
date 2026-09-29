@@ -74,6 +74,8 @@ class JobResponse(BaseModel):
     accumulated_duration_seconds: float = 0.0
     reactivation_count: int = 0
     duration_seconds: float | None = None
+    not_picked_up: bool = False
+    activity: str = ""
 
 
 

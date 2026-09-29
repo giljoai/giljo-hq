@@ -36,8 +36,8 @@ CRITICAL: ALL GiljoAI agents use the 'gil-' prefix in Codex CLI.
 The server returns agent_name WITHOUT the prefix. You MUST prepend 'gil-'.
 
 WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
-returned already carries a HARNESS block naming this agent's harness and its
-model/effort hints, and get_job_mission returns its full agent_profile (role,
+returned carries this agent's model/effort hints when they are set, and
+get_job_mission returns its full agent_profile (role,
 description, instructions, behavioural rules, success criteria). There is no
 agent template file to install, look up, or keep in sync — so do NOT re-explain
 the role in instructions=, and do NOT hunt for a catalogue entry.
@@ -69,27 +69,26 @@ DO NOT invoke spawn_agent() during staging - this is planning reference only
 _CH3_CLAUDE = (
     "agent_name → the agent_profile in that job's get_job_mission response",
     """Claude Code CLI Note:
-  - Task(subagent_type=X) where X = agent_name (NOT display_name)
-  - agent_name binds the DB record to the Task call; the role arrives from the server
-  - Example: spawn with agent_name='implementer', Task uses 'implementer'""",
+  - Task(subagent_type="general-purpose") for every agent: Claude Code's generic worker
+  - agent_name binds the DB record to the job; the role arrives from the server
+  - The Task instructions open with the agent's name and job_id, then get_job_mission""",
     """── YOUR PLATFORM: CLAUDE CODE CLI ─────────────────────────────────────────
 Task tool syntax (IMPLEMENTATION PHASE ONLY - not during staging):
-  Task(subagent_type='{agent_name}', instructions='...')
+  Task(subagent_type="general-purpose",
+       instructions="You are {agent_name} (job_id: {job_id}). First action: get_job_mission(job_id='{job_id}').")
 
-CRITICAL: Task() uses agent_name value, NOT agent_display_name
-
-WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
-returned already carries a HARNESS block naming this agent's harness and its
-model/effort hints, and get_job_mission returns its full agent_profile. There is
-no agent file to install or look up — hand the subagent the thin prompt and let
-it fetch its own mission.
+WHERE THE ROLE COMES FROM: the server, not your disk. get_job_mission returns the
+agent's full agent_profile (role, instructions, model/effort hints). There is no
+agent file to install or look up: spawn Claude Code's generic worker and let it
+fetch its own mission. agent_name only labels the job record.
 
 Example:
   spawn_job(agent_name='implementer',
                   agent_display_name='implementer', ...)
 
   Later in implementation:
-  Task(subagent_type='implementer', ...)  # agent_name!
+  Task(subagent_type="general-purpose",
+       instructions="You are implementer (job_id: <job_id>). First action: get_job_mission(job_id='<job_id>').")
 
 DO NOT invoke Task() during staging - this is planning reference only
 """,
@@ -217,7 +216,7 @@ verification entirely for doc-only / analysis-only projects. The full implementa
 sequence is spawn_job (mint the job_id + dashboard record) BEFORE launching the agent — in
 EVERY mode, including subagent mode — never Agent/Task/@-syntax without a preceding spawn_job.
 
-VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id/tenant_key
+VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id
 correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_names.
 """
 
@@ -262,7 +261,8 @@ Staging phase (orchestrator only, project.staging_status != 'staging_complete'):
 
 Implementation phase (all agents, post-staging-complete):
   waiting →[get_job_mission]→ working   working →[report_progress]→ working
-  working →[complete_job]→ complete
+  working →[complete_job]→ complete     (a worker's last call; it never finalizes)
+  complete →[finalize_job, orchestrator only, after review]→ closed
   working →[set_agent_status("blocked")]→ blocked
   working →[set_agent_status("idle")]→ idle
   working →[set_agent_status("sleeping")]→ sleeping
@@ -273,7 +273,7 @@ Implementation phase (all agents, post-staging-complete):
 Note: spawned non-orchestrator agents bypass the staging lock entirely.
 
 GENERAL ERROR PROTOCOL:
-1. Log error with context (agent_id, job_id, tenant_key).
+1. Log error with context (agent_id, job_id).
 2. Persist error state:
    - Implementation phase OR not the orchestrator → set_agent_status("blocked", reason).
    - Staging phase AND you are the orchestrator → tell the USER inline; set_agent_status
@@ -294,7 +294,7 @@ _REACTIVATION_SPAWN_BLOCKS: dict[str, str] = {
   Include in the prompt: "You are resuming job_id={job_id}. Call get_job_mission(job_id='{job_id}') to load your full context."
   Do NOT call spawn_job again — the job already exists.""",
     "claude-code": f"""Reactivation Spawn — Claude Code:
-  Task(subagent_type='{{agent_name}}', instructions='You are resuming a reactivated Giljo job. Call mcp__{MCP_ALIAS}__get_job_mission(job_id="{{job_id}}") immediately to load your mission and prior context.')
+  Task(subagent_type="general-purpose", instructions='You are {{agent_name}}, resuming a reactivated Giljo job (job_id: {{job_id}}). First action: call mcp__{MCP_ALIAS}__get_job_mission(job_id="{{job_id}}") to load your mission and prior context.')
   Do NOT call spawn_job again — the job already exists.""",
 }
 
@@ -335,7 +335,7 @@ IMPLEMENTATION PHASE MONITORING:
 
 When you (or a fresh orchestrator instance) enters implementation phase:
 
-1. Retrieve execution plan via get_job_mission(job_id, tenant_key)
+1. Retrieve execution plan via get_job_mission(job_id)
 2. Follow coordination strategy you defined in Step 7
 3. Coordinate handoffs between dependent agents
 4. After dispatching agents: set_agent_status(job_id, status="idle", reason="Agents dispatched, monitoring")

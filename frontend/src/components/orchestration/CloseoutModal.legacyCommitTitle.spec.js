@@ -24,10 +24,6 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
-vi.mock('vuetify', () => ({
-  useDisplay: () => ({ mobile: { value: false } }),
-}))
-
 vi.mock('@/composables/useFormatDate', () => ({
   useFormatDate: () => ({ formatDateTime: (v) => String(v) }),
 }))

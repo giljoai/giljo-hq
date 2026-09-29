@@ -46,7 +46,6 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
 // Import components to test
-import ProjectTabs from '@/components/projects/ProjectTabs.vue'
 import SystemSettings from '@/views/SystemSettings.vue'
 import ProductForm from '@/components/products/ProductForm.vue'
 
@@ -105,34 +104,8 @@ const globalStubs = {
 }
 
 describe('Global Tab Styles', () => {
-  describe('Tab Implementation Standard', () => {
-    it('ProjectTabs uses pill-button toggles for tab navigation', async () => {
-      const pinia = createPinia()
-      const wrapper = mount(ProjectTabs, {
-        props: {
-          project: {
-            id: 'test-project',
-            name: 'Test Project',
-            // FE-9419: ProjectTabs binds :product-id="localProject.product_id"
-            // to CloseoutModal, where productId is a required String. A project
-            // without one cannot exist, so a fixture without one is unrealistic.
-            product_id: 'test-product',
-          },
-        },
-        global: {
-          plugins: [pinia, vuetify],
-          stubs: globalStubs,
-        },
-      })
-
-      await wrapper.vm.$nextTick()
-
-      const pills = wrapper.findAll('.pill-btn')
-      expect(pills.length).toBeGreaterThanOrEqual(2)
-      expect(wrapper.find('.tab-pills').exists()).toBe(true)
-    })
-  })
-
+  // FE-9681: the ProjectTabs pill-toggle case retired with the project page;
+  // the Jobs board's side and filter segments carry the pill pattern now.
   describe('SystemSettings Component', () => {
     it('uses pill-toggle buttons for tab navigation', async () => {
       const pinia = createPinia()
@@ -217,22 +190,7 @@ describe('Global Tab Styles', () => {
       expect(toggle.findAll('[data-testid^="product-form-tab-"]').length).toBeGreaterThanOrEqual(2)
     })
 
-    it('ProjectTabs uses pill-button toggles', async () => {
-      const pinia = createPinia()
-
-      const wrapper = mount(ProjectTabs, {
-        props: { project: { id: 'test', name: 'Test', product_id: 'test-product' } },
-        global: {
-          plugins: [pinia, vuetify],
-          stubs: globalStubs,
-        },
-      })
-
-      await wrapper.vm.$nextTick()
-
-      const pills = wrapper.findAll('.pill-btn')
-      expect(pills.length).toBeGreaterThanOrEqual(2)
-    })
+    // FE-9681: the ProjectTabs case retired with the project page.
 
     it('SystemSettings uses pill-toggle buttons', async () => {
       const pinia = createPinia()

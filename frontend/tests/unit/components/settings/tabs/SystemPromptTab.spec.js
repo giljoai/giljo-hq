@@ -256,7 +256,7 @@ describe('SystemPromptTab.vue', () => {
 
     it('handles API error on load gracefully', async () => {
       apiMock.getOrchestratorPrompt.mockRejectedValueOnce({
-        response: { data: { detail: 'Failed to load prompt' } },
+        response: { data: { error_code: 'VALIDATIONERROR', message: 'Failed to load prompt' } },
       })
 
       wrapper = mountComponent()
@@ -271,7 +271,7 @@ describe('SystemPromptTab.vue', () => {
       await flushPromises()
 
       apiMock.updateOrchestratorPrompt.mockRejectedValueOnce({
-        response: { data: { detail: 'Save failed' } },
+        response: { data: { error_code: 'VALIDATIONERROR', message: 'Save failed' } },
       })
 
       // Modify and save
@@ -290,7 +290,7 @@ describe('SystemPromptTab.vue', () => {
       await flushPromises()
 
       apiMock.resetOrchestratorPrompt.mockRejectedValueOnce({
-        response: { data: { detail: 'Reset failed' } },
+        response: { data: { error_code: 'VALIDATIONERROR', message: 'Reset failed' } },
       })
 
       await wrapper.vm.restorePrompt()
@@ -466,7 +466,7 @@ describe('SystemPromptTab.vue', () => {
 
     it('can clear error state', async () => {
       apiMock.getOrchestratorPrompt.mockRejectedValueOnce({
-        response: { data: { detail: 'Test error' } },
+        response: { data: { error_code: 'VALIDATIONERROR', message: 'Test error' } },
       })
 
       wrapper = mountComponent()

@@ -13,7 +13,7 @@ from giljo_mcp.services.protocol_sections.chapters_chain_suborch import (  # noq
     _build_ch_sub_orchestrator,
     _render_ch_sub_orchestrator,
 )
-from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
+from giljo_mcp.services.protocol_sections.orchestrator_body import LAUNCH_PROMPT_RULE, render_capability_ladder
 
 
 _CH_BORDER = "════════════════════════════════════════════════════════════════════════════"
@@ -265,14 +265,14 @@ def _chain_drive_step_a_preset(run_id: str, preset: Platform, nudge: str = "") -
         open NO terminal and run NO terminal-launch command. In THIS session,
         get_job_mission(job_id=<SUB_ORCH_JOB_ID>) and DRIVE P_i to completion as its
         orchestrator: author its project mission, spawn and coordinate its agents, then
-        complete_job. Only then advance.
+        complete_job. Only then advance. {LAUNCH_PROMPT_RULE}
 
     A3. COMMS — coordinate via the chain Hub thread (get_context chain -> hub_thread_id)
         then get_thread_history / get_my_turn. Proceed to STEP B (advance on ready_to_advance).{nudge_note}"""
     fallback = (
         "If your harness supports in-process subagents, spawn ONE subagent as P_i's\n"
         "sub-orchestrator instead of adopting the role inline — still one project at a time, and\n"
-        "still NO OS terminal."
+        f"still NO OS terminal. {LAUNCH_PROMPT_RULE}"
     )
     floor_user_line = (
         "This project must be run without a terminal — I will drive it inline as its orchestrator, "
@@ -299,6 +299,8 @@ def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform 
         print instead of running. It is a flat, direct call; ``$PWD`` resolves your cwd itself.
 
 {spawn_command}
+
+    {LAUNCH_PROMPT_RULE}
 
     A3. Your launch returns NO result — coordinate ONLY via the Hub (get_context chain ->
         hub_thread_id) then get_thread_history / get_my_turn. The sub-orch runs the COMBINED flow

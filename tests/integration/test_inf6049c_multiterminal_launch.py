@@ -20,6 +20,9 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
+from giljo_mcp.platform_registry import HARNESSES
+from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block
+from giljo_mcp.template_validation import resolve_harness_name
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
@@ -241,10 +244,14 @@ async def test_implement_payload_routes_each_agent_to_its_tool_and_carries_launc
     assert by_agent["reviewer"]["cli_tool"] == "opencode"
     assert by_agent["analyzer"]["cli_tool"] == "claude"
 
-    assert "Start-Process codex " in by_agent["implementer"]["commands"]["windows"]
-    assert "opencode" in by_agent["reviewer"]["commands"]["windows"]
-    assert "Start-Process claude " in by_agent["analyzer"]["commands"]["windows"]
-    assert all(e["macos_validated"] is False for e in lc)
+    assert "Harness: codex" in by_agent["implementer"]["launch"]
+    assert "Harness: opencode" in by_agent["reviewer"]["launch"]
+    assert "Harness: claude" in by_agent["analyzer"]["launch"]
+    for entry in lc:
+        assert "commands" not in entry, f"server-authored launch syntax is retired: {entry!r}"
+        assert entry["launch"] == render_harness_launch_block(
+            resolve_harness_name(entry["cli_tool"]), model=None, effort=None, launched=True
+        ), "launch guidance must come from the one shared renderer, not a second copy"
 
     prompt = payload["prompt"]
     assert "(tool: codex)" in prompt
@@ -253,7 +260,7 @@ async def test_implement_payload_routes_each_agent_to_its_tool_and_carries_launc
     assert "get_job_mission" in prompt
 
 
-async def test_implement_launch_command_is_runnable_with_autonomy_and_loaded_prompt(
+async def test_implement_launch_guidance_names_the_registry_autonomy_flag(
     lifecycle_mcp_client, db_session, primary_tenant_key
 ):
     new_client, _switch = lifecycle_mcp_client
@@ -270,16 +277,15 @@ async def test_implement_launch_command_is_runnable_with_autonomy_and_loaded_pro
     async with new_client() as session:
         result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
     payload = _payload(result)
+
     by_agent = {e["agent"]: e for e in payload["launch_commands"]}
-
-    assert "--dangerously-bypass-approvals-and-sandbox" in by_agent["implementer"]["commands"]["linux"]
-    assert "--dangerously-skip-permissions" in by_agent["analyzer"]["commands"]["linux"]
-
-    for entry in by_agent.values():
-        lx = entry["commands"]["linux"]
-        assert "get_job_mission" in lx, "launch command must instruct loading the mission"
-        assert "You are a GiljoAI agent" in lx, "must carry the natural-language loaded prompt"
-        assert "mcp__giljo_mcp__health_check()" not in lx, "must NOT bake a raw tool-call seed into the command"
+    codex_flag = next(h.autonomy_flag for h in HARNESSES if h.cli_binary == "codex")
+    claude_flag = next(h.autonomy_flag for h in HARNESSES if h.cli_binary == "claude")
+    assert codex_flag in by_agent["implementer"]["launch"], by_agent["implementer"]
+    assert claude_flag in by_agent["analyzer"]["launch"], by_agent["analyzer"]
+    for entry in payload["launch_commands"]:
+        assert "Do not add a permission-bypass" not in entry["launch"], entry
+        assert "commands" not in entry, f"server-authored launch syntax stays retired: {entry!r}"
 
 
 
@@ -334,7 +340,7 @@ async def test_multiterminal_role_default_fallback_when_template_id_absent(
     assert result.is_error is False, _error_text(result)
     by_agent = {e["agent"]: e for e in _payload(result)["launch_commands"]}
     assert by_agent["analyzer"]["cli_tool"] == "codex"
-    assert "Start-Process codex " in by_agent["analyzer"]["commands"]["windows"]
+    assert "Harness: codex" in by_agent["analyzer"]["launch"]
 
 
 async def test_multiterminal_template_id_wins_over_role_default(lifecycle_mcp_client, db_session, primary_tenant_key):

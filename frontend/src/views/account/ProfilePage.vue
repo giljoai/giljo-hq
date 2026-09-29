@@ -247,6 +247,7 @@ import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
 import setupService from '@/services/setupService'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import RoleBadge from '@/components/common/RoleBadge.vue'
 
 const userStore = useUserStore()
@@ -388,7 +389,7 @@ async function save() {
       showToast({ message: 'Profile updated', type: 'success' })
     }
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || 'Update failed'
+    error.value = parseErrorResponse(err).message || 'Update failed'
   } finally {
     saving.value = false
   }
@@ -405,7 +406,7 @@ async function resendEmailChange() {
       type: 'success',
     })
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || 'Failed to resend verification'
+    error.value = parseErrorResponse(err).message || 'Failed to resend verification'
   } finally {
     resending.value = false
   }
@@ -420,7 +421,7 @@ async function cancelEmailChange() {
     emailPending.value = null
     showToast({ message: 'Email change cancelled.', type: 'info' })
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || 'Failed to cancel email change'
+    error.value = parseErrorResponse(err).message || 'Failed to cancel email change'
   } finally {
     cancelling.value = false
   }
@@ -445,7 +446,7 @@ async function changePassword() {
     pwError.value =
       httpStatus === 401
         ? 'Current password is incorrect.'
-        : err?.response?.data?.detail || err?.message || 'Failed to change password'
+        : parseErrorResponse(err).message || 'Failed to change password'
   } finally {
     changingPw.value = false
   }
@@ -461,7 +462,7 @@ async function changePin() {
     pinForm.value = { next: '', confirm: '' }
     showToast({ message: 'Recovery PIN updated.', type: 'success' })
   } catch (err) {
-    pinError.value = err?.response?.data?.detail || err?.message || 'Failed to update PIN'
+    pinError.value = parseErrorResponse(err).message || 'Failed to update PIN'
   } finally {
     changingPin.value = false
   }

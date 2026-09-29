@@ -41,16 +41,16 @@ def test_subagent_render_drops_multi_terminal_only_fragments() -> None:
 
 def test_subagent_render_uses_self_spawn_phrasing() -> None:
     sub = _proto(execution_mode="claude-code", tool="claude-code")
-    assert "I will spawn each agent directly via Task(subagent_type=...)" in sub
+    assert 'I will spawn each agent directly via Task(subagent_type="general-purpose")' in sub
     assert "no dashboard copy/paste needed" in sub
-    assert "Launch the replacement directly via Task(subagent_type=...)" in sub
+    assert 'Launch the replacement directly via Task(subagent_type="general-purpose")' in sub
     assert "**If your spawned subagents are running (nothing actionable right now):**" in sub
 
 
 def test_subagent_self_spawn_syntax_is_tool_aware() -> None:
     codex = _proto(execution_mode="codex", tool="codex")
     assert "spawn_agent(name=...)" in codex
-    assert "Task(subagent_type=...)" not in codex
+    assert "Task(subagent_type=" not in codex
 
     generic = _proto(execution_mode="some_future_cli", tool="some_future_cli")
     assert "your CLI's in-process subagent syntax" in generic

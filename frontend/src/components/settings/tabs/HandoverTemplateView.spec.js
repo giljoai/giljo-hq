@@ -95,7 +95,10 @@ describe('FE-9643b — saving', () => {
     await textarea(wrapper).setValue('too long or whatever')
 
     apiMock.settings.updateHandoverTemplate.mockRejectedValue({
-      response: { data: { detail: { message: 'Over the 8000-character limit.' } } },
+      response: {
+        status: 422,
+        data: { error_code: 'VALIDATIONERROR', message: 'Over the 8000-character limit.' },
+      },
     })
     await wrapper.find('[data-test="handover-save-btn"]').trigger('click')
     await flushPromises()

@@ -145,6 +145,7 @@ import { ref, computed, watch, getCurrentInstance } from 'vue'
 import api from '@/services/api'
 import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   modelValue: {
@@ -255,7 +256,7 @@ async function saveMission() {
     }
   } catch (err) {
     console.error('[AgentMissionEditModal] Failed to save mission:', err)
-    error.value = err.response?.data?.detail || 'Failed to save mission'
+    error.value = parseErrorResponse(err).message || 'Failed to save mission'
   } finally {
     loading.value = false
   }

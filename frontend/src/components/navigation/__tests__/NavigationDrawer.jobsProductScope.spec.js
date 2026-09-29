@@ -173,7 +173,7 @@ describe('NavigationDrawer — Jobs nav follows the viewed product tab (FE-9627)
     const path = jobsPath(wrapper)
     expect(path).not.toContain('yapper-p1')
     expect(path).not.toContain('run-yapper')
-    expect(path).toBe('/launch?via=jobs')
+    expect(path).toBe('/jobs-overview')
   })
 
   it('does not let a chain opened from another product win the Jobs link', async () => {
@@ -195,7 +195,7 @@ describe('NavigationDrawer — Jobs nav follows the viewed product tab (FE-9627)
     const path = jobsPath(wrapper)
     expect(path).not.toContain('yapper-p1')
     expect(path).not.toContain('run-yapper-review')
-    expect(path).toBe('/launch?via=jobs')
+    expect(path).toBe('/jobs-overview')
   })
 
   it('re-hydrates with the new product id when the tab switches', async () => {
@@ -208,6 +208,6 @@ describe('NavigationDrawer — Jobs nav follows the viewed product tab (FE-9627)
 
     expect(h.listRuns).toHaveBeenCalled()
     expect(h.listRuns.mock.calls.at(-1)[0]).toMatchObject({ product_id: YAPPER })
-    expect(jobsPath(wrapper)).toBe('/projects/yapper-p1?run=run-yapper')
+    expect(jobsPath(wrapper)).toBe('/jobs-overview')
   })
 })

@@ -66,7 +66,7 @@ class TestLaunchImplementationDropsCliFraming:
 
     def test_states_tenant_toggle_gating(self):
         description = _tool_description("launch_implementation")
-        assert "Headless toggle" in description
+        assert "Headless setting" in description
 
     def test_states_launch_does_not_activate(self):
         description = _tool_description("launch_implementation")

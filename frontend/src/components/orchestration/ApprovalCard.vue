@@ -57,6 +57,7 @@ import { useApprovalsStore } from '@/stores/useApprovalsStore'
 import { useToast } from '@/composables/useToast'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   approval: {
@@ -130,11 +131,7 @@ async function handleDecide(optionId) {
     await approvalsStore.decide(props.approval.id, optionId)
     emit('decided', { approvalId: props.approval.id, optionId })
   } catch (err) {
-    const msg =
-      err?.response?.data?.message ||
-      err?.response?.data?.detail ||
-      err?.message ||
-      'Failed to submit decision'
+    const msg = parseErrorResponse(err).message || 'Failed to submit decision'
     error.value = msg
     showToast({ message: msg, type: 'error' })
     emit('error', { approvalId: props.approval.id, optionId, error: err })

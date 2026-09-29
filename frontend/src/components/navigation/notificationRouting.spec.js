@@ -12,11 +12,7 @@ describe('notificationRouting — FE-9191 closeout family lands on the jobs tab'
       type: 'project.pre_launch_workproduct',
       payload: { project_id: 'p-1', project_name: 'Demo' },
     })
-    expect(route).toEqual({
-      name: 'ProjectLaunch',
-      params: { projectId: 'p-1' },
-      query: { tab: 'jobs' },
-    })
+    expect(route).toEqual({ name: 'JobsViewport', query: { project: 'p-1', detail: '1' } })
   })
 
   it('closeout.approval_required (payload project context) routes to ?tab=jobs', () => {
@@ -24,19 +20,15 @@ describe('notificationRouting — FE-9191 closeout family lands on the jobs tab'
       type: 'closeout.approval_required',
       payload: { project_id: 'p-9', approval_id: 'a-1' },
     })
-    expect(route).toEqual({
-      name: 'ProjectLaunch',
-      params: { projectId: 'p-9' },
-      query: { tab: 'jobs' },
-    })
+    expect(route).toEqual({ name: 'JobsViewport', query: { project: 'p-9', detail: '1' } })
   })
 
-  it('closeout family with metadata-style project context also routes to ?tab=jobs', () => {
+  it('closeout family with metadata-style project context also opens Jobs detail on the board', () => {
     const route = resolveNotificationRoute({
       type: 'project.pre_launch_workproduct',
       metadata: { project_id: 'p-3' },
     })
-    expect(route.query).toEqual({ tab: 'jobs' })
+    expect(route.query).toEqual({ project: 'p-3', detail: '1' })
   })
 
   it('the project-name chip navigation (projectRouteFor) is family-aware too', () => {
@@ -44,13 +36,13 @@ describe('notificationRouting — FE-9191 closeout family lands on the jobs tab'
       type: 'closeout.approval_required',
       payload: { project_id: 'p-4' },
     })
-    expect(closeout.query).toEqual({ tab: 'jobs' })
+    expect(closeout.query).toEqual({ project: 'p-4', detail: '1' })
 
     const generic = projectRouteFor({
       type: 'project_update',
       metadata: { project_id: 'p-5' },
     })
-    expect(generic.query).toBeUndefined()
+    expect(generic.query).toEqual({ project: 'p-5' })
   })
 
   it('the closeout family set contains exactly the two closeout notification types', () => {
@@ -67,13 +59,12 @@ describe('notificationRouting — regression map: other families keep their targ
     expect(route).toEqual({ name: 'Tools', query: { tab: 'connect' } })
   })
 
-  it('a generic project notification keeps ProjectLaunch WITHOUT a tab override', () => {
+  it('a generic project notification lands on the board card, Jobs detail closed', () => {
     const route = resolveNotificationRoute({
       type: 'project_update',
       metadata: { project_id: 'p-2' },
     })
-    expect(route).toEqual({ name: 'ProjectLaunch', params: { projectId: 'p-2' } })
-    expect(route.query).toBeUndefined()
+    expect(route).toEqual({ name: 'JobsViewport', query: { project: 'p-2' } })
   })
 
   it('context_tuning and vision_analysis stay on the current page (no route)', () => {

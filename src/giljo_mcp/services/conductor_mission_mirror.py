@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models import AgentJob
 
 
@@ -32,34 +33,34 @@ async def mirror_chain_mission_for_conductor(
     if not metadata.get("chain_conductor"):
         return
 
+    from giljo_mcp.services.sequence_run_service import SequenceRunService
+
+    svc = SequenceRunService(
+        db_manager=db_manager,
+        tenant_manager=tenant_manager,
+        session=session,
+        websocket_manager=websocket_manager,
+    )
+
+    run_id = metadata.get("run_id")
+    if not run_id:
+        execution = await repo.get_execution_with_job(session, tenant_key, job.job_id)
+        agent_id = str(execution.agent_id) if execution is not None else None
+        if agent_id is not None:
+            run = await svc.find_active_run_for_conductor(conductor_agent_id=agent_id, tenant_key=tenant_key)
+            run_id = run.get("id") if run is not None else None
+    if not run_id:
+        return
+
     try:
-        from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=session,
-            websocket_manager=websocket_manager,
-        )
-
-        run_id = metadata.get("run_id")
-        if not run_id:
-            execution = await repo.get_execution_with_job(session, tenant_key, job.job_id)
-            agent_id = str(execution.agent_id) if execution is not None else None
-            if agent_id is not None:
-                run = await svc.find_active_run_for_conductor(conductor_agent_id=agent_id, tenant_key=tenant_key)
-                run_id = run.get("id") if run is not None else None
-        if not run_id:
-            return
-
-        await svc.update(run_id=run_id, tenant_key=tenant_key, chain_mission=mission)
-        logger.info(
-            "[BE-6186] Mirrored chain conductor mission into sequence_runs.chain_mission",
-            extra={"job_id": job.job_id, "run_id": run_id, "tenant_key": tenant_key},
-        )
-    except Exception as exc:  # noqa: BLE001 - best-effort mirror, never break the primary write
-        logger.warning(
-            "[BE-6186] chain_mission mirror failed (non-fatal) for job %s: %s",
-            job.job_id,
-            exc,
-        )
+        await svc.update(run_id=run_id, tenant_key=tenant_key, chain_mission=mission, defer_broadcast=True)
+    except ResourceNotFoundError:
+        return
+    except ValidationError as exc:
+        if exc.error_code != "CHAIN_MISSION_LOCKED":
+            raise
+        return
+    logger.info(
+        "[BE-6186] Mirrored chain conductor mission into sequence_runs.chain_mission",
+        extra={"job_id": job.job_id, "run_id": run_id, "tenant_key": tenant_key},
+    )

@@ -4,8 +4,68 @@ import { useToast } from '@/composables/useToast'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { shouldShowLaunchAction } from '@/utils/actionConfig'
 import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const DEFAULT_PLAY_TOOLTIP = 'Copy prompt'
+export const REPLAY_LABEL = 'Re-issue the latest launch prompt after a disconnect or reboot'
+const CLIPBOARD_BLOCKED = 'Browser blocked clipboard access. Copy from the dialog manually.'
+
+function _implementationFetchError(error, showToast) {
+  const status = error?.response?.status
+  console.warn('[usePlayButton] Implementation prompt fetch failed:', {
+    status,
+    payload: error?.response?.data,
+    error,
+  })
+  const statusLabel = status ? `HTTP ${status}` : 'Network error'
+  showToast({
+    message:
+      `Couldn't copy implementation prompt (${statusLabel}). ` +
+      'Make sure staging is complete and at least one agent has launched. Refresh the dashboard and try again.',
+    type: 'error',
+    timeout: 7000,
+  })
+}
+
+export async function launchThenCopyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast }) {
+  try {
+    await api.projects.launchImplementation(projectId)
+  } catch (gateError) {
+    showToast({
+      message: `Could not start implementation: ${parseErrorResponse(gateError).message || 'the server refused the launch.'}`,
+      type: 'error',
+      timeout: 7000,
+    })
+    return false
+  }
+  await _copyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast })
+  return true
+}
+
+async function _copyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast, replay = false }) {
+  let response
+  try {
+    response = await api.prompts.implementation(projectId)
+  } catch (error) {
+    _implementationFetchError(error, showToast)
+    return false
+  }
+  const clipboardOk = await clipboardCopy(response?.data?.prompt)
+  if (!clipboardOk) {
+    showToast({ message: CLIPBOARD_BLOCKED, type: 'error', timeout: 6000 })
+    return false
+  }
+  if (replay) {
+    showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success', timeout: 5000 })
+    return true
+  }
+  const agentCount = response?.data?.agent_count ?? 0
+  const message = isSubagentExecutionMode(executionMode)
+    ? `Implementation prompt copied. ${agentCount + 1} jobs ready to launch (1 orchestrator, ${agentCount} specialists).`
+    : `Orchestrator prompt copied. ${agentCount} specialists ready to launch.`
+  showToast({ message, type: 'success', timeout: 5000 })
+  return true
+}
 
 export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx = null) {
   const { showToast } = useToast()
@@ -56,11 +116,18 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
   function isPlayButtonFaded(agent) {
     const jobId = agent.job_id || agent.agent_id
     if (reactivatedAgents.value.has(jobId)) return false
-    if (_isChainMember(agent) && !sequenceRunStore.isProjectStartable(_projectId())) return true
+    if (_isChainMember(agent)) {
+      if (!sequenceRunStore.isProjectStartable(_projectId())) return true
+      return agent.status !== 'waiting'
+    }
+    if (agent?.agent_display_name === 'orchestrator') return true
     return agent.status !== 'waiting'
   }
 
   function playButtonTooltip(agent) {
+    if (agent?.agent_display_name === 'orchestrator' && !_isChainMember(agent)) {
+      return 'Start this project with Implement'
+    }
     if (!_isChainMember(agent) || sequenceRunStore.isProjectStartable(_projectId())) {
       return DEFAULT_PLAY_TOOLTIP
     }
@@ -87,43 +154,8 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
 
       if (agent.agent_display_name === 'orchestrator') {
         const projectId = proj?.project_id || proj?.id
-        const storeState = getProjectState(projectId)
-        const executionMode = storeState?.execution_mode ?? proj?.execution_mode
-        const isCliMode = isSubagentExecutionMode(executionMode)
-
-        try {
-          await api.projects.launchImplementation(projectId)
-        } catch (gateError) {
-          console.warn(
-            '[usePlayButton] launch-implementation call failed (non-blocking):',
-            gateError
-          )
-        }
-
-        let response
-        try {
-          response = await api.prompts.implementation(projectId)
-        } catch (error) {
-          _handleImplementationFetchError(error)
-          return
-        }
-
-        const prompt = response?.data?.prompt
-        const clipboardOk = await clipboardCopy(prompt)
-        if (!clipboardOk) {
-          showToast({
-            message: 'Browser blocked clipboard access. Copy from the dialog manually.',
-            type: 'error',
-            timeout: 6000,
-          })
-          return
-        }
-
-        const agentCount = response?.data?.agent_count ?? 0
-        const successMsg = isCliMode
-          ? `Implementation prompt copied. ${agentCount + 1} jobs ready to launch (1 orchestrator, ${agentCount} specialists).`
-          : `Orchestrator prompt copied. ${agentCount} specialists ready to launch.`
-        showToast({ message: successMsg, type: 'success', timeout: 5000 })
+        const executionMode = getProjectState(projectId)?.execution_mode ?? proj?.execution_mode
+        await launchThenCopyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast })
         return
       }
 
@@ -139,7 +171,7 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
       showToast({ message: `${role} prompt copied. Paste in a fresh terminal to bring this specialist online.`, type: 'success', timeout: 3000 })
     } catch (error) {
       console.error('[usePlayButton] Failed to prepare launch prompt:', error)
-      const msg = error.response?.data?.detail || error.message || 'Failed to prepare launch prompt'
+      const msg = parseErrorResponse(error).message || 'Failed to prepare launch prompt'
       showToast({ message: msg, type: 'error', timeout: 5000 })
     }
   }
@@ -151,33 +183,60 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     try {
       await api.projects.launchImplementation(projectId)
     } catch (gateError) {
-      const msg =
-        gateError?.response?.data?.message ||
-        gateError?.response?.data?.detail ||
-        gateError?.message ||
-        'Could not start this project.'
+      const msg = parseErrorResponse(gateError).message || 'Could not start this project.'
       showToast({ message: msg, type: 'error', timeout: 7000 })
       return
     }
 
+    await _copyChainMemberPrompt(projectId, 'Orchestrator prompt copied. Paste it in a fresh session to run this project.')
+  }
+
+  async function _copyChainMemberPrompt(projectId, successMessage) {
     const { data } = await api.prompts.chainMember(projectId)
     const prompt = data?.prompt
     if (!prompt) throw new Error('No prompt text returned')
 
     const clipboardOk = await clipboardCopy(prompt)
     if (!clipboardOk) {
-      showToast({
-        message: 'Browser blocked clipboard access. Copy from the dialog manually.',
-        type: 'error',
-        timeout: 6000,
-      })
+      showToast({ message: CLIPBOARD_BLOCKED, type: 'error', timeout: 6000 })
       return
     }
-    showToast({
-      message: 'Orchestrator prompt copied. Paste it in a fresh session to run this project.',
-      type: 'success',
-      timeout: 5000,
-    })
+    showToast({ message: successMessage, type: 'success', timeout: 5000 })
+  }
+
+  function _projectLaunched() {
+    const proj = _getProject()
+    const state = getProjectState(_projectId())
+    return Boolean(proj?.implementation_launched_at || state?.implementationLaunched || state?.isLaunched)
+  }
+
+  function canReplay(agent) {
+    if (!isPlayButtonFaded(agent)) return false
+    if (_isChainMember(agent)) return sequenceRunStore.isProjectStartable(_projectId()) && _projectLaunched()
+    if (agent?.agent_display_name === 'orchestrator') return _projectLaunched()
+    return true
+  }
+
+  async function handleReplay(agent) {
+    const projectId = _projectId()
+    try {
+      if (_isChainMember(agent)) {
+        await _copyChainMemberPrompt(projectId, 'Latest launch prompt copied. Paste it to reconnect.')
+        return
+      }
+      if (agent?.agent_display_name === 'orchestrator') {
+        await _copyImplementationPrompt({ projectId, clipboardCopy, showToast, replay: true })
+        return
+      }
+      const response = await api.prompts.agentPrompt(agent.agent_id || agent.job_id)
+      const promptText = response.data?.prompt || ''
+      if (!promptText) throw new Error('No prompt text returned')
+      await _copyPrompt(promptText)
+      showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success', timeout: 3000 })
+    } catch (error) {
+      console.error('[usePlayButton] Failed to re-issue launch prompt:', error)
+      showToast({ message: parseErrorResponse(error).message || 'Failed to re-issue the launch prompt', type: 'error', timeout: 5000 })
+    }
   }
 
   function _titleCaseRole(name) {
@@ -192,31 +251,14 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     }
   }
 
-  function _handleImplementationFetchError(error) {
-    const status = error?.response?.status
-    const payload = error?.response?.data
-    console.warn(
-      '[usePlayButton] Implementation prompt fetch failed:',
-      { status, payload, error }
-    )
-
-    const statusLabel = status ? `HTTP ${status}` : 'Network error'
-    const hint =
-      'Make sure staging is complete and at least one agent has launched. ' +
-      'Refresh the dashboard and try again.'
-    showToast({
-      message: `Couldn't copy implementation prompt (${statusLabel}). ${hint}`,
-      type: 'error',
-      timeout: 7000,
-    })
-  }
-
   return {
     reactivatedAgents,
     shouldShowCopyButton,
     isPlayButtonFaded,
     playButtonTooltip,
     reactivatePlay,
+    canReplay,
+    handleReplay,
     handlePlay,
   }
 }

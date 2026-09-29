@@ -154,6 +154,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import api from '@/services/api'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   productId: {
@@ -229,7 +230,7 @@ async function fetchSections() {
     sections.value = data.sections || []
     selectedSections.value = [...sections.value]
   } catch (error) {
-    const message = error.response?.data?.detail || 'Failed to load tuning sections'
+    const message = parseErrorResponse(error).message || 'Failed to load tuning sections'
     sectionsError.value = message
     console.error('[ProductTuningMenu] Failed to fetch sections:', error)
   } finally {
@@ -282,7 +283,7 @@ async function generatePrompt() {
       })
     }
   } catch (error) {
-    const message = error.response?.data?.detail || 'Failed to generate tuning prompt'
+    const message = parseErrorResponse(error).message || 'Failed to generate tuning prompt'
     showToast({ message, type: 'error' })
     console.error('[ProductTuningMenu] Failed to generate prompt:', error)
   } finally {

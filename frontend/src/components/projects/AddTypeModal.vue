@@ -123,6 +123,7 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import {
   PROJECT_TYPE_COLOR_SWATCHES,
   DEFAULT_SWATCH_COLOR,
@@ -192,8 +193,7 @@ async function handleSubmit() {
     emit('type-created', data)
     close()
   } catch (err) {
-    const detail = err.response?.data?.detail
-    submitError.value = detail || err.message || 'Failed to create project type'
+    submitError.value = parseErrorResponse(err).message || 'Failed to create project type'
   } finally {
     submitting.value = false
   }

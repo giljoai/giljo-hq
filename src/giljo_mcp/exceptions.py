@@ -39,7 +39,7 @@ class BaseGiljoError(Exception):
 
     def __str__(self):
         if self.context:
-            return f"{self.message} (Context: {self.context})"
+            return f"{self.message} (Context: {_scrub(self.context)})"
         return self.message
 
     def to_dict(self) -> dict:
@@ -97,6 +97,22 @@ class DatabaseError(BaseGiljoError):
 class ValidationError(BaseGiljoError):
 
     default_status_code: int = 400
+
+
+class CodedRefusalError(ValidationError):
+
+    code = "REFUSED"
+
+    products: list[dict] | None = None
+
+    def as_refusal(self) -> dict[str, object]:
+        payload: dict[str, object] = {"success": False, "error": self.code, "message": self.message}
+        return payload if self.products is None else {**payload, "products": self.products}
+
+
+class CrewNamingExhaustedError(CodedRefusalError):
+
+    code = "CREW_NAMING_EXHAUSTED"
 
 
 class AuthenticationError(BaseGiljoError):

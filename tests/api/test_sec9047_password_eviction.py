@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from uuid import uuid4
 
 import bcrypt
 import pytest
+from sqlalchemy import select
 
+from api.middleware.auth_rate_limiter import RateLimiter
 from giljo_mcp.auth.jwt_manager import JWTManager
+from giljo_mcp.models.oauth import OAuthRefreshToken
 from giljo_mcp.services.oauth_refresh_service import issue_refresh_token, new_family_id
 from giljo_mcp.services.oauth_revocation_service import clear_revocation_cache
 
@@ -242,6 +246,84 @@ async def test_pin_reset_evicts_sessions_and_refresh_tokens(api_client, db_manag
         fresh = _mint(user_id, username, tk, revocation_epoch=1)
         relogin = await api_client.get(AUTH_PROBE, headers=_cookie_headers(fresh))
         assert relogin.status_code == 200, relogin.text
+    finally:
+        restore()
+        clear_revocation_cache()
+
+
+async def _live_refresh_rows(db_manager, *, tenant_key: str, user_id: str) -> int:
+    async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+        rows = (
+            (
+                await session.execute(
+                    select(OAuthRefreshToken).where(
+                        OAuthRefreshToken.user_id == user_id,
+                        OAuthRefreshToken.tenant_key == tenant_key,
+                        OAuthRefreshToken.revoked.is_(False),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return len(rows)
+
+
+@pytest.mark.asyncio
+async def test_pin_reset_racing_concurrent_refresh_grant_leaves_no_surviving_token(api_client, db_manager, monkeypatch):
+    from giljo_mcp.services import oauth_refresh_service as _refresh_svc
+
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 0)
+    monkeypatch.setattr("api.endpoints.auth_pin_recovery.GILJO_MODE", "")
+    clear_revocation_cache()
+
+    user_id, username, tk = await _seed_user(db_manager, with_pin=True)
+
+    client_id = str(uuid4())
+    client_secret = secrets.token_urlsafe(48)
+    secret_hash = bcrypt.hashpw(client_secret.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    restore = _install_confidential_resolver(client_id, secret_hash)
+
+    real_check = RateLimiter.check_rate_limit
+    barrier = asyncio.Barrier(2)
+    gate = {"remaining": 2}
+
+    async def _check_with_rendezvous(self, *args, **kwargs):
+        result = await real_check(self, *args, **kwargs)
+        if gate["remaining"] > 0:
+            gate["remaining"] -= 1
+            await asyncio.wait_for(barrier.wait(), timeout=30)
+        return result
+
+    monkeypatch.setattr(RateLimiter, "check_rate_limit", _check_with_rendezvous)
+
+    try:
+        raw = await _seed_refresh_token(db_manager, client_id=client_id, tenant_key=tk, user_id=user_id)
+
+        reset_resp, refresh_resp = await asyncio.wait_for(
+            asyncio.gather(
+                api_client.post(
+                    "/api/auth/verify-pin-and-reset-password",
+                    json={
+                        "username": username,
+                        "recovery_pin": RECOVERY_PIN,
+                        "new_password": NEW_PASSWORD,
+                        "confirm_password": NEW_PASSWORD,
+                    },
+                ),
+                _refresh_call(api_client, refresh_token=raw, client_id=client_id, client_secret=client_secret),
+            ),
+            timeout=30,
+        )
+
+        assert gate["remaining"] == 0, "both requests must have rendezvoused before their divergent code paths"
+        assert reset_resp.status_code == 200, reset_resp.text
+
+        clear_revocation_cache()
+        assert await _live_refresh_rows(db_manager, tenant_key=tk, user_id=user_id) == 0, (
+            f"a refresh token survived the reset (refresh_resp={refresh_resp.status_code} {refresh_resp.text!r})"
+        )
     finally:
         restore()
         clear_revocation_cache()

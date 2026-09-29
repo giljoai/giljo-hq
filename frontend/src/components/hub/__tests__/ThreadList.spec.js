@@ -103,7 +103,9 @@ describe('ThreadList (Quiet Cards)', () => {
 
   it('a rejected rename surfaces the reason as an error toast', async () => {
     store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Old', project_id: null })
-    updateMock.mockRejectedValueOnce({ response: { data: { detail: 'named after its project' } } })
+    updateMock.mockRejectedValueOnce({
+      response: { status: 400, data: { error_code: 'VALIDATIONERROR', message: 'named after its project' } },
+    })
     const wrapper = mountList(pinia)
     await flushPromises()
     await wrapper.findComponent(ThreadCard).vm.$emit('rename', { thread: { thread_id: 'a' }, subject: 'x' })

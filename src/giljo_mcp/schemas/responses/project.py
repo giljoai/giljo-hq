@@ -139,6 +139,8 @@ class ActiveProjectDetail(ProjectBase):
 
     implementation_launched_at: str | None = None
 
+    staging_status: str | None = None
+
     deleted_at: str | None = None
     agent_count: int = 0
     message_count: int = 0

@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from giljo_mcp.template_validation import validate_harness_name
+
 
 MAX_TEMPLATE_SIZE = 100 * 1024
 MAX_USER_INSTRUCTIONS_SIZE = 50 * 1024
@@ -32,7 +34,11 @@ class TemplateCreate(BaseModel):
         None, max_length=NAME_MAX_LENGTH, description="Template name (optional, generated from role when omitted)"
     )
     role: str = Field(..., max_length=ROLE_MAX_LENGTH, description="Agent role")
-    cli_tool: str = Field("claude", max_length=CLI_TOOL_MAX_LENGTH, description="CLI tool: claude, codex, generic")
+    cli_tool: str = Field(
+        "claude",
+        max_length=CLI_TOOL_MAX_LENGTH,
+        description="Harness name for this agent (free text, e.g. claude); 'default' = the orchestrator's own",
+    )
     custom_suffix: str | None = Field(None, description="Custom suffix for name generation")
     background_color: str | None = Field(
         None, max_length=BACKGROUND_COLOR_MAX_LENGTH, description="Background color (hex)"
@@ -74,6 +80,11 @@ class TemplateCreate(BaseModel):
             return None
         return v.strip() or "inherit"
 
+    @field_validator("cli_tool", mode="before")
+    @classmethod
+    def validate_harness(cls, v: str | None) -> str:
+        return validate_harness_name(v)
+
 
 class TemplateUpdate(BaseModel):
     """Request model for updating a template"""
@@ -108,6 +119,11 @@ class TemplateUpdate(BaseModel):
         if v is None:
             return None
         return v.strip() or "inherit"
+
+    @field_validator("cli_tool", mode="before")
+    @classmethod
+    def validate_harness(cls, v: str | None) -> str:
+        return validate_harness_name(v)
 
 
 class TemplateResponse(BaseModel):

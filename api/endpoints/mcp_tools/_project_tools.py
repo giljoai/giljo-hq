@@ -692,17 +692,17 @@ async def get_implementation_prompt(
     description=(
         "Release the implementation phase gate for a STAGED project -- the second of the two "
         "human-authorized doors that flip implementation_launched_at (the first is the dashboard "
-        "'Implement' button). Reachable from any MCP client -- a terminal, claude.ai, or any other "
-        "connected chat session -- not CLI-only; admission is keyed on the tenant's Headless toggle, "
-        "not on which client is asking. Idempotent (a second call returns already_launched=true). NOT "
-        "offered to a platform-spawned worker on a narrower toolset, so a worker cannot self-unlock; "
-        "the session's own MCP permission prompt IS the human authorization. Launching does NOT activate "
-        "the project -- that is a separate, explicit step (update_project(status='active') or the "
-        "dashboard's Activate control); the response's `project_active` field and, when false, a "
-        "`next_action` string name exactly what to do next. Optional `mission`: 'state your goal and "
-        "say go' in ONE call -- when passed, it is written via update_project_mission (the same "
-        "single writer the standalone tool uses) before the gate is stamped. Omit to launch a "
-        "project whose mission was already authored during staging."
+        "'Implement' button). Reachable from any MCP client, not CLI-only; admission is keyed on "
+        "the tenant's Headless setting (off by default). Idempotent (a second call returns "
+        "already_launched=true). NOT offered to a platform-spawned worker on a narrower toolset, so "
+        "a worker cannot self-unlock. Turning Headless on signs your harness's own permission prompt "
+        "for THIS call as your approval -- run that harness with a bypass/skip-permissions flag and "
+        "nobody was actually asked. Launching does NOT activate the project -- that is a separate, "
+        "explicit step (update_project(status='active') or the dashboard's Activate control); the "
+        "response's `project_active` field and, when false, a `next_action` string name exactly what "
+        "to do next. Optional `mission` writes the goal via update_project_mission (the same single "
+        "writer the standalone tool uses) before the gate is stamped; omit to launch with the mission "
+        "already authored during staging."
     ),
     annotations=_tool_hints("launch_implementation", destructive=True),
 )

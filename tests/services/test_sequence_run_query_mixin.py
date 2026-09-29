@@ -159,3 +159,36 @@ async def test_list_review_pending_drops_fully_reviewed_run(
 
     await _set_run(db_session, term["id"], reviewed_project_ids=[p1, p2])
     assert await svc.list_review_pending(tenant_key=tenant) == []
+
+
+async def test_list_review_pending_drops_run_whose_completed_members_are_gone(
+    db_session: AsyncSession, cleanup_tenants: list[str]
+) -> None:
+    from datetime import UTC, datetime
+
+    tenant = TenantManager.generate_tenant_key()
+    cleanup_tenants.append(tenant)
+
+    product_id = await _create_product(db_session, tenant)
+    p1 = await _create_project(db_session, tenant, product_id)
+    p2 = await _create_project(db_session, tenant, product_id)
+    ghost = await _create_run(db_session, tenant, [p1, p2])
+    await _set_run(db_session, ghost["id"], status="cancelled", project_statuses={p1: "completed"})
+
+    p3 = await _create_project(db_session, tenant, product_id)
+    soft = await _create_run(db_session, tenant, [p3])
+    await _set_run(db_session, soft["id"], status="completed")
+
+    svc = _seq_svc(db_session)
+    before = {r["id"] for r in await svc.list_review_pending(tenant_key=tenant)}
+    assert {ghost["id"], soft["id"]} <= before
+
+    await db_session.execute(delete(Project).where(Project.id.in_([p1, p2])))
+    await db_session.execute(
+        update(Project).where(Project.id == p3).values(deleted_at=datetime.now(UTC), status="deleted")
+    )
+    await db_session.commit()
+
+    after = [r["id"] for r in await svc.list_review_pending(tenant_key=tenant)]
+    assert ghost["id"] not in after
+    assert soft["id"] not in after

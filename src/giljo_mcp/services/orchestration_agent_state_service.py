@@ -32,6 +32,7 @@ from giljo_mcp.schemas.service_responses import (
 from giljo_mcp.services._error_helpers import M_CLOSE, M_DISMISS, M_REACTIVATE, not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
+from giljo_mcp.services.orchestrator_caller_guard import require_project_orchestrator
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -389,7 +390,9 @@ class OrchestrationAgentStateService:
                 message="Failed to dismiss reactivation", context={"job_id": job_id, "error": str(e)}
             ) from e
 
-    async def close_job(self, job_id: str, tenant_key: str | None = None) -> dict[str, Any]:
+    async def close_job(
+        self, job_id: str, tenant_key: str | None = None, caller_job_id: str | None = None
+    ) -> dict[str, Any]:
         try:
             if not tenant_key:
                 tenant_key = self.tenant_manager.get_current_tenant()
@@ -408,9 +411,9 @@ class OrchestrationAgentStateService:
                         session, tenant_key, job_id, expected_status="complete", method=M_CLOSE
                     )
 
-                execution.status = "closed"
-
                 job = await self._job_repo.get_agent_job_by_job_id(session, tenant_key, job_id)
+                await require_project_orchestrator(session, self._job_repo, tenant_key, job, caller_job_id)
+                execution.status = "closed"
                 project_id = str(job.project_id) if job and job.project_id else None
                 product_id = await self._resolve_product_id(session, tenant_key, job)
 

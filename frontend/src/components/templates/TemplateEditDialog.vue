@@ -57,28 +57,20 @@
             </v-col>
 
             <v-col cols="6">
-              <v-select
-                :model-value="template.cli_tool || 'claude'"
-                :items="codingToolItems"
-                label="Coding tool"
+              <v-text-field
+                :model-value="template.cli_tool ?? ''"
+                label="Harness"
+                placeholder="default"
                 variant="outlined"
                 density="compact"
-                data-testid="cli-tool-select"
-                aria-label="Select coding CLI tool for this agent"
+                maxlength="20"
+                :rules="[harnessNameRule]"
+                hint="Blank or 'default' = the orchestrator's own harness, or a name such as claude or codex"
+                persistent-hint
+                data-testid="cli-tool-input"
+                aria-label="Harness this agent runs in"
                 @update:model-value="update('cli_tool', $event)"
-              >
-                <template #append-inner>
-                  <v-tooltip location="top">
-                    <template #activator="{ props }">
-                      <v-icon v-bind="props" size="small" color="primary">mdi-help-circle</v-icon>
-                    </template>
-                    <span
-                      >Which CLI this agent launches in for multi-terminal runs. Each agent's
-                      terminal is pre-seeded for its assigned tool. Defaults to Claude.</span
-                    >
-                  </v-tooltip>
-                </template>
-              </v-select>
+              />
             </v-col>
 
             <v-col cols="6">
@@ -183,9 +175,6 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { foldRetiredHarness, retiredHarnessLabel } from '@/config/retiredHarness'
-
 
 const props = defineProps({
   modelValue: {
@@ -222,20 +211,13 @@ const emit = defineEmits([
   'role-change',
 ])
 
-const codingToolOptions = [
-  { title: 'Claude', value: 'claude' },
-  { title: 'Codex', value: 'codex' },
-  { title: 'Generic', value: 'generic' },
-]
-
-const codingToolItems = computed(() => {
-  const legacy = retiredHarnessLabel(props.template?.cli_tool)
-  return legacy ? [...codingToolOptions, { title: legacy, value: props.template.cli_tool }] : codingToolOptions
-})
+const HARNESS_NAME_PATTERN = /^[A-Za-z0-9._-]*$/
+function harnessNameRule(value) {
+  return HARNESS_NAME_PATTERN.test((value || '').trim()) || 'Use letters, digits, dash, underscore or dot'
+}
 
 function update(field, value) {
   const next = { ...props.template, [field]: value }
-  if (field !== 'cli_tool') next.cli_tool = foldRetiredHarness(next.cli_tool)
   emit('update:template', next)
 }
 </script>

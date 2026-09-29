@@ -173,6 +173,8 @@ class StagingPromptResponse(BaseModel):
     agent_id: str | None = Field(None, description="Executor agent ID for MCP tool calls")
     prompt: str = Field(..., description="Staging prompt for orchestrator")
     estimated_prompt_tokens: int = Field(..., description="Token estimate for the staging prompt")
+    thread_id: str | None = Field(None, description="The project's coordination thread id")
+    chat_id: str | None = Field(None, description="The coordination thread's short handle, for example CHT-0042")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -208,19 +210,8 @@ class ImplementationPromptResponse(BaseModel):
         default=False,
         description="True when all specialist agents are already complete and the project is ready to close",
     )
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class TerminationPromptResponse(BaseModel):
-    """
-    Schema for termination prompt response (Handover 0498).
-    GET /api/v1/prompts/termination/{project_id}
-    """
-
-    prompt: str = Field(..., description="Termination prompt for user to paste into orchestrator terminal")
-    orchestrator_job_id: str = Field(..., description="Orchestrator job UUID")
-    agent_count: int = Field(..., description="Number of agents included in termination prompt")
+    thread_id: str | None = Field(None, description="The project's coordination thread id")
+    chat_id: str | None = Field(None, description="The coordination thread's short handle, for example CHT-0042")
 
     model_config = ConfigDict(from_attributes=True)
 

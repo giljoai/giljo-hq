@@ -20,7 +20,7 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
-from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.services.sequence_run_service import SequenceRunService, broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 
@@ -158,6 +158,7 @@ async def test_mcp_closeout_broadcasts_sequence_updated_and_project_update(
         session=db_session,
         force=True,
     )
+    await broadcast_deferred_sequence_updates(db_session)
 
     assert _sequence_updated_events(mock_ws), "the MCP closeout must emit sequence:updated for the per-member badge"
 

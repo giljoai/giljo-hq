@@ -77,12 +77,6 @@ async def test_get_active_projects_returns_empty_when_no_active(query_service):
 
 
 @pytest.mark.asyncio
-async def test_get_project_agent_summary_returns_empty_for_missing_project(query_service, test_tenant_key):
-    result = await query_service.get_project_agent_summary("00000000-0000-0000-0000-000000000000", test_tenant_key)
-    assert result == {"agent_count": 0, "job_types": []}
-
-
-@pytest.mark.asyncio
 async def test_get_project_agent_details_returns_empty_for_missing_project(query_service, test_tenant_key):
     result = await query_service.get_project_agent_details("00000000-0000-0000-0000-000000000000", test_tenant_key)
     assert result == []
@@ -235,7 +229,7 @@ async def test_get_project_agent_summary_groups_by_job_type(query_service, db_se
         )
         await db_session.flush()
 
-    result = await query_service.get_project_agent_summary(str(project.id), test_tenant_key)
+    result = (await query_service.get_project_agent_summaries([str(project.id)], test_tenant_key))[str(project.id)]
 
     assert result["agent_count"] == 3
     assert {jt["type"]: jt["count"] for jt in result["job_types"]} == {"implementer": 2, "tester": 1}
@@ -330,3 +324,20 @@ async def test_get_project_messages_returns_seeded_messages(query_service, db_se
     assert len(messages) == 2
     assert {m["content"] for m in messages} == {"msg 0", "msg 1"}
     assert all(m["message_type"] == "direct" for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_get_active_projects_carries_staging_status_and_execution_mode(
+    query_service, db_session, test_tenant_key
+):
+    with tenant_session_context(db_session, test_tenant_key):
+        staged = await _seed_project(
+            db_session, test_tenant_key, status="active", staging_status="staged", execution_mode="multi_terminal"
+        )
+        await db_session.flush()
+
+    result = await query_service.get_active_projects(product_id=staged.product_id)
+
+    assert len(result) == 1
+    assert result[0].staging_status == "staged"
+    assert result[0].execution_mode == "multi_terminal"
