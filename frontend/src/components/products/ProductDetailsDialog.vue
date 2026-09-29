@@ -736,10 +736,4 @@ async function showConsolidatedSummary(depth) {
   outline: 2px solid rgba(255, 195, 0, 0.45);
   outline-offset: 2px;
 }
-
-@media (max-width: 640px) {
-  .summary-action-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

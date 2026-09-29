@@ -400,11 +400,7 @@ const hasProduct = computed(() => !!productsStore.currentProduct)
 const hasProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 
 const navigationItems = computed(() => {
-  const jobsPath = resolveJobsNavPath({
-    activeProject: projectStore.activeProjects[0] ?? null,
-    activeProjects: projectStore.activeProjects,
-    activeRun: sequenceRunStore.activeRuns[0] ?? sequenceRunStore.reviewPendingRun ?? null,
-  })
+  const jobsPath = resolveJobsNavPath()
 
   const items = [
     { name: 'Home', path: '/home', title: 'Home', icon: 'mdi-home' },
@@ -732,18 +728,11 @@ watch(() => productsStore.effectiveProductId, () => sequenceRunStore.hydrate(), 
   position: fixed;
   top: 12px;
   left: 12px;
-  z-index: 100;
+  // Above the product tab app bar (Vuetify layout z-index 1004), below the drawer.
+  z-index: 1005;
   // FE-9365a: a rounded square, not a circle. FABs are not exempt from the
   // button-shape standard — see the Button Shape Standard block in main.scss.
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-// Mobile: bigger touch targets for orbs
-@media (max-width: 1024px) {
-  .nav-orb {
-    width: 44px;
-    height: 44px;
-  }
 }
 </style>

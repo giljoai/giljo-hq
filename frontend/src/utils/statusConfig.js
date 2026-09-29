@@ -1,8 +1,9 @@
 
-const STATUS_COLORS = {
+export const STATUS_COLORS = {
   WAITING: '#ffd700',
   WORKING: '#ffffff',
-  BLOCKED: '#ff9800',
+  BLOCKED: '#f44336',
+  SILENT: '#e060b0',
   COMPLETE: '#67bd6d',
   IDLE: '#7a9bb5',
   SLEEPING: '#9b89b3',
@@ -10,6 +11,7 @@ const STATUS_COLORS = {
   CLOSED: '#4a9c5f',
   DECOMMISSIONED: '#757575',
   CLOSEOUT: '#ffc107',
+  PENDING: '#9e9e9e',
   FALLBACK: '#666666',
 }
 
@@ -50,9 +52,15 @@ const statusConfig = {
     italic: true,
     chipColor: 'default',
   },
+  holding: {
+    label: 'Holding',
+    color: STATUS_COLORS.IDLE,
+    italic: true,
+    chipColor: 'default',
+  },
   silent: {
     label: 'Silent',
-    color: STATUS_COLORS.BLOCKED,
+    color: STATUS_COLORS.SILENT,
     italic: false,
     chipColor: 'warning',
   },

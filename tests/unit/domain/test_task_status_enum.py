@@ -17,11 +17,12 @@ from giljo_mcp.domain.task_status import (
 
 
 
-def test_enum_has_exactly_five_members() -> None:
+def test_enum_has_exactly_six_members() -> None:
 
     assert {s.value for s in TaskStatus} == {
         "pending",
         "in_progress",
+        "on_hold",
         "completed",
         "blocked",
         "cancelled",
@@ -33,6 +34,7 @@ def test_enum_declaration_order_is_canonical() -> None:
     assert [s.value for s in TaskStatus] == [
         "pending",
         "in_progress",
+        "on_hold",
         "completed",
         "blocked",
         "cancelled",

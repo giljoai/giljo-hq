@@ -10,11 +10,7 @@ export function useLifecycleBannerNav(router) {
 
   function openLifecycleBanner(row) {
     if (!row?.projectId) return
-    router.push({
-      name: 'ProjectLaunch',
-      params: { projectId: row.projectId },
-      query: { tab: 'jobs', via: 'jobs' },
-    })
+    router.push({ name: 'JobsViewport', query: { project: row.projectId, detail: '1' } })
   }
 
   return { lifecycleBannerStore, openLifecycleBanner }

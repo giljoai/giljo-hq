@@ -8,11 +8,12 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import tenant_isolation_bypass, tenant_session_context
+from .exceptions import DatabaseError
 from .models import DownloadToken
 from .utils.log_sanitizer import mask_token, sanitize
 
@@ -181,10 +182,12 @@ class TokenManager:
             logger.info("Token marked as failed: %s, error: %s", mask_token(token), sanitize(error_message))
             return True
 
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
             await self.db_session.rollback()
             logger.exception("Error marking token as failed")
-            return False
+            raise DatabaseError(
+                message="Failed to mark download token as failed", context={"token": mask_token(token)}
+            ) from e
 
     async def mark_ready(self, token: str) -> bool:
         try:
@@ -205,35 +208,33 @@ class TokenManager:
             logger.info("Token marked as ready: %s", mask_token(token))
             return True
 
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
             await self.db_session.rollback()
             logger.exception("Error marking token as ready")
-            return False
+            raise DatabaseError(
+                message="Failed to mark download token as ready", context={"token": mask_token(token)}
+            ) from e
 
-    async def increment_download_count(self, token: str, tenant_key: str) -> bool:
+    async def claim_download(self, token: str, tenant_key: str) -> bool:
         try:
             with tenant_session_context(self.db_session, tenant_key):
-                stmt = select(DownloadToken).where(DownloadToken.token == token)
+                stmt = (
+                    update(DownloadToken)
+                    .where(DownloadToken.token == token, DownloadToken.download_count == 0)
+                    .values(download_count=DownloadToken.download_count + 1, last_downloaded_at=datetime.now(UTC))
+                    .returning(DownloadToken.id)
+                )
                 result = await self.db_session.execute(stmt)
-                token_record = result.scalar_one_or_none()
-
-                if not token_record:
-                    logger.warning("Cannot increment download count for non-existent token: %s", mask_token(token))
-                    return False
-
-                token_record.download_count += 1
-                token_record.last_downloaded_at = datetime.now(UTC)
-
+                claimed = result.first() is not None
                 await self.db_session.commit()
 
-            logger.info(
-                "Download count incremented for token: %s, new count: %d",
-                mask_token(token),
-                token_record.download_count,
-            )
-            return True
+            if claimed:
+                logger.info("Download claimed for token: %s", mask_token(token))
+            else:
+                logger.warning("Download already used or token unknown: %s", mask_token(token))
+            return claimed
 
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
             await self.db_session.rollback()
-            logger.exception("Error incrementing download count")
-            return False
+            logger.exception("Error claiming download for token")
+            raise DatabaseError(message="Failed to record download claim", context={"token": mask_token(token)}) from e

@@ -6,6 +6,7 @@
 
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler as _BaseRotatingFileHandler
 from pathlib import Path
@@ -27,14 +28,24 @@ class _McpHeartbeatAccessFilter(logging.Filter):
 
 _SENSITIVE_QUERY_PARAMS = frozenset({"token", "code", "state"})
 
+_DOWNLOAD_TOKEN_PATH_RE = re.compile(r"(/api/download/temp/)[^/?]+")
+
 
 class _SensitiveQueryAccessFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
-        if not (isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str) and "?" in args[2]):
+        if not (isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str)):
             return True
-        path, _, query = args[2].partition("?")
+
+        full_path = _DOWNLOAD_TOKEN_PATH_RE.sub(r"\1[REDACTED]", args[2])
+
+        if "?" not in full_path:
+            if full_path != args[2]:
+                record.args = (*args[:2], full_path, *args[3:])
+            return True
+
+        path, _, query = full_path.partition("?")
         redacted = []
         for pair in query.split("&"):
             name, sep, _value = pair.partition("=")

@@ -23,8 +23,10 @@ from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycle
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import ProjectData
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.comm_thread_enrolment import project_thread_ref
 from giljo_mcp.services.project_helpers import _build_ws_project_data, advance_chain_member_to_implementing
 from giljo_mcp.services.sequence_chain_context import chain_predecessor_open_error, resolve_chain_launch_gate
+from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -267,12 +269,7 @@ class ProjectStagingService:
 
             if not already_launched:
                 is_chain_member, blocking_predecessor = await resolve_chain_launch_gate(
-                    session,
-                    db_manager=self.db_manager,
-                    tenant_manager=self.tenant_manager,
-                    project_id=project_id,
-                    tenant_key=effective_tenant,
-                    test_session=self._test_session,
+                    session, project_id=project_id, tenant_key=effective_tenant
                 )
                 if blocking_predecessor is not None:
                     raise chain_predecessor_open_error(project, blocking_predecessor)
@@ -292,14 +289,16 @@ class ProjectStagingService:
                 if project.ever_launched_at is None:
                     project.ever_launched_at = project.implementation_launched_at
                 project.updated_at = datetime.now(UTC)
-                await session.commit()
-                await self._project_repo.refresh(session, project)
 
-                await self._advance_chain_on_launch(project_id, effective_tenant, websocket_manager=ws)
+                await self._advance_chain_on_launch(session, project_id, effective_tenant, websocket_manager=ws)
+                await session.commit()
+                await broadcast_deferred_sequence_updates(session)
+                await self._project_repo.refresh(session, project)
 
             launched_at_iso = project.implementation_launched_at.isoformat()
             project_active = project.status == ProjectStatus.ACTIVE
             product_id = project.product_id
+            thread_ref = await project_thread_ref(session, effective_tenant, project_id)
 
             self._logger.info(
                 "[LAUNCH_IMPL] Project %s implementation launched (already_launched=%s) by %s",
@@ -323,6 +322,7 @@ class ProjectStagingService:
             "already_launched": already_launched,
             "launched_at": launched_at_iso,
             "project_active": project_active,
+            **thread_ref,
         }
         if not project_active:
             result["next_action"] = (
@@ -364,6 +364,7 @@ class ProjectStagingService:
 
     async def _advance_chain_on_launch(
         self,
+        session: AsyncSession,
         project_id: str,
         tenant_key: str,
         websocket_manager: Any | None = None,
@@ -373,7 +374,7 @@ class ProjectStagingService:
             tenant_manager=self.tenant_manager,
             project_id=project_id,
             tenant_key=tenant_key,
-            session=self._test_session,
+            session=session,
             websocket_manager=websocket_manager,
         )
 

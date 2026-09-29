@@ -365,6 +365,12 @@ export const useCommHubStore = defineStore('commHub', () => {
     }
   }
 
+  async function resolveChainHub(runId) {
+    const thread = (await api.threads.chainHub(runId)).data?.thread || null
+    if (thread) _upsertThread(thread)
+    return thread
+  }
+
   function markThreadRead(threadId) {
     if (!threadId) return
     if ((unreadByThreadId.value.get(threadId) || 0) === 0) return
@@ -526,6 +532,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     passBaton,
     deleteThread,
     searchThreads,
+    resolveChainHub,
     selectThread,
     markThreadRead,
     markThreadsRead,

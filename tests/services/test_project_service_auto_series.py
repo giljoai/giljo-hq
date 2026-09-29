@@ -132,7 +132,7 @@ class TestAutoAssignSeriesNumber:
             description="Deleted project description",
             mission="Old mission",
             tenant_key=test_tenant_key,
-            status="inactive",
+            status="deleted",
             series_number=1,
             product_id=test_product.id,
             deleted_at=datetime.now(UTC),

@@ -5,6 +5,7 @@
 
 
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -100,14 +101,27 @@ class AuthMiddleware:
             request.state.auth_user = auth_result.get("user_obj")
             tenant_key = auth_result.get("tenant_key")
             if not tenant_key:
+                mode = os.environ.get("GILJO_MODE", "").strip().lower()
                 logger.warning(
-                    "authenticated_missing_tenant_key user_id=%s path=%s",
+                    "authenticated_missing_tenant_key user_id=%s path=%s mode=%s",
                     auth_result.get("user_id"),
                     request.url.path,
+                    mode,
                 )
-                from api.dependencies.core import _get_default_tenant_key
+                if mode in ("ce", ""):
+                    from api.dependencies.core import _get_default_tenant_key
 
-                tenant_key = _get_default_tenant_key()
+                    tenant_key = _get_default_tenant_key()
+                else:
+                    response = JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "Authentication required",
+                            "detail": "Account is not linked to a workspace",
+                        },
+                    )
+                    await response(scope, receive, send)
+                    return
             request.state.tenant_key = tenant_key
             request.state.token_exp = auth_result.get("exp")
         else:

@@ -8,6 +8,7 @@ import base64
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -397,6 +398,66 @@ class TestOAuthAuthorizeEndpoint:
                 "response_type": "code",
             },
         )
+        assert response.status_code in (401, 403)
+
+
+def _deny_body(**overrides) -> dict:
+    _verifier, challenge = _generate_pkce_pair()
+    body = {
+        "client_id": BUILTIN_CLIENT_ID,
+        "redirect_uri": "http://localhost:3000/callback",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "scope": "mcp:read mcp:write",
+        "state": "deny-state-value",
+        "response_type": "code",
+    }
+    body.update(overrides)
+    return body
+
+
+class TestOAuthDenyEndpoint:
+
+    @pytest.mark.asyncio
+    async def test_deny_rejects_unregistered_redirect_uri(self, api_client, auth_headers):
+        response = await api_client.post(
+            "/api/oauth/authorize/deny",
+            headers=auth_headers,
+            json=_deny_body(redirect_uri="https://attacker.example/steal"),
+        )
+        assert response.status_code == 400
+        assert "redirect_uri" not in response.json()
+        assert "attacker.example" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_deny_rejects_unknown_client(self, api_client, auth_headers):
+        response = await api_client.post(
+            "/api/oauth/authorize/deny",
+            headers=auth_headers,
+            json=_deny_body(client_id="invalid-client-id"),
+        )
+        assert response.status_code == 400
+        assert "redirect_uri" not in response.json()
+
+    @pytest.mark.asyncio
+    async def test_deny_registered_pair_returns_access_denied_redirect(self, api_client, auth_headers):
+        response = await api_client.post(
+            "/api/oauth/authorize/deny",
+            headers=auth_headers,
+            json=_deny_body(),
+        )
+        assert response.status_code == 200
+        target = urlsplit(response.json()["redirect_uri"])
+        assert f"{target.scheme}://{target.netloc}{target.path}" == "http://localhost:3000/callback"
+        query = parse_qs(target.query)
+        assert query["error"] == ["access_denied"]
+        assert query["state"] == ["deny-state-value"]
+        assert query["error_description"]
+        assert "code" not in query
+
+    @pytest.mark.asyncio
+    async def test_deny_requires_auth(self, api_client):
+        response = await api_client.post("/api/oauth/authorize/deny", json=_deny_body())
         assert response.status_code in (401, 403)
 
 

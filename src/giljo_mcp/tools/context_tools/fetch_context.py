@@ -412,7 +412,7 @@ async def fetch_context(
             categories_returned.append(category)
 
             if cat_metadata:
-                all_category_metadata[category] = cat_metadata
+                all_category_metadata[category] = {k: v for k, v in cat_metadata.items() if k != "tenant_key"}
 
             if directive:
                 all_directives[category] = directive
@@ -427,7 +427,7 @@ async def fetch_context(
             raise
         except Exception as e:
             logger.error("category_fetch_error category=%s error=%s", category, e, exc_info=True)
-            all_errors.append({"category": category, "error": str(e)})
+            all_errors.append({"category": category, "error": "CATEGORY_FETCH_FAILED"})
 
     last_modified: dict[str, str] = {}
     if db_manager:

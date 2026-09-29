@@ -143,12 +143,4 @@ function archiveTitle(archive) {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
-
-// Mobile: bigger touch targets
-@media (max-width: 1024px) {
-  .nav-orb {
-    width: 44px;
-    height: 44px;
-  }
-}
 </style>

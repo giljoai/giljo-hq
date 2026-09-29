@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
-from giljo_mcp.services.sequence_run_live_filter import filter_runs_with_live_members
+from giljo_mcp.services.sequence_run_live_filter import filter_runs_by_product, filter_runs_with_live_members
 from giljo_mcp.tenant import TenantManager
 
 
@@ -87,3 +87,38 @@ async def test_empty_runs_returns_empty(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     result = await filter_runs_with_live_members(session=db_session, runs=[], tenant_key=tenant)
     assert result == []
+
+
+async def test_filter_runs_by_product_keeps_a_stale_deleted_at_member(db_session: AsyncSession) -> None:
+    tenant = TenantManager.generate_tenant_key()
+    product_id = str(uuid.uuid4())
+    db_session.add(
+        Product(
+            id=product_id,
+            tenant_key=tenant,
+            name="BE-9668 filter-by-product",
+            description="seeded",
+            is_active=False,
+        )
+    )
+    pid = str(uuid.uuid4())
+    db_session.add(
+        Project(
+            id=pid,
+            product_id=product_id,
+            name="filter-by-product-test",
+            description="BE-9668 stale-shape member",
+            mission="m",
+            status="active",
+            tenant_key=tenant,
+            execution_mode="multi_terminal",
+            series_number=random.randint(1, 9000),
+            deleted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    result = await filter_runs_by_product(
+        session=db_session, runs=[_run([pid])], tenant_key=tenant, product_id=product_id
+    )
+    assert len(result) == 1, "a stale-shape live member must still count as belonging to its product"

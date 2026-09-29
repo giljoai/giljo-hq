@@ -1,6 +1,6 @@
 ## Chain Projects
 
-A **chain** links several projects together and runs them one after another under a single overarching goal. It is the tool for work that is too big for one project but has a natural order — for example, scaffold a service, then build the feature on top of it, then add tests. A chain is multi-project and single-user: it coordinates your own projects; it is not a shared-team feature.
+A **chain** links several projects together and runs them one after another under a single overarching goal. It is the tool for work that is too big for one project but has a natural order — for example, scaffold a service, then build the feature on top of it, then add tests. A chain coordinates your own projects; it is not a shared-team feature.
 
 Each project in a chain keeps its own description, agents, and 360 Memory entry. What the chain adds is a coordinator that launches them in order so you do not have to start each one by hand.
 
@@ -20,22 +20,24 @@ Once you have linked 2 to 5 projects, an action bar appears at the top of the pr
 
 Clicking it does not run the chain by itself — the dashboard cannot spawn agents. It queues the linked projects as a pending run. From there, an agent connected through your AI coding tool picks up that pending run and becomes the **conductor**, which does the actual work: staging the first project, then launching, watching, and advancing through the rest in order.
 
-After the conductor stages the first project, it pauses and waits for your explicit go-ahead before starting implementation — the same human-in-the-loop checkpoint a solo project has, just at the head of the chain. Between projects, each finished project gets its own Review step: its tab shows a **REVIEW** badge, and the conductor waits for you to review and close it out before moving on to the next one.
+After the conductor stages the first project, it pauses and waits for your explicit go-ahead before starting implementation — the same human-in-the-loop checkpoint a solo project has, just at the head of the chain. Between projects, each finished project gets its own Review step: its card in the chain's group on the **Jobs** board shows a **Review** link, and you review and close it out from there.
 
 ### The Conductor
 
-The **conductor** — also called the chain orchestrator or master orchestrator — is the coordinator that drives the chain. It is a dedicated agent that owns no project of its own; its only job is to run the chain in order: launch each project, watch for completion, and advance to the next. During staging you see it as the **Chain Conductor** card, showing its identity and current status — Waiting, Running, Done, Error, or Stopped.
+The **conductor** — also called the chain orchestrator or master orchestrator — is the coordinator that drives the chain. It is a dedicated agent that owns no project of its own; its only job is to run the chain in order: launch each project, watch for completion, and advance to the next. You follow its progress in the chain's group on the **Jobs** board: the step counter and the lit card show where it is.
 
 ### The Chain Mission
 
-The **chain mission** is the overarching goal for the whole chain — the single objective that all the linked projects serve together. It is distinct from each project's own per-project mission. During staging, it appears in its own window above the project tabs, labeled **"Multi project mission"** and tagged **"Conductor Generated"** once the conductor has written it.
+The **chain mission** is the overarching goal for the whole chain — the single objective that all the linked projects serve together. It is distinct from each project's own per-project mission. It appears in the header of the chain's group on the **Jobs** board, labeled **"Chain goal"** and tagged **"Conductor Generated"** once the conductor has written it.
 
 ### Monitoring a Chain
 
-While a chain runs, the **Jobs** page shows a **Multi project mode** indicator and an **N/M counter** — the number of projects completed out of the total in the chain. Below it, a tab strip lists every project in the chain; the active one is highlighted, and each tab carries a status badge — **WAITING**, **WORKING**, **REVIEW**, or **COMPLETED** — so you can see the whole chain's progress without switching projects. The conductor's own status card stays visible alongside it. You monitor the currently running project exactly as you would a solo project: agent status, step progress, and messages all work the same way.
+On the **Jobs** board a chain is one group. Its header shows the chain's name, a **Step n of N** counter, the execution mode and the chain goal, with the chain's controls: **Stage Chain** (or **Unstage Chain**), **Implement** to start the whole chain, **Copy master prompt** for a multi-terminal chain, **Stop chain** while it runs, and **Deactivate chain**. Below the header each project in the chain has its card, in run order and numbered by step. Only the step that is running is lit; finished steps and steps still waiting are dimmed. Each card works like any other card on the board: agent rows, the play button, messages and **Jobs detail**. A card also offers a fallback prompt that runs just that one project, while the conductor still decides what comes next.
+
+A project that belongs to a chain lives only in its chain's group; an older link to it opens the Jobs board.
 
 ### Stopping a Chain
 
-To stop a chain and return its projects to their prior state, use **Deactivate Chain** from a project's action menu on the Projects page. This rewinds all linked projects out of the run; you can re-link and relaunch when you are ready. Completed projects keep their results and 360 Memory entries.
+To end a running chain and keep the work already done, use **Stop chain** in the chain's header on the **Jobs** board. To return its projects to their prior state, use **Deactivate chain**, either in that header or from a project's action menu on the Projects page. This rewinds all linked projects out of the run; you can re-link and relaunch when you are ready. Completed projects keep their results and 360 Memory entries.
 
 For guidance on *whether* a chain is the right choice versus a single project, see **When to Use What**.

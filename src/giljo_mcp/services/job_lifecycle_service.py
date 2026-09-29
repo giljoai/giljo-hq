@@ -20,7 +20,7 @@ from giljo_mcp.exceptions import (
     ValidationError,
 )
 from giljo_mcp.models import AgentExecution, AgentJob
-from giljo_mcp.prompts.spawn_prompt import _MULTI_TERMINAL_PROMPT_POINTER, build_agent_prompt
+from giljo_mcp.prompts.spawn_prompt import _MULTI_TERMINAL_PROMPT_POINTER, build_agent_prompt, launch_gate_passed
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
@@ -206,7 +206,7 @@ class JobLifecycleService:
                     thin_client=True,
                     thin_client_note=[
                         "Mission stored server-side, keyed by job_id",
-                        "Agent calls get_job_mission(job_id, tenant_key) -> returns mission + full_protocol",
+                        "Agent calls get_job_mission(job_id) -> returns mission + full_protocol",
                         "Enables: fresh sessions, postponed launches, orchestrator handover",
                     ],
                     predecessor_job_id=predecessor_job_id,
@@ -248,7 +248,9 @@ class JobLifecycleService:
         if existing is None:
             return None
 
-        if not await self._is_active_chain_member(session, project_id, tenant_key):
+        from giljo_mcp.services.sequence_run_service import active_chain_run
+
+        if await active_chain_run(session, project_id, tenant_key) is None:
             return None
 
         project = await AgentJobRepository(None).get_project_by_id(session, tenant_key, project_id)
@@ -279,7 +281,7 @@ class JobLifecycleService:
             thin_client=True,
             thin_client_note=[
                 "Sub-orchestrator already minted at chain staging -- reused, not duplicated",
-                "Agent calls get_job_mission(job_id, tenant_key) -> returns mission + full_protocol",
+                "Agent calls get_job_mission(job_id) -> returns mission + full_protocol",
             ],
             predecessor_job_id=None,
             phase=None,
@@ -290,21 +292,6 @@ class JobLifecycleService:
                 )
             ),
         )
-
-    async def _is_active_chain_member(self, session: AsyncSession, project_id: str, tenant_key: str) -> bool:
-        try:
-            from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-            svc = SequenceRunService(
-                db_manager=self.db_manager,
-                tenant_manager=self.tenant_manager,
-                session=session,
-            )
-            run = await svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-            return run is not None
-        except Exception:  # noqa: BLE001 - best-effort chain detection; never break spawn
-            self._logger.warning("[BE-6198] chain-member check failed (non-fatal); minting fresh orchestrator")
-            return False
 
     async def _resolve_display_name(
         self,
@@ -459,13 +446,31 @@ class JobLifecycleService:
             project_name=project.name,
             job_id=job_id,
             template=template,
+            multi_terminal=mt,
+            launched=launch_gate_passed(project),
         )
         return prompt, "inline"
 
     def _build_agent_prompt(
-        self, agent_name: str, agent_display_name: str, project_name: str, job_id: str, template: Any = None
+        self,
+        agent_name: str,
+        agent_display_name: str,
+        project_name: str,
+        job_id: str,
+        template: Any = None,
+        *,
+        multi_terminal: bool = False,
+        launched: bool = False,
     ) -> str:
-        return build_agent_prompt(agent_name, agent_display_name, project_name, job_id, template)
+        return build_agent_prompt(
+            agent_name,
+            agent_display_name,
+            project_name,
+            job_id,
+            template,
+            multi_terminal=multi_terminal,
+            launched=launched,
+        )
 
     async def _create_job_and_execution_records(
         self,

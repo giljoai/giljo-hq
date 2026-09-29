@@ -22,6 +22,8 @@ from giljo_mcp.platform_registry import (
     MODE_MULTI_TERMINAL,
     effective_harness,
 )
+from giljo_mcp.prompts.spawn_prompt import launch_gate_passed
+from giljo_mcp.services.comm_thread_enrolment import project_thread_ref
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.sequence_chain_context import chain_execution_mode_for_project
 
@@ -111,19 +113,21 @@ class ThinClientLifecycleMixin:
                 cli = role_default_map.get(e.agent_display_name)
             e.cli_tool = cli or "claude"
 
-    def _launch_commands_for(self, executions: list[AgentExecution]) -> list[dict]:
-        from giljo_mcp.prompts.launch_command_synth import build_loaded_prompt, synthesize_launch_commands
+    def _launch_commands_for(self, executions: list[AgentExecution], *, launched: bool) -> list[dict]:
+        from giljo_mcp.prompts.launch_command_synth import DEFAULT_CLI_TOOL, render_harness_launch_block
+        from giljo_mcp.template_validation import resolve_harness_name
 
-        specs = [
+        return [
             {
-                "agent": e.agent_display_name,
-                "cli_tool": getattr(e, "cli_tool", "claude"),
+                "agent": e.agent_display_name or "agent",
+                "cli_tool": getattr(e, "cli_tool", DEFAULT_CLI_TOOL) or DEFAULT_CLI_TOOL,
                 "job_id": e.job_id,
-                "seed_prompt": build_loaded_prompt(e.job_id),
+                "launch": render_harness_launch_block(
+                    resolve_harness_name(getattr(e, "cli_tool", None)), model=None, effort=None, launched=launched
+                ),
             }
             for e in executions
         ]
-        return synthesize_launch_commands(specs)
 
     async def _fetch_launchable_agents(self, project_id: str) -> list[AgentExecution]:
         stmt = (
@@ -160,8 +164,9 @@ class ThinClientLifecycleMixin:
         if execution_mode == "multi_terminal":
             agents = await self._fetch_launchable_agents(project_id)
             await self._resolve_agent_cli_tools(agents, execution_mode=execution_mode)
-            launch_commands = self._launch_commands_for(agents)
+            launch_commands = self._launch_commands_for(agents, launched=False)
 
+        thread_ref = await project_thread_ref(self.db, self.tenant_key, project_id)
         return {
             "orchestrator_id": result["orchestrator_id"],
             "agent_id": result.get("agent_id"),
@@ -170,6 +175,7 @@ class ThinClientLifecycleMixin:
             "estimated_prompt_tokens": staging_tokens,
             "launch_commands": launch_commands,
             "product_id": result.get("product_id"),
+            **thread_ref,
         }
 
     async def implement(
@@ -197,6 +203,7 @@ class ThinClientLifecycleMixin:
             raise ValidationError(f"Unsupported execution mode: {execution_mode}")
 
         ProjectStagingService.check_implementation_allowed(project)
+        thread_ref = await project_thread_ref(self.db, self.tenant_key, project_id)
 
         orchestrator_stmt = (
             select(AgentExecution)
@@ -268,6 +275,7 @@ class ThinClientLifecycleMixin:
                     "orchestrator_job_id": orchestrator_execution.job_id,
                     "agent_count": len(all_specialists),
                     "launch_commands": [],
+                    **thread_ref,
                 }
             raise ValidationError("No agent jobs spawned yet. Please run staging first to create agent jobs.")
 
@@ -287,11 +295,12 @@ class ThinClientLifecycleMixin:
 
         launch_commands: list[dict] = []
         if execution_mode == "multi_terminal":
-            launch_commands = self._launch_commands_for(agent_executions)
+            launch_commands = self._launch_commands_for(agent_executions, launched=launch_gate_passed(project))
 
         return {
             "prompt": prompt,
             "orchestrator_job_id": orchestrator_execution.job_id,
             "agent_count": len(agent_executions),
             "launch_commands": launch_commands,
+            **thread_ref,
         }

@@ -1,9 +1,9 @@
 /**
- * Headless S3a — routes for the dead WS emissions D4, D11, D12, D14, D15.
+ * Headless S3a — routes for the dead WS emissions D4, D11, D14, D15.
  *
  * D4  job:mission_updated            -> agentJobs.handleMissionLengthUpdated (existing-only)
  * D11 project:memory_updated         -> window CustomEvent (dispatch-only; S3c owns the consumer)
- * D12 orchestrator:handover_initiated -> agentJobs.handleStatusChanged (status: 'handed_over')
+ * (D12 orchestrator:handover_initiated retired with the Hand over row action: no emitter remains.)
  * D14 project:launched               -> projectState.setLaunched + projects.debouncedRefreshList
  * D15 projects:bulk:deactivated      -> projects.debouncedRefreshList
  *
@@ -59,31 +59,6 @@ describe('websocketEventRouter — Headless S3a dead-emission routes', () => {
       )
 
       expect(agentJobsStore.handleUpdated).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('D12 orchestrator:handover_initiated', () => {
-    it('routes to agentJobs.handleStatusChanged with status handed_over', async () => {
-      const agentJobsStore = { handleStatusChanged: vi.fn() }
-      const storeRegistry = { agentJobs: () => agentJobsStore }
-
-      await routeWebsocketEvent(
-        {
-          type: 'orchestrator:handover_initiated',
-          data: { agent_id: 'agent-1', job_id: 'job-1', project_id: 'proj-1' },
-        },
-        { eventMap: EVENT_MAP, storeRegistry },
-      )
-
-      expect(agentJobsStore.handleStatusChanged).toHaveBeenCalledTimes(1)
-      expect(agentJobsStore.handleStatusChanged).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agent_id: 'agent-1',
-          job_id: 'job-1',
-          project_id: 'proj-1',
-          status: 'handed_over',
-        }),
-      )
     })
   })
 

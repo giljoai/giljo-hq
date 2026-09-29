@@ -354,7 +354,7 @@ class ProductMemoryRepository:
                 Task.product_id == product_id,
                 Task.tenant_key == tenant_key,
                 Task.deleted_at.is_(None),
-                Task.status.in_(["pending", "in_progress"]),
+                Task.status.in_(["pending", "in_progress", "on_hold"]),
             )
         )
         with tenant_session_context(session, tenant_key):
@@ -440,7 +440,7 @@ class ProductMemoryRepository:
                     Task.product_id.in_(product_ids),
                     Task.tenant_key == tenant_key,
                     Task.deleted_at.is_(None),
-                    Task.status.in_(["pending", "in_progress"]),
+                    Task.status.in_(["pending", "in_progress", "on_hold"]),
                 )
             )
             .group_by(Task.product_id)

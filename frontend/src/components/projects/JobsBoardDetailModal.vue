@@ -18,6 +18,20 @@
       </div>
 
       <v-card-text class="jb-modal-body">
+        <ProjectStatusBanner
+          v-if="banner"
+          v-bind="banner"
+          @open-closeout-modal="emit('open-closeout')"
+          @open-decision-modal="emit('open-decision')"
+          @dismiss-orch-unlocked="emit('dismiss-orch-unlocked')"
+          @retry-memory-poll="emit('retry-memory-poll')"
+          @close-without-summary="(reason) => emit('close-without-summary', reason)"
+        />
+
+        <div v-if="executionOrderPhases" class="jb-order" data-testid="execution-order-bar">
+          <ExecutionOrderBar :phases="executionOrderPhases" />
+        </div>
+
         <div class="jb-table-scroll">
           <table class="jb-table" data-testid="jb-detail-table">
             <thead>
@@ -33,7 +47,7 @@
             </thead>
             <tbody>
               <tr v-for="agent in agents" :key="agent.agent_id || agent.job_id" data-testid="jb-detail-row">
-                <td><span class="agent-badge-sq" :style="getAgentBadgeStyle(getAgentColorKey(agent))">{{ getAgentInitials(getPrimaryAgentLabel(agent)) }}</span></td>
+                <td><span class="agent-badge-sq" :class="{ 'live-badge': isLiveStatusWord(jobStatusWord(agent)) }" :style="getAgentBadgeStyle(getAgentColorKey(agent))">{{ getAgentInitials(getPrimaryAgentLabel(agent)) }}</span></td>
                 <td>
                   <span class="jb-nm">{{ getPrimaryAgentLabel(agent) }}</span><br />
                   <span class="jb-role">{{ getAgentRoleLabel(agent) }}</span>
@@ -79,7 +93,7 @@
                 </td>
                 <td>{{ formatAgentDuration(agent, now) }}</td>
                 <td :style="{ color: getStatusColor(agent.status, agent.block_reason) }">
-                  {{ getStatusLabel(agent.status, agent.block_reason) }}
+                  {{ getStatusLabel(agent.status, agent.block_reason) }}<LiveDots v-if="isLiveStatusWord(jobStatusWord(agent))" />
                 </td>
                 <td>
                   <span class="msg-badge" :class="(agent.messages_waiting_count ?? 0) === 0 ? 'zero' : 'has-msgs'">
@@ -92,18 +106,28 @@
         </div>
 
         <div v-if="readyForReview" class="jb-review-strip" data-testid="jb-review-strip">
-          <p><strong>All agents closed.</strong> Review happens in the existing review pane. Once reviewed, this project leaves the board.</p>
+          <p><strong>All agents closed.</strong> Review and close it here. Once reviewed, this project leaves the board.</p>
           <span class="jb-foot-spacer" />
           <v-btn
             class="jb-btn jb-btn-review"
             size="small"
             variant="flat"
-            :to="project ? { name: 'ProjectLaunch', params: { projectId: project.id }, query: { via: 'jobs', review: '1' } } : undefined"
             data-testid="jb-review-strip-btn"
+            @click="emit('open-closeout')"
           >
-            Go to review pane
+            Review and close
           </v-btn>
         </div>
+
+        <MessageComposer
+          v-if="project"
+          class="jb-composer"
+          :project-id="project.id"
+          :chain-mode="Boolean(chainCtx)"
+          :conductor-agent-id="chainCtx?.conductor?.agentId || ''"
+          :chain-run-id="chainCtx?.runId || ''"
+          :orchestrator-agent-id="orchestratorAgentId"
+        />
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -112,12 +136,19 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { getStatusLabel, getStatusColor } from '@/utils/statusConfig'
+import { jobStatusWord, isLiveStatusWord } from '@/utils/jobStatusWord'
+import LiveDots from './LiveDots.vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel, getAgentRoleLabel } from '@/utils/agentDisplay'
 import { formatAgentDuration } from '@/utils/durationFormat'
 import { isReadyForReview } from '@/utils/jobsSectionLabel'
 import { useClipboard } from '@/composables/useClipboard'
+import { isOrchestrator } from '@/utils/agentDisplay'
+import { buildExecutionOrderPhases } from '@/utils/executionOrderPhases'
+import MessageComposer from '@/components/projects/MessageComposer.vue'
+import ExecutionOrderBar from '@/components/projects/ExecutionOrderBar.vue'
+import ProjectStatusBanner from '@/components/projects/project-tabs/ProjectStatusBanner.vue'
 
 const props = defineProps({
   modelValue: {
@@ -136,11 +167,29 @@ const props = defineProps({
     type: Number,
     required: true,
   },
+  chainCtx: {
+    type: Object,
+    default: null,
+  },
+  banner: {
+    type: Object,
+    default: null,
+  },
 })
+
+const orchestratorAgentId = computed(() => (props.agents || []).find(isOrchestrator)?.agent_id || '')
+const executionOrderPhases = computed(() => buildExecutionOrderPhases(props.agents, props.project?.execution_mode))
 
 const readyForReview = computed(() => isReadyForReview(props.project, props.agents))
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits([
+  'update:modelValue',
+  'open-closeout',
+  'open-decision',
+  'dismiss-orch-unlocked',
+  'retry-memory-poll',
+  'close-without-summary',
+])
 
 const { copy: clipboardCopy } = useClipboard()
 const copiedField = ref(null)
@@ -168,7 +217,7 @@ async function handleCopy(field, value) {
 @use '../../styles/design-tokens' as *;
 
 .jb-modal-card {
-  background: $color-background-tertiary;
+  background: rgb(var(--v-theme-surface));
 }
 
 .jb-modal-tax-pill {
@@ -185,6 +234,14 @@ async function handleCopy(field, value) {
 
 .jb-modal-body {
   padding: 8px 20px 20px !important;
+}
+
+.jb-order {
+  margin-bottom: 10px;
+}
+
+.jb-composer {
+  margin-top: 16px;
 }
 
 .jb-table-scroll {

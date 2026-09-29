@@ -47,6 +47,36 @@ def refuse_if_superseded(project: Any) -> dict[str, Any] | None:
     }
 
 
+NO_CODE_CHANGES_MAX = 500
+
+
+def normalize_no_code_changes(
+    no_code_changes: str | None,
+    git_commits: list[Any] | None,
+) -> str | None:
+    reason = (no_code_changes or "").strip()
+    if not reason:
+        return None
+    if len(reason) > NO_CODE_CHANGES_MAX:
+        raise ValidationError(f"no_code_changes must be at most {NO_CODE_CHANGES_MAX} characters.")
+    if git_commits:
+        raise ValidationError("Pass git_commits or no_code_changes, not both.")
+    return reason
+
+
+def git_commits_required_rejection(project_id: str) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "GIT_COMMITS_REQUIRED",
+        "project_id": project_id,
+        "message": (
+            "Git integration is enabled, so this closeout needs one of: git_commits (the "
+            "commits this project made), or no_code_changes='<why>' when it changed no code. "
+            "Do not create an empty commit to satisfy this."
+        ),
+    }
+
+
 MAX_SUMMARY_LENGTH = 10000
 MAX_KEY_OUTCOMES = 100
 MAX_DECISIONS_MADE = 100

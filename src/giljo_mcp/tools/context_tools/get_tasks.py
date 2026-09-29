@@ -19,7 +19,7 @@ from giljo_mcp.services.next_action import task_list_next_action
 
 logger = logging.getLogger(__name__)
 
-OPEN_STATUSES = ("pending", "in_progress", "blocked")
+OPEN_STATUSES = ("pending", "in_progress", "on_hold", "blocked")
 
 
 def _estimate_tokens(data: Any) -> int:

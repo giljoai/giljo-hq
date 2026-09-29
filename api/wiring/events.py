@@ -38,12 +38,15 @@ def register_event_handlers(app: FastAPI) -> None:
             edition = "community"
             if hasattr(app.state, "config") and app.state.config:
                 edition = getattr(app.state.config, "edition", None) or "community"
+            endpoints = {"websocket": "/ws", "health": "/health"}
+            if app.docs_url:
+                endpoints = {"api": app.docs_url, **endpoints}
             return {
                 "name": branding.PRODUCT_NAME,
                 "version": giljo_version,
                 "edition": edition,
                 "status": "operational",
-                "endpoints": {"api": "/docs", "websocket": "/ws", "health": "/health"},
+                "endpoints": endpoints,
             }
 
     @app.get("/health")
@@ -59,7 +62,7 @@ def register_event_handlers(app: FastAPI) -> None:
                     state.health_detail.pop("database", None)
             except (ConnectionError, TimeoutError, RuntimeError, OSError) as e:
                 checks["database"] = "unhealthy: database"
-                state.health_detail["database"] = str(e)
+                state.health_detail["database"] = "unreachable"
                 logger.warning("Health check: database unhealthy: %s", sanitize(str(e)))
 
         if state.websocket_manager:
@@ -77,7 +80,7 @@ def register_event_handlers(app: FastAPI) -> None:
                         state.health_detail.pop("redis", None)
                 except (RedisError, ConnectionError, TimeoutError, OSError) as e:
                     checks["redis"] = "unhealthy: redis"
-                    state.health_detail["redis"] = str(e)
+                    state.health_detail["redis"] = "unreachable"
                     logger.warning("Health check: redis unhealthy: %s", sanitize(str(e)))
             else:
                 checks["redis"] = "in-process"

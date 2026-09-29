@@ -34,13 +34,12 @@ from api.endpoints.mcp_tools._harness import (  # noqa: F401
 from api.endpoints.mcp_tools._silence_scope import NON_SILENCE_CLEARING_TOOLS, SILENCE_CLEARING_TOOLS  # noqa: F401
 from giljo_mcp import __version__ as _giljo_version
 from giljo_mcp import branding
-from giljo_mcp.exceptions import BaseGiljoError, ValidationError
+from giljo_mcp.exceptions import BaseGiljoError, CodedRefusalError, ValidationError
 from giljo_mcp.schemas.jsonb_validators import GitCommitShaRequiredError
 from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS as _INTENTIONAL_LONGPOLL_MAX_SECONDS
 from giljo_mcp.services._mcp_wire_bounds import CursorRejectedError
 from giljo_mcp.services.debounce import should_run
 from giljo_mcp.services.memory_entry_write_validator import MemoryEntryWriteValidationError
-from giljo_mcp.services.product_service import ProductAmbiguousError
 from giljo_mcp.tenant_guard import TenantIsolationError
 from giljo_mcp.tools.slash_command_templates import SKILLS_VERSION as _SKILLS_VERSION
 
@@ -264,6 +263,7 @@ def _resolve_tool_func(accessor: Any, method_name: str) -> Callable[..., Awaitab
 VALIDATION_ERROR = "VALIDATION_ERROR"
 CONSTRAINT_NON_EMPTY = "non_empty"
 CONSTRAINT_INVALID_CHOICE = "invalid_choice"
+CONSTRAINT_MUTUALLY_EXCLUSIVE = "mutually_exclusive"
 
 
 def validation_rejection(*, field: str, constraint: str, message: str) -> dict[str, Any]:
@@ -345,9 +345,9 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         return {"success": False, "error": exc.code, "message": str(exc)}
     except GitCommitShaRequiredError as exc:
         return _missing_commit_identifier_response(exc, method_name)
-    except ProductAmbiguousError as exc:
-        logger.info("MCP tool '%s' refused an ambiguous create: %s", method_name, exc.code)
-        return {"success": False, "error": exc.code, "message": exc.message, "products": exc.products}
+    except CodedRefusalError as exc:
+        logger.info("MCP tool '%s' refused with %s", method_name, exc.code)
+        return exc.as_refusal()
     except BaseGiljoError as exc:
         if exc.default_status_code < 500:
             raise

@@ -209,7 +209,8 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
       mockTemplatePreview.mockRejectedValue({
         response: {
           data: {
-            detail: 'Template not found'
+            error_code: 'RESOURCE_NOT_FOUND',
+            message: 'Template not found'
           }
         }
       })
@@ -235,7 +236,7 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
       expect(wrapper.text()).toContain('Template not found')
     })
 
-    it('displays generic error when API error has no detail', async () => {
+    it('displays generic error when API error has no response', async () => {
       mockTemplatePreview.mockRejectedValue(new Error('Network error'))
 
       wrapper = mount(AgentDetailsModal, {

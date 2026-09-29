@@ -571,11 +571,4 @@ function getStatusActions(item) {
     display: none;
   }
 }
-
-/* ── Mobile breakpoint (FE-9536: shared $breakpoint-mobile = 600px) ── */
-@media (max-width: $breakpoint-mobile) {
-  .project-id-text {
-    display: none;
-  }
-}
 </style>

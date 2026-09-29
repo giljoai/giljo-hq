@@ -197,6 +197,7 @@ import api from '@/services/api'
 import { PRODUCT_NAME } from '@/branding'
 import { useProductStore } from '@/stores/products'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const productName = PRODUCT_NAME
 const prompt = ref('')
@@ -374,7 +375,7 @@ async function loadPrompt() {
     applyPromptResponse(response)
   } catch (error) {
     console.error('[SYSTEM] Failed to load orchestrator prompt:', error)
-    promptError.value = error.response?.data?.detail || 'Failed to load orchestrator prompt.'
+    promptError.value = parseErrorResponse(error).message || 'Failed to load orchestrator prompt.'
   } finally {
     loading.value = false
   }
@@ -407,7 +408,7 @@ async function performSave() {
       : 'Override saved for all products.'
   } catch (error) {
     console.error('[SYSTEM] Failed to save orchestrator prompt:', error)
-    promptError.value = error.response?.data?.detail || 'Failed to save orchestrator prompt.'
+    promptError.value = parseErrorResponse(error).message || 'Failed to save orchestrator prompt.'
   } finally {
     saving.value = false
   }
@@ -428,7 +429,7 @@ async function restorePrompt() {
       : 'Reverted to default orchestrator prompt.'
   } catch (error) {
     console.error('[SYSTEM] Failed to reset orchestrator prompt:', error)
-    promptError.value = error.response?.data?.detail || 'Failed to restore default prompt.'
+    promptError.value = parseErrorResponse(error).message || 'Failed to restore default prompt.'
   } finally {
     saving.value = false
   }

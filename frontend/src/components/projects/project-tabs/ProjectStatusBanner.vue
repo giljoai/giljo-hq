@@ -78,6 +78,15 @@
   </div>
 
   <div v-else-if="showCloseoutButton" class="action-buttons-row">
+    <v-chip
+      color="info"
+      variant="tonal"
+      size="large"
+      prepend-icon="mdi-clipboard-text-clock-outline"
+      data-testid="ready-for-review-chip"
+    >
+      Ready for review
+    </v-chip>
     <v-btn
       class="closeout-btn"
       color="yellow-darken-2"
@@ -110,36 +119,75 @@
       data-testid="memory-poll-error-chip"
     >
       <template #prepend>
-        <v-icon icon="mdi-alert" size="18" />
+        <v-icon icon="mdi-alert" size="18" class="mr-1" />
       </template>
-      <span>Closeout may have failed &mdash; check agent terminal for errors</span>
+      <span>The agents stopped without writing a closeout</span>
     </v-chip>
+    <v-btn
+      class="closeout-btn"
+      color="yellow-darken-2"
+      variant="flat"
+      prepend-icon="mdi-clipboard-check-outline"
+      data-testid="close-without-summary-btn"
+      @click="openCloseDialog"
+    >Close without agent summary</v-btn>
     <v-btn
       variant="tonal"
       color="warning"
       size="small"
       prepend-icon="mdi-refresh"
-      class="ml-2"
       data-testid="memory-poll-retry-btn"
-      :aria-label="'Retry memory poll'"
+      aria-label="Check again for the agent closeout"
       @click="$emit('retry-memory-poll')"
     >
       Retry
     </v-btn>
-    <v-btn
-      variant="text"
-      size="small"
-      class="ml-1 text-muted-a11y"
-      data-testid="memory-poll-dismiss-btn"
-      :aria-label="'Dismiss error'"
-      @click="$emit('dismiss-memory-poll-error')"
-    >
-      Dismiss
-    </v-btn>
+
+    <v-dialog v-model="closeDialogOpen" max-width="520">
+      <v-card class="smooth-border" data-testid="close-without-summary-dialog">
+        <div class="dlg-header dlg-header--warning">
+          <v-icon class="dlg-icon">mdi-clipboard-check-outline</v-icon>
+          <span class="dlg-title">Close without agent summary</span>
+          <v-btn icon variant="text" class="dlg-close" aria-label="Close dialog" @click="closeDialogOpen = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </div>
+        <v-card-text class="pt-6">
+          <p class="close-dialog-text">
+            The agents on this project stopped without writing their closeout. This saves a short
+            closeout to project memory so you can review and archive the project as usual.
+          </p>
+          <v-textarea
+            v-model="closeReason"
+            label="Note for project memory (optional)"
+            variant="outlined"
+            rows="2"
+            auto-grow
+            counter="500"
+            maxlength="500"
+            hide-details="auto"
+            data-testid="close-without-summary-reason"
+          />
+        </v-card-text>
+        <div class="dlg-footer">
+          <v-spacer />
+          <v-btn variant="text" @click="closeDialogOpen = false">Cancel</v-btn>
+          <v-btn
+            color="yellow-darken-2"
+            variant="flat"
+            :loading="closingWithoutSummary"
+            data-testid="close-without-summary-confirm"
+            @click="confirmClose"
+          >Save closeout</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
+
 defineProps({
   projectDoneStatus: {
     type: String,
@@ -177,15 +225,32 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  closingWithoutSummary: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-defineEmits([
+const emit = defineEmits([
   'open-decision-modal',
   'dismiss-orch-unlocked',
   'open-closeout-modal',
   'retry-memory-poll',
-  'dismiss-memory-poll-error',
+  'close-without-summary',
 ])
+
+const closeDialogOpen = ref(false)
+const closeReason = ref('')
+
+function openCloseDialog() {
+  closeReason.value = ''
+  closeDialogOpen.value = true
+}
+
+function confirmClose() {
+  emit('close-without-summary', closeReason.value)
+  closeDialogOpen.value = false
+}
 </script>
 
 <style scoped lang="scss">
@@ -289,6 +354,11 @@ defineEmits([
   font-weight: 600;
   font-size: 0.875rem;
   color: $color-status-warning;
+}
+
+.close-dialog-text {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
 }
 
 .closeout-decision-desc {

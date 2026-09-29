@@ -193,7 +193,9 @@ exit_with_error() {
     # Point the customer at the log FIRST so they can paste it when reporting the
     # issue, even after closing the terminal. The EXIT trap then persists a redacted
     # copy into <TargetDir>/install.log if the target dir is known. (INF-0004 #5)
-    if [[ -n "${INSTALL_LOG_TMP:-}" ]]; then
+    if [[ -n "${RESOLVED_TARGET_DIR:-}" && -d "${RESOLVED_TARGET_DIR}" ]]; then
+        echo -e "    ${CYAN}Full log: ${RESOLVED_TARGET_DIR}/install.log${NC} -- paste this if you report the issue"
+    elif [[ -n "${INSTALL_LOG_TMP:-}" ]]; then
         echo -e "    ${CYAN}Full log: ${INSTALL_LOG_TMP}${NC} -- paste this if you report the issue"
     fi
     print_fail "$*"
@@ -634,10 +636,13 @@ persist_install_log() {
     [[ -n "$RESOLVED_TARGET_DIR" && -d "$RESOLVED_TARGET_DIR" ]] || return 0
     # Redact credential-looking tokens before persisting (mirrors install.py's
     # _SENSITIVE_PATTERNS so both halves of the unified log scrub the same shapes).
-    sed -E 's/([Pp]assword|[Pp]asswd|[Ss]ecret|[Tt]oken|[Kk]ey|[Cc]redential)([=:[:space:]]+)[^[:space:]]+/\1\2***REDACTED***/g' \
-        "$INSTALL_LOG_TMP" >> "${RESOLVED_TARGET_DIR}/install.log" 2>/dev/null \
-        || cat "$INSTALL_LOG_TMP" >> "${RESOLVED_TARGET_DIR}/install.log" 2>/dev/null \
-        || true
+    # LC_ALL=C keeps BSD sed from rejecting non-UTF-8 bytes; if redaction still
+    # fails, only a marker is written, never the raw log.
+    if ! LC_ALL=C sed -E 's/([Pp]assword|[Pp]asswd|[Ss]ecret|[Tt]oken|[Kk]ey|[Cc]redential)([=:[:space:]]+)[^[:space:]]+/\1\2***REDACTED***/g' \
+        "$INSTALL_LOG_TMP" >> "${RESOLVED_TARGET_DIR}/install.log" 2>/dev/null; then
+        echo "install log redaction failed; raw log not persisted" >> "${RESOLVED_TARGET_DIR}/install.log" 2>/dev/null || true
+    fi
+    rm -f "$INSTALL_LOG_TMP"
 }
 
 cleanup() {

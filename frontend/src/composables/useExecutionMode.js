@@ -8,7 +8,7 @@ const GENERIC_EXECUTION_MODE_FAILURE = 'Failed to save execution mode. Please tr
 
 export const SUBAGENT_EXECUTION_MODES = ['claude_code_cli', 'codex_cli', 'gemini_cli', 'antigravity_cli', 'generic_mcp']
 
-export function useExecutionMode({ projectId, missionText, isProjectStaged, isProjectStaging, initialMode = null }) {
+export function useExecutionMode({ projectId, missionText, isProjectStaged, isProjectStaging, initialMode = null, modeIsFact = null }) {
   const { showToast } = useToast()
   const projectStore = useProjectStore()
   const notificationStore = useNotificationStore()
@@ -19,11 +19,11 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
 
   const executionModeSelected = computed(() => executionPlatform.value !== null)
 
-  const isExecutionModeLocked = computed(
-    () =>
-      Boolean(executionMode.value) &&
-      (Boolean(missionText.value) || isProjectStaged.value || isProjectStaging.value),
-  )
+  const isExecutionModeLocked = computed(() => {
+    if (!executionMode.value) return false
+    if (modeIsFact) return Boolean(modeIsFact.value)
+    return Boolean(missionText.value) || isProjectStaged.value || isProjectStaging.value
+  })
 
   const isSubagentMode = computed(() => isSubagentExecutionMode(executionMode.value))
 
@@ -41,7 +41,9 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
 
   async function handleExecutionModeChange(newValue) {
     const previousValue = executionPlatform.value
+    const previousMode = executionMode.value
     executionPlatform.value = newValue
+    executionMode.value = newValue
 
     try {
       await projectStore.updateProject(projectId.value, { execution_mode: newValue })
@@ -53,6 +55,7 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
       })
     } catch (error) {
       executionPlatform.value = previousValue
+      executionMode.value = previousMode
       console.error('Failed to update execution mode:', error)
       showToast({
         message: GENERIC_EXECUTION_MODE_FAILURE,

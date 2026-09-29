@@ -164,7 +164,6 @@ function tintedStyle(hex) {
   return {
     backgroundColor: hexToRgba(hex, 0.15),
     color: hex,
-    borderRadius: '8px',
   }
 }
 
@@ -394,16 +393,5 @@ defineExpose({ isProject, aliasShown, aliasStyle, typeLabel, riskBadge, complexi
   align-items: center;
   justify-content: center;
   gap: 2px;
-}
-
-@media (max-width: 760px) {
-  .rm-card {
-    flex-wrap: wrap;
-  }
-  .rm-actions {
-    width: 100%;
-    flex-direction: row;
-    box-shadow: inset 0 1px 0 var(--smooth-border-color, rgba(255, 255, 255, 0.06));
-  }
 }
 </style>

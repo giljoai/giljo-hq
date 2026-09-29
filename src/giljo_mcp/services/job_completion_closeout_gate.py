@@ -38,10 +38,16 @@ PROTECTED_SURFACE_PATTERNS: tuple[str, ...] = (
     "oauth",
     "password",
     "billing",
-    "polar",
-    "stripe",
     "subscription",
 )
+
+_edition_patterns: tuple[str, ...] = ()
+
+
+def register_protected_surface_patterns(patterns: tuple[str, ...]) -> None:
+    global _edition_patterns  # noqa: PLW0603
+    _edition_patterns = tuple(patterns)
+
 
 _CTX_GATE = "closeout_gate"
 _CTX_CHAIN_SETTLEMENT = "chain_settlement"
@@ -80,7 +86,8 @@ def detect_closeout_signal(result: dict[str, Any] | None) -> list[str]:
         reasons.append(f"{len(deferred)} deferred finding(s) awaiting a user decision")
 
     paths = _collect_paths(result)
-    matched = sorted({pat for p in paths for pat in PROTECTED_SURFACE_PATTERNS if pat in p.lower()})
+    patterns = PROTECTED_SURFACE_PATTERNS + _edition_patterns
+    matched = sorted({pat for p in paths for pat in patterns if pat in p.lower()})
     if matched:
         reasons.append(f"protected surface(s) touched: {', '.join(matched)}")
 
@@ -148,21 +155,6 @@ async def has_pending_chain_settlement(session: AsyncSession, run_id: str, tenan
         if ctx.get(_CTX_CHAIN_SETTLEMENT) is True and str(ctx.get(_CTX_RUN_ID)) == str(run_id):
             return True
     return False
-
-
-async def _find_active_run(svc: JobCompletionService, session: AsyncSession, project_id: Any, tenant_key: str):
-    try:
-        from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-        run_svc = SequenceRunService(
-            db_manager=svc.db_manager,
-            tenant_manager=svc.tenant_manager,
-            session=session,
-        )
-        return await run_svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-    except Exception:  # noqa: BLE001 — chain lookup must never break completion; treat as solo
-        logger.warning("[BE-9153] chain-run lookup failed; treating closeout as solo", exc_info=True)
-        return None
 
 
 async def _resolve_project_name(session: AsyncSession, tenant_key: str, project_id: Any) -> str | None:
@@ -327,10 +319,11 @@ async def enforce_closeout_approval_mode(
     if _is_conductor(job):
         return mode
 
+    from giljo_mcp.services.sequence_run_service import active_chain_run
     from giljo_mcp.services.user_approval_service import UserApprovalService
 
     existing = await _gate_approvals_for_execution(session, tenant_key, execution.id)
-    run = await _find_active_run(svc, session, getattr(job, "project_id", None), tenant_key)
+    run = await active_chain_run(session, getattr(job, "project_id", None), tenant_key)
 
     approval_svc = UserApprovalService(
         db_manager=svc.db_manager,

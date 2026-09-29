@@ -173,3 +173,56 @@ async def test_taxonomy_list_still_lists_types_with_no_live_projects(db_session,
         taxonomy_with_trashed_projects["trash_only_label"],
         taxonomy_with_trashed_projects["mixed_label"],
     } <= labels, f"a taxonomy type dropped out of the list, got={sorted(labels)}"
+
+
+@pytest.mark.asyncio
+async def test_stale_deleted_at_live_project_still_blocks_type_delete(db_session, test_tenant_key):
+    tenant = test_tenant_key
+    suffix = uuid4().hex[:3].upper()
+
+    with tenant_session_context(db_session, tenant):
+        stale_type = _taxonomy_type(tenant, f"S{suffix}", "Stale")
+        db_session.add(stale_type)
+        await db_session.flush()
+
+        product = Product(tenant_key=tenant, name=f"be9663 stale product {suffix}", description="d", is_active=False)
+        db_session.add(product)
+        await db_session.flush()
+
+        stale_project = _typed_project(tenant, stale_type.id, series=1, product_id=product.id)
+        stale_project.deleted_at = datetime.now(UTC)
+        db_session.add(stale_project)
+        await db_session.flush()
+
+        count = await get_project_count_for_type(db_session, tenant, stale_type.id)
+        assert count == 1, f"a stale-deleted_at live project must still be counted, got={count}"
+
+        with pytest.raises(ValueError, match="project"):
+            await delete_taxonomy_type(db_session, tenant, stale_type.id)
+
+
+@pytest.mark.asyncio
+async def test_stale_deleted_at_live_project_counted_in_list_badge_too(db_session, test_tenant_key):
+    tenant = test_tenant_key
+    suffix = uuid4().hex[:3].upper()
+
+    with tenant_session_context(db_session, tenant):
+        stale_type = _taxonomy_type(tenant, f"L{suffix}", "Stale List")
+        db_session.add(stale_type)
+        await db_session.flush()
+
+        product = Product(tenant_key=tenant, name=f"be9663 list product {suffix}", description="d", is_active=False)
+        db_session.add(product)
+        await db_session.flush()
+
+        stale_project = _typed_project(tenant, stale_type.id, series=1, product_id=product.id)
+        stale_project.deleted_at = datetime.now(UTC)
+        db_session.add(stale_project)
+        await db_session.flush()
+
+        types = await list_taxonomy_types(db_session, tenant)
+
+    counts = {t.label: t.project_count for t in types}
+    assert counts.get("Stale List") == 1, (
+        f"the taxonomy list badge must count a stale-deleted_at live project, got={counts}"
+    )

@@ -249,16 +249,20 @@ Completed and cancelled projects are protected. Any attempt to change their fiel
 
 You can also mark a project **Superseded** with a link to the project that replaced it. This keeps history navigable — the old project stays visible and points at its successor — without deleting anything.
 
-### The Project Workspace: Staging and Implementation
+### Running a Project on the Jobs Board
 
-Opening a project takes you to its workspace, which has two tabs:
+Activating a project puts it on the **Jobs** board, the one place a project is staged and run. The board has two sides:
 
-- **Staging** — where you prepare the project and generate the orchestrator prompt.
-- **Implementation** — the live agent monitoring view once work is running (covered under **Jobs** below).
+- **Staging**: projects getting ready to run, with the filters **Activated**, **Planning** and **Staged**.
+- **Implementation**: projects that are running, with the filters **Needs input**, **Implementing** and **Review** (covered under **Jobs** below).
+
+The board opens on **Implementation** when anything is running, and on **Staging** otherwise. Opening an active project from the Projects list, or following an older link to a project, lands on its card.
+
+A card on the **Staging** side shows what you read before you launch: the execution mode, the detected tool, the crew size and the number of phases, then three panels. **Project description** has a pencil to edit it. **Mission** is empty until you stage, updates live while the orchestrator writes it, and is tagged once generated. **Crew** shows the agents the orchestrator chose: click one to see its role, or use the pencil beside a worker to edit its mission before launch. The Crew header also has the agent tips and the Git and Serena icons, which take you to your integrations.
 
 #### Choosing an Execution Mode
 
-On the Staging tab you pick how the work runs. There are two modes:
+On a Staging card's **Run as** row you pick how the work runs. Nothing is selected for you: pressing **Stage Project** without a choice asks you to pick a mode first. There are two modes:
 
 - **Multi-terminal** — you launch each agent in its own terminal. Phases run one after another; agents within a phase run in parallel.
 - **Subagent** — one main agent spawns and manages all the others itself. This works with tools that support subagents.
@@ -269,14 +273,14 @@ Running agents unattended (**headless**) is a separate, account-level switch in 
 
 #### Staging a Project
 
-On the Staging tab, the stage button walks through its own states as you go: **Stage Project → Staging… → Unstage** (to back out) → **Re-Stage** (to recover a staged-but-not-yet-launched project). It is disabled once implementation has launched. Staging generates the orchestrator prompt (your product context, 360 Memory, project description, and agent template definitions) for you to paste into your connected tool.
+On the card, the stage button walks through its own states as you go: **Stage Project → Staging… → Unstage** (to back out) → **Re-Stage** (to recover a staged-but-not-yet-launched project). It is disabled once implementation has launched. **Unstage** and **Re-Stage** clear the mode choice, so the next Stage asks again. Staging generates the orchestrator prompt (your product context, 360 Memory, project description, and agent template definitions) for you to paste into your connected tool.
 
 - **Staged:** the prompt is ready; the staged indicator shows a green checkmark in the project table.
 - **Active:** the project is currently running. Several projects can be active in the same product at once.
 
 If a staging orchestrator finishes without spawning any specialist agents, staging is blocked and the project stays re-stageable (the **Implement** button stays disabled) so you can stage it again — it will not be left in a broken state.
 
-Once staging completes and you have chosen a mode, click **Implement** to launch, which switches you to the Implementation tab.
+Once staging completes, click **Implement** on the card. It starts the project, copies the implementation prompt for you to paste into your connected tool, and moves the card to the **Implementation** side.
 
 ### Project Phases
 
@@ -305,33 +309,41 @@ Because the agent does the ranking, the risk (low / med / high), complexity (lig
 Each item is a card showing a **PROJECT** or **TASK** badge, its status, its risk and complexity, and a **Blocked** row with the agent's reason if it flagged one. From a card you can:
 
 - **Drag** the grip to reorder — the order saves automatically and survives a refresh.
-- **Activate** a project — this stages it and opens the Implementation view.
 - **Convert to Project** — promotes a task into a new project.
 - **Remove from roadmap** — takes the item off the roadmap only; the project or task itself is untouched and reappears next time the agent rebuilds the roadmap.
 
 A **"Fold in tasks"** switch filters tasks out so you see projects alone.
 
+When you are ready to run a project from the roadmap, activate it from the **Projects** page. That lands its card on the **Staging** side of the **Jobs** board.
+
 ---
 
 ## Jobs
 
-The **Jobs** entry in the left navigation and a project's **Implementation** tab open the same thing: the real-time agent monitoring table for a running project.
+The **Jobs** entry in the left navigation opens the Jobs board: one card per project in flight, with live agent monitoring for every running project. The **All** tab, first in the product strip on the Jobs page, shows every product at once, one group per product with the most recently active first. Click a product tab to narrow the board to that product, and **All** to widen it again.
+
+Each product group and each card folds with its chevron. A folded card keeps one line: the crew, steps, waiting count, elapsed time and its main button. The **View** switch sets the default: **Compact** (the default) folds every card to its one line, and cards that need you keep their coloured edge; **Detailed** opens every card. The board remembers these choices in your browser.
+
+The board updates on its own. When an agent starts, finishes, goes quiet, gets blocked or receives a message, its card changes without reloading the page, and projects appear and leave as they start and finish.
 
 ### Agent Monitoring
 
-The agent table shows one row per agent:
+On a running card each agent has one row, with the orchestrator always first:
 
-| Column | Description |
+| Part of the row | What it does |
 |---|---|
-| Phase | Orchestrator shows "Start"; subagents show their phase number (P1, P2, etc.); subagent-mode agents show "All" |
-| Play button | Copy the agent's launch prompt to the clipboard |
-| Agent Name | Tinted initial badge + display name + skill template name |
-| Agent Status | Current status with color coding (see Status Badges below) |
-| Duration | Elapsed time since the agent started; for active agents this ticks live every second |
-| Steps | Completed and skipped steps out of total (e.g. 3(1) / 8) |
-| Messages Waiting | Count of unread messages from this agent |
+| Play button | Copies the agent's launch prompt. Once used, it becomes a re-copy button that re-issues the latest prompt, for example after a disconnect |
+| Agent badge | Tinted initials; hover for the agent's name, role and ids |
+| Steps | Completed steps out of total (e.g. 3/8); click to open the agent's task list |
+| Duration | Elapsed time since the agent started; ticks live every second while it works |
+| Status | Current status with color coding (see Status Badges below). An agent nobody started well after launch shows **Not picked up** |
+| Messages | Count of unread messages from this agent; click to open them |
 
-Click the agent badge to open the Agent Details modal (shows role and template). Click the agent name to open the Job modal (shows assigned mission). Click the message count badge to open the Message Audit modal, whose waiting/read counts update live as messages arrive.
+The menu at the end of the row has **View messages**, **View agent role**, **View assigned job** and, when the agent delivered one, **Open pull request**.
+
+A card that needs you says so in its status pill, for example **Orchestrator silent** or **Your decision needed**; hover the pill to see what to do about it.
+
+**Jobs detail** on a card opens the full view of that project: its status banner, the proposed execution order for multi-terminal projects, and the message composer addressed to the project's orchestrator (or, for a project in a chain, the chain's conductor).
 
 ### Status Badges
 
@@ -352,7 +364,7 @@ Each agent displays one of the following statuses (this table doubles as the on-
 
 An agent with `working` status shows a breathing glow animation on its badge and an expanding pulse ring.
 
-At the moment staging finishes but before you click Implement, the orchestrator row shows **Waiting** rather than Complete, so it is clear the project is paused for you to launch implementation — not finished.
+At the moment staging finishes but before you click Implement, the orchestrator shows **Waiting** rather than Complete, so it is clear the project is paused for you to launch implementation, not finished.
 
 ### Agent Display Names
 
@@ -360,7 +372,7 @@ When you spawn more than one agent of the same type in a project (for example, t
 
 ### Agent Approvals (Human-in-the-Loop)
 
-When an agent needs a decision from you mid-work, the project's Implementation tab shows an amber **"Decision Required"** banner: *"Check in with the orchestrator in chat, then click here to decide."*
+When an agent needs a decision from you mid-work, the project's card says **Your decision needed** and its **Jobs detail** shows an amber **"Decision Required"** banner: *"Check in with the orchestrator in chat, then click here to decide."*
 
 1. Read the agent's full reasoning in your AI chat.
 2. Click the banner to open the **decision dialog**, which shows the request and the available options (e.g. Approve / Reject / Defer).
@@ -372,19 +384,19 @@ On an AI client that supports the newest MCP connection standard, you may instea
 
 ### Closing Out a Project
 
-When every agent has finished, the Implementation tab guides you through closeout via the status banner at the top:
+When every agent has finished, the card shows a **Review project** button, and **Jobs detail** guides you through closeout via the status banner at the top:
 
 1. **"Saving project memory…"** appears briefly while the 360 Memory entry is written.
 2. A **"Review project"** button then appears. Click it to open the closeout summary — the project's 360 Memory, laid out as **Summary**, **Key Outcomes**, **Decisions Made**, and **Git Commits**.
-3. Click **Close**. A confirmation toast fires and you return to the **Projects** page immediately.
+3. Click **Close**. A confirmation toast fires and you stay on the board; the reviewed project leaves it.
 
-To look back at a finished project, its banner shows a green **"Project Completed and Closed"** pill (or "Terminated"/"Cancelled") with its own **"Review project"** button. Reopening the summary and clicking **Close** there is a safe acknowledgement — it will not re-file or overwrite anything.
+To look back at a finished project, click its serial badge on the **Projects** page to open **Project Review** (see below). Reopening a closeout summary and clicking **Close** there is a safe acknowledgement: it will not re-file or overwrite anything.
 
 If a closeout ever looks stuck because the orchestrator was never staged, you can **force-close** it to free the project. A project where everything already finished always routes cleanly to the closeout summary.
 
 ### Agent Check-in Cadence
 
-How often a waiting agent checks in for new work is now one account-level setting, not a per-project slider. Set it in **Tools → Notifications** under **Agent Monitoring**, next to the Agent Silence Threshold (see **Notification Settings** below). Agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer; every other agent sleeps for the cadence you set between checks. A project staged before this change that still carries its own saved interval keeps honoring that value as an override.
+How often a waiting agent checks in for new work is now one account-level setting, not a per-project slider. Set it in **Tools → Agents → Behaviour**, next to the Agent Silence Threshold (see **Agent Behaviour** below). Agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer; every other agent sleeps for the cadence you set between checks. A project staged before this change that still carries its own saved interval keeps honoring that value as an override.
 
 ---
 
@@ -426,7 +438,7 @@ Type in the composer at the bottom:
 - Toggle **Broadcast** (everyone on the thread) or **Direct** (pick one agent under **"To agent…"**).
 - Press **Ctrl+Enter** or click **Send**.
 
-You can reach a thread directly from a notification, from the **Open in Hub** link in Project Review, and from the message icon on the Implementation tab.
+You can reach a thread directly from a notification, from the **Open in Hub** link in Project Review, and from the Hub button or an agent's message count on a Jobs board card.
 
 ### Your Turn and the Baton
 
@@ -435,7 +447,7 @@ Agents pass a conversational "turn" (the baton) as they work. The Hub shows the 
 ### Creating and Recovering Threads
 
 - **New Thread** needs a **Subject**; a Project and Product are optional.
-- **Request Auto Check-in** (in the composer) asks the agents on a thread to check in on an interval you set (default 10 minutes). This is **best-effort** — a model may or may not comply.
+- The Hub has no check-in control of its own. How often waiting agents check in for new work is the account setting **Agent Check-in Cadence** (see **Agent Check-in Cadence** under Jobs, above).
 - Only **General threads** can be deleted; the **Deleted** button lists soft-deleted threads so you can restore them. Project threads follow their project's lifecycle and cannot be deleted from the Hub.
 
 ---
@@ -462,7 +474,7 @@ A handover is written for someone who was not in the session, cannot ask the aut
 
 The third section is the one that matters most. A handover that lists only what went right reads exactly the same whether the author checked it or assumed it, and the next person finds out at the worst possible moment.
 
-The five statuses carry handover meanings: **Pending** is written but unread, **In Progress** means someone is verifying its claims, **Completed** means verified rather than merely read, **Blocked** means a claim turned out to be false and needs you, and **Cancelled** means a later handover superseded it.
+The statuses carry handover meanings: **Pending** is written but unread, **In Progress** means someone is verifying its claims, **Completed** means verified rather than merely read, **Blocked** means a claim turned out to be false and needs you, and **Cancelled** means a later handover superseded it.
 
 Two things a handover will not do. It is a record of work that already happened, so **Convert to Project** is not offered on one. If a handover surfaced work still to do, create that project and leave the handover as the record of where it came from. And a handover still marked **Pending** cannot be archived, because nobody has read it yet and hiding it would remove it from the list of the one person it was written for. Move it off Pending first.
 
@@ -483,7 +495,9 @@ Your AI coding tool writes handovers for you: ask it to hand the session over, a
 
 **Priorities:** `low`, `medium`, `high`, `critical`
 
-**Statuses:** `pending`, `in_progress`, `completed`, `blocked`, `cancelled`
+**Statuses:** `pending`, `in_progress`, `on_hold`, `completed`, `blocked`, `cancelled`
+
+Use **On hold** (`on_hold`) to park a task you have not decided on yet. It still counts as open work, and unlike **In Progress** it does not record a start time.
 
 Status badges use brand colors from the server's canonical status registry.
 
@@ -508,9 +522,9 @@ Navigate to **Tools** via the left navigation. Five tabs are available:
 | Tab | Contents |
 |---|---|
 | **Connect** | Your directory of connected AI tools, API keys, and integrations (git, Serena MCP) |
-| **Agents** | Agent Template Manager: browse, create, edit, and activate agent templates |
+| **Agents** | Agent Template Manager: browse, create, edit, and activate agent templates; the **Behaviour** view holds the agent silence threshold and check-in cadence |
 | **Context** | Context configuration: choose what grounding context agents receive and how much |
-| **Notifications** | Notification position and duration, plus the agent silence threshold and check-in cadence |
+| **Notifications** | Notification position and duration |
 | **Startup** | Cards to reopen the **Setup Wizard**, open this **guide** (the "Learning" card), and — in Community Edition — the **Certificate Trust** helper |
 
 ### Connecting Your AI Tools (Connect)
@@ -588,7 +602,9 @@ Beyond each agent's **Role & Expertise**, two tenant-level controls shape what a
 
 The **Notifications** tab sets where notifications appear (**Position** — six corner/edge options) and how long they stay (**Display duration**, 2–10 seconds).
 
-An **Agent Monitoring** section below that holds two account-level settings, saved to the database and persisted across sessions, in both editions:
+### Agent Behaviour
+
+Under **Tools → Agents → Behaviour**, two account-level settings tune agent timing, saved to the database and persisted across sessions, in both editions:
 
 - **Agent Silence Threshold (minutes)** — how long an agent can go quiet before it is marked "Silent." Raise it for a slower-inference model so it is not falsely flagged.
 - **Agent Check-in Cadence (minutes)** — how often a waiting agent checks in for new work (see **Agent Check-in Cadence** under Jobs, above).
@@ -765,7 +781,7 @@ The numbers you are most likely to bump into. "Edition" shows where a limit appl
 | Deleted-project recovery | 10 days before permanent purge | Both |
 | Deleted thread / vision doc / agent template recovery | 30 days | Both |
 | Free trial | 7 days, no card required | SaaS |
-| Data-retention grace after trial/cancellation | 30 days | SaaS |
+| Data kept after a trial or subscription ends | Read-only at once; deleted about 13 months after a trial ends or 12 months after paid access ends; reminder email about 30 days before | SaaS |
 | Seats | 1 (Solo) | SaaS |
 
 ---

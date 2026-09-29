@@ -100,7 +100,14 @@ class TestRenderFromFlagAlone:
         assert "Git Closeout Commit" in prompt
         assert "Committer of last resort" in prompt
         assert "git status --short" in prompt
-        assert "closeout(BE-9103)" in prompt
+        assert 'git commit -m "BE-9103: ' in prompt
+
+    def test_orchestrator_closeout_never_asks_for_an_empty_commit(self):
+        builder = _MinimalBuilder()
+        orchestrator_prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=True)
+        assert "--allow-empty" not in orchestrator_prompt
+        assert "NEVER `git add -A`" in orchestrator_prompt
+        assert "no_code_changes" in orchestrator_prompt
 
     def test_orchestrator_closeout_absent_when_flag_false(self):
         builder = _MinimalBuilder()

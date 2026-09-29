@@ -87,6 +87,7 @@ import { useCommHubStore } from '@/stores/commHubStore'
 import { useProductStore } from '@/stores/products'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import AgentPill from '@/components/hub/AgentPill.vue'
 import ThreadRetagMenu from '@/components/hub/ThreadRetagMenu.vue'
 import ThreadDates from '@/components/hub/ThreadDates.vue'
@@ -136,7 +137,7 @@ async function saveHeaderRename() {
     await commHub.renameThread(commHub.selectedThreadId, next)
     showToast({ type: 'success', message: 'Thread renamed.' })
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not rename this thread.'
+    const msg = parseErrorResponse(err).message || 'Could not rename this thread.'
     showToast({ type: 'error', message: msg })
   }
 }
@@ -148,7 +149,7 @@ async function onRetagProduct(productId) {
     await commHub.retagThread(threadId, { productId })
     showToast({ type: 'success', message: productId ? 'Product updated.' : 'Product cleared.' })
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not retag this thread.'
+    const msg = parseErrorResponse(err).message || 'Could not retag this thread.'
     showToast({ type: 'error', message: msg })
   }
 }

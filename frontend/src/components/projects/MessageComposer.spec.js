@@ -7,6 +7,7 @@ const listMock = vi.fn()
 const createMock = vi.fn()
 const postMock = vi.fn()
 const searchMock = vi.fn()
+const chainHubMock = vi.fn()
 const showToastMock = vi.fn()
 
 vi.mock('@/services/api', () => ({
@@ -16,6 +17,7 @@ vi.mock('@/services/api', () => ({
       create: (...args) => createMock(...args),
       post: (...args) => postMock(...args),
       search: (...args) => searchMock(...args),
+      chainHub: (...args) => chainHubMock(...args),
     },
   },
 }))
@@ -161,9 +163,10 @@ describe('MessageComposer', () => {
     )
   })
 
-  it('CHAIN: reroutes orchestrator message to the conductor coordination thread', async () => {
+  it('CHAIN: reroutes orchestrator message to the chain hub looked up by run id', async () => {
+    chainHubMock.mockResolvedValue({ data: { thread: { thread_id: 'thread-hub', subject: 'Chain: ship it' } } })
     searchMock.mockResolvedValue({
-      data: { threads: [{ thread_id: 'thread-conductor', subject: 'Chain run run-123 coordination hub' }] },
+      data: { threads: [{ thread_id: 'thread-decoy', subject: 'Notes on run-123' }] },
     })
 
     const wrapper = mountComposer({
@@ -177,14 +180,36 @@ describe('MessageComposer', () => {
     await wrapper.vm.sendMessage()
     await flushPromises()
 
-    expect(searchMock).toHaveBeenCalledWith({ query: 'run-123' })
+    expect(chainHubMock).toHaveBeenCalledWith('run-123')
+    expect(searchMock).not.toHaveBeenCalled()
     expect(listMock).not.toHaveBeenCalled()
     expect(postMock).toHaveBeenCalledTimes(1)
     const [threadId, body] = postMock.mock.calls[0]
-    expect(threadId).toBe('thread-conductor')
+    expect(threadId).toBe('thread-hub')
     expect(body.to_participant).toBe('agent-conductor')
     expect(body.requires_action).toBe(true)
     expect(body.content).toBe('chain directive')
+  })
+
+  it('CHAIN: a failed hub lookup shows an error, not "hasn\'t set up", and posts nothing', async () => {
+    chainHubMock.mockRejectedValue(new Error('Network Error'))
+
+    const wrapper = mountComposer({
+      projectId: 'proj-member',
+      chainMode: true,
+      conductorAgentId: 'agent-conductor',
+      chainRunId: 'run-123',
+    })
+    await setMessage(wrapper, 'chain directive')
+
+    await wrapper.vm.sendMessage()
+    await flushPromises()
+
+    expect(postMock).not.toHaveBeenCalled()
+    expect(showToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
+    expect(showToastMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("hasn't set up") }),
+    )
   })
 
   it('CHAIN: broadcast stays scoped to the active project bound thread, not the conductor', async () => {
@@ -229,7 +254,7 @@ describe('MessageComposer', () => {
   })
 
   it('CHAIN: warns and does not post when the conductor coordination thread is not found', async () => {
-    searchMock.mockResolvedValue({ data: { threads: [] } })
+    chainHubMock.mockResolvedValue({ data: { thread: null } })
 
     const wrapper = mountComposer({
       projectId: 'proj-member',

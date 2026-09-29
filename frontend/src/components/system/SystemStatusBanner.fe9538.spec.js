@@ -102,9 +102,8 @@ describe('SystemStatusBanner lifecycle banner row (FE-9538)', () => {
     await wrapper.find('[data-testid="lifecycle-banner-cta"]').trigger('click')
 
     expect(h.push).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'p1' },
-      query: { tab: 'jobs', via: 'jobs' },
+      name: 'JobsViewport',
+      query: { project: 'p1', detail: '1' },
     })
   })
 
@@ -159,9 +158,8 @@ describe('SystemStatusBanner decision banner navigation (FE-9538, Ask 2)', () =>
     await wrapper.find('[data-testid="approval-cta"]').trigger('click')
 
     expect(h.push).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-1' },
-      query: { tab: 'jobs', decide: '1' },
+      name: 'JobsViewport',
+      query: { project: 'proj-1', decide: '1' },
     })
   })
 })

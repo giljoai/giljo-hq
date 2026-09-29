@@ -1,46 +1,7 @@
 <template>
   <div class="guide-layout">
-    <div v-if="isMobile" class="guide-toc-mobile">
-      <div class="guide-toc-mobile-search">
-        <v-icon size="16" class="guide-search-icon">mdi-magnify</v-icon>
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="Search guide..."
-          class="guide-search-input"
-          @keydown.escape="searchQuery = ''"
-        />
-        <button v-if="searchQuery" class="guide-search-clear" @click="searchQuery = ''">
-          <v-icon size="14">mdi-close</v-icon>
-        </button>
-      </div>
-      <div v-if="!searchQuery" class="guide-toc-mobile-inner">
-        <button
-          v-for="entry in tocEntries"
-          :key="entry.anchor"
-          class="guide-toc-chip"
-          :class="{ 'guide-toc-chip--active': activeTocAnchor === entry.anchor }"
-          @click="scrollToAnchor(entry.anchor)"
-        >
-          {{ entry.text }}
-        </button>
-      </div>
-      <div v-else-if="searchResults.length" class="guide-search-results-mobile">
-        <button
-          v-for="result in searchResults"
-          :key="result.anchor"
-          class="guide-search-result"
-          @click="goToSearchResult(result)"
-        >
-          <span class="guide-search-result-section">{{ result.section }}</span>
-          <span class="guide-search-result-snippet" v-html="result.snippet" />
-        </button>
-      </div>
-      <div v-else class="guide-search-empty">No results for "{{ searchQuery }}"</div>
-    </div>
-
     <div class="guide-inner">
-      <aside v-if="!isMobile" class="guide-sidebar">
+      <aside class="guide-sidebar">
         <div class="guide-sidebar-header">
           <div class="guide-sidebar-title">Contents</div>
           <div class="guide-search-box">
@@ -96,7 +57,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDisplay } from 'vuetify'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/composables/useSanitizeMarkdown'
 import configService from '@/services/configService'
@@ -115,11 +75,9 @@ import glossaryMd from '../content/guide/glossary.md?raw'
 const saasMdModules = import.meta.glob('../saas/docs/*.md', { query: '?raw', import: 'default', eager: true })
 
 const route = useRoute()
-const { width } = useDisplay()
 const isSaas = ref(false)
 const { isSaasMode } = useGiljoMode()
 
-const isMobile = computed(() => width.value < 768)
 const contentRef = ref(null)
 const activeTocAnchor = ref('')
 const searchQuery = ref('')
@@ -307,60 +265,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-// ─── MOBILE TOC + SEARCH ───
-
-.guide-toc-mobile {
-  padding: 10px 16px;
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  flex-shrink: 0;
-}
-
-.guide-toc-mobile-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.guide-toc-mobile-inner {
-  display: flex;
-  gap: 8px;
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-.guide-toc-chip {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 0.8rem;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  transition: color 0.15s ease, background 0.15s ease;
-  white-space: nowrap;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-
-  &:hover {
-    color: $yellow;
-    background: rgba($yellow, 0.08);
-  }
-
-  &--active {
-    color: $yellow;
-    background: rgba($yellow, 0.1);
-    box-shadow: inset 0 0 0 1px rgba($yellow, 0.3);
-  }
-}
-
 // ─── DESKTOP TWO-COLUMN LAYOUT ───
 
 .guide-inner {
@@ -452,8 +356,7 @@ onBeforeUnmount(() => {
 
 // ─── SEARCH RESULTS ───
 
-.guide-search-results,
-.guide-search-results-mobile {
+.guide-search-results {
   overflow-y: auto;
   flex: 1;
   padding: 0 12px 12px;
@@ -559,25 +462,5 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   line-height: 1.7;
   font-size: 0.95rem;
-}
-
-// ─── RESPONSIVE ───
-
-@media (max-width: 767px) {
-  .guide-layout {
-    height: auto;
-    min-height: calc(100vh - 64px);
-    overflow: visible;
-  }
-
-  .guide-inner {
-    flex-direction: column;
-    overflow: visible;
-  }
-
-  .guide-content {
-    padding: 20px 16px;
-    overflow: visible;
-  }
 }
 </style>

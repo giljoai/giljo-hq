@@ -19,6 +19,11 @@ from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_li
 _TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 logger = logging.getLogger(__name__)
 
+CHAIN_MEMBER_FALLBACK_PREAMBLE = (
+    "You are a member of a chain run by a conductor. This is a fallback prompt for this project only. "
+    "Do not advance the chain yourself; the conductor decides the next step."
+)
+
 
 
 

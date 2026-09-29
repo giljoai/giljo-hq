@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useBulkSelection() {
   const selection = ref(new Map())
@@ -70,18 +71,10 @@ export async function runBulk(rows, action, { skipReason } = {}) {
       await action(row)
       done.push(row)
     } catch (error) {
-      failed.push({ row, reason: serverReason(error) })
+      failed.push({ row, reason: parseErrorResponse(error).message })
     }
   }
   return { done, skipped, failed }
-}
-
-function serverReason(error) {
-  const data = error?.response?.data
-  const detail = data?.detail ?? data?.message
-  if (typeof detail === 'string' && detail.trim()) return detail.trim()
-  if (detail && typeof detail === 'object' && typeof detail.message === 'string') return detail.message
-  return 'the server refused it'
 }
 
 export function describeBulkResult(verb, { done, skipped, failed }) {

@@ -1,8 +1,7 @@
 <template>
   <v-dialog
     :model-value="show"
-    :fullscreen="isMobile"
-    :max-width="isMobile ? undefined : '520'"
+    max-width="520"
     persistent
     class="supersede-project-modal"
     role="dialog"
@@ -69,8 +68,8 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { useDisplay } from 'vuetify'
 import { useProjectStore } from '@/stores/projects'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   show: {
@@ -91,8 +90,6 @@ const emit = defineEmits(['close', 'superseded'])
 
 const projectStore = useProjectStore()
 
-const { mobile } = useDisplay()
-const isMobile = computed(() => mobile.value)
 
 const candidates = ref([])
 const loadingCandidates = ref(false)
@@ -158,7 +155,7 @@ const handleConfirm = async () => {
     resetState()
   } catch (err) {
     console.error('[SupersedeProjectModal] Failed to supersede project:', err)
-    error.value = err.response?.data?.detail || err.response?.data?.message || 'Failed to mark project superseded'
+    error.value = parseErrorResponse(err).message || 'Failed to mark project superseded'
   } finally {
     submitting.value = false
   }

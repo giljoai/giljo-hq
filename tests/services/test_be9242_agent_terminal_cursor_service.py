@@ -89,6 +89,20 @@ async def _seed_execution(
     return ex
 
 
+async def _caller_orchestrator_job_id(session: AsyncSession, tenant_key: str, project_id: str) -> str:
+    job = AgentJob(
+        job_id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        project_id=project_id,
+        job_type="orchestrator",
+        mission="caller",
+        status="active",
+    )
+    session.add(job)
+    await session.commit()
+    return job.job_id
+
+
 async def _post(
     session: AsyncSession,
     tenant_key: str,
@@ -159,7 +173,9 @@ async def test_close_job_clears_informational_cursor_and_forwards_action_require
     assert not await _is_acked(db_session, tenant, informational.id, implementer.agent_id)
     assert not await _is_acked(db_session, tenant, action_required.id, implementer.agent_id)
 
-    result = await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
+    result = await _state_service(db_session).close_job(
+        job_id=implementer.job_id, tenant_key=tenant, caller_job_id=orchestrator.job_id
+    )
     assert result["new_status"] == "closed"
 
     assert await _is_acked(db_session, tenant, informational.id, implementer.agent_id), (
@@ -210,7 +226,11 @@ async def test_close_job_with_no_live_orchestrator_leaves_action_required_cursor
         requires_action=True,
     )
 
-    await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
+    await _state_service(db_session).close_job(
+        job_id=implementer.job_id,
+        tenant_key=tenant,
+        caller_job_id=await _caller_orchestrator_job_id(db_session, tenant, project_id),
+    )
 
     assert not await _is_acked(db_session, tenant, action_required.id, implementer.agent_id), (
         "with no live orchestrator to forward to, the action-required cursor must be "
@@ -241,7 +261,11 @@ async def test_close_job_no_orchestrator_warning_sanitizes_agent_supplied_agent_
     )
 
     with caplog.at_level("WARNING", logger="giljo_mcp.services.agent_terminal_cursor_service"):
-        await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
+        await _state_service(db_session).close_job(
+            job_id=implementer.job_id,
+            tenant_key=tenant,
+            caller_job_id=await _caller_orchestrator_job_id(db_session, tenant, project_id),
+        )
 
     rendered = [r.getMessage() for r in caplog.records if "no live orchestrator to forward" in r.getMessage()]
     assert len(rendered) == 1, "expected exactly one no-live-orchestrator warning"
@@ -287,7 +311,9 @@ async def test_close_job_forwards_to_successor_when_two_orchestrators_active_dur
         requires_action=True,
     )
 
-    result = await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
+    result = await _state_service(db_session).close_job(
+        job_id=implementer.job_id, tenant_key=tenant, caller_job_id=successor.job_id
+    )
     assert result["new_status"] == "closed"
 
     assert await _is_acked(db_session, tenant, action_required.id, implementer.agent_id)

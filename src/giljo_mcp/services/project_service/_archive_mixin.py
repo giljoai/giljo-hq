@@ -63,16 +63,12 @@ class ArchiveMixin:
             websocket_manager=ws,
         )
 
-        closed_names: list[str] = []
-        try:
-            closed_names = await self.closeout.close_completed_agents_with_commit(
-                project_id=project_id,
-                tenant_key=resolved_tenant,
-            )
-            if closed_names:
-                logger.info("Closed %d agent(s) on archive: %s", len(closed_names), ", ".join(closed_names))
-        except OSError:
-            logger.warning("Failed to close agents during project archive")
+        closed_names = await self.closeout.close_completed_agents_with_commit(
+            project_id=project_id,
+            tenant_key=resolved_tenant,
+        )
+        if closed_names:
+            logger.info("Closed %d agent(s) on archive: %s", len(closed_names), ", ".join(closed_names))
 
         return ProjectArchiveResult(
             project=updated,

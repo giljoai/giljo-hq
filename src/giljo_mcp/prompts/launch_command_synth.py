@@ -8,14 +8,11 @@ from __future__ import annotations
 
 import shutil
 import sys
-from typing import Any
 
 from giljo_mcp.platform_registry import CLI_BINARIES, HARNESSES, MODE_MULTI_TERMINAL, get_harness
 
 
 DEFAULT_CLI_TOOL = "claude"
-
-SUPPORTED_OSES: tuple[str, ...] = ("windows", "linux", "macos")
 
 AUTONOMY_FLAGS: dict[str, str] = {h.cli_binary: h.autonomy_flag for h in HARNESSES if h.autonomy_flag}
 
@@ -34,81 +31,6 @@ def prompt_flag(binary: str) -> str:
     return PROMPT_FLAGS.get(binary, "")
 
 
-def build_loaded_prompt(job_id: str) -> str:
-    jid = job_id or "<job_id>"
-    return (
-        "You are a GiljoAI agent. First verify the MCP connection with health_check, "
-        f"then load your mission by calling get_job_mission(job_id={jid!r}) and execute "
-        "the returned mission. Report progress with report_progress and call complete_job "
-        "when done."
-    )
-
-
-
-
-def posix_single_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\\''") + "'"
-
-
-def pwsh_single_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def applescript_quote(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-
-
-def _binary_with_flag(binary: str) -> str:
-    tokens = [binary, autonomy_flag(binary), prompt_flag(binary)]
-    return " ".join(t for t in tokens if t) + " "
-
-
-def windows_command(binary: str, title: str, seed_prompt: str) -> str:
-    static_flags = [f for f in (autonomy_flag(binary), prompt_flag(binary)) if f]
-    arg_list = ",".join([*static_flags, pwsh_single_quote(seed_prompt)])
-    return f"Start-Process {binary} -ArgumentList {arg_list}"
-
-
-def linux_command(binary: str, title: str, seed_prompt: str) -> str:
-    return (
-        f"gnome-terminal --title={posix_single_quote(title)} -- "
-        f"{_binary_with_flag(binary)}{posix_single_quote(seed_prompt)}"
-    )
-
-
-def linux_command_fallback(binary: str, title: str, seed_prompt: str) -> str:
-    return f"x-terminal-emulator -e {_binary_with_flag(binary)}{posix_single_quote(seed_prompt)}"
-
-
-def macos_command(binary: str, title: str, seed_prompt: str) -> str:
-    shell_cmd = f"{_binary_with_flag(binary)}{posix_single_quote(seed_prompt)}"
-    script = f'tell application "Terminal" to do script "{applescript_quote(shell_cmd)}"'
-    return "osascript -e " + posix_single_quote(script)
-
-
-def synthesize_agent_launch(agent: dict[str, Any]) -> dict[str, Any]:
-    cli_tool = agent.get("cli_tool") or DEFAULT_CLI_TOOL
-    binary = resolve_binary(cli_tool)
-    title = agent.get("agent") or "agent"
-    seed = agent.get("seed_prompt") or ""
-    return {
-        "agent": title,
-        "cli_tool": cli_tool,
-        "job_id": agent.get("job_id", ""),
-        "commands": {
-            "windows": windows_command(binary, title, seed),
-            "linux": linux_command(binary, title, seed),
-            "linux_fallback": linux_command_fallback(binary, title, seed),
-            "macos": macos_command(binary, title, seed),
-        },
-        "macos_validated": False,
-    }
-
-
-def synthesize_launch_commands(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [synthesize_agent_launch(agent) for agent in agents]
 
 
 
@@ -291,6 +213,7 @@ _HINT_FOOTNOTE = (
     "(Hints are prose for the harness; 'inherit' means the same as the orchestrator. "
     "Ignore a hint your harness cannot honour.)\n"
 )
+_NO_BYPASS_LINE = "Do not add a permission-bypass or autonomy flag unless the user asked for one.\n"
 
 
 def normalize_hint(value: str | None) -> str:
@@ -298,34 +221,53 @@ def normalize_hint(value: str | None) -> str:
     return text or INHERIT
 
 
-def render_harness_launch_block(cli_tool: str | None, *, model: str | None, effort: str | None) -> str:
-    harness = next((h for h in HARNESSES if h.cli_tool == (cli_tool or "")), None)
-    lines = ["## HARNESS\n"]
-    if harness is None:
-        lines.append(
-            "Harness: Generic. Launch this agent in any MCP-capable harness connected to this server\n"
-            "and seed it with this prompt.\n"
-        )
-    else:
-        binary = harness.cli_binary
-        parts = [binary]
-        if harness.autonomy_flag:
-            parts.append(harness.autonomy_flag)
-        if harness.launch_prompt_flag:
-            parts.append(harness.launch_prompt_flag)
-        parts.append('"<this prompt>"')
-        lines.append(
-            f"Harness: {harness.display_label}. Launch this agent in a fresh {harness.display_label} session:\n"
-            f"  {' '.join(parts)}\n"
-        )
+def render_model_hints(*, model: str | None, effort: str | None) -> str:
+    hints = []
     model_hint = normalize_hint(model)
     effort_hint = normalize_hint(effort)
-    hints = []
     if model_hint != INHERIT:
         hints.append(f"Model hint: {model_hint}\n")
     if effort_hint != INHERIT:
         hints.append(f"Effort hint: {effort_hint}\n")
-    if hints:
-        lines.extend(hints)
-        lines.append(_HINT_FOOTNOTE)
+    if not hints:
+        return ""
+    return "".join(hints) + _HINT_FOOTNOTE
+
+
+def _registry_harness_for_name(harness_name: str):
+    wanted = harness_name.strip().lower()
+    for h in HARNESSES:
+        if wanted in {h.tool_type, h.cli_tool, h.cli_binary, h.display_label.lower()}:
+            return h
+    return None
+
+
+def _autonomy_line(harness_name: str | None) -> str:
+    lead = "The user approved this project, so the worker may run without pausing for permission.\n"
+    if harness_name is None:
+        known = "; ".join(f"{h.display_label}: {h.autonomy_flag}" for h in HARNESSES if h.autonomy_flag)
+        return lead + f"Start your harness with its autonomy flag ({known}).\n"
+    row = _registry_harness_for_name(harness_name)
+    if row is not None and row.autonomy_flag:
+        return lead + f"Start {harness_name} with its autonomy flag: {row.autonomy_flag}\n"
+    return lead + f"Start {harness_name} with its own setting for running without permission prompts, if it has one.\n"
+
+
+def render_harness_launch_block(
+    harness_name: str | None, *, model: str | None, effort: str | None, launched: bool = False
+) -> str:
+    lines = ["## HARNESS\n"]
+    if harness_name is None:
+        lines.append(
+            "Harness: default. Open a new terminal running the same harness you are running in,\n"
+            "seeded with this prompt.\n"
+        )
+    else:
+        lines.append(
+            f"Harness: {harness_name} (the user chose it for this agent). Find it on this machine, work out its launch\n"
+            "syntax (its --help usually says), and open it in a new terminal seeded with this prompt.\n"
+            "If you cannot find it or are unsure how to launch it, ask the user.\n"
+        )
+    lines.append(_autonomy_line(harness_name) if launched else _NO_BYPASS_LINE)
+    lines.append(render_model_hints(model=model, effort=effort))
     return "".join(lines)

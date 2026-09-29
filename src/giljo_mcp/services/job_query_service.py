@@ -5,16 +5,21 @@
 
 
 import logging
+from collections import Counter, defaultdict
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.domain.job_activity import activity_word
 from giljo_mcp.exceptions import OrchestrationError, ResourceNotFoundError
-from giljo_mcp.models import AgentExecution, AgentJob
+from giljo_mcp.models import AgentExecution, AgentJob, Project
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.schemas.service_responses import JobListResult
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.not_picked_up import not_picked_up_job_ids
+from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -69,8 +74,10 @@ class JobQueryService:
                     session, tenant_key, live_project_ids, live_agent_ids
                 )
 
+                not_picked_up = await self._not_picked_up_executions(session, tenant_key, rows)
                 job_dicts = [
-                    self._build_job_dict(execution, job, live_unread, live_action_required) for execution, job in rows
+                    self._build_job_dict(execution, job, live_unread, live_action_required, not_picked_up)
+                    for execution, job in rows
                 ]
 
                 self._logger.info(
@@ -120,7 +127,8 @@ class JobQueryService:
                         session, tenant_key, [str(job.project_id)], [execution.agent_id]
                     )
 
-                return self._build_job_dict(execution, job, live_unread, live_action_required)
+                not_picked_up = await self._not_picked_up_executions(session, tenant_key, [(execution, job)])
+                return self._build_job_dict(execution, job, live_unread, live_action_required, not_picked_up)
 
         except ResourceNotFoundError:
             raise
@@ -131,12 +139,41 @@ class JobQueryService:
                 context={"job_id": job_id, "tenant_key": tenant_key, "error": str(e)},
             ) from e
 
+    async def _not_picked_up_executions(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        rows: list[tuple[AgentExecution, AgentJob]],
+    ) -> set[str]:
+        by_project: dict[str, list[tuple]] = defaultdict(list)
+        for execution, job in rows:
+            if execution.status == "waiting" and job.project_id:
+                by_project[str(job.project_id)].append((execution.id, execution.status, job.job_id))
+        if not by_project:
+            return set()
+
+        projects = (
+            (
+                await session.execute(
+                    select(Project).where(Project.tenant_key == tenant_key, Project.id.in_(list(by_project)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        flagged: set[str] = set()
+        for project in projects:
+            cadence = await resolve_checkin_cadence_safe(session, tenant_key, project)
+            flagged |= await not_picked_up_job_ids(session, tenant_key, project, by_project[str(project.id)], cadence)
+        return flagged
+
     def _build_job_dict(
         self,
         execution: AgentExecution,
         job: AgentJob,
         live_unread: dict,
         live_action_required: dict,
+        not_picked_up: set[str] | None = None,
     ) -> dict:
         self._logger.debug(
             f"[LIST_JOBS DEBUG] Agent {execution.agent_display_name} (job={job.job_id}, agent={execution.agent_id}): "
@@ -183,6 +220,8 @@ class JobQueryService:
             "reactivation_count": execution.reactivation_count or 0,
             "duration_seconds": execution.duration_seconds,
             "working_started_at": execution.working_started_at.isoformat() if execution.working_started_at else None,
+            "not_picked_up": execution.id in (not_picked_up or set()),
+            "activity": activity_word(execution.status, Counter(item.status for item in job.todo_items or [])),
         }
 
     async def get_job_messages(

@@ -81,6 +81,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import api from '@/services/api'
 import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   modelValue: {
@@ -172,7 +173,7 @@ const fetchTemplateData = async () => {
     }
   } catch (err) {
     console.error('[AgentDetailsModal] Failed to fetch template:', err)
-    error.value = err.response?.data?.detail || err.message || 'Failed to fetch template data'
+    error.value = parseErrorResponse(err).message || 'Failed to fetch template data'
   } finally {
     loading.value = false
   }
@@ -188,8 +189,7 @@ const fetchOrchestratorPrompt = async () => {
     orchestratorPrompt.value = response.data.content
   } catch (err) {
     console.error('[AgentDetailsModal] Failed to fetch orchestrator prompt:', err)
-    error.value =
-      err.response?.data?.detail || err.message || 'Failed to fetch orchestrator prompt'
+    error.value = parseErrorResponse(err).message || 'Failed to fetch orchestrator prompt'
   } finally {
     loading.value = false
   }

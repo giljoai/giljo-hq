@@ -22,7 +22,7 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset(
     }
 )
 
-_OPEN_TASK_STATUSES: frozenset[str] = frozenset({"pending", "in_progress"})
+_OPEN_TASK_STATUSES: frozenset[str] = frozenset({"pending", "in_progress", "on_hold"})
 
 STAGING_COMPLETE = "staging_complete"
 

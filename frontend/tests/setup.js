@@ -360,7 +360,6 @@ vi.mock('@/services/api', () => {
       execution: vi.fn(() => Promise.resolve({ data: { prompt: 'Mock orchestrator prompt' } })),
       agentPrompt: vi.fn(() => Promise.resolve({ data: { prompt: 'Mock agent prompt' } })),
       implementation: vi.fn(() => Promise.resolve({ data: { prompt: 'Mock implementation prompt', agent_count: 3 } })),
-      termination: vi.fn(() => Promise.resolve({ data: { prompt: 'Mock termination prompt' } })),
       orchestrator: vi.fn(() => Promise.resolve({ data: { prompt: 'Mock orchestrator prompt' } })),
       // FE-6165f: chain (run-scoped) kickoff prompts — BE-6165d ChainPromptResponse shape.
       chainStaging: vi.fn(() =>
@@ -478,7 +477,6 @@ vi.mock('@/services/api', () => {
       spawn: vi.fn(() => Promise.resolve({ data: {} })),
       status: vi.fn(() => Promise.resolve({ data: {} })),
       updateMission: vi.fn(() => Promise.resolve({ data: { success: true } })),
-      simpleHandover: vi.fn(() => Promise.resolve({ data: {} })),
       messages: vi.fn(() => Promise.resolve({ data: [] })),
     },
     users: {

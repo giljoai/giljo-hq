@@ -132,9 +132,8 @@ describe('SystemStatusBanner approval row (FE-9501b, D6)', () => {
     const wrapper = await mountBanner({ approvals: [approval({ project_id: 'proj-42' })] })
     await wrapper.find('[data-testid="approval-cta"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-42' },
-      query: { tab: 'jobs', decide: '1' },
+      name: 'JobsViewport',
+      query: { project: 'proj-42', decide: '1' },
     })
   })
 
@@ -162,9 +161,8 @@ describe('SystemStatusBanner approval row (FE-9501b, D6)', () => {
 
     await row(wrapper).trigger('click')
     expect(h.push).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'p2' },
-      query: { tab: 'jobs', decide: '1' },
+      name: 'JobsViewport',
+      query: { project: 'p2', decide: '1' },
     })
   })
 

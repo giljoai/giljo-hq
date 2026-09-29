@@ -214,6 +214,16 @@ async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommiss
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
     job, execution = await _seed_specialist(session, tenant_key, project.id, status="silent")
+    orchestrator = AgentJob(
+        job_id=str(uuid4()),
+        tenant_key=tenant_key,
+        project_id=project.id,
+        job_type="orchestrator",
+        mission="BE-9292b orchestrator",
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    session.add(orchestrator)
     await session.commit()
 
     async with client() as mcp_session:
@@ -226,7 +236,9 @@ async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommiss
             f"complete_job must accept a 'silent' execution ('silent' is not terminal), got: {complete_text!r}"
         )
 
-        close_result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
+        close_result = await mcp_session.call_tool(
+            "finalize_job", {"job_id": job.job_id, "caller_job_id": orchestrator.job_id}
+        )
         close_text = _content_text(close_result)
         assert not close_result.is_error, f"finalize_job must accept the now-complete execution, got: {close_text!r}"
 

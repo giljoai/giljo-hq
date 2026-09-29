@@ -11,6 +11,7 @@ import os
 from contextlib import suppress
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,7 +32,8 @@ logger = logging.getLogger("api.app")
 def _register_saas_middleware_or_raise(app: FastAPI) -> None:
     _saas_middleware_dir = Path(__file__).parent.parent / "saas_middleware"
     if not _saas_middleware_dir.is_dir():
-        return
+        logger.critical("SaaS middleware directory missing in saas mode; aborting boot")
+        raise RuntimeError("saas_middleware directory is missing in saas mode")
     try:
         from api.saas_middleware import register_saas_middleware
 
@@ -55,7 +57,7 @@ def configure_middleware(app: FastAPI) -> None:
         cors_origins = config.get("security", {}).get("cors", {}).get("allowed_origins", [])
         if cors_origins:
             logger.info(f"Loaded CORS origins from config.yaml security section: {cors_origins}")
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
         logger.warning(f"Could not load CORS config from config.yaml: {e}")
 
     if not cors_origins:

@@ -13,6 +13,7 @@ from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.platform_registry import normalize_execution_mode
+from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
@@ -34,7 +35,7 @@ class ProductStatisticsRepository:
         tenant_key: str,
     ) -> int:
         result = await session.scalar(
-            select(func.count(Project.id)).where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+            select(func.count(Project.id)).where(Project.tenant_key == tenant_key, project_not_trashed())
         )
         return result or 0
 
@@ -48,7 +49,7 @@ class ProductStatisticsRepository:
             select(func.count(Project.id)).where(
                 Project.tenant_key == tenant_key,
                 Project.status == status,
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
         )
         return result or 0
@@ -62,7 +63,7 @@ class ProductStatisticsRepository:
             select(func.count(Project.id)).where(
                 Project.tenant_key == tenant_key,
                 Project.staging_status.in_(("staged", "staging_complete")),
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
         )
         return result or 0
@@ -124,7 +125,7 @@ class ProductStatisticsRepository:
             func.coalesce(task_count, 0),
             func.coalesce(completed_task_count, 0),
             last_activity,
-        ).where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+        ).where(Project.tenant_key == tenant_key, project_not_trashed())
 
         if status:
             query = query.where(Project.status == status)
@@ -185,7 +186,7 @@ class ProductStatisticsRepository:
     ) -> dict[str, int]:
         stmt = (
             select(Project.status, func.count(Project.id))
-            .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+            .where(Project.tenant_key == tenant_key, project_not_trashed())
             .group_by(Project.status)
         )
         if product_id:
@@ -215,7 +216,7 @@ class ProductStatisticsRepository:
             .where(
                 Project.tenant_key == tenant_key,
                 Project.project_type_id.is_not(None),
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
             .group_by(TaxonomyType.label, TaxonomyType.color)
         )
@@ -227,7 +228,7 @@ class ProductStatisticsRepository:
         untyped_stmt = select(func.count(Project.id)).where(
             Project.tenant_key == tenant_key,
             Project.project_type_id.is_(None),
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         if product_id:
             untyped_stmt = untyped_stmt.where(Project.product_id == product_id)
@@ -280,7 +281,7 @@ class ProductStatisticsRepository:
                 Project.tenant_key == tenant_key,
                 Project.status == ProjectStatus.COMPLETED,
                 Project.completed_at.isnot(None),
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
             .order_by(Project.completed_at.desc())
             .limit(limit)
@@ -407,7 +408,7 @@ class ProductStatisticsRepository:
     ) -> dict[str, int]:
         stmt = (
             select(Project.execution_mode, func.count(Project.id))
-            .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+            .where(Project.tenant_key == tenant_key, project_not_trashed())
             .group_by(Project.execution_mode)
         )
         if product_id:
@@ -435,7 +436,7 @@ class ProductStatisticsRepository:
                 and_(
                     Product.id == Project.product_id,
                     Project.tenant_key == tenant_key,
-                    Project.deleted_at.is_(None),
+                    project_not_trashed(),
                 ),
             )
             .where(Product.tenant_key == tenant_key, Product.deleted_at.is_(None))

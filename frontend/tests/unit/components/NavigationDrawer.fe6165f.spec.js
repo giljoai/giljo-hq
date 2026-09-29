@@ -1,11 +1,9 @@
 /**
- * NavigationDrawer.vue — FE-6174c (Jobs-nav branch C reinstated → /jobs multi)
+ * NavigationDrawer.vue — the Jobs nav item's destination
  *
- * FE-6173 removed branch C (which had pointed at the now-deleted /mission-control
- * route). FE-6174c REINSTATES it, but routing to the FE-6174b /jobs multi variant:
- *   - /projects/<headPid>?run=<id>  when an active chain run exists (branch C)
- *   - /projects/<id>?via=jobs       when no chain run but a solo project is active (branch A)
- *   - /launch?via=jobs              when neither (branch B)
+ * FE-9655e: one landing. The item used to resolve per product data (a chain run,
+ * a solo project, several, none); it now points at the Jobs board in every case,
+ * so these tests hold the store in each of those states and assert the same path.
  *
  * Edition Scope: CE
  */
@@ -155,7 +153,7 @@ function jobsPath(wrapper) {
   return item?.path
 }
 
-describe('NavigationDrawer.vue — Jobs-nav (FE-6174c: branch C → /jobs multi)', () => {
+describe('NavigationDrawer.vue — the Jobs nav item always opens the board (FE-9655e)', () => {
   let pinia
 
   beforeEach(() => {
@@ -166,7 +164,7 @@ describe('NavigationDrawer.vue — Jobs-nav (FE-6174c: branch C → /jobs multi)
     vi.clearAllMocks()
   })
 
-  it('branch C: an active chain run routes Jobs to the head project /jobs multi view', async () => {
+  it('an in-flight chain run does not send Jobs to a member project', async () => {
     const wrapper = mountDrawer(pinia)
     await flushPromises()
 
@@ -174,16 +172,13 @@ describe('NavigationDrawer.vue — Jobs-nav (FE-6174c: branch C → /jobs multi)
     store._testSeedRuns([{ id: 'r1', project_ids: ['p1'], status: 'running' }])
     await wrapper.vm.$nextTick()
 
-    // FE-6174c: an active chain run resolves to /projects/<headPid>?run=<id>
-    // (the /jobs multi variant). Head falls back to project_ids[0] when the
-    // seeded run carries no resolved_order. It must NOT point at the retired
-    // /mission-control route.
     const path = jobsPath(wrapper)
+    expect(path).toBe('/jobs-overview')
+    expect(path).not.toContain('/projects/')
     expect(path).not.toContain('/mission-control')
-    expect(path).toBe('/projects/p1?run=r1')
   })
 
-  it('branch C: head comes from resolved_order[0] when present', async () => {
+  it('a run carrying resolved_order still resolves to the board, with no run query', async () => {
     const wrapper = mountDrawer(pinia)
     await flushPromises()
 
@@ -193,15 +188,15 @@ describe('NavigationDrawer.vue — Jobs-nav (FE-6174c: branch C → /jobs multi)
     ])
     await wrapper.vm.$nextTick()
 
-    expect(jobsPath(wrapper)).toBe('/projects/head?run=r2')
+    expect(jobsPath(wrapper)).toBe('/jobs-overview')
   })
 
-  it('branch B: Jobs path = /launch?via=jobs when no chain run and no active project', async () => {
+  it('nothing in flight still resolves to the board, which carries its own empty state', async () => {
     const wrapper = mountDrawer(pinia)
     await flushPromises()
 
     const path = jobsPath(wrapper)
-    expect(path).not.toContain('/mission-control')
-    expect(path).toBe('/launch?via=jobs')
+    expect(path).toBe('/jobs-overview')
+    expect(path).not.toContain('/launch')
   })
 })

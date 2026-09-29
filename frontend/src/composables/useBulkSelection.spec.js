@@ -45,7 +45,7 @@ describe('runBulk', () => {
       calls.push(row.id)
       if (row.id === 'c') {
         const error = new Error('409')
-        error.response = { data: { detail: 'Project is active' } }
+        error.response = { data: { error_code: 'VALIDATIONERROR', message: 'Project is active' } }
         throw error
       }
     })
@@ -62,7 +62,7 @@ describe('runBulk', () => {
     const result = await runBulk(rows, action)
     expect(action).toHaveBeenCalledTimes(3)
     expect(result.done).toHaveLength(2)
-    expect(result.failed[0].reason).toBe('the server refused it')
+    expect(result.failed[0].reason).toBe('boom')
   })
 })
 

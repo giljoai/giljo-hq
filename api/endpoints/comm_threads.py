@@ -169,6 +169,20 @@ async def search_threads(
     )
 
 
+@router.get("/chain-hub")
+async def get_chain_hub(
+    sequence_run_id: str = Query(..., min_length=1, max_length=_ID_MAX),
+    current_user: User = Depends(get_current_active_user),
+    service: CommThreadService = Depends(get_comm_thread_service),
+) -> dict[str, Any]:
+    """The coordination hub thread of a chain run, or ``{"thread": null}`` if it has none yet."""
+    thread = await service.resolve_chain_hub_thread(
+        sequence_run_id=sequence_run_id,
+        tenant_key=current_user.tenant_key,
+    )
+    return {"thread": thread}
+
+
 @router.get("/deleted")
 async def list_deleted_threads(
     product_id: str | None = Query(None),

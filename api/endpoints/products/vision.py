@@ -149,6 +149,11 @@ async def upload_vision_document(
                 "message": "File must be valid UTF-8 encoded text.",
             },
         )
+    if not content_str.strip():
+        raise ValidationError(
+            message="content is required and cannot be empty. Pass the full markdown vision document text.",
+            context={"product_id": product_id},
+        )
 
     try:
         result = await vision_service.upload_vision_document(

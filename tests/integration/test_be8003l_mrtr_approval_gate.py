@@ -404,3 +404,86 @@ class TestTheOrchestratorOnlyRejectionIsUntouched:
         assert payload["success"] is False
         assert payload["error"] == "ORCHESTRATOR_ONLY_APPROVAL"
         assert await _approvals_for(db_session, seed["job"].job_id) == []
+
+
+class TestPopupFollowsTheHeadlessSetting:
+
+    async def test_headless_off_offers_no_popup_and_points_at_the_dashboard(
+        self, wired_app, db_session, tenant_key, monkeypatch
+    ):
+        from api.endpoints import mcp_sdk_server
+
+        async def _blocked(_request):
+            return True
+
+        monkeypatch.setattr(mcp_sdk_server, "_launch_gate_blocked", _blocked)
+        seed = await _seed_approval_context(db_session, tenant_key)
+
+        async with wire_client() as client:
+            first = await _call_request_approval(
+                client, version=_MODERN, seed=seed, envelope=_envelope(elicitation=True)
+            )
+
+        assert first.get("error") is None
+        assert first["result"].get("resultType") != "input_required", "headless off: no pop-up in the terminal"
+        payload = _structured(first["result"])
+        assert payload["status"] == "pending"
+        assert payload["decide_in"] == "dashboard"
+        assert "dashboard" in payload["message"].lower()
+        rows = await _approvals_for(db_session, seed["job"].job_id)
+        assert len(rows) == 1 and rows[0].status == "pending"
+
+    async def test_headless_off_refuses_a_popup_answer_that_arrives_anyway(
+        self, wired_app, db_session, tenant_key, monkeypatch
+    ):
+        from api.endpoints import mcp_sdk_server
+
+        seed = await _seed_approval_context(db_session, tenant_key)
+        async with wire_client() as client:
+            first = await _call_request_approval(
+                client, version=_MODERN, seed=seed, envelope=_envelope(elicitation=True)
+            )
+            result = first["result"]
+            key = next(iter(result["inputRequests"]))
+
+            async def _blocked(_request):
+                return True
+
+            monkeypatch.setattr(mcp_sdk_server, "_launch_gate_blocked", _blocked)
+            second = await _call_request_approval(
+                client,
+                version=_MODERN,
+                seed=seed,
+                envelope=_envelope(elicitation=True),
+                request_state=result["requestState"],
+                input_responses={key: {"action": "accept", "content": {"choice": "approve"}}},
+                msg_id=3,
+            )
+
+        assert second.get("error") is None
+        payload = _structured(second["result"])
+        assert payload["status"] == "pending", f"headless off: a terminal answer must not decide, got {payload!r}"
+        rows = await _approvals_for(db_session, seed["job"].job_id)
+        assert len(rows) == 1, "the retry must not mint a second approval"
+        await db_session.refresh(rows[0])
+        assert rows[0].status == "pending"
+
+
+class TestPopupSaysItIsYourDecision:
+
+    async def test_popup_names_the_decision_and_the_project(self, wired_app, db_session, tenant_key):
+        seed = await _seed_approval_context(db_session, tenant_key)
+
+        async with wire_client() as client:
+            first = await _call_request_approval(
+                client, version=_MODERN, seed=seed, envelope=_envelope(elicitation=True)
+            )
+
+        requests = first["result"]["inputRequests"]
+        message = next(iter(requests.values()))["params"]["message"]
+        lines = message.splitlines()
+        assert lines[0] == "Decision needed from you (Giljo HQ)", f"menu must open by saying so, got {message!r}"
+        assert any(line.startswith("Project: ") and seed["project"].name in line for line in lines), message
+        assert "The agent asks: BE-8003l gate" in message
+        assert "Pick one:" in message
+        assert "dashboard" in message.lower(), "the menu says the dashboard can answer it too"

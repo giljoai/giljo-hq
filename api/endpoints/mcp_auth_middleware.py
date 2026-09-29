@@ -95,6 +95,24 @@ class MCPAuthMiddleware:
         except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError):
             pass
 
+    @staticmethod
+    def _stamp_auth_state(
+        scope: Scope,
+        tenant_key: str,
+        user_id: str | None,
+        auth_method: str | None,
+        token_scopes: list[str] | None,
+        must_change_password: bool | None,
+    ) -> None:
+        if "state" not in scope:
+            scope["state"] = {}
+        scope["state"]["tenant_key"] = tenant_key
+        scope["state"]["user_id"] = user_id
+        scope["state"]["auth_method"] = auth_method
+        if token_scopes is not None:
+            scope["state"]["scopes"] = token_scopes
+        scope["state"]["must_change_password"] = must_change_password
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -110,6 +128,7 @@ class MCPAuthMiddleware:
         api_key_id: str | None = None
         auth_method: str | None = None
         token_scopes: list[str] | None = None
+        must_change_password: bool | None = None
         mcp_session_id: str | None = None
 
         if bearer_token and not api_key_value:
@@ -132,6 +151,7 @@ class MCPAuthMiddleware:
                     tenant_key = principal.tenant_key
                     user_id = principal.user_id
                     auth_method = "jwt"
+                    must_change_password = principal.user.must_change_password
                     token_scopes = principal.scopes if principal.scopes is not None else ["mcp:read", "mcp:write"]
                 except PrincipalValidationError as exc:
                     if exc.reason in JWT_FALLBACK_REASONS:
@@ -188,6 +208,7 @@ class MCPAuthMiddleware:
                         user_id = user.id
                         api_key_id = key_record.id
                         auth_method = "api_key"
+                        must_change_password = user.must_change_password
 
                         if method == _INITIALIZE_METHOD:
                             session = await session_mgr.create_session(
@@ -228,13 +249,7 @@ class MCPAuthMiddleware:
             await resp(scope, receive, send)
             return
 
-        if "state" not in scope:
-            scope["state"] = {}
-        scope["state"]["tenant_key"] = tenant_key
-        scope["state"]["user_id"] = user_id
-        scope["state"]["auth_method"] = auth_method
-        if token_scopes is not None:
-            scope["state"]["scopes"] = token_scopes
+        self._stamp_auth_state(scope, tenant_key, user_id, auth_method, token_scopes, must_change_password)
 
         gate = _mcp_post_auth_gate
         if gate is not None:

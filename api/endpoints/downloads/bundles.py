@@ -284,7 +284,9 @@ async def get_bootstrap_prompt(
     if not zip_path:
         await token_manager.mark_failed(token, message)
         logger.error("Failed to stage slash commands for bootstrap prompt: %s", sanitize(str(message)))
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to stage download content"
+        )
 
     await token_manager.mark_ready(token)
 

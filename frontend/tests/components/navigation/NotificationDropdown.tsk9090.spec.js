@@ -96,10 +96,11 @@ describe('NotificationDropdown — TSK-9090: payload.project_id deep-link', () =
     await wrapper.find('.v-list-item').trigger('click')
     // FE-9191: pre_launch_workproduct is a closeout-family notification, so it
     // now lands on the jobs tab (where the closeout pill and review live).
+    // FE-9681: the project page is retired; it lands on the board card with
+    // Jobs detail open (where the closeout status area lives).
     expect(pushSpy).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-payload-123' },
-      query: { tab: 'jobs' },
+      name: 'JobsViewport',
+      query: { project: 'proj-payload-123', detail: '1' },
     })
   })
 
@@ -107,8 +108,8 @@ describe('NotificationDropdown — TSK-9090: payload.project_id deep-link', () =
     const wrapper = mountDropdown([METADATA_PROJECT_NOTIF])
     await wrapper.find('.v-list-item').trigger('click')
     expect(pushSpy).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-metadata-456' },
+      name: 'JobsViewport',
+      query: { project: 'proj-metadata-456' },
     })
   })
 })

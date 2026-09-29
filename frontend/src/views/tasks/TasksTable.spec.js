@@ -129,6 +129,34 @@ describe('TasksTable', () => {
     expect(badge.text()).toContain('Archived')
   })
 
+  it('gives the On hold option its own icon, not the unknown-status fallback', () => {
+    const optionStubs = {
+      ...stubs,
+      'v-select': {
+        template:
+          '<div class="v-select"><template v-for="opt in items" :key="opt.value"><div class="status-option" :data-value="opt.value"><slot name="item" v-bind="{ props: {}, item: opt, internalItem: { value: opt.value } }" /></div></template></div>',
+        props: ['modelValue', 'items'],
+      },
+    }
+    const wrapper = mount(TasksTable, {
+      props: {
+        tasks: sampleTasks,
+        loading: false,
+        statusSelectOptions: [
+          { title: 'In Progress', value: 'in_progress' },
+          { title: 'On hold', value: 'on_hold' },
+        ],
+        priorityOptions: ['low', 'medium', 'high', 'critical'],
+      },
+      global: { stubs: optionStubs },
+    })
+    const onHold = wrapper.find('.status-option[data-value="on_hold"] .v-icon')
+    expect(onHold.exists()).toBe(true)
+    expect(onHold.text()).toBe('mdi-pause-circle-outline')
+    const inProgress = wrapper.find('.status-option[data-value="in_progress"] .v-icon')
+    expect(inProgress.text()).toBe('mdi-progress-clock')
+  })
+
   it('does NOT render the Archived badge for a visible task', () => {
     const wrapper = mount(TasksTable, {
       props: {

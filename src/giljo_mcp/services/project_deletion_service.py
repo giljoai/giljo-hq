@@ -80,6 +80,7 @@ class ProjectDeletionService:
                 execution.completed_at = now
                 decommissioned_jobs_count += 1
 
+            await self._cancel_sequence_membership(session, project_id, tenant_key)
             await session.commit()
 
             self._logger.info(
@@ -105,39 +106,29 @@ class ProjectDeletionService:
 
             deleted_at_iso = project.deleted_at.isoformat() if project.deleted_at else None
 
-        await self._cancel_sequence_membership(project_id, tenant_key)
-
         return SoftDeleteResult(
             message="Project deleted successfully",
             deleted_at=deleted_at_iso,
             decommissioned_jobs=decommissioned_jobs_count,
         )
 
-    async def _cancel_sequence_membership(self, project_id: str, tenant_key: str) -> None:
+    async def _cancel_sequence_membership(self, session: AsyncSession, project_id: str, tenant_key: str) -> None:
         from giljo_mcp.exceptions import ValidationError as _ValidationError
         from giljo_mcp.services.sequence_run_service import SequenceRunService
 
-        if self._test_session is not None:
-            seq_service = SequenceRunService(tenant_manager=self.tenant_manager, session=self._test_session)
-        else:
-            seq_service = SequenceRunService(db_manager=self.db_manager, tenant_manager=self.tenant_manager)
+        seq_service = SequenceRunService(tenant_manager=self.tenant_manager, session=session)
 
+        run = await seq_service.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
+        if not run:
+            return
+        run_id = run.get("id")
+        if run.get("status") in ("running", "stalled"):
+            await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
+            return
         try:
-            run = await seq_service.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-            if not run:
-                return
-            run_id = run.get("id")
-            if run.get("status") in ("running", "stalled"):
-                await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
-                return
-            try:
-                await seq_service.remove_member(run_id=run_id, project_id=project_id, tenant_key=tenant_key)
-            except _ValidationError:
-                await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
-        except Exception as cascade_error:  # noqa: BLE001 - cascade must not block the delete
-            self._logger.warning(
-                "Sequence-membership cascade failed for deleted project %s: %s", project_id, cascade_error
-            )
+            await seq_service.remove_member(run_id=run_id, project_id=project_id, tenant_key=tenant_key)
+        except _ValidationError:
+            await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
 
     async def nuclear_delete_project(
         self, project_id: str, websocket_manager: Any | None = None

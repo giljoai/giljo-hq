@@ -66,6 +66,7 @@ import { useCommHubStore } from '@/stores/commHubStore'
 import { useProductStore } from '@/stores/products'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 
 const props = defineProps({
@@ -123,7 +124,7 @@ async function onCreate() {
     emit('update:modelValue', false)
     resetForm()
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Failed to create thread.'
+    const msg = parseErrorResponse(err).message || 'Failed to create thread.'
     errorMsg.value = msg
     showToast({ type: 'error', message: msg })
   } finally {

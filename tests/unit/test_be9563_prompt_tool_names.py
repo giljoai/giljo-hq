@@ -12,14 +12,14 @@ import re
 from pathlib import Path
 
 from giljo_mcp.models import AgentTemplate
+from tests.helpers.agent_prose_literals import prose_literals as _prose_literals
+from tests.helpers.agent_prose_literals import python_files
 from tests.helpers.retired_tool_names import RETIRED_TOOL_NAMES
 
 
 _SCAN_ROOTS = ("src", "api")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-_LOG_METHODS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "critical", "log"})
 
 _IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]*")
 
@@ -38,35 +38,8 @@ def _qualified_pattern() -> re.Pattern[str]:
     return re.compile(rf"mcp__{re.escape(MCP_ALIAS)}__([a-z_][a-z0-9_]*)")
 
 
-def _prose_literals(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-
-    skip: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            skip.add(id(node.value))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _LOG_METHODS:
-            for arg in ast.walk(node):
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    skip.add(id(arg))
-
-    out: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
-            continue
-        if id(node) in skip:
-            continue
-        if not any(ch.isspace() for ch in node.value):
-            continue
-        out.append((node.lineno, node.value))
-    return out
-
-
 def _scanned_files() -> list[Path]:
-    files: list[Path] = []
-    for root in _SCAN_ROOTS:
-        files.extend(sorted((_REPO_ROOT / root).rglob("*.py")))
-    return files
+    return python_files(*_SCAN_ROOTS)
 
 
 

@@ -232,7 +232,7 @@ class TestEdgeCases:
 
         project = SimpleNamespace(name="My Project", id="p1", product_id="pr1", taxonomy_alias=None)
         result = ClaudePromptBuilder().build_execution_prompt("orch-1", project, [], git_enabled=True)
-        assert "closeout(My Project)" in result
+        assert 'git commit -m "My Project: ' in result
 
 
 class TestPackageExports:

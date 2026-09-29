@@ -73,62 +73,39 @@ function mountDialog(propsData = {}) {
   })
 }
 
-function codingToolSelect(wrapper) {
-  return wrapper.find('[data-testid="cli-tool-select"]')
+function harnessInput(wrapper) {
+  return wrapper.find('[data-testid="cli-tool-input"]')
 }
 
-describe('TemplateEditDialog — Coding tool dropdown (INF-6049c)', () => {
-  it('renders the Coding tool select with the surviving tools (INF-9605a)', () => {
+describe('TemplateEditDialog — Harness free-text field', () => {
+  it('renders a free-text Harness field, not a fixed list', () => {
     const wrapper = mountDialog()
-    const select = codingToolSelect(wrapper)
-    expect(select.exists()).toBe(true)
-    const values = select.findAll('button').map((b) => b.attributes('data-value'))
-    expect(values).toEqual(['claude', 'codex', 'generic'])
+    expect(harnessInput(wrapper).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="cli-tool-select"]').exists()).toBe(false)
   })
 
-  it('reflects the template current cli_tool', () => {
-    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'codex' }) })
-    expect(codingToolSelect(wrapper).attributes('data-testid')).toBe('cli-tool-select')
-    expect(codingToolSelect(wrapper).exists()).toBe(true)
+  it('reflects the template current harness, including a legacy value', () => {
+    expect(harnessInput(mountDialog({ template: makeTemplate({ cli_tool: 'codex' }) })).element.value).toBe('codex')
+    expect(harnessInput(mountDialog({ template: makeTemplate({ cli_tool: 'gemini' }) })).element.value).toBe('gemini')
   })
 
-  it('shows a retired cli_tool once as "Generic (was Gemini)" (INF-9605a)', () => {
-    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'gemini' }) })
-    const select = codingToolSelect(wrapper)
-    const legacy = select.find('[data-value="gemini"]')
-    expect(legacy.exists()).toBe(true)
-    expect(legacy.text()).toBe('Generic (was Gemini)')
-    expect(select.find('[data-value="antigravity"]').exists()).toBe(false)
-  })
-
-  it('folds a retired cli_tool to generic on the next edit of any field (INF-9605a)', async () => {
-    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'antigravity', role: 'implementer' }) })
-    const codexBtn = codingToolSelect(wrapper).find('[data-value="codex"]')
-    await codexBtn.trigger('click')
-    expect(wrapper.emitted('update:template')[0][0]).toMatchObject({ cli_tool: 'codex' })
-
-    const wrapper2 = mountDialog({ template: makeTemplate({ cli_tool: 'gemini', role: 'implementer' }) })
-    const suffix = wrapper2.find('input[aria-label="Custom agent name suffix"]')
-    expect(suffix.exists()).toBe(true)
-    await suffix.setValue('fastapi')
-    const emitted = wrapper2.emitted('update:template')
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0][0]).toMatchObject({ custom_suffix: 'fastapi', cli_tool: 'generic' })
-  })
-
-  it('persists a change by emitting update:template with the new cli_tool', async () => {
+  it('persists a typed harness name by emitting update:template', async () => {
     const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'claude', role: 'implementer' }) })
-    const codexBtn = codingToolSelect(wrapper).find('[data-value="codex"]')
-    expect(codexBtn.exists()).toBe(true)
-    await codexBtn.trigger('click')
-
+    await harnessInput(wrapper).setValue('gemini-cli')
     const emitted = wrapper.emitted('update:template')
     expect(emitted).toHaveLength(1)
-    expect(emitted[0][0]).toMatchObject({ cli_tool: 'codex', role: 'implementer' })
+    expect(emitted[0][0]).toMatchObject({ cli_tool: 'gemini-cli', role: 'implementer' })
   })
 
-  it('defaults the displayed value to claude when cli_tool is unset', () => {
+  it('keeps a stored harness name when another field changes (no silent rewrite)', async () => {
+    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'gemini', role: 'implementer' }) })
+    await wrapper.find('input[aria-label="Custom agent name suffix"]').setValue('fastapi')
+    const emitted = wrapper.emitted('update:template')
+    expect(emitted[0][0]).toMatchObject({ custom_suffix: 'fastapi', cli_tool: 'gemini' })
+  })
+
+  it('shows blank for an unset harness (the server reads blank as default)', () => {
     const wrapper = mountDialog({ template: makeTemplate({ cli_tool: undefined }) })
-    expect(codingToolSelect(wrapper).find('[data-value="generic"]').exists()).toBe(true)
+    expect(harnessInput(wrapper).element.value).toBe('')
   })
 })

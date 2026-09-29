@@ -285,6 +285,7 @@ import { useNotificationStore } from '@/stores/notifications'
 import { useProjectStatusesStore } from '@/stores/projectStatusesStore'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { storeToRefs } from 'pinia'
 import ManualCloseoutModal from '@/components/orchestration/ManualCloseoutModal.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
@@ -318,8 +319,7 @@ async function performReset() {
   resetDialog.value = { ...resetDialog.value, show: false }
   try {
     if (kind === 'chain') {
-      await api.sequenceRuns.deactivate(runId)
-      await sequenceRunStore.hydrate()
+      await sequenceRunStore.deactivateChain(runId)
       showToast({ message: 'Chain deactivated — all projects reset to original state.', type: 'success' })
     } else {
       await api.projects.reset(projectId)
@@ -485,9 +485,7 @@ const {
 
 async function activateAndLaunch(projectId) {
   await projectStore.activateProject(projectId)
-  const project = projectStore.projects.find((p) => p.id === projectId)
-  const staged = project && (project.staging_status === 'staged' || project.staging_status === 'staging_complete')
-  router.push({ name: 'ProjectLaunch', params: { projectId }, query: { via: 'jobs', ...(staged ? { tab: 'jobs' } : {}) } })
+  router.push({ name: 'JobsViewport', query: { project: projectId } })
 }
 
 function openProject(item) {
@@ -499,12 +497,7 @@ function openProject(item) {
     reviewProductId.value = item.product_id
     showReviewModal.value = true
   } else if (status === 'active') {
-    const staged = item.staging_status === 'staged' || item.staging_status === 'staging_complete'
-    if (staged) {
-      router.push({ name: 'ProjectLaunch', params: { projectId: item.id }, query: { tab: 'jobs' } })
-    } else {
-      router.push({ name: 'ProjectLaunch', params: { projectId: item.id } })
-    }
+    router.push({ name: 'JobsViewport', query: { project: item.id } })
   } else {
     editProject(item)
   }
@@ -544,7 +537,7 @@ async function duplicateProject(project) {
     showToast({ message: `Duplicated project "${project.name}"`, type: 'success' })
   } catch (error) {
     console.error('[PROJECTS] Failed to duplicate project:', error)
-    showToast({ message: error.response?.data?.detail || 'Failed to duplicate project', type: 'error' })
+    showToast({ message: parseErrorResponse(error).message || 'Failed to duplicate project', type: 'error' })
   }
 }
 

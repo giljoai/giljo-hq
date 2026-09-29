@@ -156,7 +156,7 @@ describe('AgentJobModal', () => {
     })
 
     it('should return correct color for pending status', () => {
-      expect(wrapper.vm.getStatusColor('pending')).toBe('grey')
+      expect(wrapper.vm.getStatusColor('pending')).toBe('#9e9e9e')
     })
 
     it('should return correct color for in_progress status', () => {
@@ -168,7 +168,7 @@ describe('AgentJobModal', () => {
     })
 
     it('should return default color for unknown status', () => {
-      expect(wrapper.vm.getStatusColor('unknown')).toBe('grey')
+      expect(wrapper.vm.getStatusColor('unknown')).toBe('#9e9e9e')
     })
   })
 

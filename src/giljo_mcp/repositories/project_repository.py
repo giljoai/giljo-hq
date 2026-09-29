@@ -22,7 +22,7 @@ from giljo_mcp.models.projects import Project, TaxonomyType
 from giljo_mcp.models.roadmaps import RoadmapItem
 from giljo_mcp.models.tasks import Message, Task
 from giljo_mcp.models.user_approval import UserApproval
-from giljo_mcp.repositories._project_enrichment_reads_mixin import ProjectEnrichmentReadsMixin
+from giljo_mcp.repositories._project_enrichment_reads_mixin import ProjectEnrichmentReadsMixin, project_not_trashed
 from giljo_mcp.repositories._project_keyset import (
     completion_recency_order_clauses,
     keyset_axis_for_sort_key,
@@ -87,7 +87,7 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         project_max_q = select(func.coalesce(func.max(Project.series_number), 0)).where(
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         task_max_q = select(func.coalesce(func.max(Task.series_number), 0)).where(
             Task.tenant_key == tenant_key,
@@ -119,7 +119,7 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,
             Project.series_number == series_number,
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         if project_type_id:
             dup_query = dup_query.where(Project.project_type_id == project_type_id)
@@ -254,12 +254,12 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
                 if only == "deleted":
                     conditions.append(Project.deleted_at.isnot(None))
                 else:
-                    conditions.append(Project.deleted_at.is_(None))
+                    conditions.append(project_not_trashed())
             else:
                 conditions.append(Project.status.in_(status_list))
-                conditions.append(Project.deleted_at.is_(None))
+                conditions.append(project_not_trashed())
         else:
-            conditions.append(Project.deleted_at.is_(None))
+            conditions.append(project_not_trashed())
             if not include_cancelled:
                 conditions.append(Project.status != ProjectStatus.CANCELLED)
 
@@ -372,7 +372,7 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             )
             .select_from(Project)
             .outerjoin(TaxonomyType, Project.project_type_id == TaxonomyType.id)
-            .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+            .where(Project.tenant_key == tenant_key, project_not_trashed())
             .group_by(Project.status, TaxonomyType.abbreviation)
         )
         if product_id:
@@ -380,22 +380,6 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         result = await session.execute(query)
         return list(result.all())
 
-
-    async def get_not_deleted(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        project_id: str,
-    ) -> Project | None:
-        stmt = select(Project).where(
-            and_(
-                Project.id == project_id,
-                Project.tenant_key == tenant_key,
-                Project.deleted_at.is_(None),
-            )
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
 
     async def get_active_executions_for_project(
         self,

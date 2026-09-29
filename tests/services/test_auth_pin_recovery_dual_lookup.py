@@ -149,7 +149,7 @@ class TestVerifyPinDualLookup:
         user, _, pin = pin_user
         req = VerifyPinRequest(username=user.username, recovery_pin=pin)
 
-        resp = await verify_pin(request_data=req, db=db_session)
+        resp = await verify_pin(http_request=_fake_request(), request_data=req, db=db_session)
 
         assert resp.valid is True
 
@@ -158,7 +158,7 @@ class TestVerifyPinDualLookup:
         user, _, pin = pin_user
         req = VerifyPinRequest(username=user.email, recovery_pin=pin)
 
-        resp = await verify_pin(request_data=req, db=db_session)
+        resp = await verify_pin(http_request=_fake_request(), request_data=req, db=db_session)
 
         assert resp.valid is True
 
@@ -166,7 +166,7 @@ class TestVerifyPinDualLookup:
     async def test_unknown_identifier_returns_invalid(self, db_session):
         req = VerifyPinRequest(username="ghost_abc", recovery_pin="0000")
 
-        resp = await verify_pin(request_data=req, db=db_session)
+        resp = await verify_pin(http_request=_fake_request(), request_data=req, db=db_session)
 
         assert resp.valid is False
         assert "Invalid username or PIN" in resp.message

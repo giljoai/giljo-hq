@@ -72,18 +72,15 @@ describe('ProjectsView — WI-4: row click routing for active projects', () => {
       // review modal — not navigating
       return 'review'
     } else if (status === 'active') {
-      if (isProjectStaged(item)) {
-        pushMock({ name: 'ProjectLaunch', params: { projectId: item.id }, query: { tab: 'jobs' } })
-      } else {
-        pushMock({ name: 'ProjectLaunch', params: { projectId: item.id } })
-      }
+      // FE-9681: staged or not, an active project opens on its board card.
+      pushMock({ name: 'JobsViewport', query: { project: item.id } })
       return 'navigate'
     } else {
       return 'edit'
     }
   }
 
-  it('active + staged project navigates to ProjectLaunch with tab=jobs', () => {
+  it('active + staged project navigates to its Jobs board card', () => {
     simulateRowClick({
       id: 'proj-1',
       status: 'active',
@@ -91,13 +88,12 @@ describe('ProjectsView — WI-4: row click routing for active projects', () => {
     })
 
     expect(pushMock).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-1' },
-      query: { tab: 'jobs' },
+      name: 'JobsViewport',
+      query: { project: 'proj-1' },
     })
   })
 
-  it('active + staging_complete project navigates to ProjectLaunch with tab=jobs', () => {
+  it('active + staging_complete project navigates to its Jobs board card', () => {
     simulateRowClick({
       id: 'proj-2',
       status: 'active',
@@ -105,13 +101,12 @@ describe('ProjectsView — WI-4: row click routing for active projects', () => {
     })
 
     expect(pushMock).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-2' },
-      query: { tab: 'jobs' },
+      name: 'JobsViewport',
+      query: { project: 'proj-2' },
     })
   })
 
-  it('active + not staged navigates to ProjectLaunch without tab query', () => {
+  it('active + not staged navigates to its Jobs board card too', () => {
     simulateRowClick({
       id: 'proj-3',
       status: 'active',
@@ -119,8 +114,8 @@ describe('ProjectsView — WI-4: row click routing for active projects', () => {
     })
 
     expect(pushMock).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-3' },
+      name: 'JobsViewport',
+      query: { project: 'proj-3' },
     })
   })
 

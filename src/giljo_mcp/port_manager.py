@@ -10,6 +10,8 @@ import socket
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from giljo_mcp._config_io import read_config
 
 
@@ -121,7 +123,7 @@ class PortManager:
             logger.debug("No 'services' or 'server' section found in config")
             return False
 
-        except (OSError, ValueError):
+        except (OSError, ValueError, yaml.YAMLError):
             logger.exception("Error loading port configuration from {self.config_path}")
             return False
 

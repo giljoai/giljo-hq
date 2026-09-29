@@ -94,12 +94,14 @@ describe('JobsBoardDetailModal', () => {
     expect(copyBtn.classes()).toContain('jb-copy-btn--done')
   })
 
-  it('the review strip routes to the existing per-project review pane, not a new flow', () => {
+  it('the review strip opens the closeout on the board, the same flow, no navigation', async () => {
     const wrapper = mountModal()
-    expect(wrapper.find('[data-testid="jb-review-strip"]').text()).toContain('Review happens in the existing review pane')
+    expect(wrapper.find('[data-testid="jb-review-strip"]').text()).toContain('Review and close it here')
     const btn = wrapper.find('[data-testid="jb-review-strip-btn"]')
     expect(btn.exists()).toBe(true)
-    expect(btn.text()).toContain('Go to review pane')
+    expect(btn.text()).toContain('Review and close')
+    await btn.trigger('click')
+    expect(wrapper.emitted('open-closeout')).toHaveLength(1)
   })
 
   it('uses the shared .agent-badge-sq and .msg-badge classes, not bespoke ones', () => {

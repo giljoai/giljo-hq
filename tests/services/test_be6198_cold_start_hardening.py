@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.exceptions import AlreadyExistsError
 from giljo_mcp.models import AgentTemplate, Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
-from giljo_mcp.schemas.responses.orchestration import StagingDirective
+from giljo_mcp.schemas.responses.orchestration import SOLO_STAGING_END_NEXT_ACTION_WHY, StagingDirective
 from giljo_mcp.services.job_completion_service import (
     _CHAIN_SUBORCH_STAGING_END_ACTION,
     _CHAIN_SUBORCH_STAGING_END_NEXT_ACTION,
@@ -28,7 +28,7 @@ from giljo_mcp.services.job_completion_service import (
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_chain_drive
-from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.services.sequence_run_service import SequenceRunService, active_chain_run
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.product_crew_helper import adopt_all_templates
 
@@ -244,11 +244,9 @@ def test_phase_response_solo_staging_end_unchanged():
     _phase, _msg, next_action = JobCompletionService._phase_response(
         is_staging_end=True, is_closeout_phase=False, is_chain_member_suborch=False
     )
-    assert next_action["tool"] is None
+    assert next_action["tool"] == "launch_implementation"
     assert next_action["why"] == (
-        "Stop this session now. A human presses Implement in the dashboard to start the "
-        "implementation session with a fresh orchestrator execution. Do NOT write the "
-        "project closeout from the staging session."
+        f"{SOLO_STAGING_END_NEXT_ACTION_WHY} Do NOT write the project closeout from the staging session."
     )
 
 
@@ -311,6 +309,14 @@ def test_staging_directive_conductor_awaits_go_action_stays_stop():
     assert "explicit go" in low, "must tell the conductor to wait for the user's explicit GO"
     assert "do not re-call get_job_mission" in low, "must forbid self-driving via get_job_mission"
     assert "implement chain" in low, "must name the dashboard GO equivalent"
+
+
+def test_be9653_implementation_gate_reports_what_is_true_at_staging_end():
+    assert JobCompletionService._staging_directive_for(True).implementation_gate == "OPEN"
+    assert JobCompletionService._staging_directive_for(False).implementation_gate == "AWAITING_LAUNCH"
+    assert (
+        JobCompletionService._staging_directive_for(False, is_conductor=True).implementation_gate == "AWAITING_LAUNCH"
+    )
 
 
 def test_staging_directive_conductor_differs_from_solo_default():
@@ -394,16 +400,14 @@ async def test_is_chain_member_suborch_true_for_active_run(db_session):
     await _run_svc(db_session).create(
         project_ids=[p1, p2], resolved_order=[p1, p2], execution_mode="claude_code_cli", tenant_key=tenant
     )
-    svc = JobCompletionService(db_manager=None, tenant_manager=TenantManager(), test_session=db_session)
-    assert await svc._is_chain_member_suborch(db_session, p1, tenant) is True
+    assert await active_chain_run(db_session, p1, tenant) is not None
 
 
 @pytest.mark.asyncio
 async def test_is_chain_member_suborch_false_for_solo(db_session):
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
-    svc = JobCompletionService(db_manager=None, tenant_manager=TenantManager(), test_session=db_session)
-    assert await svc._is_chain_member_suborch(db_session, p1, tenant) is False
+    assert await active_chain_run(db_session, p1, tenant) is None
 
 
 

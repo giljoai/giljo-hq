@@ -163,8 +163,13 @@ async def update_task(
         str, Field(max_length=MCP_DESCRIPTION_MAX, description="New description; empty string keeps current.")
     ] = "",
     status: Annotated[
-        Literal["", "pending", "in_progress", "completed", "blocked", "cancelled"],
-        Field(description="New status: pending|in_progress|completed|blocked|cancelled. Empty string keeps current."),
+        Literal["", "pending", "in_progress", "on_hold", "completed", "blocked", "cancelled"],
+        Field(
+            description=(
+                "New status: pending|in_progress|on_hold|completed|blocked|cancelled. on_hold parks an "
+                "undecided task: it stays open and does not stamp started_at. Empty string keeps current."
+            )
+        ),
     ] = "",
     priority: Annotated[
         Literal["", "low", "medium", "high", "critical"],

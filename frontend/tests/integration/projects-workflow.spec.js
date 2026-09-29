@@ -9,7 +9,7 @@ import { useProductStore } from '@/stores/products'
 // - Has series-aware sorting (Handover 0440c)
 // - deleteProject() uses internal state (projectToDelete) not a parameter
 // - Calls fetchProjects() after every status action
-// - Requires additional stubs: ManualCloseoutModal, ProjectReviewModal, BaseDialog, AgentTipsDialog, AddTypeModal, StatusBadge
+// - Requires additional stubs: ManualCloseoutModal, ProjectReviewModal, BaseDialog, AddTypeModal, StatusBadge
 // - Uses router with named routes (ProjectLaunch)
 //
 // These store-level tests still validate the project workflow correctly

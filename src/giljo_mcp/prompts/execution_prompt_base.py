@@ -64,7 +64,6 @@ class ExecutionPromptBuilderBase:
             "precedence over any multi-terminal phrasing in `full_protocol`. If `full_protocol` says to "
             "copy a prompt from the dashboard, paste it into a NEW terminal, or go to another agent's "
             "terminal, IGNORE that — in this session all agents run as subagents in THIS session.",
-            "Note: tenant_key is auto-injected by server from your API key session.",
             "",
             *self._build_execution_plan_details(),
             "## What You've Already Done",
@@ -153,7 +152,6 @@ class ExecutionPromptBuilderBase:
             "```python",
             f'get_workflow_status(project_id="{project.id}")',
             "```",
-            "Note: tenant_key is auto-injected by server from your API key session",
             "",
         ]
 
@@ -177,18 +175,16 @@ class ExecutionPromptBuilderBase:
         tag = getattr(project, "taxonomy_alias", None) or project.name
         return [
             "### Git Closeout Commit",
-            "**Committer of last resort:** BEFORE the closeout marker, check the working tree "
+            "**Committer of last resort:** BEFORE closeout, check the working tree "
             "(`git status --short`). If it is DIRTY with this project's work — a worker that "
-            "did not commit, or your own residue — commit those files first "
-            "(`git add <the specific changed files>`; NEVER `git add -A`) with a descriptive "
-            "message. Only then create the closeout marker:",
+            "did not commit, or your own residue — commit those files "
+            "(`git add <the specific changed files>`; NEVER `git add -A`):",
             "```bash",
-            f'git commit --allow-empty -m "closeout({tag}): {project.name}',
-            "",
-            "Completed: <today YYYY-MM-DD>",
-            "Key outcomes:",
-            '- <list each concrete outcome>"',
+            f'git commit -m "{tag}: <what these changes do>"',
             "```",
+            "Pass this project's commits (yours and your workers') as `git_commits` to "
+            "`write_project_closeout`. Never create an empty commit to have something to pass: "
+            'if the project changed no code, pass `no_code_changes="<why>"` instead.',
             "",
         ]
 

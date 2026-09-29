@@ -10,7 +10,8 @@
  *   - Convert emits the right intent; the .rm-grip drag handle exists (drag
  *     itself is owned by vuedraggable in RoadmapView).
  *   - taxonomy_alias chip hides when the alias is empty.
- *   - meta badges use the tinted-badge anatomy (rgba 0.15 tint + 8px radius).
+ *   - meta badges use the tinted-badge anatomy (rgba 0.15 tint; radius owned
+ *     by the .rm-badge class, not an inline style).
  *   - WCAG AA: every new badge text color clears 4.5:1 on the #12202e panel bg.
  *
  * Edition Scope: CE
@@ -290,13 +291,21 @@ describe('RoadmapCard.vue — blocked dependency row (FE-6022d)', () => {
 })
 
 describe('RoadmapCard.vue — tinted-badge anatomy', () => {
-  it('type badge uses an rgba(…, 0.15) tint + 8px radius', () => {
+  it('type badge uses an rgba(…, 0.15) tint from an inline style, with no inline radius', () => {
     const w = mountCard(PROJECT_ITEM)
     const badge = w.findAll('.rm-badge')[0]
     const style = badge.attributes('style')
     expect(style).toContain('rgba(')
     expect(style).toContain('0.15')
-    expect(style).toContain('border-radius: 8px')
+    expect(style).not.toContain('border-radius')
+  })
+
+  it('the .rm-badge class, not an inline style, owns the radius', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = readFileSync(resolve(__dirname, '../../../src/components/RoadmapCard.vue'), 'utf8')
+    const rmBadgeBlock = src.match(/\.rm-badge\s*\{([^}]*)\}/)?.[1] || ''
+    expect(rmBadgeBlock).toMatch(/border-radius:\s*\$border-radius-default/)
   })
 
   it('renders risk + complexity badges when set, omits them when null', () => {

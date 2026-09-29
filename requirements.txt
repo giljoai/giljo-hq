@@ -17,8 +17,13 @@
 # completes it: route-introspection tests now flatten _IncludedRouter via tests/helpers/route_surface
 # and the frozen surface baselines are reproduced byte-for-byte. starlette 1.3.1 clears 4 CVEs
 # (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two pinned in lockstep.
-fastapi==0.139.2           # REST API and WebSockets
-starlette==1.3.1           # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
+# 2026-09-24: deliberate pair bump fastapi 0.139.2 -> 0.141.1, starlette 1.3.1 -> 1.7.0 (fastapi
+# 0.141.1 only requires starlette>=0.46.0, so 1.7.0 is the newest compatible). _IncludedRouter /
+# effective_candidates() are unchanged; frozen surface baselines still reproduce byte-for-byte.
+# starlette 1.7.0 requires anyio>=4,<5 and raises WebSocketDisconnected (a RuntimeError subclass)
+# for operations on a disconnected WebSocket — our WS handlers already catch RuntimeError.
+fastapi==0.141.1           # REST API and WebSockets
+starlette==1.7.0           # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
 uvicorn[standard]>=0.23.0   # ASGI server with production extras (includes websockets, httptools, watchfiles)
 pydantic>=2.0.0             # Data validation and serialization
 
@@ -33,7 +38,7 @@ greenlet>=3.5.1             # Required by SQLAlchemy async on macOS arm64 (trans
 bcrypt>=4.0.0                      # Password hashing (direct bcrypt, no passlib wrapper)
 cryptography>=50.0.0              # Fernet encryption for auth tokens (auth_manager.py)
 python-multipart>=0.0.6           # Form data and file upload support
-PyJWT>=2.8.0                      # JWT token handling (using PyJWT instead of python-jose)
+PyJWT>=2.14.0                     # JWT token handling (using PyJWT instead of python-jose)
 email-validator>=2.1.0            # Required by Pydantic EmailStr (auth.py, users.py)
 
 # MCP SDK (Model Context Protocol)

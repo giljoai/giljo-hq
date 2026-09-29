@@ -67,13 +67,19 @@ def _build_choice_schema(options: list[dict]):
     )
 
 
-def _format_message(reason: str, options: list[dict]) -> str:
-    lines = [reason, "", "Options:"]
+def _format_message(reason: str, options: list[dict], project_label: str | None = None) -> str:
+    lines = ["Decision needed from you (Giljo HQ)"]
+    if project_label:
+        lines.append(f"Project: {project_label}")
+    lines.extend(["", f"The agent asks: {reason}", "", "Pick one:"])
     lines.extend(f"  - {opt.get('label') or opt['id']} (id: {opt['id']})" for opt in options)
+    lines.extend(["", "You can also answer it on the Giljo HQ dashboard."])
     return "\n".join(lines)
 
 
-def _build_input_required(reason: str, options: list[dict], approval_id: str) -> InputRequiredResult:
+def _build_input_required(
+    reason: str, options: list[dict], approval_id: str, project_label: str | None = None
+) -> InputRequiredResult:
     schema = _build_choice_schema(options)
     return InputRequiredResult(
         input_requests={
@@ -81,7 +87,7 @@ def _build_input_required(reason: str, options: list[dict], approval_id: str) ->
                 method="elicitation/create",
                 params=ElicitRequestFormParams(
                     mode="form",
-                    message=_format_message(reason, options),
+                    message=_format_message(reason, options, project_label),
                     requested_schema=render_elicitation_schema(schema),
                 ),
             )
@@ -142,7 +148,45 @@ async def _decide_inline(ctx: Context, approval_id: str, option_id: str) -> bool
         return False
 
 
-async def resolve_pending_inline_approval(ctx: Context | None, options: list[dict] | None) -> dict[str, Any] | None:
+DASHBOARD_ONLY_MESSAGE = (
+    "Your decision request is waiting for the user in the Giljo HQ dashboard (the project card shows "
+    "'Your decision needed'). Headless is off for this account, so it can only be answered there. "
+    "Do not ask the user in chat; wait, and you resume when they decide."
+)
+
+
+async def harness_may_decide(ctx: Context | None) -> bool:
+    if ctx is None:
+        return True
+    try:
+        from api.endpoints import mcp_sdk_server
+
+        request = getattr(getattr(ctx, "request_context", None), "request", None)
+        return not await mcp_sdk_server._launch_gate_blocked(request)
+    except Exception:  # noqa: BLE001 - never raise into the tool; resolve to dashboard-only
+        logger.warning("[TSK-9691] headless lookup for an inline approval failed; dashboard only", exc_info=True)
+        return False
+
+
+async def approval_project_label(ctx: Context | None, project_id: str) -> str | None:
+    try:
+        from api.endpoints.mcp_tools._base import _get_tool_accessor, _resolve_tenant
+
+        service = _get_tool_accessor()._user_approval_service
+        return await service.project_label(tenant_key=_resolve_tenant(ctx), project_id=project_id)
+    except Exception:  # noqa: BLE001 - a missing label must never block the offer
+        return None
+
+
+def with_dashboard_only_notice(result: Any) -> Any:
+    if not isinstance(result, dict) or result.get("status") != "pending":
+        return result
+    return {**result, "decide_in": "dashboard", "message": DASHBOARD_ONLY_MESSAGE}
+
+
+async def resolve_pending_inline_approval(
+    ctx: Context | None, options: list[dict] | None, *, may_decide: bool = True
+) -> dict[str, Any] | None:
     if ctx is None:
         return None
     try:
@@ -153,6 +197,8 @@ async def resolve_pending_inline_approval(ctx: Context | None, options: list[dic
         return None
 
     pending = {"approval_id": approval_id, "status": "pending"}
+    if not may_decide:
+        return with_dashboard_only_notice(pending)
     choice = _chosen_option_id(ctx)
     if choice is None or choice not in {opt["id"] for opt in _normalize_options(options)}:
         return pending
@@ -167,6 +213,7 @@ def maybe_offer_approval_inline(
     *,
     reason: str,
     options: list[dict] | None,
+    project_label: str | None = None,
 ) -> Any:
     if ctx is None or not _mrtr_enabled():
         return approval_result
@@ -181,7 +228,7 @@ def maybe_offer_approval_inline(
         return approval_result
 
     try:
-        return _build_input_required(reason, norm_options, approval_id)
+        return _build_input_required(reason, norm_options, approval_id, project_label)
     except Exception:  # noqa: BLE001 - building the offer is best-effort
         logger.warning("[BE-8003l] inline approval offer failed to build; async fallback", exc_info=True)
         return approval_result

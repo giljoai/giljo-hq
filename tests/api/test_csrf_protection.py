@@ -114,15 +114,29 @@ class TestCSRFExemptPaths:
         )
 
     @pytest.mark.asyncio
-    async def test_csrf_exempt_setup_endpoints(self, api_client):
-        response = await api_client.post(
-            "/api/setup/database/test-connection",
-            json={"host": "localhost", "port": 5432},
-        )
+    async def test_csrf_exempt_setup_status_endpoint(self, api_client):
+        response = await api_client.get("/api/setup/status")
 
         assert response.status_code != 403 or (
             response.status_code == 403 and "CSRF" not in response.json().get("detail", "")
         )
+
+    @pytest.mark.asyncio
+    async def test_database_setup_routes_removed_sec9700(self, api_client):
+        get_response = await api_client.get("/api/setup/database/verify")
+        assert get_response.status_code == 404
+
+        post_test_connection = await api_client.post(
+            "/api/setup/database/test-connection",
+            json={"host": "localhost", "port": 5432},
+        )
+        assert post_test_connection.status_code == 405
+
+        post_setup = await api_client.post(
+            "/api/setup/database/setup",
+            json={"host": "localhost", "admin_password": "x"},
+        )
+        assert post_setup.status_code == 405
 
 
 

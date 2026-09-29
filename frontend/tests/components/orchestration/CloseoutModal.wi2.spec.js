@@ -30,11 +30,6 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
-// Vuetify display mock
-vi.mock('vuetify', () => ({
-  useDisplay: () => ({ mobile: { value: false } }),
-}))
-
 describe('CloseoutModal — WI-2 post-archive UX', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

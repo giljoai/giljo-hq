@@ -49,6 +49,7 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 VALID_RELEASE_MODES: frozenset[str] = frozenset({"graceful", "cancel"})
+_DEFERRED_SEQUENCE_UPDATES = "deferred_sequence_updates"
 
 __all__ = ["MAX_CHAIN_MISSION_CHARS", "VALID_RELEASE_MODES", "SequenceRunService"]
 
@@ -186,6 +187,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
         conductor_project_id: str | None = None,
         conductor_label: str | None = None,
         clear_conductor: bool = False,
+        defer_broadcast: bool = False,
     ) -> dict[str, Any]:
         try:
             effective_tenant_key = tenant_key or (
@@ -235,6 +237,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                             "Cannot edit the chain mission: the run is staging-complete or running "
                             "(read-only after Implement)."
                         ),
+                        error_code="CHAIN_MISSION_LOCKED",
                         context={"field": "chain_mission", "run_id": run_id, "status": run.status},
                     )
                 if execution_mode is not None:
@@ -268,11 +271,15 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                     run.conductor_label = None
                 run.updated_at = datetime.now(UTC)
 
-                await session.commit()
+                await session.flush()
                 await session.refresh(run)
                 serialized = _serialize(run)
 
-            await self._broadcast_sequence_updated(run_id, effective_tenant_key)
+            if defer_broadcast and self._session is not None:
+                deferred = self._session.info.setdefault(_DEFERRED_SEQUENCE_UPDATES, {})
+                deferred[run_id] = (effective_tenant_key, self._websocket_manager)
+            else:
+                await self._broadcast_sequence_updated(run_id, effective_tenant_key)
             self._logger.info(
                 "Updated sequence_run %s (tenant=%s, status=%s, index=%s)",
                 sanitize(run_id),
@@ -587,3 +594,14 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
 
 
 _serialize = serialize_sequence_run
+
+
+async def active_chain_run(session: AsyncSession, project_id: Any, tenant_key: str) -> dict[str, Any] | None:
+    return await SequenceRunService(session=session).find_active_run_for_project(
+        project_id=str(project_id), tenant_key=tenant_key
+    )
+
+
+async def broadcast_deferred_sequence_updates(session: AsyncSession) -> None:
+    for run_id, (tenant_key, websocket_manager) in session.info.pop(_DEFERRED_SEQUENCE_UPDATES, {}).items():
+        await SequenceRunService(websocket_manager=websocket_manager)._broadcast_sequence_updated(run_id, tenant_key)

@@ -8,6 +8,9 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+import yaml
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -173,9 +176,9 @@ features:
         config_path.write_text("{ invalid yaml: [")
 
         service = ConfigService(config_path=config_path)
-        result = service.get_serena_config()
 
-        assert result == {}
+        with pytest.raises(yaml.YAMLError):
+            service.get_serena_config()
 
     def test_thread_safety(self, tmp_path):
         import threading

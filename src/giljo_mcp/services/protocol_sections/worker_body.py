@@ -196,6 +196,8 @@ Final steps:
 2. Process any pending messages - ensure queue is empty
 3. Call `complete_job()` - ONLY after TODOs are complete and queue is empty
    - Full call: `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})`
+   - `complete_job` is your LAST call. Never call `finalize_job`: your orchestrator reviews
+     your result and finalizes it. If it needs rework, it messages you and resumes your job.
 
 If you call `complete_job()` without meeting these requirements:
 - System will REJECT your completion

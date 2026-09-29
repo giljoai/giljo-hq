@@ -19,12 +19,11 @@ from api.endpoints import (
     comm_threads,
     configuration,
     connect,
-    database_setup,
     downloads,
     git,
-    master_prompt,
     notifications,
     oauth,
+    oauth_deny,
     oauth_register,
     oauth_revoke,
     oauth_well_known,
@@ -77,7 +76,6 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(agent_jobs.router)
     app.include_router(agent_jobs.jobs_router)
     app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
-    app.include_router(master_prompt.router, prefix="/api/v1/prompts", tags=["prompts"])
     app.include_router(configuration.router, prefix="/api/v1/config", tags=["configuration"])
     app.include_router(system_prompts.router, prefix="/api/v1/system", tags=["system"])
     app.include_router(statistics.router, prefix="/api/v1/stats", tags=["statistics"])
@@ -86,6 +84,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(auth_pin_recovery.router, prefix="/api/auth", tags=["auth"])
     app.include_router(connect.router, prefix="/api/connect", tags=["connect"])
     app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
+    app.include_router(oauth_deny.router, prefix="/api/oauth", tags=["oauth"])
     app.include_router(oauth_revoke.router, prefix="/api/oauth", tags=["oauth"])
     if _app_module.GILJO_MODE in ("", "ce"):
         app.include_router(oauth_register.router, prefix="/api/oauth", tags=["oauth"])
@@ -95,7 +94,6 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(user_settings.router, prefix="/api/v1/user", tags=["user-settings"])
     app.include_router(settings.router, prefix="/api/v1/settings", tags=["settings"])
     app.include_router(tenant_data.router, prefix="/api/v1/account", tags=["tenant-data"])
-    app.include_router(database_setup.router, prefix="/api/setup/database", tags=["database-setup"])
     app.include_router(setup_security.router, prefix="/api/setup", tags=["setup-security"])
     app.include_router(serena.router, prefix="/api/serena", tags=["serena"])
     app.include_router(git.router, prefix="/api/git", tags=["git"])
@@ -112,10 +110,7 @@ def register_routers(app: FastAPI) -> None:
     if _app_module.GILJO_MODE == "saas":
         _saas_endpoints_dir = Path(__file__).parent.parent / "saas_endpoints"
         if _saas_endpoints_dir.is_dir():
-            try:
-                from api.saas_endpoints import register_saas_routes
+            from api.saas_endpoints import register_saas_routes
 
-                register_saas_routes(app)
-                logger.info("SaaS endpoint routes registered")
-            except ImportError:
-                logger.info("SaaS endpoints directory exists but no routes registered")
+            register_saas_routes(app)
+            logger.info("SaaS endpoint routes registered")

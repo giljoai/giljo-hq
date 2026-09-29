@@ -34,10 +34,10 @@
             <template #activator="{ props }">
               <v-icon v-bind="props" size="15" class="setting-row-info">mdi-information-outline</v-icon>
             </template>
-            This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. On (the default) lets a trusted CLI/OAuth agent self-advance without a click. Turn it off to keep a human in the loop: the server will then refuse to authorize that launch until you press Implement yourself; only turn it off if you want every launch gated on your own click. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
+            This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. Off (the default) keeps a human in the loop: the server refuses to authorize that launch until you press Implement yourself. Turning it on lets a trusted CLI/OAuth agent self-advance without a click — but only because your harness's own permission prompt for that call now counts as your approval; running that harness with a bypass/skip-permissions flag removes the ask, so only turn this on if you trust every session on this account to be asked honestly. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it.
           </v-tooltip>
         </div>
-        <div class="setting-row-help">Your coding agent may skip the Implement click.</div>
+        <div class="setting-row-help">Off by default. On lets your coding agent skip the Implement click.</div>
       </div>
       <div class="setting-row-control">
         <v-switch
@@ -63,21 +63,14 @@ const { showToast } = useToast()
 
 const closeoutModeHitl = ref(true)
 
-const allowHeadless = ref(true)
+const allowHeadless = ref(false)
 
 async function toggleCloseoutMode(enabled) {
   const newMode = enabled ? 'hitl' : 'autonomous'
   const previousValue = closeoutModeHitl.value
   closeoutModeHitl.value = enabled
   try {
-    let general = {}
-    try {
-      const currentRes = await api.settings.getGeneral()
-      general = currentRes.data?.settings || {}
-    } catch (readErr) {
-      console.warn('[OrchestrationToggles] could not read general settings to merge', readErr)
-    }
-    await api.settings.updateGeneral({ ...general, closeout_mode: newMode })
+    await api.settings.updateCloseoutMode(newMode)
     showToast({
       message: enabled
         ? 'User approval required before project closeout'
@@ -124,7 +117,7 @@ async function loadHeadlessLaunch() {
     const res = await api.settings.getHeadlessLaunch()
     allowHeadless.value = !!res.data?.allow_headless_launch
   } catch {
-    // Default stays true (Headless), matching the server default (BE-9542)
+    // Default stays false (HITL), matching the server default (BE-9670b)
   }
 }
 

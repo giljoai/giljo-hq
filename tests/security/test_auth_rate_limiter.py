@@ -208,6 +208,48 @@ class TestAlwaysTrustProxyHeaderRewriteBypass:
 
 
 
+class TestCfConnectingIpRequiresVerifiedCloudflareHop:
+
+    def _limiter(self, monkeypatch, trusted_proxies: str = ""):
+        monkeypatch.setenv("FORWARDED_ALLOW_IPS", "*")
+        if trusted_proxies:
+            monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, trusted_proxies)
+        else:
+            monkeypatch.delenv(arl._TRUSTED_PROXIES_ENV, raising=False)
+        arl._RateLimiterHolder.reset_for_tests()
+        return arl.RateLimiter()
+
+    def test_forged_cf_header_ignored_when_nearest_hop_is_not_cloudflare(self, monkeypatch):
+        limiter = self._limiter(monkeypatch)
+        req = _make_request(
+            client_host="198.51.100.9",
+            forwarded_for="198.51.100.9",
+            cf_connecting_ip="1.2.3.4",
+        )
+        assert limiter._get_client_ip(req) == "198.51.100.9"
+
+    def test_forged_cf_header_ignored_without_any_xff_to_verify_against(self, monkeypatch):
+        limiter = self._limiter(monkeypatch)
+        req = _make_request(client_host="198.51.100.9", forwarded_for=None, cf_connecting_ip="1.2.3.4")
+        assert limiter._get_client_ip(req) == "198.51.100.9"
+
+    def test_cf_header_honored_when_nearest_hop_is_a_real_cloudflare_address(self, monkeypatch):
+        limiter = self._limiter(monkeypatch)
+        req = _make_request(
+            client_host="198.51.100.9",
+            forwarded_for="198.51.100.9, 173.245.48.1",
+            cf_connecting_ip="203.0.113.55",
+        )
+        assert limiter._get_client_ip(req) == "203.0.113.55"
+
+    def test_pinned_cloudflare_range_list_is_non_empty(self):
+        from api.middleware._cloudflare_ip_ranges import CLOUDFLARE_NETWORKS
+
+        assert len(CLOUDFLARE_NETWORKS) > 0
+
+
+
+
 class TestSharedLimiterStore:
     @pytest.mark.asyncio
     async def test_two_instances_share_one_combined_limit(self):

@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 _RATE_LIMIT_TENANT_SENTINEL = "_ratelimit"
 
 
+class _TestBypass:
+
+    enabled: bool = False
+
+
+def set_test_bypass(enabled: bool) -> None:
+    _TestBypass.enabled = bool(enabled)
+
+
+def is_test_bypass_enabled() -> bool:
+    return _TestBypass.enabled
+
+
 @dataclass(frozen=True, slots=True)
 class RateLimitDecision:
 
@@ -96,7 +109,7 @@ class RateLimitMiddleware:
         return self._ip_resolver.resolve(request)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or _TestBypass.enabled:
             await self.app(scope, receive, send)
             return
 

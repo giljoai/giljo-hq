@@ -129,13 +129,14 @@ class TestGitCloseout:
         project = _make_project(taxonomy_alias="BE-5072")
         prompt = builder.build_execution_prompt("orch-1", project, [], git_enabled=True)
         assert "Git Closeout Commit" in prompt
-        assert "closeout(BE-5072)" in prompt
+        assert 'git commit -m "BE-5072: ' in prompt
+        assert "--allow-empty" not in prompt
 
     def test_git_enabled_falls_back_to_project_name_when_no_taxonomy(self):
         builder = _MinimalBuilder()
         project = _make_project(taxonomy_alias=None)
         prompt = builder.build_execution_prompt("orch-1", project, [], git_enabled=True)
-        assert "closeout(Test Project)" in prompt
+        assert 'git commit -m "Test Project: ' in prompt
 
 
 class TestSubclassOverrides:

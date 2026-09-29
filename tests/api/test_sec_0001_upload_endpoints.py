@@ -199,6 +199,62 @@ class TestEndpointBRegression:
         assert response.json()["document_name"] == "notes.markdown"
 
 
+async def _vision_doc_count(db_manager, tenant_key: str, product_id: str) -> int:
+    from sqlalchemy import func, select
+
+    from giljo_mcp.models.products import VisionDocument
+
+    async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+        stmt = (
+            select(func.count())
+            .select_from(VisionDocument)
+            .where(VisionDocument.product_id == product_id, VisionDocument.tenant_key == tenant_key)
+        )
+        return int((await session.execute(stmt)).scalar_one())
+
+
+class TestEndpointBNoOrphanDocument:
+
+    @pytest.mark.asyncio
+    async def test_blank_upload_is_refused_and_leaves_no_row(self, api_client, auth_headers, db_manager):
+        tenant_key = _extract_tenant_key(auth_headers)
+        product_id = await _seed_product(db_manager, tenant_key)
+        url = ENDPOINT_B_TEMPLATE.format(product_id=product_id)
+
+        first = await api_client.post(
+            url, headers=auth_headers, files={"file": ("blank.md", b"   \n\n", "text/markdown")}
+        )
+        assert first.status_code == 400, first.text
+        assert await _vision_doc_count(db_manager, tenant_key, product_id) == 0
+
+        retry = await api_client.post(
+            url, headers=auth_headers, files={"file": ("blank.md", b"   \n\n", "text/markdown")}
+        )
+        assert retry.status_code == 400, retry.text
+
+    @pytest.mark.asyncio
+    async def test_chunking_failure_leaves_no_row(self, api_client, auth_headers, db_manager):
+        from unittest.mock import AsyncMock, patch
+
+        from giljo_mcp.exceptions import ContextError
+
+        tenant_key = _extract_tenant_key(auth_headers)
+        product_id = await _seed_product(db_manager, tenant_key)
+        url = ENDPOINT_B_TEMPLATE.format(product_id=product_id)
+        files = {"file": ("vision.md", b"# Vision\n\nReal content.\n", "text/markdown")}
+
+        with patch(
+            "giljo_mcp.context_management.chunker.VisionDocumentChunker.chunk_vision_document",
+            AsyncMock(side_effect=ContextError("chunker down")),
+        ):
+            failed = await api_client.post(url, headers=auth_headers, files=files)
+        assert failed.status_code == 500, failed.text
+        assert await _vision_doc_count(db_manager, tenant_key, product_id) == 0
+
+        retry = await api_client.post(url, headers=auth_headers, files=files)
+        assert retry.status_code == 201, retry.text
+
+
 
 
 class TestEndpointAFilenameSanitization:

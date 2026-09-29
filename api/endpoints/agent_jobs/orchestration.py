@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -195,6 +195,8 @@ class LaunchImplementationResponse(BaseModel):
     implementation_launched_at: str | None = None
     already_launched: bool | None = None
     launched_at: str | None = None
+    thread_id: str | None = Field(None, description="The project's coordination thread id")
+    chat_id: str | None = Field(None, description="The coordination thread's short handle, for example CHT-0042")
 
 
 @router.patch("/projects/{project_id}/launch-implementation", response_model=LaunchImplementationResponse)
@@ -256,6 +258,8 @@ async def launch_implementation(
             already_launched=True,
             launched_at=result["launched_at"],
             implementation_launched_at=result["implementation_launched_at"],
+            thread_id=result.get("thread_id"),
+            chat_id=result.get("chat_id"),
         )
 
     logger.info(
@@ -265,4 +269,6 @@ async def launch_implementation(
         success=True,
         implementation_launched_at=result["implementation_launched_at"],
         launched_at=result["launched_at"],
+        thread_id=result.get("thread_id"),
+        chat_id=result.get("chat_id"),
     )

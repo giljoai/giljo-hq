@@ -650,20 +650,4 @@ defineExpose({
 .depth-menu-list .v-list-item--active {
   background-color: rgba(var(--v-theme-primary), 0.12);
 }
-
-/* Mobile responsive */
-@media (max-width: 600px) {
-  .context-row {
-    flex-wrap: wrap;
-  }
-
-  .context-label {
-    min-width: 100%;
-    margin-bottom: 8px;
-  }
-
-  .depth-chip {
-    width: 120px;
-  }
-}
 </style>

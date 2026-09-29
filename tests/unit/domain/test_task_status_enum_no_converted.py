@@ -17,12 +17,13 @@ def test_converted_not_in_status_meta() -> None:
     assert all(member.value != "converted" for member in TASK_STATUS_META)
 
 
-def test_enum_has_exactly_five_members() -> None:
+def test_enum_has_exactly_six_members() -> None:
     assert {s.name for s in TaskStatus} == {
         "PENDING",
         "IN_PROGRESS",
+        "ON_HOLD",
         "COMPLETED",
         "BLOCKED",
         "CANCELLED",
     }
-    assert len(list(TaskStatus)) == 5
+    assert len(list(TaskStatus)) == 6

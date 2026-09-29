@@ -202,15 +202,3 @@
   align-items: flex-end;
   gap: 6px;
 }
-
-/* Narrow screens — let the action wrap full-width below the text */
-@media (max-width: 640px) {
-  .intg-line {
-    flex-wrap: wrap;
-  }
-
-  .intg-line-action {
-    width: 100%;
-    align-items: stretch;
-  }
-}

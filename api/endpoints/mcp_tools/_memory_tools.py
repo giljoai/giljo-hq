@@ -10,10 +10,12 @@ from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
+    CONSTRAINT_MUTUALLY_EXCLUSIVE,
     GIT_COMMITS_DESC,
     MCP_ID_MAX,
     _call_tool,
     mcp,
+    validation_rejection,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.services.memory_entry_write_validator import (
@@ -23,6 +25,7 @@ from giljo_mcp.services.memory_entry_write_validator import (
     MEMORY_KEY_OUTCOMES_COUNT,
     MEMORY_SUMMARY_MAX,
 )
+from giljo_mcp.tools._memory_helpers import NO_CODE_CHANGES_MAX
 
 
 _SUMMARY_CAP_TEXT = f"Max {MEMORY_SUMMARY_MAX} chars (server-enforced)."
@@ -36,6 +39,22 @@ _OUTCOMES_CAP_TEXT = (
     f"Max {MEMORY_KEY_OUTCOMES_COUNT} items, each max {MEMORY_KEY_OUTCOME_MAX} chars (server-enforced)."
 )
 _DECISIONS_CAP_TEXT = f"Max {MEMORY_DECISIONS_COUNT} items, each max {MEMORY_DECISION_MAX} chars (server-enforced)."
+
+_NoCodeChanges = Annotated[
+    str,
+    Field(max_length=NO_CODE_CHANGES_MAX, description="If nothing was committed, why (instead of git_commits)."),
+]
+
+
+def _both_commits_and_declaration(git_commits: Any, no_code_changes: str) -> dict[str, Any] | None:
+    if not (git_commits and no_code_changes.strip()):
+        return None
+    return validation_rejection(
+        field="no_code_changes",
+        constraint=CONSTRAINT_MUTUALLY_EXCLUSIVE,
+        message="Pass git_commits or no_code_changes, not both.",
+    )
+
 
 _EntryType = Literal[
     "project_completion",
@@ -52,8 +71,7 @@ _EntryType = Literal[
     description=(
         "Close a project and write the 360 Memory closeout entry. Orchestrator-only, at project "
         "completion. All agents MUST be complete/closed/decommissioned first (resolve via "
-        "report_progress + complete_job). git_commits is REQUIRED when git integration is "
-        "enabled -- see that param for the accepted shape."
+        "report_progress + complete_job)."
     ),
     annotations=_tool_hints("write_project_closeout", destructive=True),
 )
@@ -113,8 +131,11 @@ async def write_project_closeout(
             )
         ),
     ] = False,
+    no_code_changes: _NoCodeChanges = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    if (rejection := _both_commits_and_declaration(git_commits, no_code_changes)) is not None:
+        return rejection
     kwargs: dict[str, Any] = {
         "project_id": project_id,
         "summary": summary,
@@ -126,6 +147,8 @@ async def write_project_closeout(
         kwargs["git_commits"] = git_commits
     if tags is not None:
         kwargs["tags"] = tags
+    if no_code_changes:
+        kwargs["no_code_changes"] = no_code_changes
     return await _call_tool(ctx, "write_project_closeout", kwargs)
 
 
@@ -133,8 +156,8 @@ async def write_project_closeout(
     title="Write Memory Entry",
     description=(
         "Write a 360 memory entry for project completion or handover (orchestrator on completion, "
-        "or any agent on handover). git_commits is REQUIRED for project_completion when git "
-        "integration is enabled -- see that param for the accepted shape."
+        "or any agent on handover). With git integration on, project_completion needs git_commits "
+        "or no_code_changes."
     ),
     annotations=_tool_hints("write_memory_entry"),
 )
@@ -200,8 +223,11 @@ async def write_memory_entry(
             )
         ),
     ] = False,
+    no_code_changes: _NoCodeChanges = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    if (rejection := _both_commits_and_declaration(git_commits, no_code_changes)) is not None:
+        return rejection
     kwargs: dict[str, Any] = {
         "project_id": project_id,
         "summary": summary,
@@ -217,4 +243,6 @@ async def write_memory_entry(
         kwargs["tags"] = tags
     if acknowledge_closeout_todo:
         kwargs["acknowledge_closeout_todo"] = acknowledge_closeout_todo
+    if no_code_changes:
+        kwargs["no_code_changes"] = no_code_changes
     return await _call_tool(ctx, "write_memory_entry", kwargs)
