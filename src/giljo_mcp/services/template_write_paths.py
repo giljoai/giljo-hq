@@ -11,16 +11,40 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import (
     AuthorizationError,
+    CrewNamingExhaustedError,
     TemplateNotFoundError,
     ValidationError,
 )
 from giljo_mcp.models.templates import AgentTemplate
-from giljo_mcp.template_validation import MAX_NAME_SUFFIX, crew_suffixed_names, get_role_color, slugify_name
+from giljo_mcp.template_validation import (
+    MAX_NAME_SUFFIX,
+    crew_suffixed_names,
+    get_role_color,
+    slugify_name,
+    validate_harness_name,
+)
 from giljo_mcp.utils.log_sanitizer import sanitize
+
+
+_CREW_NAME_CONSTRAINT = "uq_template_tenant_name_version"
+
+AGENT_NAME_RACE_ATTEMPTS = 5
+
+
+def is_agent_name_conflict(exc: IntegrityError) -> bool:
+    return _CREW_NAME_CONSTRAINT in str(exc.orig or exc)
+
+
+def _harness_or_refuse(value: str | None) -> str:
+    try:
+        return validate_harness_name(value)
+    except ValueError as exc:
+        raise ValidationError(message=f"Invalid harness: {exc}") from exc
 
 
 async def require_own_product(session: AsyncSession, product_id: str, tenant_key: str) -> None:
@@ -65,10 +89,66 @@ async def resolve_crew_suffix(
 
     resolved = crew_suffixed_names(base_names, taken)
     if resolved is None:
-        raise ValidationError(
+        raise CrewNamingExhaustedError(
             message=(f"Too many agent crews named '{base_names[0]}' and siblings — rename or delete some agents first")
         )
     return resolved[0]
+
+
+async def _commit_with_name_race_retry(
+    service: Any,
+    session: AsyncSession,
+    tenant_key: str,
+    data,
+    base_name: str,
+    new_template: AgentTemplate,
+) -> None:
+
+    async def _free_name() -> str:
+        candidate = base_name
+        counter = 2
+        while await service.check_template_name_exists(session, tenant_key, candidate):
+            candidate = f"{base_name}-{counter}"
+            counter += 1
+            if counter > 20:
+                raise ValidationError(message=f"Too many agents named '{base_name}' — use a custom suffix")
+        return candidate
+
+    async def _clear_sibling_defaults() -> None:
+        if data.is_default and data.role:
+            existing_defaults = await service.get_default_templates_by_role(session, tenant_key, data.role)
+            for existing in existing_defaults:
+                existing.is_default = False
+
+    new_template.name = await _free_name()
+    await _clear_sibling_defaults()
+
+    for attempt in range(1, AGENT_NAME_RACE_ATTEMPTS + 1):
+        try:
+            await service.add_and_commit_template(session, new_template)
+            return
+        except IntegrityError as exc:
+            if not is_agent_name_conflict(exc):
+                raise
+            service._logger.warning(
+                "Agent name race on attempt %d/%d for product '%s': %s",
+                attempt,
+                AGENT_NAME_RACE_ATTEMPTS,
+                sanitize(data.product_id),
+                new_template.name,
+            )
+            if attempt == AGENT_NAME_RACE_ATTEMPTS:
+                raise CrewNamingExhaustedError(
+                    message=(
+                        "Could not name this agent because another change was "
+                        "happening at the same time. Please try creating it again."
+                    ),
+                    context={"tenant_key": tenant_key, "product_id": data.product_id},
+                ) from exc
+            await session.rollback()
+            await _clear_sibling_defaults()
+            new_template.name = await _free_name()
+            session.add(new_template)
 
 
 async def create_from_request(
@@ -81,6 +161,7 @@ async def create_from_request(
     from giljo_mcp.template_seeder import _get_mcp_bootstrap_section
 
     await require_own_product(session, data.product_id, tenant_key)
+    harness = _harness_or_refuse(data.cli_tool)
 
     raw_name = data.name or data.role or ""
     generated_name = slugify_name(data.role or raw_name, data.custom_suffix)
@@ -91,12 +172,6 @@ async def create_from_request(
         raise ValidationError(message="Name must be 100 characters or less")
 
     base_name = generated_name
-    counter = 2
-    while await service.check_template_name_exists(session, tenant_key, generated_name):
-        generated_name = f"{base_name}-{counter}"
-        counter += 1
-        if counter > 20:
-            raise ValidationError(message=f"Too many agents named '{base_name}' — use a custom suffix")
 
     canonical_bootstrap = _get_mcp_bootstrap_section()
 
@@ -104,7 +179,7 @@ async def create_from_request(
 
     description = data.description
     if not description:
-        if data.cli_tool == "claude":
+        if harness == "claude":
             description = f"Subagent for {data.role}"
         else:
             description = f"{data.role} agent template" if data.role else "Agent template"
@@ -113,20 +188,14 @@ async def create_from_request(
 
     new_template_id = str(uuid4())
 
-
-    if data.is_default and data.role:
-        existing_defaults = await service.get_default_templates_by_role(session, tenant_key, data.role)
-        for existing in existing_defaults:
-            existing.is_default = False
-
     new_template = AgentTemplate(
         id=new_template_id,
         tenant_key=tenant_key,
         product_id=data.product_id,
-        name=generated_name,
+        name=base_name,
         category=data.category or "role",
         role=data.role,
-        cli_tool=data.cli_tool,
+        cli_tool=harness,
         background_color=background_color,
         description=description,
         system_instructions=canonical_bootstrap,
@@ -141,11 +210,11 @@ async def create_from_request(
         is_active=data.is_active,
         is_default=data.is_default,
         tags=data.tags or [],
-        tool=data.cli_tool,
+        tool=harness,
         created_by=created_by,
     )
 
-    await service.add_and_commit_template(session, new_template)
+    await _commit_with_name_race_retry(service, session, tenant_key, data, base_name, new_template)
 
 
     service._logger.info("Created template %s for tenant %s", new_template.id, tenant_key)
@@ -175,6 +244,8 @@ async def update_from_request(
         raise AuthorizationError(message="Cannot modify system-managed templates")
 
     update_data = updates.model_dump(exclude_unset=True)
+    if "cli_tool" in update_data:
+        update_data["cli_tool"] = _harness_or_refuse(update_data["cli_tool"])
 
     if "system_instructions" in update_data:
         raise AuthorizationError(message="system_instructions is read-only; use reset-system to restore defaults")

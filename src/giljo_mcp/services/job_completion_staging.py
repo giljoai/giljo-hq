@@ -18,6 +18,7 @@ from giljo_mcp.models import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
 from giljo_mcp.repositories.mission_repository import MissionRepository
+from giljo_mcp.schemas.responses.orchestration import IMPLEMENTATION_GATE_OPEN
 from giljo_mcp.schemas.service_responses import StagingDirective, build_next_action
 from giljo_mcp.services.project_helpers import (
     advance_chain_member_to_implementing,
@@ -191,26 +192,13 @@ async def is_staging_end_orchestrator_call(
     ):
         return False, project
 
-    if project is not None and await _finale_deliverables_recorded(
-        session,
-        tenant_key,
-        str(job.project_id),
-        db_manager=db_manager,
-        tenant_manager=tenant_manager,
-    ):
+    if project is not None and await _finale_deliverables_recorded(session, tenant_key, str(job.project_id)):
         return False, project
 
     return True, project
 
 
-async def _finale_deliverables_recorded(
-    session: AsyncSession,
-    tenant_key: str,
-    project_id: str,
-    *,
-    db_manager: Any,
-    tenant_manager: Any,
-) -> bool:
+async def _finale_deliverables_recorded(session: AsyncSession, tenant_key: str, project_id: str) -> bool:
     from giljo_mcp.repositories.mission_repository import MissionRepository
 
     total, in_flight = await MissionRepository().count_non_orchestrator_agents_by_liveness(
@@ -219,19 +207,9 @@ async def _finale_deliverables_recorded(
     if total == 0 or in_flight > 0:
         return False
 
-    try:
-        from giljo_mcp.services.sequence_run_service import SequenceRunService
+    from giljo_mcp.services.sequence_run_service import active_chain_run
 
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=session,
-        )
-        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-    except Exception:  # noqa: BLE001 — on lookup failure keep the staging-end classification unchanged
-        logger.warning("[BE-9165] chain-member check failed (non-fatal); keeping staging-end classification")
-        return False
-    return run is None
+    return await active_chain_run(session, project_id, tenant_key) is None
 
 
 async def is_conductor_staging_end(
@@ -276,7 +254,6 @@ async def handle_staging_end(
     db_manager: Any,
     tenant_manager: Any,
     websocket_manager: Any | None,
-    test_session: AsyncSession | None,
 ) -> StagingDirective | None:
     if not is_staging_end:
         return None
@@ -320,7 +297,7 @@ async def handle_staging_end(
             tenant_manager=tenant_manager,
             project_id=str(job.project_id),
             tenant_key=tenant_key,
-            session=test_session,
+            session=session,
             websocket_manager=websocket_manager,
         )
         if websocket_manager is not None:
@@ -347,6 +324,7 @@ async def handle_staging_end(
 def staging_directive_for(is_chain_member_suborch: bool, is_conductor: bool = False) -> StagingDirective:
     if is_chain_member_suborch:
         return StagingDirective(
+            implementation_gate=IMPLEMENTATION_GATE_OPEN,
             action=_CHAIN_SUBORCH_STAGING_END_ACTION,
             message=_CHAIN_SUBORCH_STAGING_END_NEXT_ACTION,
             next_action=build_next_action(tool="get_job_mission", why=_CHAIN_SUBORCH_STAGING_END_NEXT_STEP),

@@ -19,6 +19,7 @@ from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.monitoring.health_config import AgentHealthStatus, HealthCheckConfig
 from giljo_mcp.protocols.websocket import WebSocketBroadcaster
+from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
 from giljo_mcp.services.agent_health_ws_broadcast import broadcast_agent_auto_failed, broadcast_health_alert
 
 
@@ -134,7 +135,7 @@ class AgentHealthMonitor:
                     or_(
                         AgentJob.project_id.is_(None),
                         and_(
-                            Project.deleted_at.is_(None),
+                            project_not_trashed(),
                             Project.status == ProjectStatus.ACTIVE,
                         ),
                     ),
@@ -372,7 +373,7 @@ class AgentHealthMonitor:
                 or_(
                     AgentJob.project_id.is_(None),
                     and_(
-                        Project.deleted_at.is_(None),
+                        project_not_trashed(),
                         Project.status == ProjectStatus.ACTIVE,
                     ),
                 )

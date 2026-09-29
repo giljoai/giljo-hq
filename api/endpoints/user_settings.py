@@ -81,8 +81,11 @@ class HeadlessLaunchResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": True}})
 
     allow_headless_launch: bool = Field(
-        description="True = Headless (a trusted CLI/OAuth agent may self-advance the implement gate) -- "
-        "the default since BE-9542; False = HITL (the human Implement step is enforced)."
+        description="False (the default) = HITL: a human must press Implement, or answer an approval, "
+        "in the dashboard. True = Headless: turning this on says your harness's own permission "
+        "prompt for that call IS your approval, and running that harness with a bypass/skip-permissions "
+        "flag removes the ask -- so a trusted CLI/OAuth agent may self-advance the implement gate with "
+        "nobody having actually been asked."
     )
 
 
@@ -92,7 +95,8 @@ class HeadlessLaunchUpdateRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": True}})
 
     allow_headless_launch: bool = Field(
-        description="True for Headless (the default); False disables it, enforcing the human Implement step."
+        description="False (the default) enforces the human Implement step; True opts into Headless, "
+        "where your harness's own permission prompt for that call becomes your approval."
     )
 
 
@@ -225,13 +229,13 @@ async def get_headless_launch(
     """Get the account-wide setting controlling whether a connected agent may
     advance the implement gate.
 
-    See the settings documentation for the current default. Admin-gated and
-    tenant-scoped. Requires admin role.
+    BE-9670b: off (False) by default. Admin-gated and tenant-scoped. Requires
+    admin role.
     """
     logger.debug("Admin %s retrieving headless-launch toggle", sanitize(current_user.username))
 
     service = SettingsService(db, current_user.tenant_key)
-    allow = await service.get_setting_value("security", "allow_headless_launch", default=True)
+    allow = await service.get_setting_value("security", "allow_headless_launch", default=False)
 
     return HeadlessLaunchResponse(allow_headless_launch=bool(allow))
 
@@ -244,13 +248,15 @@ async def update_headless_launch(
 ) -> HeadlessLaunchResponse:
     """Set the account-wide Headless-vs-HITL launch toggle (admin only).
 
-    Headless (True) is the platform default; this endpoint is how a tenant
-    opts OUT into HITL. HITL (False) means the server does not authorize
-    implementation early for a jwt/OAuth agent session — the human Implement step
-    is enforced at the MCP launch gate. This is a server-side authorization
-    control; it does not attempt to constrain client-local execution.
-    Read-modify-write preserves the sibling ``security`` keys, and stamps
-    ``allow_headless_launch_explicit=True`` so this deliberate write is
+    HITL (False) is the platform default: the server does not authorize
+    implementation early for a jwt/OAuth agent session -- the human Implement step
+    is enforced at the MCP launch gate. This endpoint is how a tenant opts IN to
+    Headless (True): a harness's own permission prompt for a gated call then
+    counts as the human's approval, so running that harness with a
+    bypass/skip-permissions flag removes the ask. This is a server-side
+    authorization control; it does not attempt to constrain client-local
+    execution. Read-modify-write preserves the sibling ``security`` keys, and
+    stamps ``allow_headless_launch_explicit=True`` so this deliberate write is
     distinguishable from an incidental one made by another security writer.
     """
     logger.info(

@@ -1,5 +1,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useTokenActionPage(performAction) {
   const route = useRoute()
@@ -26,7 +27,7 @@ export function useTokenActionPage(performAction) {
       response.value = await performAction(token.value)
       success.value = true
     } catch (err) {
-      errorDetail.value = err?.response?.data?.detail || ''
+      errorDetail.value = parseErrorResponse(err).message
       success.value = false
     } finally {
       loading.value = false

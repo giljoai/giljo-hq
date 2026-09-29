@@ -1,5 +1,6 @@
 import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useChainImplementation() {
   const { showToast } = useToast()
@@ -10,11 +11,7 @@ export function useChainImplementation() {
       await api.projects.launchImplementation(headProjectId)
       return true
     } catch (err) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.response?.data?.detail ||
-        err?.message ||
-        'Could not start the first project in this chain.'
+      const msg = parseErrorResponse(err).message || 'Could not start the first project in this chain.'
       showToast({ message: msg, type: 'error', timeout: 6000 })
       return false
     }

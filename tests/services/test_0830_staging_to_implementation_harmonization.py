@@ -6,7 +6,7 @@
 
 import random
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -17,6 +17,16 @@ from giljo_mcp.schemas.service_responses import MissionResponse
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.services.protocol_builder import _generate_agent_protocol
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
+
+
+@pytest.fixture(autouse=True)
+def _solo_chain_lookup():
+    with patch(
+        "giljo_mcp.services.sequence_run_service.SequenceRunService.find_active_run_for_project",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        yield
 
 
 

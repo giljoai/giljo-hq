@@ -11,20 +11,15 @@ from unittest.mock import AsyncMock, patch
 
 
 def test_free_functions_importable_from_mission_implementation_gate() -> None:
-    from giljo_mcp.services.mission_implementation_gate import (
-        check_implementation_gate,
-        is_chain_member,
-    )
+    from giljo_mcp.services.mission_implementation_gate import check_implementation_gate
 
     assert callable(check_implementation_gate)
-    assert callable(is_chain_member)
 
 
 def test_back_compat_shims_still_present_on_mission_service() -> None:
     from giljo_mcp.services.mission_service import MissionService
 
     assert hasattr(MissionService, "_check_implementation_gate")
-    assert hasattr(MissionService, "_is_chain_member")
 
 
 async def test_check_implementation_gate_shim_delegates_with_service_handles() -> None:
@@ -42,7 +37,7 @@ async def test_check_implementation_gate_shim_delegates_with_service_handles() -
         "giljo_mcp.services.mission_service.check_implementation_gate",
         new=AsyncMock(return_value=("PROJECT", None)),
     ) as mocked:
-        result = await service._check_implementation_gate(session, job, "job-1", "tk")
+        result = await service._check_implementation_gate(session, job, "job-1", "tk", agent_id="agent-1")
 
     assert result == ("PROJECT", None)
     mocked.assert_awaited_once_with(
@@ -54,24 +49,7 @@ async def test_check_implementation_gate_shim_delegates_with_service_handles() -
         repo=service._repo,
         db_manager=service.db_manager,
         tenant_manager=service.tenant_manager,
-    )
-
-
-async def test_is_chain_member_shim_delegates_with_service_handles() -> None:
-    from giljo_mcp.services.mission_service import MissionService
-
-    service = MissionService.__new__(MissionService)
-    service._logger = logging.getLogger("test.mission_implementation_gate")
-    service.db_manager = object()
-    service.tenant_manager = object()
-    session = object()
-
-    with patch("giljo_mcp.services.mission_service.is_chain_member", new=AsyncMock(return_value=True)) as mocked:
-        result = await service._is_chain_member(session, "proj-1", "tk")
-
-    assert result is True
-    mocked.assert_awaited_once_with(
-        service._logger, session, "proj-1", "tk", db_manager=service.db_manager, tenant_manager=service.tenant_manager
+        agent_id="agent-1",
     )
 
 

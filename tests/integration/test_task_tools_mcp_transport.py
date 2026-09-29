@@ -313,6 +313,31 @@ async def test_update_task_completion_notes_without_completed_is_noop(task_mcp_c
     assert "should not be appended" not in row["description"]
 
 
+async def test_update_task_accepts_on_hold_and_list_tasks_reports_it_open(
+    task_mcp_client, db_session, primary_tenant_key
+):
+    new_client, _switch = task_mcp_client
+    task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
+
+    async with new_client() as session:
+        result = await session.call_tool("update_task", {"task_id": task_id, "status": "on_hold"})
+
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert payload.get("success") is not False, f"on_hold was refused: {payload}"
+    assert "status" in payload["updated_fields"]
+    assert "started_at" not in payload["updated_fields"]
+
+    async with new_client() as session:
+        listed = await session.call_tool("list_tasks", {"mode": "full", "status": "on_hold"})
+    body = _payload(listed)
+    row = next(r for r in body["tasks"] if r["task_id"] == task_id)
+    assert row["status"] == "on_hold"
+    assert not row.get("started_at")
+    assert body["counts"]["by_status"]["on_hold"] == 1
+    assert body["next_action"]["tool"] == "update_task"
+
+
 
 
 async def test_list_tasks_summary_mode_field_shape(task_mcp_client, db_session, primary_tenant_key):

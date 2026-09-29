@@ -217,19 +217,15 @@ const testConnection = async () => {
 }
 
 const loadSettings = async () => {
-  try {
-    const { data: config } = await api.settings.getDatabase()
+  const { data: config } = await api.settings.getDatabase()
 
-    dbConfig.value = {
-      type: 'postgresql',
-      host: config.host || 'localhost',
-      port: config.port || 5432,
-      name: config.name || 'giljo_mcp',
-      user: config.user || 'postgres',
-      password: '********',
-    }
-  } catch {
-    // Settings fetch failed -- fields keep their defaults
+  dbConfig.value = {
+    type: 'postgresql',
+    host: config.host || 'localhost',
+    port: config.port || 5432,
+    name: config.name || 'giljo_mcp',
+    user: config.user || 'postgres',
+    password: '********',
   }
 }
 
@@ -291,7 +287,11 @@ const generateSuggestions = (error) => {
 }
 
 onMounted(async () => {
-  await loadSettings()
+  try {
+    await loadSettings()
+  } catch {
+    // Settings fetch failed -- fields keep their defaults
+  }
 })
 
 defineExpose({

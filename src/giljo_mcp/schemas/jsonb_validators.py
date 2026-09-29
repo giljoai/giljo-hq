@@ -583,14 +583,18 @@ def validate_consolidated_vision(data: dict | None) -> dict | None:
 class ProviderCancelResponse(BaseModel):
     """Validates the provider subscription-cancel response at the deletion write boundary.
 
-    Captures the relevant subset of the provider cancellation result
-    output so the GDPR audit chain can prove the cancel call was
-    acknowledged. The payload is persisted into
-    ``account_deletion_requests.billing_cancel_response`` (and mirrored into
-    ``deletion_receipts.billing_cancel_response``); the column name is
+    Captures the relevant subset of the provider cancellation result output so
+    the GDPR audit chain can prove the cancel call was acknowledged. The
+    column name (``account_deletion_requests.billing_cancel_response``) is
     provider-agnostic so a future pivot does not require another schema
     rename. ``extra="allow"`` so provider payload shape changes (added
     top-level keys) do not break audit writes.
+
+    BE-9696 F3: ``deletion_receipts.billing_cancel_response`` no longer
+    mirrors this payload verbatim -- ``receipts.py::_minimal_cancel_response``
+    validates through this model, then keeps only ``subscription_id`` and
+    ``status`` (the cancellation confirmation, not the provider's full
+    subscription JSON) before it ever reaches that column.
     """
 
     model_config = ConfigDict(extra="allow")

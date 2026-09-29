@@ -517,33 +517,8 @@ describe('useProjectCloseout', () => {
     })
   })
 
-  describe('dismissMemoryPollError', () => {
-    it('clears timed-out state when dismissed', async () => {
-      const api = (await import('@/services/api')).default
-      api.products.getMemoryEntries.mockResolvedValue({ data: { entries: [] } })
-
-      const project = makeProject({ product_id: 'prod-1' })
-      const jobs = [{ agent_display_name: 'orchestrator', status: 'complete' }]
-      const { memoryPollTimedOut, dismissMemoryPollError } = useProjectCloseout({
-        project,
-        projectId: computed(() => 'proj-1'),
-        sortedJobs: makeJobs(jobs),
-      })
-
-      await nextTick()
-      await nextTick()
-
-      vi.advanceTimersByTime(30_000)
-      await nextTick()
-      expect(memoryPollTimedOut.value).toBe(true)
-
-      dismissMemoryPollError()
-      expect(memoryPollTimedOut.value).toBe(false)
-    })
-  })
-
   describe('showMemoryPending with error states', () => {
-    it('stays true when memoryPollTimedOut is true (spinner kept visible by design)', () => {
+    it('turns false when memoryPollTimedOut is true', () => {
       const project = makeProject({ product_id: 'prod-1' })
       const jobs = [{ agent_display_name: 'orchestrator', status: 'complete' }]
       const { showMemoryPending, memoryPollTimedOut } = useProjectCloseout({
@@ -552,10 +527,10 @@ describe('useProjectCloseout', () => {
         sortedJobs: makeJobs(jobs),
       })
       memoryPollTimedOut.value = true
-      expect(showMemoryPending.value).toBe(true)
+      expect(showMemoryPending.value).toBe(false)
     })
 
-    it('stays true when memoryPollError is true (spinner kept visible by design)', () => {
+    it('turns false when memoryPollError is true', () => {
       const project = makeProject({ product_id: 'prod-1' })
       const jobs = [{ agent_display_name: 'orchestrator', status: 'complete' }]
       const { showMemoryPending, memoryPollError } = useProjectCloseout({
@@ -564,7 +539,7 @@ describe('useProjectCloseout', () => {
         sortedJobs: makeJobs(jobs),
       })
       memoryPollError.value = true
-      expect(showMemoryPending.value).toBe(true)
+      expect(showMemoryPending.value).toBe(false)
     })
   })
 })

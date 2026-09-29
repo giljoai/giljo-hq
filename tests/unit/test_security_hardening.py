@@ -7,9 +7,6 @@
 import sys
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -42,93 +39,6 @@ class TestPathTraversalPrevention:
 
     def test_dot_dot_in_products_still_blocked(self):
         assert not self._is_allowed("./products/../../../etc/passwd")
-
-
-class TestSetupEndpointGuard:
-
-    def test_require_setup_incomplete_blocks_when_users_exist(self):
-        from fastapi import HTTPException
-
-        from api.endpoints.database_setup import require_setup_incomplete
-
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (1,)
-        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_cursor.__exit__ = MagicMock(return_value=False)
-        mock_conn.cursor.return_value = mock_cursor
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "DB_HOST": "localhost",
-                    "DB_PORT": "5432",
-                    "DB_NAME": "giljo_mcp",
-                    "DB_USER": "giljo_user",
-                    "DB_PASSWORD": "test",
-                },
-            ),
-            patch("psycopg2.connect", return_value=mock_conn),
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                require_setup_incomplete()
-            assert exc_info.value.status_code == 403
-            assert "already completed" in exc_info.value.detail.lower()
-
-    def test_require_setup_incomplete_allows_when_no_users(self):
-        from api.endpoints.database_setup import require_setup_incomplete
-
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (0,)
-        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
-        mock_cursor.__exit__ = MagicMock(return_value=False)
-        mock_conn.cursor.return_value = mock_cursor
-
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "DB_HOST": "localhost",
-                    "DB_PORT": "5432",
-                    "DB_NAME": "giljo_mcp",
-                    "DB_USER": "giljo_user",
-                    "DB_PASSWORD": "test",
-                },
-            ),
-            patch("psycopg2.connect", return_value=mock_conn),
-        ):
-            result = require_setup_incomplete()
-            assert result is None
-
-    def test_require_setup_incomplete_allows_when_no_credentials(self):
-        from api.endpoints.database_setup import require_setup_incomplete
-
-        with patch.dict("os.environ", {}, clear=True):
-            result = require_setup_incomplete()
-            assert result is None
-
-    def test_require_setup_incomplete_allows_when_db_unreachable(self):
-        from api.endpoints.database_setup import require_setup_incomplete
-
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "DB_HOST": "localhost",
-                    "DB_PORT": "5432",
-                    "DB_NAME": "giljo_mcp",
-                    "DB_USER": "giljo_user",
-                    "DB_PASSWORD": "test",
-                },
-            ),
-            patch("psycopg2.connect", side_effect=Exception("Connection refused")),
-        ):
-            result = require_setup_incomplete()
-            assert result is None
 
 
 class TestErrorDetailLeaks:
@@ -177,9 +87,6 @@ class TestErrorDetailLeaks:
 
     def test_system_prompt_service_error_detail_is_generic(self):
         self._assert_no_internal_leak("System prompt service temporarily unavailable.")
-
-    def test_database_setup_failure_detail_is_generic(self):
-        self._assert_no_internal_leak("Database setup failed. Check server logs for details.")
 
     def test_setup_status_contains_expected_fields_only(self):
         expected_fields = {"setup_complete", "is_fresh_install", "requires_admin_creation", "total_users_count"}

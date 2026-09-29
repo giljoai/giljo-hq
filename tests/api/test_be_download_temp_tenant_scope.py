@@ -88,17 +88,32 @@ async def test_temp_download_returns_200_under_enforce_guard(
 
 
 @pytest.mark.asyncio
-async def test_temp_download_survives_metrics_failure(api_client: AsyncClient, staged_token: dict, monkeypatch) -> None:
+async def test_second_download_with_the_same_token_is_refused(
+    api_client: AsyncClient, staged_token: dict, monkeypatch
+) -> None:
+    monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
+
+    first = await api_client.get(staged_token["url"])
+    assert first.status_code == 200, first.text
+
+    second = await api_client.get(staged_token["url"])
+    assert second.status_code == 410, second.text
+
+
+@pytest.mark.asyncio
+async def test_temp_download_fails_closed_when_the_claim_raises(
+    api_client: AsyncClient, staged_token: dict, monkeypatch
+) -> None:
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
 
     from giljo_mcp.download_tokens import TokenManager
+    from giljo_mcp.exceptions import DatabaseError
 
     async def _boom(self, token, tenant_key):  # noqa: ANN001 - test stub
-        raise RuntimeError("simulated metrics backend failure")
+        raise DatabaseError("simulated claim backend failure")
 
-    monkeypatch.setattr(TokenManager, "increment_download_count", _boom)
+    monkeypatch.setattr(TokenManager, "claim_download", _boom)
 
     resp = await api_client.get(staged_token["url"])
 
-    assert resp.status_code == 200, resp.text
-    assert resp.content == _ZIP_BYTES
+    assert resp.status_code == 500, resp.text

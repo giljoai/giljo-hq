@@ -121,14 +121,15 @@ async def get_context(
             )
         ),
     ] = "",
-    project_id: str = "",
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
     agent_name: Annotated[
         str, Field(description="Agent template name (e.g. 'implementer-backend') for self_identity category. Optional.")
     ] = "",
     job_id: Annotated[
         str,
         Field(
-            description="Agent job UUID. REQUIRED for the 'todos' category (read-back of an agent's TODO list — sequence + content + status). Ignored by other categories."
+            max_length=MCP_ID_MAX,
+            description="Agent job UUID. REQUIRED for the 'todos' category (read-back of an agent's TODO list — sequence + content + status). Ignored by other categories.",
         ),
     ] = "",
     categories: Annotated[

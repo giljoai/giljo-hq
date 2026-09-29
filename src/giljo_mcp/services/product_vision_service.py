@@ -17,8 +17,6 @@ from giljo_mcp.domain.soft_delete import RECOVER_WINDOW_DAYS, recover_window_exp
 from giljo_mcp.exceptions import (
     AlreadyExistsError,
     BaseGiljoError,
-    ContextError,
-    GiljoFileNotFoundError,
     ResourceNotFoundError,
     ValidationError,
 )
@@ -82,8 +80,7 @@ class ProductVisionService:
                     is_active=True,
                     display_order=0,
                 )
-
-                await session.commit()
+                await session.flush()
 
                 self._logger.info(f"Created vision document {sanitize(doc.id)} for product {sanitize(product_id)}")
 
@@ -126,29 +123,21 @@ class ProductVisionService:
     async def _chunk_document(
         self, session, doc, content: str, auto_chunk: bool, max_tokens: int, total_tokens: int
     ) -> tuple[int, int]:
-        chunks_created = 0
-
         if not auto_chunk:
-            return chunks_created, total_tokens
+            return 0, total_tokens
 
         from giljo_mcp.context_management.chunker import VisionDocumentChunker
 
         chunker = VisionDocumentChunker(target_chunk_size=max_tokens)
 
-        try:
-            chunk_result = await chunker.chunk_vision_document(
-                session=session, tenant_key=self.tenant_key, vision_document_id=str(doc.id)
-            )
+        chunk_result = await chunker.chunk_vision_document(
+            session=session, tenant_key=self.tenant_key, vision_document_id=str(doc.id)
+        )
+        await session.commit()
 
-            await session.commit()
-
-            chunks_created = chunk_result["chunks_created"]
-            total_tokens = chunk_result["total_tokens"]
-
-            self._logger.info(f"Chunked document {doc.id}: {chunks_created} chunks, {total_tokens} tokens")
-        except (ContextError, GiljoFileNotFoundError, OSError) as e:
-            self._logger.warning(f"Document {doc.id} created but chunking failed: {e}")
-
+        chunks_created = chunk_result["chunks_created"]
+        total_tokens = chunk_result["total_tokens"]
+        self._logger.info(f"Chunked document {doc.id}: {chunks_created} chunks, {total_tokens} tokens")
         return chunks_created, total_tokens
 
     async def evaluate_vision_analysis_complete(

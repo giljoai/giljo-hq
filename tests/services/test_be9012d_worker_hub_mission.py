@@ -179,9 +179,9 @@ class TestResolveCommThreadId:
             mock_instance = mock_cls.return_value
             mock_instance.resolve_or_create_bound_thread = AsyncMock(return_value={"thread_id": _THREAD})
 
-            result = await service._resolve_comm_thread_id(given_session, job, _TENANT)
+            result = await service._resolve_comm_thread(given_session, job, _TENANT)
 
-        assert result == _THREAD
+        assert result == {"thread_id": _THREAD}
         mock_cls.assert_called_once_with(db_manager, tenant_manager, session=given_session)
         mock_instance.resolve_or_create_bound_thread.assert_awaited_once_with(
             project_id=str(job.project_id), tenant_key=_TENANT
@@ -204,6 +204,6 @@ class TestResolveCommThreadId:
             new_callable=AsyncMock,
             side_effect=RuntimeError("db exploded"),
         ):
-            result = await service._resolve_comm_thread_id(MagicMock(), job, _TENANT)
+            result = await service._resolve_comm_thread(MagicMock(), job, _TENANT)
 
         assert result is None

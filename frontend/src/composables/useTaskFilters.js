@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 const TASK_STATUS_OPTIONS = [
   { title: 'Pending', value: 'pending' },
   { title: 'In Progress', value: 'in_progress' },
+  { title: 'On hold', value: 'on_hold' },
   { title: 'Completed', value: 'completed' },
   { title: 'Blocked', value: 'blocked' },
   { title: 'Cancelled', value: 'cancelled' },

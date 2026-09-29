@@ -20,8 +20,8 @@ class TaskCreate(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255, description="Task title")
     description: str | None = Field(None, description="Task description")
-    status: Literal["pending", "in_progress", "completed", "blocked", "cancelled"] | None = Field(
-        None, description="Task status: pending, in_progress, completed, blocked, cancelled"
+    status: Literal["pending", "in_progress", "on_hold", "completed", "blocked", "cancelled"] | None = Field(
+        None, description="Task status: pending, in_progress, on_hold, completed, blocked, cancelled"
     )
     priority: Literal["low", "medium", "high", "critical"] | None = Field(
         None, description="Task priority: low, medium, high, critical"
@@ -64,8 +64,8 @@ class TaskUpdate(BaseModel):
 
     title: str | None = Field(None, min_length=1, max_length=255, description="Task title")
     description: str | None = Field(None, description="Task description")
-    status: Literal["pending", "in_progress", "completed", "blocked", "cancelled"] | None = Field(
-        None, description="Task status: pending, in_progress, completed, blocked, cancelled"
+    status: Literal["pending", "in_progress", "on_hold", "completed", "blocked", "cancelled"] | None = Field(
+        None, description="Task status: pending, in_progress, on_hold, completed, blocked, cancelled"
     )
     priority: Literal["low", "medium", "high", "critical"] | None = Field(
         None, description="Task priority: low, medium, high, critical"
@@ -195,6 +195,6 @@ class TaskResponse(BaseModel):
 class StatusUpdate(BaseModel):
     """Schema for status-only updates."""
 
-    status: Literal["pending", "in_progress", "completed", "blocked", "cancelled"] = Field(
+    status: Literal["pending", "in_progress", "on_hold", "completed", "blocked", "cancelled"] = Field(
         ..., description="New task status"
     )

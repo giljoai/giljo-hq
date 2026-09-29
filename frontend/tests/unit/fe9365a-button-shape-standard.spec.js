@@ -45,6 +45,15 @@ const CIRCULAR_ALLOWLIST = new Set([
   // FE-9365c: the Hub card's agent status dot. Colour and ring come from
   // useAgentStatusDot (the Jobs board's vocabulary); it is an indicator, never clicked.
   '__pill-dot',
+  // FE-9678: the folded Jobs board card's per-agent status dot, in the corner
+  // of the crew badge. Same vocabulary as the row's status word; never clicked.
+  'jb-summary-dot',
+  // FE-9682: the Mission row's state dot (none / writing / written), the crew
+  // chip's status dot and the Serena "S" ring on the meta line. Indicators
+  // and a glyph, never a button of their own.
+  'jb-dot',
+  'jb-achip-st',
+  'jb-int-serena',
   // FE-9365e: the same dot again, as the legend's swatch. It has to be round for the
   // legend to be explaining the thing the card actually draws.
   '__dot',

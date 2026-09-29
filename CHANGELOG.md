@@ -2,6 +2,66 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.6.0] — 2026-09-29
+
+### Added
+
+- A new Jobs board. It is now the one place to stage and run projects: every product on one board with an All tab, a Staging side and an Implementation side, and each card carries its own controls (pick the run mode, Stage, Implement, Re-Stage, Review). Cards fold to one line, update live as agents work, and show who needs to act and why. The old project page tabs are gone.
+- Chains live on the Jobs board as one group: linked projects in run order under one header, with Stage, Implement, Stop and Deactivate for the whole chain, and the current step lit up.
+- Agents nobody started now stand out. An agent still waiting well past your check-in interval is marked "Not picked up" on the board and over MCP, with a nudge to launch it.
+- Close a project from the dashboard when its agents stopped early, without waiting for an agent summary. A saved closeout shows "Ready for review" until you archive.
+- Tasks can be put On hold: parked, still visible as open work, with its own badge and filter.
+
+### Changed
+
+- Nothing picks an execution mode for you. Every card asks you to choose before Stage, then shows the choice as a locked fact.
+- Headless launch is off by default. A CLI or OAuth agent can self-advance a staged project only if an admin turns Headless on. A staged chain also waits on the server for your one approval, which then carries the whole chain.
+- Where you answer an agent's decision follows the Headless setting: with it off, decisions are answered only on the dashboard, and the terminal menu says so plainly.
+- Agents spawned inside your orchestrator's session get a clean start prompt with no launch command. For agents in their own terminals, the harness is a name you type; the server names the tool and leaves the command to you. Anyone driving Giljo HQ from their own client: the per-agent launch entries now carry `launch` instead of ready-made `commands`.
+- Accepting an agent's finished work is reserved for the orchestrator (`finalize_job` takes `caller_job_id`), so every job gets a review and can be sent back.
+- A project that changed no code can be closed out honestly, with the reason kept in its history.
+- Staging, the implementation prompt and `get_job_mission` all name the project's coordination thread, so an agent knows where to post from the start.
+- Phones and tablets show the full desktop dashboard scaled to fit; pinch to zoom.
+- Web framework and dashboard libraries updated to their latest compatible releases. No action needed.
+- Saving a task edit sends only what you changed, so concurrent edits clash less.
+- The welcome email's set-password link now stays valid for 24 hours; a forgot-password link still expires in 1 hour.
+
+### Fixed
+
+- A chain project no longer turns into a solo project when its chain lookup fails; spawning, staging, launching and closing out a chain member report the error instead of starting a second orchestrator or losing progress.
+- A message to the Orchestrator in a chain always reaches the chain's own coordination thread, and a failed lookup shows an error.
+- Turning "Require approval before closeout" on or off no longer clears your other account settings.
+- Error messages across the dashboard show the server's actual reason instead of a generic or missing message.
+- A vision document upload whose chunking fails saves nothing, so trying again works; an empty upload is refused.
+- Restoring a trashed project can no longer produce a duplicate project number, and revived projects are counted on the dashboard again.
+- Creating two products at once no longer fails with a server error.
+- A broken config.yaml no longer gets silently wiped when you toggle HTTPS; the page shows an error and leaves the file alone.
+- Finished chain steps read Complete, cancelled steps read Stopped, a finished chain whose projects were deleted leaves the board, and the "Chain finished" bell notice is back.
+- The card edit pencil opens a filled-in form instead of an empty one that risked wiping the project on save.
+- The start-up logo no longer lingers after sign-in, the Reload from Config button works again, and the guide no longer mentions the retired Auto Check-In slider.
+- On the hosted plan: data export works during a lapsed trial, retention emails state the real timeline, and the 11-month inactivity warning fires again after a second lapse.
+
+### Removed
+
+- The project page's Staging and Implementation tabs, the Agent Lab tips window, and the Hand over and Stop project buttons on the orchestrator row. Old links land on the board.
+- The old "Launch staged" master-prompt endpoint, which backed a dialog that no longer exists.
+
+### Security
+
+- A pending forced password change now blocks every request on your account, not only the dashboard screens, so a skipped first-login screen cannot be worked around. On the hosted plan, a browser session that still owes acceptance of updated Terms is refused until it accepts.
+- Your account's internal isolation key no longer appears in any prompt, context result, staging instruction or error message an agent reads. The dashboard prompt and the MCP prompt come from one generator, so they cannot drift.
+- Agents are no longer handed a launch command with their own permission prompts turned off; that decision is yours.
+- New accounts receive a one-time set-password link instead of a password by email.
+- Error responses no longer echo database text, file paths, SQL or internal server addresses; the detail stays in the server log.
+- Oversized job or project ids are rejected and internal call tracking is capped, so a flood of made-up ids cannot grow server memory.
+- One-time download links cannot be reused; a used card offers "Generate a new link". A link that fails to prepare shows a clear error.
+- Set-password and reset links cannot be used twice at the same moment. Admin-triggered reset emails share the public hourly limit. The recovery-PIN check reveals nothing about the account and has its own rate limit, and near-simultaneous wrong guesses are counted correctly.
+- Names you type are shown as plain text in account emails. The consent screen's Deny only returns to a registered address. Links containing two dashes are no longer rejected or logged.
+- An unused database-setup endpoint reachable without signing in has been removed.
+- The Cloudflare client-IP header is trusted only when the request came through Cloudflare. On the hosted plan, a signed-in request not linked to a workspace is refused, and the interactive API docs are no longer published; self-hosted installs keep them.
+- The Linux and macOS installer never writes a raw install log if it cannot redact secrets; the Windows installer removes its raw transcript once the cleaned copy is saved.
+- Third-party libraries updated to their latest fixed releases (HTTP client, login-token, database, migration and web server).
+
 ## [2.5.0] — 2026-09-24
 
 ### Added
@@ -648,47 +708,6 @@ Agents can now reliably stay attached to a Message Hub thread. The wait-for-my-t
   product back on the shared prompt now has a clearly labelled action that names what
   the product will fall back to.
 
-### Changed
-
-- **Hand-off alerts now say who is waiting on you.** When work is handed to you in
-  a conversation, the notification names the agent that is blocked — "P1
-  Orchestrator is waiting on you in Laptop interop" — instead of only naming the
-  conversation. You can tell at a glance whether it needs you now, without opening
-  it first.
-Message Hub posts now always carry an explicit author. Agents must identify themselves with `from_agent` on every `post_to_thread` call, and posting in your (the human user's) voice now requires an explicit `as_user=true` — a forgotten field can no longer make an agent's message appear as if you wrote it.
-- **New agents arrive ready to configure, not switched on.** Adding an agent — or pressing
-  "Add Default Agents" — used to put it straight to work in the product you had open, even
-  though it was still carrying its stock instructions. New agents now appear in your agent
-  list where you can open and tailor them, and go live in a product only when you switch
-  them on there. Nothing runs in a product until you say so.
-- **Agents you already switched on are untouched.** This applies only to agents added from
-  now on; everything already enabled for a product stays exactly as you left it.
-- **Agent crews now start with the right instructions once, not twice.** In
-  Subagent mode each agent already loads its role from the agent file installed
-  on your machine, so the server no longer sends that same role a second time.
-  That leaves noticeably more room in every agent's context for the actual work.
-  Multi-Terminal agents are unaffected: their terminals have no installed file
-  to read from, so they keep receiving their role from the server as before.
-- **A missing agent install no longer halts a run.** Previously an orchestrator
-  was told to stop and report the mismatch when an agent file was not installed.
-  It now carries on using your coding tool's own default agent and tells you
-  once: "No Giljo HQ agent templates installed — using default agents. Run
-  giljo_setup to install tuned agents."
-- **Every project now lives under a product.** Creating a project without
-  naming one is refused up front with a message that says what to pass, instead
-  of failing deep in the database. Older installs that still held product-less
-  projects get them filed under a product on upgrade — those projects are kept,
-  never discarded.
-- **Closeout and memory-entry tools now tell you how to avoid a save failure, not just how you'll hear about it afterward.** The `summary` field's description now says to send it as the last argument in your call, so a long note can't accidentally swallow the fields that follow it.
-- **Your AI assistant now sees how big your task list is before it reads it.** Every
-  task listing comes back with the totals for your whole board — how many are done, how
-  many are still open, and the date range they span — so the assistant can ask a
-  sensible question instead of pulling everything and hoping. Listings are also bounded
-  now: you get a sensible page by default, and when there is more, the answer says so
-  plainly instead of looking complete. Asking for everything still works — it is just a
-  deliberate request now rather than the accidental default.
-
-Added
 - **Search your tasks by a word.** Ask for "the OAuth one" and the assistant can find it
   by a word in the title, the description, or the TSK number, instead of reading the
   whole list to look for it.
@@ -699,7 +718,7 @@ Added
   release.** The dashboard now runs on Pinia 4, keeping it current with the
   wider Vue ecosystem and on a supported upgrade path. Nothing changes in how
   the dashboard looks or behaves.
-The per-project auto check-in slider is retired. How often waiting agents check in is now one account-level setting (Tools → Notifications, next to the silence threshold), agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer, and the dashboard now tells you whether an agent is waiting for a wake signal, sleeping on a countdown, or has gone quiet. Cadence values you had set on individual projects are still honoured.
+- The per-project auto check-in slider is retired. How often waiting agents check in is now one account-level setting (Tools → Notifications, next to the silence threshold), agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer, and the dashboard now tells you whether an agent is waiting for a wake signal, sleeping on a countdown, or has gone quiet. Cadence values you had set on individual projects are still honoured.
 - **A cleaner Message Hub.** The toolbar above your conversations now uses the
   same compact icon buttons as the Projects page, with the number of deleted
   threads shown as a small dot on the trash icon. The conversation cards line up
@@ -761,48 +780,47 @@ The per-project auto check-in slider is retired. How often waiting agents check 
   the whole time — so the same button also tells you at a glance whether anything needs
   you here. It respects your system's reduced-motion setting.
 
-Fixed
-- **The gold "Waiting on you" marker now disappears when you clear a thread.** Opening a
-  thread from a notification and marking it handled cleared it everywhere except the
-  marker itself, which stayed pinned above the message until you navigated away.
-- **Desktop notifications show the Giljo face instead of the wordmark**, matching the
-  rest of the app.
-- **Giljo HQ now runs on version 2.0 of the Model Context Protocol SDK.** Your
-  existing connections keep working exactly as before — every protocol version
-  your tools already speak is still served, and there is nothing to reconnect or
-  reconfigure.
-- **Support added for the newest protocol version (2026-07-28).** Newer clients
-  that speak it can now connect without being turned away, alongside the older
-  versions Giljo HQ has always supported.
+### Changed
 
-### Fixed
+- **Hand-off alerts now say who is waiting on you.** When work is handed to you in
+  a conversation, the notification names the agent that is blocked — "P1
+  Orchestrator is waiting on you in Laptop interop" — instead of only naming the
+  conversation. You can tell at a glance whether it needs you now, without opening
+  it first.
+- Message Hub posts now always carry an explicit author. Agents must identify themselves with `from_agent` on every `post_to_thread` call, and posting in your (the human user's) voice now requires an explicit `as_user=true` — a forgotten field can no longer make an agent's message appear as if you wrote it.
+- **New agents arrive ready to configure, not switched on.** Adding an agent — or pressing
+  "Add Default Agents" — used to put it straight to work in the product you had open, even
+  though it was still carrying its stock instructions. New agents now appear in your agent
+  list where you can open and tailor them, and go live in a product only when you switch
+  them on there. Nothing runs in a product until you say so.
+- **Agents you already switched on are untouched.** This applies only to agents added from
+  now on; everything already enabled for a product stays exactly as you left it.
+- **Agent crews now start with the right instructions once, not twice.** In
+  Subagent mode each agent already loads its role from the agent file installed
+  on your machine, so the server no longer sends that same role a second time.
+  That leaves noticeably more room in every agent's context for the actual work.
+  Multi-Terminal agents are unaffected: their terminals have no installed file
+  to read from, so they keep receiving their role from the server as before.
+- **A missing agent install no longer halts a run.** Previously an orchestrator
+  was told to stop and report the mismatch when an agent file was not installed.
+  It now carries on using your coding tool's own default agent and tells you
+  once: "No Giljo HQ agent templates installed — using default agents. Run
+  giljo_setup to install tuned agents."
+- **Every project now lives under a product.** Creating a project without
+  naming one is refused up front with a message that says what to pass, instead
+  of failing deep in the database. Older installs that still held product-less
+  projects get them filed under a product on upgrade — those projects are kept,
+  never discarded.
+- **Closeout and memory-entry tools now tell you how to avoid a save failure, not just how you'll hear about it afterward.** The `summary` field's description now says to send it as the last argument in your call, so a long note can't accidentally swallow the fields that follow it.
+- **Your AI assistant now sees how big your task list is before it reads it.** Every
+  task listing comes back with the totals for your whole board — how many are done, how
+  many are still open, and the date range they span — so the assistant can ask a
+  sensible question instead of pulling everything and hoping. Listings are also bounded
+  now: you get a sensible page by default, and when there is more, the answer says so
+  plainly instead of looking complete. Asking for everything still works — it is just a
+  deliberate request now rather than the accidental default.
 
-- **Wait-for-your-turn now works on hosted installs, not just self-hosted ones.**
-  On a deployment that runs several server processes, an agent waiting for work could
-  miss it when the message happened to arrive on a different process. Waiting agents
-  are now woken wherever the message lands. Self-hosted installs were never affected.
-Marking a project completed from an agent now finishes it properly. It runs the same full close-down the Archive button does — the project is set aside, given a real completion date, and any agents still sitting at "complete" are moved to "closed". Before, an agent could only do the halfway version, which looked finished on the dashboard while leaving its helper agents hanging around forever.
-- **Your agents now follow the product you are working in.** Switching products used to
-  have no effect on which agents were installed or which ones an orchestrator could
-  start — every product got the same set, so agents you had tuned for one product turned
-  up in another. Enable or disable an agent on the Agents screen and that choice is now
-  remembered per product, and applies to what you install, what your orchestrator can
-  start, and what it sees on its roster.
-- **A product you have never customised keeps all of your agents**, exactly as before, so
-  nothing disappears when you upgrade.
-- **Turning an agent off stays off.** A disabled agent is no longer switched back on when
-  you restart, upgrade, or switch back to that product.
-- **Orchestrators can now start any of your enabled agents, up to 16.** The roster was
-  capped at 8 while installs already allowed 16, so an agent could be installed and yet
-  impossible to start.
-Installing your agents can no longer overwrite files you wrote yourself. Every agent
-Giljo HQ exports now says, inside the file, that it came from Giljo HQ and which product
-it belongs to -- so an install refreshes its own files, leaves anything you hand-wrote
-completely alone, and asks before replacing anything it is unsure about. It used to be an
-all-or-nothing choice: overwrite everything in the folder, or skip the update entirely.
-
-Changed
-Exported agents are now named after the product they belong to, so the same agent used by
+- Exported agents are now named after the product they belong to, so the same agent used by
 two products installs as two separate files instead of one quietly replacing the other.
 Where your coding tool supports it, agents install into the project you are working in
 rather than your home folder, which keeps each project's agents to itself.
@@ -848,7 +866,7 @@ rather than your home folder, which keeps each project's agents to itself.
   "(Copy)" on screen but saved under a different name entirely, which made it harder to
   find and to start. A copy is now named after its role, so the name you see is the name
   it keeps.
-Connected AI clients no longer lose their connection when their sign-in token renews in the background. Renewals are now accepted at the same address the server tells clients to use, so a long-running session keeps working instead of stopping with an error until you sign in again.
+- Connected AI clients no longer lose their connection when their sign-in token renews in the background. Renewals are now accepted at the same address the server tells clients to use, so a long-running session keeps working instead of stopping with an error until you sign in again.
 - **Tasks and projects created by agents now always land on the product the agent
   intended, even while you switch products in the dashboard.** An agent can name the
   product it is filing against instead of relying on whichever product happens to be
@@ -894,14 +912,14 @@ Connected AI clients no longer lose their connection when their sign-in token re
 - **The project shortcut on a notification works again.** Notifications that name a
   project now show a clickable project tag that takes you straight there. It had
   stopped appearing on notifications sent from the server.
-Setting your server's public address with a trailing slash no longer produces broken links. Orchestrator prompts and setup download links now come out correct either way, instead of working on some paths and doubling up the slash on others.
+- Setting your server's public address with a trailing slash no longer produces broken links. Orchestrator prompts and setup download links now come out correct either way, instead of working on some paths and doubling up the slash on others.
 - **The projects list's rows-per-page control no longer silently does nothing.**
   Choosing "All" asked for more rows than the server will return in one page, so
   the request was rejected and the table quietly stayed as it was — it looked
   like a dead button. The control now offers only page sizes that work, up to a
   new largest option of 200 rows, and an out-of-range choice can no longer reach
   the server at all.
-Ask an AI assistant what work you have finished and you now get the whole answer. The project list an assistant reads is capped for safety, and that cap was keeping whichever projects were created most recently — so a project started months ago and finished last week fell outside the window and vanished from the list entirely, with nothing to say anything was missing. Finished work is now kept by when it was finished, unfinished work is never dropped, the cap sits two and a half times higher, and a list that does get cut short now says so and explains how to narrow the question.
+- Ask an AI assistant what work you have finished and you now get the whole answer. The project list an assistant reads is capped for safety, and that cap was keeping whichever projects were created most recently — so a project started months ago and finished last week fell outside the window and vanished from the list entirely, with nothing to say anything was missing. Finished work is now kept by when it was finished, unfinished work is never dropped, the cap sits two and a half times higher, and a list that does get cut short now says so and explains how to narrow the question.
 - **Changing a task's product no longer silently fails.** Trying to move a
   task to a different product now shows a clear error instead of appearing
   to save while quietly not applying the change.
@@ -915,7 +933,6 @@ Ask an AI assistant what work you have finished and you now get the whole answer
   out — no error, no warning, just a missing row. Pages now advance on a stable
   order, so every item is returned exactly once.
 
-Changed
 - **A stale page marker now says so instead of silently starting over.** Asking
   for the next page using a marker that no longer points at anything used to
   hand back the first page again, which could keep a client looping forever.
@@ -934,7 +951,6 @@ Changed
   count, and a new "remaining" count shows how much is left in the current
   walk.
 
-Changed
 - **Large lists now page one page sooner, to guarantee delivery.** The size
   limit for a single page of projects or tasks was lowered slightly after
   testing found a narrow range where a page reported as complete could
@@ -1000,7 +1016,7 @@ Clicking a "waiting on you" notification now takes you to the exact message that
   leaving a page blank until someone cleared the cache by hand. Those responses
   are no longer stored, so the page loads normally as soon as the update
   finishes.
-When a closeout or memory entry is rejected because one argument was swallowed into another, the error now tells you the fix that actually works: send the long summary as the last argument, so nothing follows it and nothing can be swallowed. It previously advised shortening the summary, which never resolved the problem and cost several rounds of failed retries — and it said so while also correctly stating that no size limit had been reached.
+- When a closeout or memory entry is rejected because one argument was swallowed into another, the error now tells you the fix that actually works: send the long summary as the last argument, so nothing follows it and nothing can be swallowed. It previously advised shortening the summary, which never resolved the problem and cost several rounds of failed retries — and it said so while also correctly stating that no size limit had been reached.
 An agent that has gone quiet now reads the same on every screen, and it never reads as healthy when we have simply lost track of it. Opening a thread used to show a silent agent as "Monitoring" — as if it were working away — while the thread list correctly showed it as "Silent". Both now report the agent's real status, so you can tell a working agent from a stalled one before deciding whether to wait or step in.
 Editing a task now saves. Reopening a task and changing its title or description previously failed with a generic "Failed to save task" message and the edit was lost — the dashboard was sending the task's own type back unchanged, and the server refused it. Your edits go through.
 - Your orchestrator now lands on its project's message thread automatically, so a
@@ -1008,6 +1024,46 @@ Editing a task now saves. Reopening a task and changing its title or description
   every agent it assigned to join the thread but never appeared there itself, which
   meant instructions aimed at the orchestrator went nowhere. Its instructions now also
   name the thread outright instead of leaving you to work out which one it meant.
+
+### Fixed
+
+- **The gold "Waiting on you" marker now disappears when you clear a thread.** Opening a
+  thread from a notification and marking it handled cleared it everywhere except the
+  marker itself, which stayed pinned above the message until you navigated away.
+- **Desktop notifications show the Giljo face instead of the wordmark**, matching the
+  rest of the app.
+- **Giljo HQ now runs on version 2.0 of the Model Context Protocol SDK.** Your
+  existing connections keep working exactly as before — every protocol version
+  your tools already speak is still served, and there is nothing to reconnect or
+  reconfigure.
+- **Support added for the newest protocol version (2026-07-28).** Newer clients
+  that speak it can now connect without being turned away, alongside the older
+  versions Giljo HQ has always supported.
+
+
+- **Wait-for-your-turn now works on hosted installs, not just self-hosted ones.**
+  On a deployment that runs several server processes, an agent waiting for work could
+  miss it when the message happened to arrive on a different process. Waiting agents
+  are now woken wherever the message lands. Self-hosted installs were never affected.
+- Marking a project completed from an agent now finishes it properly. It runs the same full close-down the Archive button does — the project is set aside, given a real completion date, and any agents still sitting at "complete" are moved to "closed". Before, an agent could only do the halfway version, which looked finished on the dashboard while leaving its helper agents hanging around forever.
+- **Your agents now follow the product you are working in.** Switching products used to
+  have no effect on which agents were installed or which ones an orchestrator could
+  start — every product got the same set, so agents you had tuned for one product turned
+  up in another. Enable or disable an agent on the Agents screen and that choice is now
+  remembered per product, and applies to what you install, what your orchestrator can
+  start, and what it sees on its roster.
+- **A product you have never customised keeps all of your agents**, exactly as before, so
+  nothing disappears when you upgrade.
+- **Turning an agent off stays off.** A disabled agent is no longer switched back on when
+  you restart, upgrade, or switch back to that product.
+- **Orchestrators can now start any of your enabled agents, up to 16.** The roster was
+  capped at 8 while installs already allowed 16, so an agent could be installed and yet
+  impossible to start.
+- Installing your agents can no longer overwrite files you wrote yourself. Every agent
+Giljo HQ exports now says, inside the file, that it came from Giljo HQ and which product
+it belongs to -- so an install refreshes its own files, leaves anything you hand-wrote
+completely alone, and asks before replacing anything it is unsure about. It used to be an
+all-or-nothing choice: overwrite everything in the folder, or skip the update entirely.
 
 ### Security
 

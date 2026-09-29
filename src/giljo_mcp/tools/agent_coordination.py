@@ -78,32 +78,3 @@ async def spawn_agent(
         "job_id": job_id,
         "agent_id": new_agent_id,
     }
-
-
-async def get_team_agents(
-    job_id: str,
-    tenant_key: str,
-    include_inactive: bool = False,
-) -> dict[str, Any]:
-    if not job_id or not job_id.strip():
-        raise ValidationError(message="job_id cannot be empty")
-
-    if not tenant_key or not tenant_key.strip():
-        raise ValidationError(message="tenant_key cannot be empty")
-
-    job_manager = _create_job_manager()
-    team_members = await job_manager.list_team_agents(
-        job_id=job_id,
-        tenant_key=tenant_key,
-        include_inactive=include_inactive,
-    )
-
-    logger.info(
-        f"[get_team_agents] Retrieved {len(team_members)} teammates for job {job_id}, "
-        f"include_inactive={include_inactive}, tenant={tenant_key}"
-    )
-
-    return {
-        "success": True,
-        "team": team_members,
-    }

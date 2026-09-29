@@ -22,7 +22,6 @@ from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptB
 from giljo_mcp.prompts.staging_prompt_builder import StagingPromptBuilder
 from giljo_mcp.prompts.subagent_prompt_builder import SubagentPromptBuilder
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
-from giljo_mcp.services.handover_template import resolve_handover_template
 from giljo_mcp.thin_prompt_lifecycle import SUBAGENT_EXECUTION_PROMPT_TYPE, ThinClientLifecycleMixin
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -57,7 +56,6 @@ YOUR IDENTITY (use these in all MCP calls):
   THE Project ID: {project_id}
 
 MCP Server: {mcp_url}
-Note: tenant_key is auto-injected by server from your API key session
 Tool names below are bare; your MCP client may expose them under a prefix
 (e.g. `mcp__<server>__<tool>`) — call them by the names your harness lists.
 
@@ -146,120 +144,6 @@ on a recorded commit. Your conductor identity is re-stamped to your agent_id on
 your first staging/mission call.
 """
     return base_prompt + chain_block
-
-
-def build_retirement_prompt(
-    project_id: str,
-    agent_id: str,
-    job_id: str,
-    project_name: str | None = None,
-    git_enabled: bool = False,
-    project_taxonomy: str = "",
-    handover_template: str | None = None,
-) -> str:
-    project_display = f' "{project_name}"' if project_name else ""
-    template_block = resolve_handover_template(handover_template).strip()
-
-    git_closeout_section = ""
-    if git_enabled:
-        tag = project_taxonomy or project_name or project_id[:8]
-        display_name = project_name or "this project"
-        git_closeout_section = f"""
-BETWEEN STEP 5 and STEP 6, create a git closeout commit to preserve project history:
-
-git commit --allow-empty -m "closeout({tag}): {display_name}
-
-Completed: <today's date YYYY-MM-DD>
-Key outcomes:
-- <list each concrete outcome from this session>"
-
-This commit makes project history searchable via git log --grep="closeout" or git log --grep="{tag}".
-"""
-
-    return f"""ORCHESTRATOR SESSION RETIREMENT{project_display}
-
-Your agent session is ending due to context exhaustion. You are handing off to a continuation
-orchestrator that will pick up where you left off. Other agents are NOT affected — leave them alone.
-Tool names below are bare; your MCP client may expose them under a prefix
-(e.g. `mcp__<server>__<tool>`) — call them by the names your harness lists.
-
-YOUR IDENTITY:
-  Agent ID: {agent_id}
-  Job ID: {job_id}
-  Project ID: {project_id}
-
-IMPORTANT: Do NOT touch other agents. Do NOT drain their messages, modify their todos, or force-complete
-their jobs. They are running independently and will continue working after you exit. The continuation
-orchestrator will resume coordination with them seamlessly using the same agent_id and job_id.
-
-STEP 1 — Snapshot team state (READ-ONLY, do NOT modify anything)
-
-get_workflow_status(project_id="{project_id}")
-
-Record the current state of each agent for your handover summary:
-- Agent name, job_id, status, messages_waiting, todo progress
-- Any agents that are blocked and what they are blocked on
-
-STEP 2 — Drain YOUR OWN message queue
-
-get_thread_history(as_participant="{agent_id}", unread_only=true, mark_read=true) on your coordination thread
-
-Record any important messages for your handover summary.
-
-STEP 3 — Report your own progress
-
-report_progress(
-    job_id="{job_id}",
-    todo_items=[...mark your own items appropriately...]
-)
-
-STEP 4 — Write the handover as a task
-
-A handover is a TASK of type HND. It gets a serial your successor can name, a status
-you can both see, and it can be set Blocked if your successor finds one of your claims
-to be false. Write it for someone who does not trust you yet, because they should not.
-
-The server REFUSES an HND whose description does not carry all three of these headings.
-This is a gate, not a style note:
-
-  ## Verify before trusting
-  Every claim you make, each one next to the exact command that checks it. Not "tests
-  pass" — the command, and what a passing run prints. A claim with no check beside it
-  is the one that will be wrong.
-
-  ## Waiting on the operator
-  Anything that cannot move without a human. Say who, what, and what happens if the
-  answer is no. Write "nothing" if there is nothing.
-
-  ## Cannot testify
-  What you did NOT verify. Guesses, assumptions, things you were told, things that
-  looked fine but you never ran. This section is what makes the other two trustworthy.
-  Write "nothing" only if it is genuinely empty, which it rarely is.
-
-create_task(
-    product_id=<your product UUID -- it is in your mission header; pass it explicitly
-               rather than omitting it, or the task lands on whichever product is
-               active at that moment, which another session can change under you>,
-    task_type="HND",
-    title="<session handover: what this session was and where it stopped>",
-    priority="high",
-    description=<one string, laid out exactly like this>
-)
-
-The description, verbatim shape. This is YOUR ACCOUNT'S handover template -- your
-operator wrote it, and it is what every handover here is expected to look like. Keep
-every heading it carries, fill each one in, and add sections this session needs:
-
-{template_block}
-{git_closeout_section}
-STEP 5 — Confirm to user
-
-Print: "Session handover saved as an HND task. You may now end this session and start the continuation prompt in a new agent session (terminal, desktop, or web tab). Other agents are unaffected and will continue working."
-
-CRITICAL: Do NOT skip the handover task. The continuation session depends on this context.
-CRITICAL: Do NOT call complete_job() on YOUR OWN job. You are NOT done — your work continues in a new agent session.
-CRITICAL: Do NOT modify other agents in any way — no force-complete, no message draining, no todo changes.
-"""
 
 
 class ThinClientPromptGenerator(ThinClientLifecycleMixin):

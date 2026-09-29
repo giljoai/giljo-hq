@@ -42,9 +42,7 @@ vi.mock('@/services/api', () => {
       removeMember: vi.fn(),
     },
     roadmap: { get: mockApiRoadmapGet },
-    prompts: { termination: vi.fn() },
     messages: { sendUnified: vi.fn() },
-    agentJobs: { simpleHandover: vi.fn() },
     projects: { restage: vi.fn(), launchImplementation: vi.fn() },
   }
   return { api: apiObj, default: apiObj }

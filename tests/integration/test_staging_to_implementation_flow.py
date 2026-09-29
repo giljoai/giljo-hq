@@ -46,6 +46,11 @@ def _wire_state_service(svc, execution, job, project):
     return mock_session
 
 
+@pytest.fixture(autouse=True)
+def _no_thread_lookup(monkeypatch):
+    monkeypatch.setattr("giljo_mcp.thin_prompt_lifecycle.project_thread_ref", AsyncMock(return_value={}))
+
+
 
 
 class TestStagingToImplementationFlow:

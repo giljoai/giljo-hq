@@ -251,6 +251,7 @@ import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
 import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
 import { useProductStore } from '@/stores/products'
 import { useUserStore } from '@/stores/user'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import TemplatesTable from './templates/TemplatesTable.vue'
 import TemplateToolbar from './templates/TemplateToolbar.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
@@ -404,7 +405,7 @@ const handleToggleActive = async (template, newValue) => {
     const overBudget = error.response?.status === 409
     showToast({
       message:
-        error.response?.data?.detail ||
+        parseErrorResponse(error).message ||
         (overBudget ? 'This product is at its agent limit.' : 'Failed to update agent'),
       type: overBudget ? 'warning' : 'error',
       title: overBudget ? 'Agent limit reached' : 'Error',
@@ -461,7 +462,7 @@ const importDefaultAgents = async () => {
     const anyAdded = summary.added.length > 0 || summary.added_as_duplicate.length > 0
     showToast({ message: `Default agents: ${parts.join(', ')}`, type: anyAdded ? 'success' : 'info' })
   } catch (error) {
-    showToast({ message: error.response?.data?.detail || 'Failed to add default agents', type: 'error' })
+    showToast({ message: parseErrorResponse(error).message || 'Failed to add default agents', type: 'error' })
   }
 }
 
@@ -521,7 +522,7 @@ const saveTemplate = async () => {
     closeEditDialog()
   } catch (error) {
     console.error('Failed to save template:', error)
-    const detail = error.response?.data?.detail || 'Failed to save template. Check your connection and try again.'
+    const detail = parseErrorResponse(error).message || 'Failed to save template. Check your connection and try again.'
     const isNameCollision = error.response?.status === 400 && /already exists|unique/i.test(detail)
     showToast({
       message: detail,
@@ -601,7 +602,7 @@ const resetAllAgents = async () => {
     })
   } catch (error) {
     showToast({
-      message: error.response?.data?.detail || 'Failed to reset agents',
+      message: parseErrorResponse(error).message || 'Failed to reset agents',
       type: 'error',
       title: 'Error',
     })

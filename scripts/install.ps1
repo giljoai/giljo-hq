@@ -156,8 +156,9 @@ function Exit-WithError {
     Write-Host ""
     # Point the customer at the log FIRST so they can paste it when reporting the
     # issue, even if they close the terminal right after reading the error. (INF-0004 #5)
-    if ($script:TranscriptPath) {
-        Write-Host "    Full log: $script:TranscriptPath -- paste this if you report the issue" -ForegroundColor $script:INFO_COLOR
+    $logHint = if ($script:ResolvedTargetDir -and (Test-Path $script:ResolvedTargetDir)) { Join-Path $script:ResolvedTargetDir "install.log" } else { $script:TranscriptPath }
+    if ($logHint) {
+        Write-Host "    Full log: $logHint -- paste this if you report the issue" -ForegroundColor $script:INFO_COLOR
     }
     Write-Fail $Message
     Write-Host ""
@@ -1082,6 +1083,7 @@ function Save-TranscriptToInstallLog {
             $raw = Get-Content -Raw -LiteralPath $script:TranscriptPath
             $redacted = [regex]::Replace($raw, $script:SensitivePattern, '$1$2***REDACTED***')
             Add-Content -LiteralPath (Join-Path $script:ResolvedTargetDir "install.log") -Value $redacted -Encoding UTF8
+            Remove-Item -LiteralPath $script:TranscriptPath -Force
         } catch {
             # Persisting the log must never itself fail the install.
         }

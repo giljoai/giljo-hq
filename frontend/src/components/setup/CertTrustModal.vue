@@ -554,11 +554,4 @@ function handleSkip() {
 }
 
 /* ── Responsive — matches SetupWizardOverlay breakpoints ── */
-
-@media (max-width: 599px) {
-  .setup-wizard-overlay { padding: 12px; }
-  .setup-wizard-header { padding: 16px 16px 8px; }
-  .setup-wizard-content { padding: 0 16px 12px; }
-  .setup-wizard-footer { padding: 8px 16px 16px; }
-}
 </style>

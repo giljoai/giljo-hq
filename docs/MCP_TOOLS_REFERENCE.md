@@ -327,7 +327,7 @@ hidden flag), or promote the task to a project. Omitted fields remain unchanged;
 task type is immutable. To **complete** a task, set `status=completed` (this stamps
 `completed_at`); pass `completion_notes` to append an audit-trail entry as it completes.
 
-**Status vocabulary for a handover (`HND`).** The same five values, read as the
+**Status vocabulary for a handover (`HND`).** The same values, read as the
 lifecycle of a handover: **Pending** = written, nobody has read it. **In Progress** =
 the successor is verifying its claims. **Completed** = verified, not merely read.
 **Blocked** = the successor found a claim that is false and needs the operator.
@@ -338,7 +338,7 @@ the successor is verifying its claims. **Completed** = verified, not merely read
 | task_id | str | Yes | ID of the task to update. |
 | title | str | No | New title. Alongside `convert_to_project=true`, names the new project instead. |
 | description | str | No | New description. |
-| status | str | No | `pending` / `in_progress` / `completed` / `blocked` / `cancelled`. |
+| status | str | No | `pending` / `in_progress` / `on_hold` / `completed` / `blocked` / `cancelled`. `on_hold` parks an undecided task: it stays open and does not stamp `started_at`. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. |
 | task_type | str | No | A task's type is fixed at creation and cannot be changed. Passing the task's own current type is a harmless no-op; passing a different one is refused with a `VALIDATION_ERROR` on field `task_type`, and the whole call writes nothing (any other fields in the same call are not applied either). Create a new task of the type you want instead. |
 | hidden | str | No | UI declutter flag (the UI calls it "archived"). Setting it on a **pending** handover is refused with `PENDING_HANDOVER_NOT_ARCHIVABLE`: a handover nobody has read must not leave the list. Move it off `pending` first. |
@@ -491,14 +491,16 @@ an implementation orchestrator and deliverable agents close normally.
 ### finalize_job `mcp:agent`
 
 **Purpose:** Accept a finished agent's work and seal the job — the last step, after you
-have reviewed what it produced. Only the orchestrator does this, and only after
-`complete_job`. A sealed job is not woken again by new messages. If the job is not in an
+have reviewed what it produced. Only the project's orchestrator does this, and only after
+`complete_job`: any other caller gets a structured `ORCHESTRATOR_ONLY` response and the job
+is left unchanged. A sealed job is not woken again by new messages. If the job is not in an
 acceptable state, this returns a structured error naming the outstanding requirement.
 (Renamed from `close_job`, which read as cancel-or-finish ambiguous.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | job_id | str | Yes | The job ID to seal. |
+| caller_job_id | str | Yes in practice | Your own job ID. Must be an orchestrator job on the same project as `job_id`; omitted or any other value is refused with `ORCHESTRATOR_ONLY`. |
 
 ---
 

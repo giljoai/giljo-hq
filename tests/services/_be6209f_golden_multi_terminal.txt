@@ -86,7 +86,7 @@ Returns:
 Read this protocol via orchestrator_protocol field.
 
 ⚠️  CONTEXT VARIABLES: get_context responses carry AUTHORITATIVE project_path,
-product_name, tenant_key. Use those in missions — never hardcode terminal paths.
+product_name. Use those in missions — never hardcode terminal paths.
 
 ── STEP 3: Discover Agents ─────────────────────────────────────────────────
 Use the `agent_templates` field already in this response (filtered by phase).
@@ -212,7 +212,7 @@ verification entirely for doc-only / analysis-only projects. The full implementa
 sequence is spawn_job (mint the job_id + dashboard record) BEFORE launching the agent — in
 EVERY mode, including subagent mode — never Agent/Task/@-syntax without a preceding spawn_job.
 
-VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id/tenant_key
+VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id
 correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_names.
 
 <<<CHAPTER:ch_authority>>>
@@ -276,7 +276,8 @@ Staging phase (orchestrator only, project.staging_status != 'staging_complete'):
 
 Implementation phase (all agents, post-staging-complete):
   waiting →[get_job_mission]→ working   working →[report_progress]→ working
-  working →[complete_job]→ complete
+  working →[complete_job]→ complete     (a worker's last call; it never finalizes)
+  complete →[finalize_job, orchestrator only, after review]→ closed
   working →[set_agent_status("blocked")]→ blocked
   working →[set_agent_status("idle")]→ idle
   working →[set_agent_status("sleeping")]→ sleeping
@@ -287,7 +288,7 @@ Implementation phase (all agents, post-staging-complete):
 Note: spawned non-orchestrator agents bypass the staging lock entirely.
 
 GENERAL ERROR PROTOCOL:
-1. Log error with context (agent_id, job_id, tenant_key).
+1. Log error with context (agent_id, job_id).
 2. Persist error state:
    - Implementation phase OR not the orchestrator → set_agent_status("blocked", reason).
    - Staging phase AND you are the orchestrator → tell the USER inline; set_agent_status
@@ -312,7 +313,7 @@ IMPLEMENTATION PHASE MONITORING:
 
 When you (or a fresh orchestrator instance) enters implementation phase:
 
-1. Retrieve execution plan via get_job_mission(job_id, tenant_key)
+1. Retrieve execution plan via get_job_mission(job_id)
 2. Follow coordination strategy you defined in Step 7
 3. Coordinate handoffs between dependent agents
 4. After dispatching agents: set_agent_status(job_id, status="idle", reason="Agents dispatched, monitoring")
@@ -511,7 +512,8 @@ When a completed agent receives a message and gets auto-blocked:
 CLOSING JOBS (FINAL ACCEPTANCE):
 
 After verifying all deliverables from a completed agent:
-- Call finalize_job(job_id=...) for each agent whose work is accepted
+- Call finalize_job(job_id=..., caller_job_id=<your own job_id>) for each agent
+  whose work is accepted. Only you can: a worker is refused (ORCHESTRATOR_ONLY)
 - Agents marked 'closed' will not be auto-reactivated on new messages
 - Use 'decommissioned' only for failed/replaced/abandoned agents
 - Lifecycle: working → complete (agent self-reports) → closed (orchestrator accepts)
@@ -534,7 +536,8 @@ execution, and 'silent' is not terminal:
    Skipping this returns COMPLETION_BLOCKED naming the stranded items.
 3. complete_job(job_id=<stalled job>, result={"summary": ..., "commits": [...]})
    — record what it actually delivered, not what it claimed.
-4. finalize_job(job_id=<stalled job>) → 'closed'. Accepted, not failed.
+4. finalize_job(job_id=<stalled job>, caller_job_id=<your own job_id>) → 'closed'.
+   Accepted, not failed.
 
 Do NOT use write_project_closeout(force=true) to get past a stalled agent. It
 does not refuse on a specialist's account — it DECOMMISSIONS it, permanently
@@ -694,6 +697,8 @@ Your subagents run in separate sessions. The user mediates between sessions.
 **On every wake-up**, regardless of what the user said, run the active coordination
 loop below. The user's message is a trigger — your TODO list is your authority.
 
+**LAUNCH PROMPT: start every agent with the prompt the server issued for its job (the agent_prompt spawn_job returned), verbatim, as its first message; a hand-written work order may add to it, never replace it.**
+
 **THE COORDINATION LOOP (execute on EVERY wake-up or trigger):**
 
 Every time you are activated — whether by user interaction, a sleep timer, a subagent
@@ -844,7 +849,8 @@ re-verify before closeout.
   you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
   its work (git add the specific files; NEVER git add -A) before complete_job, exactly as the
   worker protocol requires.
-- **Handover-on-context-exhaustion does NOT apply.** If context is exhausted, tell the user.
+- **Low on context?** Write a handover task (`create_task(task_type="HND", ...)`), then tell
+  the user its serial so a fresh session can continue from it.
 - **You operate with the user's delegated authority.** Decide and document in
   `decisions_made`. Escalate via `request_approval` only when the choice is
   irreversible, materially changes scope, or has no clear default.
@@ -952,7 +958,7 @@ Returns:
 Read this protocol via orchestrator_protocol field.
 
 ⚠️  CONTEXT VARIABLES: get_context responses carry AUTHORITATIVE project_path,
-product_name, tenant_key. Use those in missions — never hardcode terminal paths.
+product_name. Use those in missions — never hardcode terminal paths.
 
 ── STEP 3: Discover Agents ─────────────────────────────────────────────────
 Use the `agent_templates` field already in this response (filtered by phase).
@@ -1078,7 +1084,7 @@ verification entirely for doc-only / analysis-only projects. The full implementa
 sequence is spawn_job (mint the job_id + dashboard record) BEFORE launching the agent — in
 EVERY mode, including subagent mode — never Agent/Task/@-syntax without a preceding spawn_job.
 
-VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id/tenant_key
+VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id
 correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_names.
 
 <<<CHAPTER:ch_authority>>>
@@ -1142,7 +1148,8 @@ Staging phase (orchestrator only, project.staging_status != 'staging_complete'):
 
 Implementation phase (all agents, post-staging-complete):
   waiting →[get_job_mission]→ working   working →[report_progress]→ working
-  working →[complete_job]→ complete
+  working →[complete_job]→ complete     (a worker's last call; it never finalizes)
+  complete →[finalize_job, orchestrator only, after review]→ closed
   working →[set_agent_status("blocked")]→ blocked
   working →[set_agent_status("idle")]→ idle
   working →[set_agent_status("sleeping")]→ sleeping
@@ -1153,7 +1160,7 @@ Implementation phase (all agents, post-staging-complete):
 Note: spawned non-orchestrator agents bypass the staging lock entirely.
 
 GENERAL ERROR PROTOCOL:
-1. Log error with context (agent_id, job_id, tenant_key).
+1. Log error with context (agent_id, job_id).
 2. Persist error state:
    - Implementation phase OR not the orchestrator → set_agent_status("blocked", reason).
    - Staging phase AND you are the orchestrator → tell the USER inline; set_agent_status
@@ -1232,6 +1239,8 @@ Your subagents run in separate sessions. The user mediates between sessions.
 
 **On every wake-up**, regardless of what the user said, run the active coordination
 loop below. The user's message is a trigger — your TODO list is your authority.
+
+**LAUNCH PROMPT: start every agent with the prompt the server issued for its job (the agent_prompt spawn_job returned), verbatim, as its first message; a hand-written work order may add to it, never replace it.**
 
 **THE COORDINATION LOOP (execute on EVERY wake-up or trigger):**
 
@@ -1383,7 +1392,8 @@ re-verify before closeout.
   you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
   its work (git add the specific files; NEVER git add -A) before complete_job, exactly as the
   worker protocol requires.
-- **Handover-on-context-exhaustion does NOT apply.** If context is exhausted, tell the user.
+- **Low on context?** Write a handover task (`create_task(task_type="HND", ...)`), then tell
+  the user its serial so a fresh session can continue from it.
 - **You operate with the user's delegated authority.** Decide and document in
   `decisions_made`. Escalate via `request_approval` only when the choice is
   irreversible, materially changes scope, or has no clear default.

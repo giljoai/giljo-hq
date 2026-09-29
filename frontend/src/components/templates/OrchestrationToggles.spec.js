@@ -13,7 +13,7 @@ vi.mock('@/services/api', () => {
   const api = {
     settings: {
       getGeneral: vi.fn().mockResolvedValue({ data: { settings: {} } }),
-      updateGeneral: vi.fn().mockResolvedValue({ data: {} }),
+      updateCloseoutMode: vi.fn().mockResolvedValue({ data: {} }),
       getHeadlessLaunch: vi.fn().mockResolvedValue({ data: { allow_headless_launch: false } }),
       updateHeadlessLaunch: vi.fn().mockResolvedValue({ data: {} }),
     },
@@ -57,7 +57,7 @@ describe('OrchestrationToggles — HITL closeout toggle', () => {
     expect(wrapper.find('[data-testid="closeout-mode-toggle"]').exists()).toBe(true)
   })
 
-  it('calls api.settings.updateGeneral when toggle changes', async () => {
+  it('calls api.settings.updateCloseoutMode when toggle changes', async () => {
     mockShowToast = vi.fn()
     const api = (await import('@/services/api')).default
     vi.clearAllMocks()
@@ -70,12 +70,10 @@ describe('OrchestrationToggles — HITL closeout toggle', () => {
     await toggle.trigger('change')
     await flushPromises()
 
-    expect(api.settings.updateGeneral).toHaveBeenCalledWith(
-      expect.objectContaining({ closeout_mode: 'autonomous' })
-    )
+    expect(api.settings.updateCloseoutMode).toHaveBeenCalledWith('autonomous')
   })
 
-  it('calls api.settings.updateGeneral with hitl when toggle turns ON', async () => {
+  it('calls api.settings.updateCloseoutMode with hitl when toggle turns ON', async () => {
     mockShowToast = vi.fn()
     const api = (await import('@/services/api')).default
     vi.clearAllMocks()
@@ -91,9 +89,7 @@ describe('OrchestrationToggles — HITL closeout toggle', () => {
     await toggle.trigger('change')
     await flushPromises()
 
-    expect(api.settings.updateGeneral).toHaveBeenCalledWith(
-      expect.objectContaining({ closeout_mode: 'hitl' })
-    )
+    expect(api.settings.updateCloseoutMode).toHaveBeenCalledWith('hitl')
   })
 })
 
@@ -153,52 +149,31 @@ describe('OrchestrationToggles — BE-9084 Headless-vs-HITL launch toggle', () =
 })
 
 
-describe('OrchestrationToggles — the closeout toggle preserves sibling general settings', () => {
-  it('sends the merged category, not just closeout_mode', async () => {
+describe('OrchestrationToggles — the closeout toggle writes only closeout_mode', () => {
+  it('flipping the toggle issues no settings read and no whole-category write', async () => {
     const api = (await import('@/services/api')).default
-    vi.clearAllMocks()
-    mockShowToast = vi.fn()
-    api.settings.getGeneral.mockResolvedValue({
-      data: { settings: { closeout_mode: 'hitl', execution_mode_default: 'subagent' } },
-    })
-
     const wrapper = mountToggles()
     await flushPromises()
-
-    const toggle = wrapper.find('[data-testid="closeout-mode-toggle"]')
-    toggle.element.checked = false
-    await toggle.trigger('change')
-    await flushPromises()
-
-    expect(api.settings.updateGeneral).toHaveBeenCalledWith({
-      closeout_mode: 'autonomous',
-      execution_mode_default: 'subagent',
-    })
-  })
-
-  it('still writes closeout_mode when there are no siblings to preserve', async () => {
-    const api = (await import('@/services/api')).default
-    vi.clearAllMocks()
-    mockShowToast = vi.fn()
-    api.settings.getGeneral.mockResolvedValue({ data: { settings: {} } })
-
-    const wrapper = mountToggles()
-    await flushPromises()
-
-    const toggle = wrapper.find('[data-testid="closeout-mode-toggle"]')
-    toggle.element.checked = true
-    await toggle.trigger('change')
-    await flushPromises()
-
-    expect(api.settings.updateGeneral).toHaveBeenCalledWith({ closeout_mode: 'hitl' })
-  })
-
-  it('does not lose the toggle write when the sibling read fails', async () => {
-    const api = (await import('@/services/api')).default
     vi.clearAllMocks()
     mockShowToast = vi.fn()
     api.settings.getGeneral.mockRejectedValue(new Error('offline'))
 
+    const toggle = wrapper.find('[data-testid="closeout-mode-toggle"]')
+    toggle.element.checked = false
+    await toggle.trigger('change')
+    await flushPromises()
+
+    expect(api.settings.getGeneral).not.toHaveBeenCalled()
+    expect(api.settings.updateCloseoutMode).toHaveBeenCalledTimes(1)
+    expect(api.settings.updateCloseoutMode).toHaveBeenCalledWith('autonomous')
+  })
+
+  it('shows an error when the write fails', async () => {
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+    api.settings.getGeneral.mockResolvedValue({ data: { settings: { closeout_mode: 'hitl' } } })
+    api.settings.updateCloseoutMode.mockRejectedValueOnce(new Error('boom'))
     const wrapper = mountToggles()
     await flushPromises()
 
@@ -207,8 +182,6 @@ describe('OrchestrationToggles — the closeout toggle preserves sibling general
     await toggle.trigger('change')
     await flushPromises()
 
-    expect(api.settings.updateGeneral).toHaveBeenCalledWith(
-      expect.objectContaining({ closeout_mode: 'autonomous' })
-    )
+    expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
   })
 })

@@ -21,7 +21,7 @@ LOCK = REPO_ROOT / "requirements.lock"
 
 HASH_PREFIX = "# requirements-txt-hash: sha256:"
 
-PINNED_EXACT = {"fastapi": "0.139.2", "starlette": "1.3.1"}
+PINNED_EXACT = {"fastapi": "0.141.1", "starlette": "1.7.0"}
 
 
 pytestmark = pytest.mark.skipif(

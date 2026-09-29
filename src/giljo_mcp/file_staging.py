@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .platform_registry import SKILL_SLASH_PLATFORMS
 from .tools.slash_command_templates import get_all_templates
+from .utils.log_sanitizer import mask_token
 
 
 logger = logging.getLogger(__name__)
@@ -31,13 +32,13 @@ class FileStaging:
             raise ValueError("Invalid tenant_key: path traversal detected")
 
         if ".." in token or "/" in token or "\\" in token:
-            logger.error(f"Directory traversal attempt detected in token: {token}")
+            logger.error(f"Directory traversal attempt detected in token: {mask_token(token)}")
             raise ValueError("Invalid token: path traversal detected")
 
         staging_dir = self.base_path / tenant_key / token
         staging_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.debug(f"Created staging directory: {staging_dir}")
+        logger.debug("Created staging directory: %s/%s", self.base_path / tenant_key, mask_token(token))
         return staging_dir
 
     async def stage_slash_commands(

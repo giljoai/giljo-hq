@@ -128,6 +128,16 @@ class UserApprovalService:
             raise ValidationError(f"job_id={job_id} does not belong to project_id={project_id}")
         return job
 
+    async def project_label(self, *, tenant_key: str, project_id: str) -> str | None:
+        async with self._get_session(tenant_key) as session:
+            project = (
+                await session.execute(select(Project).where(Project.tenant_key == tenant_key, Project.id == project_id))
+            ).scalar_one_or_none()
+        if project is None:
+            return None
+        alias = project.taxonomy_alias
+        return f"{alias} · {project.name}" if alias else project.name
+
     async def create_pending(
         self,
         *,

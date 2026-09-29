@@ -243,7 +243,7 @@ Call: report_progress(
 {step2_body}
 
 ⚠️  CONTEXT VARIABLES: get_context responses carry AUTHORITATIVE project_path,
-product_name, tenant_key. Use those in missions — never hardcode terminal paths.
+product_name. Use those in missions — never hardcode terminal paths.
 
 ── STEP 3: Discover Agents ─────────────────────────────────────────────────
 Use the `agent_templates` field already in this response (filtered by phase).

@@ -134,6 +134,8 @@ class ProjectQueryService:
                             mission=project.mission or "",
                             description=project.description,
                             status=project.status,
+                            staging_status=project.staging_status,
+                            execution_mode=project.execution_mode,
                             product_id=project.product_id,
                             created_at=project.created_at.isoformat() if project.created_at else None,
                             updated_at=project.updated_at.isoformat() if project.updated_at else None,
@@ -160,15 +162,6 @@ class ProjectQueryService:
         except Exception as e:
             self._logger.exception("Failed to get active projects")
             raise BaseGiljoError(message=f"Failed to get active projects: {e!s}", context={}) from e
-
-    async def get_project_agent_summary(self, project_id: str, tenant_key: str) -> dict:
-        try:
-            async with self._get_session() as session:
-                rows = await self._repo.get_agent_job_type_summary(session, tenant_key, project_id)
-                return _format_agent_summary_rows(rows)
-        except Exception as e:  # noqa: BLE001 -- graceful degradation for optional enrichment
-            self._logger.warning("Failed to get agent summary for project %s: %s", project_id, e)
-            return {"agent_count": 0, "job_types": []}
 
     async def get_project_agent_details(
         self,

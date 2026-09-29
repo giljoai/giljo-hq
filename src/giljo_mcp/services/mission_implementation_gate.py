@@ -16,6 +16,7 @@ from giljo_mcp.services.execution_mode_gate import (
     EXECUTION_MODE_NOT_SELECTED_MESSAGE,
     execution_mode_selected,
 )
+from giljo_mcp.services.sequence_run_service import active_chain_run
 
 
 async def check_implementation_gate(
@@ -28,7 +29,21 @@ async def check_implementation_gate(
     repo: Any,
     db_manager: Any,
     tenant_manager: Any,
+    agent_id: str | None = None,
 ) -> tuple[Any, MissionResponse | None]:
+    if job.project_id is None:
+        hold = await check_conductor_chain_hold(
+            session,
+            job,
+            job_id,
+            tenant_key,
+            agent_id=agent_id,
+            repo=repo,
+            db_manager=db_manager,
+            tenant_manager=tenant_manager,
+        )
+        return None, hold
+
     from giljo_mcp.services.mission_service import _CHAIN_WORKER_STAGING_BLOCK_MESSAGE
 
     project = await repo.get_project_by_id(session, tenant_key, job.project_id)
@@ -45,9 +60,7 @@ async def check_implementation_gate(
 
     if project and project.implementation_launched_at is None:
         if job.job_type == "orchestrator":
-            chain_member = await is_chain_member(
-                logger, session, job.project_id, tenant_key, db_manager=db_manager, tenant_manager=tenant_manager
-            )
+            chain_member = await active_chain_run(session, job.project_id, tenant_key) is not None
             if chain_member and project.staging_status != "staging_complete":
                 return project, None
             return project, MissionResponse(
@@ -62,9 +75,7 @@ async def check_implementation_gate(
                     "orchestrator prompt in your agent session (terminal, desktop, or web tab)."
                 ),
             )
-        chain_member = await is_chain_member(
-            logger, session, job.project_id, tenant_key, db_manager=db_manager, tenant_manager=tenant_manager
-        )
+        chain_member = await active_chain_run(session, job.project_id, tenant_key) is not None
         if chain_member:
             return project, MissionResponse(
                 job_id=job_id,
@@ -90,28 +101,45 @@ async def check_implementation_gate(
     return project, None
 
 
-async def is_chain_member(
-    logger: Any,
+_CONDUCTOR_HOLD_MESSAGE = (
+    "The chain is staged but has not been released. The user must press Implement on "
+    "the chain in the dashboard, or approve launch_implementation for the chain's first "
+    "project, before you can drive it. Report the staged plan to the user and wait."
+)
+
+
+async def check_conductor_chain_hold(
     session: AsyncSession,
-    project_id: Any,
+    job: AgentJob,
+    job_id: str,
     tenant_key: str,
     *,
+    agent_id: str | None,
+    repo: Any,
     db_manager: Any,
     tenant_manager: Any,
-) -> bool:
-    try:
-        from giljo_mcp.services.sequence_run_service import SequenceRunService
+) -> MissionResponse | None:
+    if job.job_type != "orchestrator" or not (job.job_metadata or {}).get("chain_conductor") or not agent_id:
+        return None
 
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=session,
-        )
-        run = await svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-        return run is not None
-    except Exception:  # noqa: BLE001 - best-effort chain detection; never block the gate
-        logger.warning("[BE-6196] chain-member check failed (non-fatal); falling back to solo gate")
-        return False
+    from giljo_mcp.services.sequence_run_service import SequenceRunService
+
+    svc = SequenceRunService(db_manager=db_manager, tenant_manager=tenant_manager, session=session)
+    run = await svc.find_active_run_for_conductor(conductor_agent_id=str(agent_id), tenant_key=tenant_key)
+    if run is None or run.get("status") != "pending":
+        return None
+    order = run.get("resolved_order") or []
+    head = await repo.get_project_by_id(session, tenant_key, order[0]) if order else None
+    if head is not None and head.implementation_launched_at is not None:
+        return None
+    return MissionResponse(
+        job_id=job_id,
+        blocked=True,
+        mission=None,
+        full_protocol=None,
+        error="BLOCKED: Implementation phase not launched",
+        user_instruction=_CONDUCTOR_HOLD_MESSAGE,
+    )
 
 
 _CHAIN_MEMBER_SETTLED_STATUSES: frozenset[str] = frozenset(
@@ -119,7 +147,9 @@ _CHAIN_MEMBER_SETTLED_STATUSES: frozenset[str] = frozenset(
 )
 
 
-async def promote_chain_member_on_first_worker_start(mission_service: Any, job: AgentJob, tenant_key: str) -> None:
+async def promote_chain_member_on_first_worker_start(
+    mission_service: Any, session: AsyncSession, job: AgentJob, tenant_key: str
+) -> None:
     if job.job_type == "orchestrator" or not job.project_id:
         return
     from giljo_mcp.services.project_helpers import mark_chain_member_status
@@ -130,7 +160,7 @@ async def promote_chain_member_on_first_worker_start(mission_service: Any, job: 
         project_id=str(job.project_id),
         tenant_key=tenant_key,
         status="implementing",
-        test_session=mission_service._test_session,
+        test_session=session,
         websocket_manager=mission_service._websocket_manager,
         not_from=_CHAIN_MEMBER_SETTLED_STATUSES,
     )

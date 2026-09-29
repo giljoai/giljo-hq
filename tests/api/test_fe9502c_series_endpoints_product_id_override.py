@@ -136,6 +136,20 @@ class TestCheckSeriesProductIdOverride:
         assert resp.json() == {"available": True}
 
 
+class TestAvailableSeriesLimitBound:
+
+    async def test_oversized_limit_is_rejected(self, api_client, auth_headers):
+        type_id = await _make_taxonomy_type(api_client, auth_headers)
+
+        resp = await api_client.get(
+            "/api/v1/projects/available-series",
+            params={"type_id": type_id, "limit": 100_000},
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+
+
 class TestUsedSubseriesProductIdOverride:
     async def test_resolves_against_the_overridden_product_not_the_active_one(
         self, api_client, auth_headers, two_product_fixture

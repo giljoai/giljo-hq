@@ -224,4 +224,32 @@ describe('DangerPage — Download My Data section (BE-5062)', () => {
     expect(link.exists()).toBe(true)
     expect(link.attributes('href')).toBe('/api/download/temp/abc123/tenant_export.zip')
   })
+
+  it('swaps the download link for a "Generate a new link" button once clicked, and it re-generates', async () => {
+    exportMyDataMock.mockResolvedValue({
+      data: {
+        download_url: '/api/download/temp/abc123/tenant_export.zip',
+        expires_at: '2026-05-14T15:00:00+00:00',
+        model_counts: { products: 3, projects: 2 },
+      },
+    })
+    const wrapper = await mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="generate-export-btn"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-test="export-download-link"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="export-download-link"]').exists()).toBe(false)
+    const regenerateBtn = wrapper.find('[data-test="export-generate-new-link-btn"]')
+    expect(regenerateBtn.exists()).toBe(true)
+    expect(regenerateBtn.text()).toContain('Generate a new link')
+
+    await regenerateBtn.trigger('click')
+    await flushPromises()
+
+    expect(exportMyDataMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="export-download-link"]').exists()).toBe(true)
+  })
 })

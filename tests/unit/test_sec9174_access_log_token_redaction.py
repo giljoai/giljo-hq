@@ -84,6 +84,46 @@ class TestSensitiveQueryAccessFilter:
         assert record.getMessage() == "plain message, no args"
 
 
+class TestDownloadTokenPathSegmentRedacted:
+
+    def test_download_token_path_segment_masked(self):
+        record = _access_record("/api/download/temp/a1b2c3d4-e5f6-7890-abcd-ef1234567890/slash_commands.zip")
+        keep = _SensitiveQueryAccessFilter().filter(record)
+        line = record.getMessage()
+        assert keep is True, "redaction must never DROP the access line"
+        assert "a1b2c3d4-e5f6-7890-abcd-ef1234567890" not in line
+        assert '"GET /api/download/temp/[REDACTED]/slash_commands.zip HTTP/1.1" 200' in line
+
+    def test_download_token_path_segment_masked_with_trailing_query(self):
+        record = _access_record("/api/download/temp/live-token-value/file.zip?debug=1")
+        _SensitiveQueryAccessFilter().filter(record)
+        line = record.getMessage()
+        assert "live-token-value" not in line
+        assert "/api/download/temp/[REDACTED]/file.zip?debug=1" in line
+
+    def test_unrelated_download_path_untouched(self):
+        record = _access_record("/api/downloads/temporary/report.csv")
+        keep = _SensitiveQueryAccessFilter().filter(record)
+        assert keep is True
+        assert "/api/downloads/temporary/report.csv" in record.getMessage()
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_download_request_line_has_no_token_value(self, caplog):
+        configure_logging()
+        logger = logging.getLogger("uvicorn.access")
+        with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+            logger.info(
+                UVICORN_ACCESS_FORMAT,
+                "198.51.100.9:44100",
+                "GET",
+                "/api/download/temp/9f8e7d6c-5b4a-3210-fedc-ba9876543210/giljo_setup.zip",
+                "1.1",
+                200,
+            )
+        assert "9f8e7d6c-5b4a-3210-fedc-ba9876543210" not in caplog.text
+        assert "/api/download/temp/[REDACTED]/giljo_setup.zip" in caplog.text
+
+
 class TestFilterRegisteredOnUvicornAccess:
     def test_configure_logging_attaches_redaction_filter(self):
         configure_logging()

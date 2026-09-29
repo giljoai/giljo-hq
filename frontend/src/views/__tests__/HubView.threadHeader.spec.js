@@ -82,7 +82,7 @@ describe('HubView thread header (FE-9289c)', () => {
   it('surfaces the server refusal instead of pretending the rename worked', async () => {
     seed(store, { thread_id: GENERAL_ID, subject: 'old name', project_id: null })
     vi.spyOn(store, 'renameThread').mockRejectedValue({
-      response: { data: { detail: 'kept with the project 360 memory' } },
+      response: { status: 400, data: { error_code: 'VALIDATIONERROR', message: 'kept with the project 360 memory' } },
     })
     const wrapper = mountHub(pinia)
     await wrapper.get('[data-testid="thread-header-rename"]').trigger('click')

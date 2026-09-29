@@ -330,7 +330,13 @@ describe('DefaultLayout.vue', () => {
   })
 
   describe('Drawer State Management', () => {
-    it('should initialize drawer as open', async () => {
+    const originalInnerWidth = window.innerWidth
+    afterEach(() => {
+      window.innerWidth = originalInnerWidth
+    })
+
+    it('should initialize drawer as open on a desktop-width window', async () => {
+      window.innerWidth = 1280
       api.auth.me.mockResolvedValue({
         data: { username: 'admin', role: 'admin' }
       })
@@ -343,6 +349,22 @@ describe('DefaultLayout.vue', () => {
 
       await flushPromises()
       expect(wrapper.vm.drawer).toBe(true)
+    })
+
+    it('FE-9648: starts with the overlay drawer closed on a narrow (1000px) desktop window', async () => {
+      window.innerWidth = 1000
+      api.auth.me.mockResolvedValue({
+        data: { username: 'admin', role: 'admin' }
+      })
+
+      wrapper = mount(DefaultLayout, {
+        global: {
+          plugins: [vuetify, router, pinia],
+        }
+      })
+
+      await flushPromises()
+      expect(wrapper.vm.drawer).toBe(false)
     })
 
     it('should toggle rail when NavigationDrawer emits toggle-rail event', async () => {

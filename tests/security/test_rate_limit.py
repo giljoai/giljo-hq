@@ -21,6 +21,8 @@ from giljo_mcp.services.cache_backends import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("real_rate_limiter")
+
 _SEC0002_AUDIT = Path(__file__).resolve().parents[2] / "handovers" / "security" / "SEC-0002_passive_server_audit.md"
 
 

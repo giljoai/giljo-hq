@@ -31,6 +31,7 @@ export const DEFAULT_SWATCH_COLOR = '#E91E63'
 export const TASK_STATUS = {
   PENDING: 'pending',
   IN_PROGRESS: 'in_progress',
+  ON_HOLD: 'on_hold',
   COMPLETED: 'completed',
   FAILED: 'failed',
   CANCELLED: 'cancelled',

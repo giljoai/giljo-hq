@@ -19,6 +19,17 @@ const DEFAULT_TASK = () => ({
   series_number: null,
 })
 
+function diffChangedFields(snapshot, edited) {
+  if (!snapshot) return { ...edited }
+  const changed = {}
+  for (const key of Object.keys(edited)) {
+    if (edited[key] !== snapshot[key]) {
+      changed[key] = edited[key]
+    }
+  }
+  return changed
+}
+
 export function useTaskCrud() {
   const taskStore = useTaskStore()
   const productStore = useProductStore()
@@ -30,11 +41,13 @@ export function useTaskCrud() {
   const editingTask = ref(null)
   const saving = ref(false)
   const currentTask = ref(DEFAULT_TASK())
+  const editSnapshot = ref(null)
   const saveError = ref('')
 
   function editTask(task) {
     editingTask.value = task
     currentTask.value = { ...task }
+    editSnapshot.value = { ...task }
     showTaskDialog.value = true
   }
 
@@ -43,6 +56,7 @@ export function useTaskCrud() {
     showCreateDialog.value = false
     editingTask.value = null
     currentTask.value = DEFAULT_TASK()
+    editSnapshot.value = null
     saveError.value = ''
   }
 
@@ -52,6 +66,7 @@ export function useTaskCrud() {
     }
     editingTask.value = null
     currentTask.value = DEFAULT_TASK()
+    editSnapshot.value = null
     showTaskDialog.value = true
     return { noProduct: false }
   }
@@ -66,6 +81,7 @@ export function useTaskCrud() {
       task_type: RESERVED_HANDOVER_TYPE_ABBR,
       description: templateText,
     }
+    editSnapshot.value = null
     showTaskDialog.value = true
     return { noProduct: false }
   }
@@ -119,8 +135,11 @@ export function useTaskCrud() {
     saveError.value = ''
     try {
       if (editingTask.value) {
-        const { parent_task_id: _parent, ...taskData } = currentTask.value
-        await taskStore.updateTask(editingTask.value.id, taskData)
+        const { parent_task_id: _parent, ...changedFields } = diffChangedFields(
+          editSnapshot.value,
+          currentTask.value,
+        )
+        await taskStore.updateTask(editingTask.value.id, changedFields)
       } else {
         const productId = productStore.effectiveProductId
         if (productId) {

@@ -115,3 +115,46 @@ class TestToggleRequiresProvisionedCert:
         assert result.ssl_enabled is False
         assert result.restart_required is True
         assert captured["features"]["ssl_enabled"] is False
+
+
+class TestConfigReadRaisesOnCorruption:
+
+    def test_read_config_raises_on_malformed_yaml(self, tmp_path):
+        bad_config = tmp_path / "config.yaml"
+        bad_config.write_text("{ not: valid: yaml: [")
+
+        import yaml
+
+        from giljo_mcp._config_io import read_config
+
+        with pytest.raises(yaml.YAMLError):
+            read_config(bad_config)
+
+    def test_read_config_raises_on_os_error(self, tmp_path):
+        from giljo_mcp._config_io import read_config
+
+        with pytest.raises(OSError):
+            read_config(tmp_path)
+
+    def test_read_config_still_returns_empty_when_file_missing(self, tmp_path):
+        from giljo_mcp._config_io import read_config
+
+        assert read_config(tmp_path / "nonexistent.yaml") == {}
+
+    @pytest.mark.asyncio
+    async def test_toggle_ssl_does_not_clobber_config_on_read_error(self, monkeypatch, tmp_path):
+        import yaml
+
+        import giljo_mcp._config_io as cio
+
+        bad_config = tmp_path / "config.yaml"
+        bad_config.write_bytes(b"{ not: valid: yaml: [")
+        before = bad_config.read_bytes()
+
+        monkeypatch.setattr(cio, "get_config_path", lambda: bad_config)
+        monkeypatch.setattr(cfg, "_ssl_status_from_config", lambda: (True, None, None, False))
+
+        with pytest.raises(yaml.YAMLError):
+            await cfg.toggle_ssl(cfg.SSLToggleRequest(enabled=False), current_user=None, _ce=None)
+
+        assert bad_config.read_bytes() == before

@@ -44,12 +44,12 @@ from giljo_mcp.services.mission_orchestration_builders import (
     build_execution_mode_fields,
     build_orchestrator_identity_block,
     check_staging_redirect,
-    is_chain_member,
     maybe_build_ctx_self_close_directive,
 )
 from giljo_mcp.services.protocol_builder import _get_user_config
 from giljo_mcp.services.protocol_survival import staging_orchestrator_actions
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
+from giljo_mcp.services.sequence_run_service import active_chain_run, broadcast_deferred_sequence_updates
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
 
@@ -305,7 +305,7 @@ class MissionOrchestrationService:
                 }
             }
 
-        is_chain_member = await self._is_chain_member(session, str(project.id), tenant_key)
+        is_chain_member = await active_chain_run(session, project.id, tenant_key) is not None
         early = self._check_staging_redirect(project, job_id, is_chain_member=is_chain_member)
         if early:
             return {"early_return": early}
@@ -450,9 +450,11 @@ class MissionOrchestrationService:
             project_id=str(project.id),
             tenant_key=tenant_key,
             status="completed",
-            test_session=self._test_session,
+            test_session=session,
             websocket_manager=self._websocket_manager,
         )
+        await session.commit()
+        await broadcast_deferred_sequence_updates(session)
 
         logger.info(
             "[BE-5122] CTX self-close applied server-side",
@@ -487,11 +489,6 @@ class MissionOrchestrationService:
             ),
             "thin_client": True,
         }
-
-    async def _is_chain_member(self, session: AsyncSession, project_id: str, tenant_key: str) -> bool:
-        return await is_chain_member(
-            session, project_id, tenant_key, db_manager=self.db_manager, tenant_manager=self.tenant_manager
-        )
 
     @staticmethod
     def _check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool = False) -> dict[str, Any] | None:
@@ -543,7 +540,7 @@ class MissionOrchestrationService:
         git_integration_enabled = integrations.get("git_integration", {}).get("enabled", False)
 
         response: dict[str, Any] = {
-            "identity": build_orchestrator_identity_block(ctx, job_id=job_id, tenant_key=tenant_key),
+            "identity": build_orchestrator_identity_block(ctx, job_id=job_id),
             "next_required_actions": staging_orchestrator_actions(project, ctx.get("chain_ctx")),
             "project_description_inline": {
                 "description": project.description or "",

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import uvicorn
+import yaml
 
 
 
@@ -124,7 +125,7 @@ def get_default_host() -> str:
 
         logging.info("No host configured, defaulting to 0.0.0.0")
         return "0.0.0.0"
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
         logging.warning(f"Could not read config: {e}, defaulting to 0.0.0.0")
 
     return "0.0.0.0"
@@ -366,9 +367,10 @@ def main():
     http_proto = "https" if ssl_config else "http"
     ws_proto = "wss" if ssl_config else "ws"
     logger.info("API Endpoints:")
-    logger.info(f"  Documentation: {http_proto}://{args.host}:{args.port}/docs")
-    logger.info(f"  ReDoc: {http_proto}://{args.host}:{args.port}/redoc")
-    logger.info(f"  OpenAPI JSON: {http_proto}://{args.host}:{args.port}/openapi.json")
+    if os.environ.get("GILJO_MODE", "").strip().lower() in ("ce", ""):
+        logger.info(f"  Documentation: {http_proto}://{args.host}:{args.port}/docs")
+        logger.info(f"  ReDoc: {http_proto}://{args.host}:{args.port}/redoc")
+        logger.info(f"  OpenAPI JSON: {http_proto}://{args.host}:{args.port}/openapi.json")
     logger.info(f"  Health Check: {http_proto}://{args.host}:{args.port}/health")
     logger.info(f"  WebSocket: {ws_proto}://{args.host}:{args.port}/ws/{{client_id}}")
     logger.info("-" * 60)

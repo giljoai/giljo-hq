@@ -119,7 +119,13 @@ describe('SupersedeProjectModal.vue', () => {
 
   it('surfaces a backend validation error inline instead of crashing', async () => {
     api.projects.update = vi.fn().mockRejectedValue({
-      response: { data: { detail: 'Successor project must be different from the project itself.' } },
+      response: {
+        status: 400,
+        data: {
+          error_code: 'VALIDATIONERROR',
+          message: 'Successor project must be different from the project itself.',
+        },
+      },
     })
     const { wrapper } = await mountModal()
 

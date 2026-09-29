@@ -2,6 +2,7 @@ import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useNotificationStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useProjectCloseout({ project, projectId, sortedJobs, onComplete }) {
   const notificationStore = useNotificationStore()
@@ -49,6 +50,7 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
   const showMemoryPending = computed(() => {
     if (!allJobsTerminal.value) return false
     if (!project.value?.product_id) return false
+    if (memoryPollTimedOut.value || memoryPollError.value) return false
     return !memoryWritten.value
   })
 
@@ -114,9 +116,25 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
     startMemoryPoll()
   }
 
-  function dismissMemoryPollError() {
-    memoryPollTimedOut.value = false
-    memoryPollError.value = false
+  const DEFAULT_CLOSE_REASON = 'Closed from the dashboard: the agents stopped without writing a closeout.'
+  const closingWithoutSummary = ref(false)
+
+  async function closeWithoutSummary(reason) {
+    if (closingWithoutSummary.value) return false
+    closingWithoutSummary.value = true
+    try {
+      await api.projects.closeoutWithoutSummary(projectId.value, (reason || '').trim() || DEFAULT_CLOSE_REASON)
+      startMemoryPoll()
+      return true
+    } catch (error) {
+      showToast({
+        message: parseErrorResponse(error).message || 'Could not close the project. Try again.',
+        type: 'error',
+      })
+      return false
+    } finally {
+      closingWithoutSummary.value = false
+    }
   }
 
   function reset(newProjectId, oldProjectId) {
@@ -144,7 +162,8 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
     openCloseoutModal,
     handleCloseoutComplete,
     retryMemoryPoll,
-    dismissMemoryPollError,
+    closeWithoutSummary,
+    closingWithoutSummary,
     reset,
     cleanup,
   }

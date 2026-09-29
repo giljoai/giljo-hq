@@ -203,7 +203,7 @@ describe('projects store — handleRealtimeUpdate (full-refetch-on-event)', () =
   })
 
   // FE-9533 — LOAD-BEARING REGRESSION: activeProjectMeta (the dedicated
-  // /projects/active read consumed by LaunchRedirectView's Jobs pane and by
+  // /projects/active read consumed by the Jobs board and by
   // ProjectsView's hasActiveProject) was written ONLY from the two local,
   // self-triggered actions (activateProject/deactivateProject). A project
   // activated from ANOTHER session or headlessly over MCP broadcasts the same

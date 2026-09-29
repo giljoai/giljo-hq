@@ -63,12 +63,12 @@ Open **Projects** in the left sidebar and create a project:
 3. Set the **Project Type** for its taxonomy badge (for example BE, FE, API). The series number fills in the next available value for that type.
 4. Save.
 
-Open the project to reach its two tabs, **Staging** and **Implementation**. On the **Staging** tab, choose an **Execution Mode** (a read-only chip shows the coding tool the wizard detected for you):
+Activate the project from the project list. That takes you to its card on the **Jobs** board, which has two sides: **Staging** for projects getting ready and **Implementation** for projects that are running. On the card's **Run as** row, choose an **Execution Mode** (a read-only chip shows the coding tool the wizard detected for you). Nothing is picked for you in advance:
 
 - **Multi-Terminal** — each agent gets its own prompt, run in separate terminal sessions.
 - **Subagent** — one main agent spawns its subagents within a single session.
 
-Click **Stage Project**. GiljoAI assembles a structured prompt from your product context, 360 Memory, project description, and agent templates, and copies it to your clipboard.
+Click **Stage Project** on the card. GiljoAI assembles a structured prompt from your product context, 360 Memory, project description, and agent templates, and copies it to your clipboard. If you have not picked a mode yet, the card asks you to pick one first.
 
 ---
 
@@ -76,8 +76,8 @@ Click **Stage Project**. GiljoAI assembles a structured prompt from your product
 
 1. Open your AI coding tool and paste the staged prompt.
 2. Your agent connects to GiljoAI and plans the mission.
-3. Back in the dashboard, switch to the project's **Implementation** tab.
-4. Copy the implementation prompt from there and paste it into your tool.
+3. Back in the dashboard, the card shows the mission and the agent team the orchestrator chose.
+4. Click **Implement** on the card. It copies the implementation prompt for you to paste into your tool, and the card moves to the **Implementation** side of the board.
 5. Work begins: agents read their assigned jobs, build todo lists, and coordinate through the Message Hub.
 
 GiljoAI never calls an AI model itself — it assembles context and protocol; your AI coding tool does the thinking.
@@ -86,18 +86,18 @@ GiljoAI never calls an AI model itself — it assembles context and protocol; yo
 
 ## Monitor and Close Out
 
-The project's **Implementation** tab shows live agent activity:
+The project's card on the **Implementation** side of the **Jobs** board shows live agent activity, one row per agent with the orchestrator first:
 
 - Agent status (waiting, working, blocked, sleeping, complete — the User Guide has the full list)
 - Step progress (for example 6/6)
 - Duration per agent (ticks live while an agent is active)
-- A **Messages Waiting** count for each agent
+- A count of messages waiting for each agent
 
-Talk to your agents from the message composer — **Broadcast** to all or **Direct** to one — or open the full conversation in the **Message Hub**.
+Click **Jobs detail** on the card to open the full view of the project. Talk to your agents from its message composer (**Broadcast** to all or **Direct** to one), or open the full conversation in the **Message Hub** with the card's Hub button.
 
-If an agent needs a decision from you mid-run, a **Decision Required** banner appears. Check in with the orchestrator, then click the banner to open the decision dialog and pick an option — that is the only place approvals are decided.
+If an agent needs a decision from you mid-run, the card says **Your decision needed** and **Jobs detail** shows a **Decision Required** banner. Check in with the orchestrator, then click the banner to open the decision dialog and pick an option. That is the only place approvals are decided.
 
-When every agent has finished, a **Review project** button appears (the banner shows **"Saving project memory…"** while the 360 Memory entry is written). Click **Review project** to see the closeout summary, then **Close** — you return to the Projects page. You can reopen the summary any time from the **"Project Completed and Closed"** badge.
+When every agent has finished, the card shows a **Review project** button (**Jobs detail** shows **"Saving project memory…"** while the 360 Memory entry is written). Click **Review project** to see the closeout summary, then **Close**. You stay on the board, and the reviewed project leaves it. You can reopen the summary any time from the project's serial badge on the **Projects** page.
 
 Your next project starts with this accumulated 360 Memory automatically.
 
@@ -128,9 +128,9 @@ Your next project starts with this accumulated 360 Memory automatically.
 - Run `giljo_setup` in your AI coding tool to refresh your skills. If a setup download reports itself stale, re-run `giljo_setup` for a fresh copy.
 
 **An agent shows "Silent" status:**
-- Raise the **Agent Check-in Cadence** in **Tools → Notifications** so waiting agents check in more often; agents on a harness with live wake support respond instantly instead of waiting for the next cycle.
+- Raise the **Agent Check-in Cadence** in **Tools → Agents → Behaviour** so waiting agents check in more often; agents on a harness with live wake support respond instantly instead of waiting for the next cycle.
 
-**The Implementation tab is not updating:**
+**The Jobs board is not updating:**
 - Check the connection indicator in the navigation. A red icon means the live connection dropped — click it and use **Force Reconnect**.
 
 > [!CE]

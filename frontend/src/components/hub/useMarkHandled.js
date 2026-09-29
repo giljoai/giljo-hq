@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useMarkHandled() {
   const commHub = useCommHubStore()
@@ -33,7 +34,7 @@ export function useMarkHandled() {
       clearFocusFromRoute()
       showToast({ type: 'success', message: 'Handled — the turn is cleared.' })
     } catch (err) {
-      const msg = err?.response?.data?.detail || err?.message || 'Could not clear the turn.'
+      const msg = parseErrorResponse(err).message || 'Could not clear the turn.'
       showToast({ type: 'error', message: msg })
     } finally {
       clearing.value = false

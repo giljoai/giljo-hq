@@ -10,6 +10,31 @@ import re
 MAX_NAME_SUFFIX = 20
 
 
+HARNESS_NAME_MAX_LENGTH = 20
+HARNESS_DEFAULT = "default"
+_HARNESS_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_DEFAULT_HARNESS_TOKENS = frozenset({HARNESS_DEFAULT, "generic"})
+
+
+def validate_harness_name(value: str | None) -> str:
+    text = (value or "").strip()
+    if not text or text.lower() == HARNESS_DEFAULT:
+        return HARNESS_DEFAULT
+    if len(text) > HARNESS_NAME_MAX_LENGTH:
+        raise ValueError(f"harness name must be {HARNESS_NAME_MAX_LENGTH} characters or less")
+    if not _HARNESS_NAME_RE.match(text):
+        raise ValueError("harness name may only use letters, digits, dash, underscore and dot")
+    return text
+
+
+def resolve_harness_name(value: str | None) -> str | None:
+    try:
+        name = validate_harness_name(value)
+    except ValueError:
+        return None
+    return None if name.lower() in _DEFAULT_HARNESS_TOKENS else name
+
+
 def crew_suffixed_names(base_names: list[str], taken_names: set[str]) -> tuple[list[str], int] | None:
     for n in range(1, MAX_NAME_SUFFIX + 1):
         candidates = [base if n == 1 else f"{base}-{n}" for base in base_names]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giljo-mcp"
-version = "2.5.0"
+version = "2.6.0"
 description = "Giljo HQ Coding Orchestrator - Multi-agent orchestration system"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -35,8 +35,9 @@ dependencies = [
     # effective_candidates(). INF-6053 deferred by pinning last-known-good; this change completes the bump
     # (route-introspection tests flatten _IncludedRouter via tests/helpers/route_surface). starlette 1.3.1
     # clears 4 CVEs (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two in lockstep.
-    "fastapi==0.139.2",
-    "starlette==1.3.1",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
+    # 2026-09-24: pair bumped to fastapi 0.141.1 / starlette 1.7.0 (see requirements.txt).
+    "fastapi==0.141.1",
+    "starlette==1.7.0",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
 
@@ -51,7 +52,7 @@ dependencies = [
     "bcrypt>=4.0.0",
     "cryptography>=50.0.0",  # Fernet encryption for auth tokens (auth_manager.py)
     "python-multipart>=0.0.6",
-    "PyJWT>=2.8.0",
+    "PyJWT>=2.14.0",
     "email-validator>=2.1.0",  # Required by Pydantic EmailStr (auth.py, users.py)
 
     # MCP SDK (Model Context Protocol)

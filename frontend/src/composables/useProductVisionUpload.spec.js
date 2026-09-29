@@ -31,7 +31,7 @@ vi.mock('@/utils/uploadValidation', () => ({
 }))
 
 vi.mock('@/utils/errorMessages', () => ({
-  parseErrorResponse: (err) => ({ message: err?.response?.data?.detail || 'Error' }),
+  parseErrorResponse: (err) => ({ message: err?.message || 'Error' }),
 }))
 
 import { useProductVisionUpload } from './useProductVisionUpload'

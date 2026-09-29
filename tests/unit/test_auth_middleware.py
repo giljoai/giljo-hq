@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -188,6 +189,7 @@ class TestMissingTenantKeyFallback:
     async def test_authenticated_missing_tenant_key_uses_default(self, monkeypatch):
         import api.app_state
 
+        monkeypatch.setenv("GILJO_MODE", "")
         monkeypatch.setattr(api.app_state.state, "config", None, raising=False)
         monkeypatch.setenv("DEFAULT_TENANT_KEY", "tk_fallback_default")
 
@@ -231,6 +233,63 @@ class TestMissingTenantKeyFallback:
         await middleware(scope, receive, send)
 
         assert captured_state.get("tenant_key") == "tk_fallback_default"
+
+    @pytest.mark.asyncio
+    async def test_saas_authenticated_missing_tenant_key_is_rejected(self, monkeypatch):
+        import api.app_state
+
+        monkeypatch.setenv("GILJO_MODE", "saas")
+        monkeypatch.setattr(api.app_state.state, "config", None, raising=False)
+        monkeypatch.setenv("DEFAULT_TENANT_KEY", "tk_fallback_default")
+
+        mock_auth_mgr = MagicMock()
+        mock_auth_mgr.authenticate_request = AsyncMock(
+            return_value={
+                "authenticated": True,
+                "user": "testuser",
+                "user_id": "testuser",
+                "tenant_key": None,
+                "is_auto_login": False,
+                "user_obj": None,
+            }
+        )
+
+        route_reached = False
+
+        async def downstream_app(scope, receive, send):
+            nonlocal route_reached
+            route_reached = True
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        middleware = AuthMiddleware(downstream_app, auth_manager=lambda: mock_auth_mgr)
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/projects",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "scheme": "http",
+            "app": MagicMock(state=MagicMock()),
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent: list[dict] = []
+
+        async def send(message):
+            sent.append(message)
+
+        await middleware(scope, receive, send)
+
+        assert route_reached is False
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        assert start["status"] == 401
+        body = json.loads(b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body"))
+        assert body["error"] == "Authentication required"
+        assert "tk_fallback_default" not in json.dumps(body)
 
 
 class TestTokenExpInAuthResult:

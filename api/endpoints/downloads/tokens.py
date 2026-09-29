@@ -113,7 +113,9 @@ async def generate_download_token(
     if not zip_path:
         await token_manager.mark_failed(token, message)
         logger.error(f"Failed to stage content for token {mask_token(token)}: {message}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to stage download content"
+        )
 
     await token_manager.mark_ready(token)
 
@@ -229,10 +231,9 @@ async def download_temp_file(
             logger.exception("Failed reading file {file_path}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server error") from e
 
-        try:
-            await token_manager.increment_download_count(token, tenant_key)
-        except Exception:
-            logger.exception("Download metrics increment failed; serving file anyway")
+        if not await token_manager.claim_download(token, tenant_key):
+            logger.warning(f"Token validation failed: token={mask_token(token)}, reason=already_used")
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Download token already used")
 
         logger.info(f"Download served: {sanitize(filename)} ({len(content)} bytes) token={mask_token(token)}")
 

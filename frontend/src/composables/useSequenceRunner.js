@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import {
   MAX_SEQUENCE_PROJECTS,
   DEFAULT_EXECUTION_MODE,
@@ -87,15 +88,10 @@ export function useSequenceRunner() {
         current_index: 0,
         project_statuses,
       })
-      const headPid = data.resolved_order?.[0] || resolvedOrder?.[0]
-      router.push({ name: 'ProjectLaunch', params: { projectId: headPid }, query: { run: data.id } })
+      router.push({ name: 'JobsViewport', query: { run: data.id } })
       return data
     } catch (err) {
-      const detail = err?.response?.data?.detail
-      const message =
-        typeof detail === 'string'
-          ? detail
-          : 'Could not start the sequence. Check your selection and try again.'
+      const message = parseErrorResponse(err).message || 'Could not start the sequence. Check your selection and try again.'
       showToast({ message, type: 'error' })
       return null
     } finally {

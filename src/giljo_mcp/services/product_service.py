@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import (
     BaseGiljoError,
+    CodedRefusalError,
     ResourceNotFoundError,
     ValidationError,
 )
@@ -33,7 +34,7 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
-class ProductAmbiguousError(ValidationError):
+class ProductAmbiguousError(CodedRefusalError):
 
     code = "PRODUCT_AMBIGUOUS"
 

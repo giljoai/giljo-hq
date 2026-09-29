@@ -68,7 +68,7 @@ function openSkillGuide() {
   padding: 4px 10px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.22);
-  color: var(--brand-yellow);
+  color: var(--color-accent-primary);
   font-family: 'IBM Plex Mono', monospace;
   font-weight: 600;
   font-size: 0.8125rem;

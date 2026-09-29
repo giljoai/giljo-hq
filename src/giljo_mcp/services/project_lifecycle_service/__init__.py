@@ -32,6 +32,7 @@ from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
 from giljo_mcp.services.project_helpers import _build_ws_project_data, mark_chain_member_status
 from giljo_mcp.services.project_lifecycle_service._orchestrator_fixture_mixin import OrchestratorFixtureMixin
+from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -351,7 +352,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
             project_id=project_id,
             tenant_key=tenant_key,
             status="completed",
-            test_session=self._test_session,
+            test_session=session,
             websocket_manager=self._websocket_manager,
         )
 
@@ -390,6 +391,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
         if commit:
             await session.commit()
+            await broadcast_deferred_sequence_updates(session)
 
             if decommission_events:
                 await broadcast_agent_status_events(

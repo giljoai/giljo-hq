@@ -114,24 +114,8 @@ describe('useSequenceRunner — startSequence (cap + payload + nav)', () => {
     expect(body.project_statuses).toEqual({ a: 'pending', b: 'pending', c: 'pending' })
     expect(run).toEqual({ id: 'run-123' })
     expect(pushMock).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'a' },
+      name: 'JobsViewport',
       query: { run: 'run-123' },
-    })
-  })
-
-  it('FE-6174c: routes to the head project from the create response resolved_order[0]', async () => {
-    createMock.mockResolvedValueOnce({ data: { id: 'run-9', resolved_order: ['head', 'tail'] } })
-    const seq = useSequenceRunner()
-    await seq.startSequence({
-      projectIds: ['head', 'tail'],
-      resolvedOrder: ['head', 'tail'],
-      executionMode: 'multi_terminal',
-    })
-    expect(pushMock).toHaveBeenCalledWith({
-      name: 'ProjectLaunch',
-      params: { projectId: 'head' },
-      query: { run: 'run-9' },
     })
   })
 

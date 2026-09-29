@@ -3,7 +3,6 @@
     <v-card v-draggable class="smooth-border">
       <div class="dlg-header">
         <span class="dlg-title">{{ editingProject ? 'Edit Project' : 'Create New Project' }}</span>
-        <AgentTipsDialog />
         <v-btn icon variant="text" class="dlg-close" aria-label="Close dialog" @click="cancel">
           <v-icon>mdi-close</v-icon>
         </v-btn>
@@ -151,17 +150,16 @@
 
           <v-textarea
             v-model="localData.mission"
-            label="Orchestrator Generated Mission"
-            readonly
+            label="Orchestrator mission"
             variant="outlined"
             rows="4"
             class="mb-3"
-            hint="Auto-generated during staging. Clear to regenerate on next staging."
+            hint="Written by the orchestrator during staging; you can edit it. Clear it to regenerate on the next staging."
             persistent-hint
             :placeholder="
               localData.mission ? '' : 'Mission will be generated when you stage this project'
             "
-            aria-label="Orchestrator generated mission"
+            aria-label="Orchestrator mission"
           >
             <template #append>
               <v-menu>
@@ -230,7 +228,6 @@
 import { ref, watch, computed } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import AddTypeModal from '@/components/projects/AddTypeModal.vue'
-import AgentTipsDialog from '@/components/common/AgentTipsDialog.vue'
 import api from '@/services/api'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { useProjectTaxonomy } from '@/composables/useProjectTaxonomy'
@@ -357,6 +354,7 @@ watch(
       }
     }
   },
+  { immediate: true },
 )
 
 function clearMissionData() {

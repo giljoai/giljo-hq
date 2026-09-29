@@ -58,7 +58,9 @@ describe('useTaskBulkActions', () => {
   })
 
   it('reports a server refusal with its reason instead of failing the batch', async () => {
-    mockDeleteTask.mockRejectedValueOnce({ response: { data: { detail: 'Task is locked' } } })
+    mockDeleteTask.mockRejectedValueOnce({
+      response: { data: { error_code: 'VALIDATIONERROR', message: 'Task is locked' } },
+    })
     const { api } = setup([plain('t1'), plain('t2')])
     api.onSelectedIds(['t1', 't2'])
 

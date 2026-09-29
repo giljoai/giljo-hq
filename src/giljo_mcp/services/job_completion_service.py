@@ -26,6 +26,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.schemas.jsonb_validators import validate_agent_execution_result
+from giljo_mcp.schemas.responses.orchestration import SOLO_STAGING_END_NEXT_ACTION_WHY
 from giljo_mcp.schemas.service_responses import CompleteJobResult, StagingDirective, build_next_action
 from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
 from giljo_mcp.services.job_completion_closeout_gate import (
@@ -47,7 +48,9 @@ from giljo_mcp.services.job_completion_staging import (  # noqa: F401 — consta
     is_staging_phase_orchestrator,
     staging_directive_for,
 )
+from giljo_mcp.services.orchestrator_caller_guard import warn_if_never_started
 from giljo_mcp.services.protocol_survival import build_complete_job_footer
+from giljo_mcp.services.sequence_run_service import active_chain_run, broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 
 
@@ -161,7 +164,7 @@ class JobCompletionService:
                     is_chain_member_suborch = bool(
                         is_staging_end
                         and getattr(job, "project_id", None) is not None
-                        and await self._is_chain_member_suborch(session, job.project_id, tenant_key)
+                        and await active_chain_run(session, job.project_id, tenant_key) is not None
                     )
 
                     await self._validate_completion_requirements(
@@ -185,6 +188,7 @@ class JobCompletionService:
                         is_closeout_phase=is_closeout_phase,
                     )
 
+                    warn_if_never_started(job, execution, warnings)
                     old_status, duration_seconds = self._apply_completion_status(
                         execution, result, is_staging_end=is_staging_end
                     )
@@ -226,6 +230,7 @@ class JobCompletionService:
                 else:
                     await self._raise_for_missing_execution(session, job_id, tenant_key)
 
+            await broadcast_deferred_sequence_updates(session)
             if execution:
                 await self._broadcast_completion(
                     tenant_key, job_id, job, execution, old_status, duration_seconds, product_id_for_broadcast
@@ -269,21 +274,6 @@ class JobCompletionService:
             raise OrchestrationError(
                 message="Failed to complete job", context={"job_id": job_id, "error": str(e)}
             ) from e
-
-    async def _is_chain_member_suborch(self, session: AsyncSession, project_id: Any, tenant_key: str) -> bool:
-        try:
-            from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-            svc = SequenceRunService(
-                db_manager=self.db_manager,
-                tenant_manager=self.tenant_manager,
-                session=session,
-            )
-            run = await svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-            return run is not None
-        except Exception:  # noqa: BLE001 - best-effort chain detection; never break completion
-            self._logger.warning("[BE-6198] chain-member check failed (non-fatal); falling back to solo staging-end")
-            return False
 
     async def _guard_conductor_chain_incomplete(
         self,
@@ -570,7 +560,6 @@ class JobCompletionService:
             db_manager=self.db_manager,
             tenant_manager=self.tenant_manager,
             websocket_manager=self._websocket_manager,
-            test_session=self._test_session,
         )
 
     @staticmethod
@@ -602,11 +591,8 @@ class JobCompletionService:
                 "staging_end",
                 "Staging marked complete.",
                 build_next_action(
-                    why=(
-                        "Stop this session now. A human presses Implement in the dashboard to start the "
-                        "implementation session with a fresh orchestrator execution. Do NOT write the "
-                        "project closeout from the staging session."
-                    )
+                    tool="launch_implementation",
+                    why=f"{SOLO_STAGING_END_NEXT_ACTION_WHY} Do NOT write the project closeout from the staging session.",
                 ),
             )
         if is_closeout_phase:

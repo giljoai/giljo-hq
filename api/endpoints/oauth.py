@@ -158,6 +158,22 @@ class OAuthMetadataResponse(BaseModel):
     )
 
 
+async def validate_consent_request(oauth_service: OAuthService, body: AuthorizeRequest, tenant_key: str) -> None:
+    try:
+        await oauth_service.validate_authorize_request(tenant_key=tenant_key, **body.model_dump(exclude={"state"}))
+    except ValueError as exc:
+        logger.warning("OAuth authorize validation failed: %s", sanitize(str(exc)))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid authorization request parameters.",
+        ) from exc
+
+
+def append_query_params(redirect_uri: str, params: dict[str, str]) -> str:
+    separator = "&" if "?" in redirect_uri else "?"
+    return f"{redirect_uri}{separator}{urlencode(params)}"
+
+
 @router.post("/authorize", tags=["oauth"])
 async def authorize(
     request: Request,
@@ -184,24 +200,7 @@ async def authorize(
         HTTPException 400: If OAuth parameter validation fails.
     """
     oauth_service = OAuthService(db_session=db)
-
-    try:
-        await oauth_service.validate_authorize_request(
-            client_id=body.client_id,
-            redirect_uri=body.redirect_uri,
-            code_challenge=body.code_challenge,
-            code_challenge_method=body.code_challenge_method,
-            response_type=body.response_type,
-            scope=body.scope,
-            tenant_key=current_user.tenant_key,
-            resource=body.resource,
-        )
-    except ValueError as exc:
-        logger.warning("OAuth authorize validation failed: %s", sanitize(str(exc)))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid authorization request parameters.",
-        ) from exc
+    await validate_consent_request(oauth_service, body, current_user.tenant_key)
 
     code = await oauth_service.generate_authorization_code(
         user_id=str(current_user.id),
@@ -217,8 +216,7 @@ async def authorize(
     if body.state:
         params["state"] = body.state
 
-    separator = "&" if "?" in body.redirect_uri else "?"
-    redirect_target = f"{body.redirect_uri}{separator}{urlencode(params)}"
+    redirect_target = append_query_params(body.redirect_uri, params)
 
     logger.info(
         "Authorization code issued for user_id=%s client_id=%s",

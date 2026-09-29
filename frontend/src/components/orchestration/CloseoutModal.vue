@@ -1,8 +1,7 @@
 <template>
   <v-dialog
     :model-value="show"
-    :fullscreen="isMobile"
-    :max-width="isMobile ? undefined : '900'"
+    max-width="900"
     persistent
     class="closeout-modal"
     role="dialog"
@@ -230,8 +229,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { useDisplay } from 'vuetify'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { useToast } from '@/composables/useToast'
@@ -279,8 +277,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'closeout'])
 
-const { mobile } = useDisplay()
-const isMobile = computed(() => mobile.value)
 
 const loading = ref(false)
 const error = ref(null)
@@ -421,13 +417,6 @@ watch(
 /* Ensure proper spacing */
 .v-list-item {
   min-height: 40px;
-}
-
-/* Mobile optimizations */
-@media (max-width: 600px) {
-  .git-commits-list {
-    max-height: 200px;
-  }
 }
 
 /* Expansion panel styling */

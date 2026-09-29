@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 
 import { immutableMapSet, immutableMapDelete } from './immutableHelpers'
 import { useProductStore } from '@/stores/products'
+import { useNotificationStore } from '@/stores/notifications'
 import api from '@/services/api'
 
 const ACTIVE_RUN_STATUSES = ['pending', 'running', 'stalled']
@@ -162,11 +163,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
   }
 
 
-  async function hydrate(statuses = ACTIVE_RUN_STATUSES) {
+  async function hydrate(statuses = ACTIVE_RUN_STATUSES, { allProducts = false } = {}) {
     loading.value = true
     error.value = null
     try {
-      const viewedProductId = useProductStore().effectiveProductId
+      const viewedProductId = allProducts ? null : useProductStore().effectiveProductId
       const res = await api.sequenceRuns.list({
         status: statuses.join(','),
         include_review_pending: true,
@@ -245,20 +246,40 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     return run
   }
 
+  function notifyChainRetired(runId) {
+    useNotificationStore().addNotification({
+      id: `chain-retired:${runId}`,
+      type: 'lifecycle',
+      severity: 'info',
+      title: 'Chain finished',
+      message: 'This chain has finished; its record was retired.',
+    })
+  }
+
   async function handleSequenceUpdated(payload) {
     const runId = payload?.run_id || payload?.id
     const openRunId = activeRun.value?.id ?? null
+    const wasKnownToBoard = !!runId && (runsById.value.has(runId) || reviewPendingById.value.has(runId))
     await hydrate()
-    if (runId && openRunId === runId) {
-      if (!runsById.value.has(runId)) {
+    if (!runId) return
+    const stillKnown = runsById.value.has(runId) || reviewPendingById.value.has(runId)
+    if (openRunId === runId) {
+      if (!stillKnown) {
         try {
           await fetchRun(runId)
         } catch {
           activeRun.value = null
           retiredRunNotice.value = { runId }
+          notifyChainRetired(runId)
         }
       } else {
         activeRun.value = runsById.value.get(runId)
+      }
+    } else if (wasKnownToBoard && !stillKnown) {
+      try {
+        await api.sequenceRuns.get(runId)
+      } catch {
+        notifyChainRetired(runId)
       }
     }
   }
@@ -280,6 +301,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     const stopped = normalizeRun(res.data)
     await hydrate()
     return stopped
+  }
+
+  async function deactivateChain(runId) {
+    await api.sequenceRuns.deactivate(runId)
+    await hydrate()
   }
 
   function clearActiveRun() {
@@ -342,6 +368,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     lockRun,
     unlockRun,
     stopChain,
+    deactivateChain,
     handleSequenceUpdated,
     clearRetiredRunNotice,
     clearActiveRun,

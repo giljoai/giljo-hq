@@ -11,7 +11,6 @@ from . import (
     messages,
     operations,
     orchestration,
-    simple_handover,
     status,
 )
 
@@ -21,7 +20,6 @@ router = APIRouter(prefix="/api/agent-jobs", tags=["agent-jobs"])
 router.include_router(lifecycle.router)
 router.include_router(status.router)
 router.include_router(orchestration.router)
-router.include_router(simple_handover.router)
 router.include_router(messages.router)
 
 jobs_router = APIRouter(prefix="/api/jobs", tags=["job-operations"])

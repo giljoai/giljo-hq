@@ -13,9 +13,12 @@ vi.mock('@/services/api', () => ({
   default: {
     prompts: { staging: (...args) => stagingMock(...args) },
     orchestrator: { launchProject: (...args) => launchMock(...args) },
-    projects: { get: vi.fn().mockResolvedValue({ data: { id: 'proj-1' } }) },
+    projects: { get: vi.fn().mockResolvedValue({ data: { id: 'proj-1' } }), launchImplementation: vi.fn().mockResolvedValue({}) },
   },
-  api: {},
+  api: {
+    projects: { launchImplementation: vi.fn().mockResolvedValue({}) },
+    prompts: { implementation: vi.fn().mockResolvedValue({ data: { prompt: 'IMPL', agent_count: 0 } }) },
+  },
 }))
 
 const clipboardCopyMock = vi.fn().mockResolvedValue(true)
@@ -96,7 +99,10 @@ describe('useProjectStaging', () => {
 
   it('handleStageProject shows a friendly warning on the 409 no-execution-mode gate', async () => {
     const err = new Error('No execution mode selected')
-    err.response = { status: 409, data: { detail: 'No execution mode selected. Choose an execution mode before staging.' } }
+    err.response = {
+      status: 409,
+      data: { error_code: 'VALIDATIONERROR', message: 'No execution mode selected. Choose an execution mode before staging.' },
+    }
     stagingMock.mockRejectedValueOnce(err)
     const { handleStageProject } = await makeComposable({ executionMode: null })
     await handleStageProject()
@@ -150,7 +156,9 @@ describe('useProjectStaging', () => {
 
   it('handleRestageProject shows error toast on 409 (impl already launched)', async () => {
     const err = new Error('Cannot recover mode')
-    err.response = { data: { detail: 'Cannot recover mode: implementation already launched' } }
+    err.response = {
+      data: { error_code: 'VALIDATIONERROR', message: 'Cannot recover mode: implementation already launched' },
+    }
     restageProjectMock.mockRejectedValueOnce(err)
     const { handleRestageProject } = await makeComposable({ canRestage: true })
     await handleRestageProject()

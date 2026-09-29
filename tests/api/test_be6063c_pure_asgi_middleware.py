@@ -23,6 +23,9 @@ from api.middleware import (
 )
 
 
+pytestmark = pytest.mark.usefixtures("real_rate_limiter")
+
+
 def _build_stacked_app() -> FastAPI:
 
     app = FastAPI()

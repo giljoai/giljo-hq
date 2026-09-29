@@ -2,6 +2,7 @@ import { ref, computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { isCeModeValue } from '@/composables/useGiljoMode'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useNavDrawerAccount({ giljoMode }) {
   const router = useRouter()
@@ -70,9 +71,8 @@ export function useNavDrawerAccount({ giljoMode }) {
       await store.cancelDeletion()
       showToast({ message: 'Account deletion cancelled.', type: 'success' })
     } catch (err) {
-      const detail = err?.response?.data?.detail
       showToast({
-        message: detail || 'Could not cancel deletion. Please try again.',
+        message: parseErrorResponse(err).message || 'Could not cancel deletion. Please try again.',
         type: 'error',
       })
     } finally {

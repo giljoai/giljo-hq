@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useUserStore } from './user'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export const useOrgStore = defineStore('org', () => {
   const organizations = ref([])
@@ -75,7 +76,7 @@ export const useOrgStore = defineStore('org', () => {
       organizations.value.push(response.data)
       return { success: true, data: response.data }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     } finally {
       loading.value = false
     }
@@ -92,7 +93,7 @@ export const useOrgStore = defineStore('org', () => {
       }
       return { success: true, data: response.data }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     } finally {
       loading.value = false
     }
@@ -108,7 +109,7 @@ export const useOrgStore = defineStore('org', () => {
       }
       return { success: true }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     } finally {
       loading.value = false
     }
@@ -133,7 +134,7 @@ export const useOrgStore = defineStore('org', () => {
       members.value.push(response.data)
       return { success: true, data: response.data }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     }
   }
 
@@ -146,7 +147,7 @@ export const useOrgStore = defineStore('org', () => {
       }
       return { success: true, data: response.data }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     }
   }
 
@@ -156,7 +157,7 @@ export const useOrgStore = defineStore('org', () => {
       members.value = members.value.filter((m) => m.user_id !== userId)
       return { success: true }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     }
   }
 
@@ -168,7 +169,7 @@ export const useOrgStore = defineStore('org', () => {
       await fetchMembers(orgId)
       return { success: true }
     } catch (err) {
-      return { success: false, error: err.response?.data?.detail || err.message }
+      return { success: false, error: parseErrorResponse(err).message }
     }
   }
 

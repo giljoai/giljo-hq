@@ -99,3 +99,27 @@ def test_checklist_surfaces_mode_and_gate():
     assert "without an approval gate" in auto["instruction"]
 
     assert build_closeout_checklist()["closeout_mode"] == "hitl"
+
+
+def test_shared_protected_surface_list_is_vendor_neutral():
+    assert PROTECTED_SURFACE_PATTERNS == (
+        "migrations/",
+        "/auth",
+        "auth/",
+        "licensing",
+        "jwt",
+        "csrf",
+        "oauth",
+        "password",
+        "billing",
+        "subscription",
+    )
+
+
+def test_registered_edition_patterns_join_the_protected_surface():
+    import giljo_mcp.services.job_completion_closeout_gate as gate
+
+    result = {"files_changed": ["api/saas_endpoints/vendorx_webhook.py"]}
+    assert detect_closeout_signal(result) == []
+    gate.register_protected_surface_patterns(("vendorx",))
+    assert detect_closeout_signal(result) == ["protected surface(s) touched: vendorx"]

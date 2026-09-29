@@ -205,11 +205,7 @@ describe('ProjectReviewModal.vue — superseded successor notice (FE-9591)', () 
       routes: [
         { path: '/', name: 'Root', component: { template: '<div />' } },
         { path: '/hub', name: 'Hub', component: { template: '<div />' } },
-        {
-          path: '/projects/:projectId',
-          name: 'ProjectLaunch',
-          component: { template: '<div />' },
-        },
+        { path: '/jobs-overview', name: 'JobsViewport', component: { template: '<div />' } },
       ],
     })
   }
@@ -251,8 +247,8 @@ describe('ProjectReviewModal.vue — superseded successor notice (FE-9591)', () 
     await link.trigger('click')
     await flushPromises()
 
-    expect(router.currentRoute.value.name).toBe('ProjectLaunch')
-    expect(router.currentRoute.value.params.projectId).toBe(SUCCESSOR_ID)
+    expect(router.currentRoute.value.name).toBe('JobsViewport')
+    expect(router.currentRoute.value.query.project).toBe(SUCCESSOR_ID)
     expect(wrapper.emitted('close')).toBeTruthy()
   })
 

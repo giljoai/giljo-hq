@@ -20,10 +20,10 @@
 # The hash below is the canonical direct-dep set of requirements.txt. The CI
 # drift gate (tests/unit/test_requirements_lock_drift.py) REDs if it no longer
 # matches — i.e. requirements.txt was changed without regenerating this lock.
-# requirements-txt-hash: sha256:cea1476247baf0dedaf5f26c21242e7fdd7960970259c49dbf0b3804f0804eb2
+# requirements-txt-hash: sha256:a754886bf45df5676538ba5b2a5aab78dfc1e8e36325b94557719f9d7c53559a
 aiosmtplib==5.1.3
     # via -r requirements.txt
-alembic==1.19.2
+alembic==1.20.0
     # via -r requirements.txt
 annotated-doc==0.0.5
     # via fastapi
@@ -47,9 +47,9 @@ authlib==1.8.0
     # via -r requirements.txt
 bcrypt==5.0.0
     # via -r requirements.txt
-boto3==1.43.90
+boto3==1.43.101
     # via -r requirements.txt
-botocore==1.43.90
+botocore==1.43.101
     # via
     #   boto3
     #   s3transfer
@@ -79,11 +79,11 @@ dnspython==2.8.0
     # via email-validator
 email-validator==2.3.0
     # via -r requirements.txt
-fastapi==0.139.2
+fastapi==0.141.1
     # via
     #   -r requirements.txt
     #   sentry-sdk
-greenlet==3.5.5
+greenlet==3.5.6
     # via
     #   -r requirements.txt
     #   sqlalchemy
@@ -102,7 +102,7 @@ httpx==0.28.1
     # via -r requirements.txt
 httpx2==2.12.0
     # via mcp
-idna==3.19
+idna==3.20
     # via
     #   anyio
     #   email-validator
@@ -121,7 +121,7 @@ jsonschema==4.26.0
     # via mcp
 jsonschema-specifications==2025.9.1
     # via jsonschema
-mako==1.4.1
+mako==1.4.3
     # via alembic
 markupsafe==3.0.3
     # via
@@ -137,7 +137,7 @@ packaging==26.3
     # via -r requirements.txt
 psutil==7.2.2
     # via -r requirements.txt
-psycopg2-binary==2.9.12
+psycopg2-binary==2.9.13
     # via -r requirements.txt
 pycparser==3.0
     # via cffi
@@ -149,7 +149,7 @@ pydantic==2.13.5
     #   mcp-types
 pydantic-core==2.46.5
     # via pydantic
-pyjwt==2.13.0
+pyjwt==2.15.0
     # via
     #   -r requirements.txt
     #   mcp
@@ -173,13 +173,13 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-regex==2026.9.3
+regex==2026.9.10
     # via tiktoken
 requests==2.34.2
     # via
     #   resend
     #   tiktoken
-resend==2.43.0
+resend==2.47.0
     # via -r requirements.txt
 rpds-py==2026.6.3
     # via
@@ -187,17 +187,17 @@ rpds-py==2026.6.3
     #   referencing
 s3transfer==0.19.2
     # via boto3
-sentry-sdk==2.69.1
+sentry-sdk==2.70.0
     # via -r requirements.txt
 six==1.17.0
     # via python-dateutil
-sqlalchemy==2.0.52
+sqlalchemy==2.0.54
     # via
     #   -r requirements.txt
     #   alembic
 sse-starlette==3.4.11
     # via mcp
-starlette==1.3.1
+starlette==1.7.0
     # via
     #   -r requirements.txt
     #   fastapi
@@ -232,12 +232,12 @@ typing-inspection==0.4.4
     #   fastapi
     #   mcp
     #   pydantic
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   botocore
     #   requests
     #   sentry-sdk
-uvicorn==0.52.4
+uvicorn==0.53.0
     # via
     #   -r requirements.txt
     #   mcp
@@ -245,7 +245,7 @@ uvloop==0.22.1
     # via uvicorn
 watchdog==6.0.0
     # via -r requirements.txt
-watchfiles==1.2.0
+watchfiles==1.3.0
     # via uvicorn
 websockets==17.1
     # via uvicorn

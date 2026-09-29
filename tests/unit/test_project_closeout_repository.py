@@ -46,6 +46,12 @@ def create_mock_db_session(project_mock, product_mock):
     return mock_session, mock_db_manager
 
 
+@pytest.fixture(autouse=True)
+def _solo_chain_member():
+    with patch("giljo_mcp.tools._closeout_finalize.mark_chain_member_status", AsyncMock(return_value=False)):
+        yield
+
+
 @pytest.fixture
 def sample_product_id():
     return uuid4()

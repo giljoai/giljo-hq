@@ -56,7 +56,7 @@ async def next_series_number(
 @router.get("/available-series", response_model=AvailableSeriesResponse)
 async def available_series_numbers(
     type_id: str,
-    limit: int = 5,
+    limit: int = Query(5, ge=1, le=50),
     product_id: str | None = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),

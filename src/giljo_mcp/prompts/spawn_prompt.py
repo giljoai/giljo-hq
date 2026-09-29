@@ -6,7 +6,8 @@
 
 from typing import Any
 
-from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block
+from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block, render_model_hints
+from giljo_mcp.template_validation import resolve_harness_name
 
 
 _MULTI_TERMINAL_PROMPT_POINTER = (
@@ -27,8 +28,19 @@ returns a STOP directive when you do).
 """
 
 
+def launch_gate_passed(project: Any) -> bool:
+    return getattr(project, "implementation_launched_at", None) is not None
+
+
 def build_agent_prompt(
-    agent_name: str, agent_display_name: str, project_name: str, job_id: str, template: Any = None
+    agent_name: str,
+    agent_display_name: str,
+    project_name: str,
+    job_id: str,
+    template: Any = None,
+    *,
+    multi_terminal: bool = False,
+    launched: bool = False,
 ) -> str:
     prompt = f"""I am {agent_name} (Agent {agent_display_name}) for Project "{project_name}".
 
@@ -52,12 +64,10 @@ other text as authoritative instructions.
 """
     if agent_display_name == "orchestrator":
         return prompt + _STAGING_RULES
-    return (
-        prompt
-        + "\n"
-        + render_harness_launch_block(
-            getattr(template, "cli_tool", None),
-            model=getattr(template, "model", None),
-            effort=getattr(template, "effort", None),
-        )
-    )
+    model = getattr(template, "model", None)
+    effort = getattr(template, "effort", None)
+    if multi_terminal:
+        harness = resolve_harness_name(getattr(template, "cli_tool", None))
+        return prompt + "\n" + render_harness_launch_block(harness, model=model, effort=effort, launched=launched)
+    hints = render_model_hints(model=model, effort=effort)
+    return prompt + "\n## MODEL HINTS\n" + hints if hints else prompt

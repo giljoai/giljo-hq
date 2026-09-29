@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useJobActions } from './useJobActions'
 import { useCommHubStore } from '@/stores/commHubStore'
-import { api } from '@/services/api'
 
 const mockShowToast = vi.fn()
 vi.mock('@/composables/useToast', () => ({
@@ -27,12 +26,10 @@ describe('useJobActions', () => {
     const {
       showAgentDetailsModal,
       showAgentJobModal,
-      showHandoverModal,
     } = useJobActions(getJob)
 
     expect(showAgentDetailsModal.value).toBe(false)
     expect(showAgentJobModal.value).toBe(false)
-    expect(showHandoverModal.value).toBe(false)
   })
 
   it('handleMessages deep-links to the project bound thread on the Project comms tab', async () => {
@@ -100,36 +97,6 @@ describe('useJobActions', () => {
     expect(selectedJobId.value).toBe('job-4')
     expect(jobModalInitialTab.value).toBe('mission')
     expect(showAgentJobModal.value).toBe(true)
-  })
-
-  it('handleHandOver calls simpleHandover and opens modal on success', async () => {
-    api.agentJobs.simpleHandover.mockResolvedValue({
-      data: {
-        success: true,
-        retirement_prompt: 'retire this',
-        continuation_prompt: 'continue here',
-      },
-    })
-
-    const { handleHandOver, showHandoverModal, handoverData } = useJobActions(getJob)
-    await handleHandOver({ job_id: 'job-5' })
-
-    expect(api.agentJobs.simpleHandover).toHaveBeenCalledWith('job-5')
-    expect(showHandoverModal.value).toBe(true)
-    expect(handoverData.value.retirement_prompt).toBe('retire this')
-    expect(handoverData.value.continuation_prompt).toBe('continue here')
-  })
-
-  it('handleHandOver shows error toast on API failure', async () => {
-    api.agentJobs.simpleHandover.mockRejectedValue(new Error('Network error'))
-
-    const { handleHandOver, showHandoverModal } = useJobActions(getJob)
-    await handleHandOver({ job_id: 'job-6' })
-
-    expect(showHandoverModal.value).toBe(false)
-    expect(mockShowToast).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'error' })
-    )
   })
 
   it('selectedAgent delegates to getJob with selectedJobId', () => {

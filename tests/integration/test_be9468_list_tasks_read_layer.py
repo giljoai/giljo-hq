@@ -194,7 +194,7 @@ class TestTheCountsBlockIsTheKeystone:
             )
 
             by_status = counts.get("by_status", {})
-            assert set(by_status) == {"pending", "in_progress", "completed", "blocked", "cancelled"}, (
+            assert set(by_status) == {"pending", "in_progress", "on_hold", "completed", "blocked", "cancelled"}, (
                 f"by_status must carry EXPLICIT ZEROS for the whole status vocabulary, got {by_status!r}"
             )
             assert by_status["completed"] == 6, f"by_status must total by status, got {by_status!r}"

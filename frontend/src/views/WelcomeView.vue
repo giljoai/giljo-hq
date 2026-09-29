@@ -260,8 +260,8 @@ const setupCard = {
   description: `Connect your AI coding tools and configure ${PRODUCT_NAME}.`,
   icon: 'mdi-rocket-launch',
   iconBg: 'rgba(255,195,0,0.1)',
-  iconColor: 'var(--brand-yellow)',
-  accent: 'var(--brand-yellow)',
+  iconColor: 'var(--color-accent-primary)',
+  accent: 'var(--color-accent-primary)',
   action: openSetupWithCertGate,
 }
 
@@ -290,8 +290,8 @@ const newProjectCard = computed(() => ({
   description: 'Create and launch a project with your Agent team or directly from your AI tool.',
   icon: 'mdi-plus-circle-outline',
   iconBg: 'rgba(255,195,0,0.1)',
-  iconColor: 'var(--brand-yellow)',
-  accent: 'var(--brand-yellow)',
+  iconColor: 'var(--color-accent-primary)',
+  accent: 'var(--color-accent-primary)',
   badge: '/giljo add project',
   to: '/Projects',
   attention: !hasAnyProject.value,
@@ -302,8 +302,8 @@ const newProductCard = computed(() => ({
   description: 'Define a product to give your AI agents full context about what they\'re building.',
   icon: 'mdi-package-variant-closed',
   iconBg: 'rgba(255,195,0,0.1)',
-  iconColor: 'var(--brand-yellow)',
-  accent: 'var(--brand-yellow)',
+  iconColor: 'var(--color-accent-primary)',
+  accent: 'var(--color-accent-primary)',
   to: '/Products',
   attention: true,
 }))
@@ -313,8 +313,8 @@ const activateProductCard = computed(() => ({
   description: 'You have a product but it\'s not active. Activate it to start creating projects.',
   icon: 'mdi-play-circle-outline',
   iconBg: 'rgba(255,195,0,0.1)',
-  iconColor: 'var(--brand-yellow)',
-  accent: 'var(--brand-yellow)',
+  iconColor: 'var(--color-accent-primary)',
+  accent: 'var(--color-accent-primary)',
   to: '/Products',
   attention: true,
 }))
@@ -349,7 +349,7 @@ const activeProjectsCard = computed(() => ({
   iconColor: getAgentColor('implementer').hex,
   accent: getAgentColor('implementer').hex,
   badge: `${activeProjectCount.value} active`,
-  to: '/launch?via=jobs',
+  to: '/jobs-overview',
 }))
 
 const templateCards = computed(() =>

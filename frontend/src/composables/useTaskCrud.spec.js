@@ -211,6 +211,120 @@ describe('useTaskCrud', () => {
     })
   })
 
+  describe('saveTask sends a diff-only payload in edit mode (FE-9656)', () => {
+    const loadedTask = {
+      id: 1,
+      title: 'Original title',
+      description: 'Original description',
+      status: 'pending',
+      priority: 'medium',
+      task_type: 'TSK',
+      product_id: 'product-1',
+      series_number: 12,
+      estimated_effort: 5,
+      hidden: true,
+    }
+
+    it('sends only the one field the user changed, plus nothing else', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = { ...crud.currentTask.value, status: 'in_progress' }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { status: 'in_progress' })
+    })
+
+    it('sends only the description when editing an HND handover description', async () => {
+      const hnd = { ...loadedTask, task_type: 'HND', description: 'old body' }
+      crud.editTask(hnd)
+      crud.currentTask.value = { ...crud.currentTask.value, description: 'new body' }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { description: 'new body' })
+    })
+
+    it('sends multiple changed keys together when several fields are edited', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = {
+        ...crud.currentTask.value,
+        title: 'New title',
+        priority: 'high',
+      }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { title: 'New title', priority: 'high' })
+    })
+
+    it('treats a clear-to-empty-string as a real change, not "unset"', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = { ...crud.currentTask.value, title: '' }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { title: '' })
+    })
+
+    it('treats a change to 0 as a real change, not "unset"', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = { ...crud.currentTask.value, estimated_effort: 0 }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { estimated_effort: 0 })
+    })
+
+    it('treats a change to false as a real change, not "unset"', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = { ...crud.currentTask.value, hidden: false }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, { hidden: false })
+    })
+
+    it('does not echo untouched fields (task_type, product_id, series_number) back', async () => {
+      crud.editTask(loadedTask)
+      crud.currentTask.value = { ...crud.currentTask.value, priority: 'low' }
+
+      await crud.saveTask(stubForm())
+
+      const sentFields = mockUpdateTask.mock.calls.at(-1)[1]
+      expect(sentFields).not.toHaveProperty('task_type')
+      expect(sentFields).not.toHaveProperty('product_id')
+      expect(sentFields).not.toHaveProperty('series_number')
+    })
+
+    it('diffs against the snapshot of the task actually open, not a previously edited one', async () => {
+      const taskB = {
+        id: 2,
+        title: 'Task B original',
+        description: 'Task B description',
+        status: 'pending',
+        priority: 'low',
+        task_type: 'TSK',
+      }
+
+      crud.editTask(loadedTask)
+      crud.cancelTask()
+      crud.editTask(taskB)
+      crud.currentTask.value = { ...crud.currentTask.value, priority: 'high' }
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(2, { priority: 'high' })
+    })
+
+    it('sends an empty patch (still calls updateTask) when nothing was changed', async () => {
+      crud.editTask(loadedTask)
+
+      await crud.saveTask(stubForm())
+
+      expect(mockUpdateTask).toHaveBeenCalledWith(1, {})
+    })
+  })
+
   describe('completeTask error surfacing (FE-9466)', () => {
     it('pushes a persistent notification carrying the server reason on a structured failure', async () => {
       const serverMessage = 'Cannot complete a task with unresolved subtasks.'

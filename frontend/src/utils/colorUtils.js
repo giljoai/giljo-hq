@@ -15,6 +15,5 @@ export function getAgentBadgeStyle(agentName) {
   return {
     backgroundColor: hexToRgba(hex, 0.15),
     color: hex,
-    borderRadius: '8px',
   }
 }

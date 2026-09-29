@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from giljo_mcp import platform_registry
+from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ImplementationNotReadyError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
@@ -23,6 +25,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.project_staging_service import ProjectStagingService
+from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor._project_tools import (
     _STAGING_CHAIN_CONTINUE_INSTRUCTION,
@@ -93,6 +96,8 @@ async def _seed_product_project(
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)
+    with tenant_session_context(db_session, tenant_key):
+        await ensure_default_types_seeded(db_session, tenant_key)
     await db_session.commit()
     return {"project": project, "product": product}
 
@@ -584,6 +589,9 @@ async def test_stage_project_equivalent_to_rest_staging(lifecycle_mcp_client, db
         "stage_project staging prompt must be content-equivalent to GET /api/prompts/staging"
     )
     assert tool_payload["orchestrator_id"] == rest_response.orchestrator_id
+    assert rest_response.thread_id, "REST staging must carry the project's thread_id"
+    assert tool_payload["thread_id"] == rest_response.thread_id
+    assert tool_payload["chat_id"] == rest_response.chat_id
 
 
 
@@ -654,7 +662,7 @@ async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, w
 
     rest_ws = _CapturingWebSocketManager()
 
-    await prompts.generate_staging_prompt(
+    rest_response = await prompts.generate_staging_prompt(
         project_id=seeded["project"].id,
         tool="claude-code",
         execution_mode="claude_code_cli",
@@ -664,6 +672,8 @@ async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, w
     async with new_client() as session:
         tool_result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
     assert tool_result.is_error is False, _error_text(tool_result)
+    assert rest_response.thread_id
+    assert _payload(tool_result)["thread_id"] == rest_response.thread_id
 
     rest_events = rest_ws.events(_PROMPT_EVENT)
     mcp_events = ws_spy.events(_PROMPT_EVENT)
@@ -897,3 +907,148 @@ async def test_be9622_implementation_gate_refusal_carries_the_stop_text(
     assert _STAGING_STOP_INSTRUCTION in payload["next_action"]["why"], (
         "the gate refusal must carry the STAGING COMPLETE -- STOP HERE text verbatim"
     )
+
+
+
+_CHAT_ID_RE = re.compile(r"^CHT-\d{4}$")
+
+
+async def test_be9709b_thread_address_rides_every_lifecycle_reply(lifecycle_mcp_client, db_session, primary_tenant_key):
+    from unittest.mock import MagicMock
+
+    from api.endpoints import prompts
+    from giljo_mcp.models.comm import CommThread
+
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+    project_id = seeded["project"].id
+
+    async with new_client() as session:
+        staged = await session.call_tool("stage_project", {"project_id": project_id, "mode": "claude"})
+    assert staged.is_error is False, _error_text(staged)
+    staged_payload = _payload(staged)
+    thread_id = staged_payload.get("thread_id")
+    chat_id = staged_payload.get("chat_id")
+    assert thread_id, f"stage_project must name the project's thread; keys: {sorted(staged_payload)}"
+    assert _CHAT_ID_RE.match(chat_id or ""), f"chat_id must look like CHT-nnnn, got {chat_id!r}"
+
+    bound = (
+        (
+            await db_session.execute(
+                select(CommThread.id).where(
+                    CommThread.tenant_key == primary_tenant_key,
+                    CommThread.project_id == project_id,
+                    CommThread.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert bound == [thread_id], "the named thread must be the project's one bound thread"
+
+    orch_exec = (
+        await db_session.execute(
+            select(AgentExecution).where(
+                AgentExecution.tenant_key == primary_tenant_key,
+                AgentExecution.agent_id == staged_payload["agent_id"],
+            )
+        )
+    ).scalar_one()
+    child_job = AgentJob(
+        job_id=str(uuid4()),
+        tenant_key=primary_tenant_key,
+        project_id=project_id,
+        job_type="implementer",
+        mission="implement",
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(child_job)
+    await db_session.flush()
+    db_session.add(
+        AgentExecution(
+            id=str(uuid4()),
+            agent_id=str(uuid4()),
+            job_id=child_job.job_id,
+            tenant_key=primary_tenant_key,
+            agent_display_name="implementer",
+            status="waiting",
+            spawned_by=orch_exec.agent_id,
+            started_at=datetime.now(UTC),
+        )
+    )
+    row = (await db_session.execute(select(Project).where(Project.id == project_id))).scalar_one()
+    row.staging_status = "staging_complete"
+    await db_session.commit()
+
+    async with new_client() as session:
+        launched = await session.call_tool("launch_implementation", {"project_id": project_id})
+        implemented = await session.call_tool("get_implementation_prompt", {"project_id": project_id})
+        mission = await session.call_tool("get_job_mission", {"job_id": staged_payload["orchestrator_id"]})
+
+    for name, result in (
+        ("launch_implementation", launched),
+        ("get_implementation_prompt", implemented),
+        ("get_job_mission", mission),
+    ):
+        assert result.is_error is False, f"{name}: {_error_text(result)}"
+        payload = _payload(result)
+        assert payload.get("thread_id") == thread_id, f"{name} must name the staged thread; keys: {sorted(payload)}"
+        assert payload.get("chat_id") == chat_id, f"{name} must carry the same chat_id"
+
+    current_user = MagicMock()
+    current_user.id = uuid4()
+    current_user.tenant_key = primary_tenant_key
+    current_user.username = "be9709b-user"
+    rest_impl = await prompts.get_implementation_prompt(project_id=project_id, current_user=current_user, db=db_session)
+    assert rest_impl.thread_id == thread_id, "the REST implementation reply must name the same thread"
+    assert rest_impl.chat_id == chat_id
+
+
+async def test_be9709b_thread_failure_never_fails_staging_or_launch(
+    lifecycle_mcp_client, db_session, primary_tenant_key, monkeypatch
+):
+    from giljo_mcp.models.comm import CommThread
+    from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
+
+    original_create = CommThreadRepository.create_thread
+
+    async def _create_then_fail(self, session, tenant_key, **kwargs):
+        await original_create(self, session, tenant_key, **kwargs)
+        raise RuntimeError("hub down after the thread row was flushed")
+
+    monkeypatch.setattr(CommThreadRepository, "create_thread", _create_then_fail)
+
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+    project_id = seeded["project"].id
+
+    async with new_client() as session:
+        staged = await session.call_tool("stage_project", {"project_id": project_id, "mode": "claude"})
+    assert staged.is_error is False, _error_text(staged)
+    staged_payload = _payload(staged)
+    assert staged_payload["status"] == "staged"
+    assert "thread_id" not in staged_payload
+    assert "chat_id" not in staged_payload
+
+    row = (await db_session.execute(select(Project).where(Project.id == project_id))).scalar_one()
+    assert row.staging_status == "staged", "mark_staged must commit despite the rolled-back thread"
+    threads = (
+        (await db_session.execute(select(CommThread.id).where(CommThread.project_id == project_id))).scalars().all()
+    )
+    assert threads == [], "the savepoint must discard the half-created thread"
+
+    row.staging_status = "staging_complete"
+    await db_session.commit()
+
+    async with new_client() as session:
+        launched = await session.call_tool("launch_implementation", {"project_id": project_id})
+    assert launched.is_error is False, _error_text(launched)
+    launched_payload = _payload(launched)
+    assert launched_payload["status"] == "launched"
+    assert "thread_id" not in launched_payload
+    assert "chat_id" not in launched_payload
+
+    await db_session.refresh(row)
+    assert row.implementation_launched_at is not None, "the launch write must commit"

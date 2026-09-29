@@ -2,8 +2,10 @@ import { ref, isRef } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectTabsStore } from '@/stores/projectTabs'
+import { launchThenCopyImplementationPrompt } from '@/composables/usePlayButton'
 
 export function useProjectStaging({ projectId, executionMode, isProjectStaged, readyToLaunch, canRestage = null }) {
   const { showToast } = useToast()
@@ -73,7 +75,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
     } catch (error) {
       console.error('Stage project failed:', error)
 
-      const errorMsg = error.response?.data?.detail || error.message || 'Failed to stage project'
+      const errorMsg = parseErrorResponse(error).message || 'Failed to stage project'
 
       if (errorMsg.toLowerCase().includes('orchestrator already exists')) {
         showToast({ message: 'An orchestrator is already active for this project. The existing orchestrator will be reused.', type: 'info' })
@@ -96,7 +98,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       })
     } catch (error) {
       console.error('Unstage failed:', error)
-      const msg = error.response?.data?.detail || error.message || 'Failed to unstage project'
+      const msg = parseErrorResponse(error).message || 'Failed to unstage project'
       showError(msg)
     }
   }
@@ -110,7 +112,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       })
     } catch (error) {
       console.error('Restage failed:', error)
-      const msg = error.response?.data?.detail || error.message || 'Failed to recover project staging'
+      const msg = parseErrorResponse(error).message || 'Failed to recover project staging'
       showError(msg)
     }
   }
@@ -137,6 +139,13 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
         return
       }
 
+      const launched = await launchThenCopyImplementationPrompt({
+        projectId: projectId.value,
+        executionMode: executionMode?.value,
+        clipboardCopy,
+        showToast,
+      })
+      if (!launched) return
       await api.orchestrator.launchProject({ project_id: projectId.value })
       tabsStore.isLaunched = true
       tabsStore.currentProject = project
@@ -147,7 +156,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       }
     } catch (error) {
       console.error('Launch jobs failed:', error)
-      const msg = error.response?.data?.detail || error.message || 'Failed to launch jobs'
+      const msg = parseErrorResponse(error).message || 'Failed to launch jobs'
       showError(msg)
     }
   }

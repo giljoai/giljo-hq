@@ -77,7 +77,7 @@ async def test_advance_blocked_without_closeout(db_session: AsyncSession) -> Non
         current_index=0,
     )
 
-    await _staging_svc(db_session)._advance_chain_on_launch(p2, tenant)
+    await _staging_svc(db_session)._advance_chain_on_launch(db_session, p2, tenant)
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p2, tenant_key=tenant)
     assert refreshed["current_index"] == 0, "advance must be BLOCKED while p1 has no closeout"
@@ -102,7 +102,7 @@ async def test_advance_succeeds_with_closeout(db_session: AsyncSession) -> None:
         current_index=0,
     )
 
-    await _staging_svc(db_session)._advance_chain_on_launch(p2, tenant)
+    await _staging_svc(db_session)._advance_chain_on_launch(db_session, p2, tenant)
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p2, tenant_key=tenant)
     assert refreshed["current_index"] == 1, "advance must succeed once p1 has closed out"

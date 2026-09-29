@@ -145,7 +145,9 @@ class ProjectToolsMixin:
             await self._project_service.lifecycle.mark_staged(
                 project_id, execution_mode, tenant_key=tenant_key, db_session=db
             )
-            is_chain_member = await self._stage_is_chain_member(db, project_id, tenant_key)
+            from giljo_mcp.services.sequence_run_service import active_chain_run
+
+            is_chain_member = await active_chain_run(db, project_id, tenant_key) is not None
 
         await broadcast_orchestrator_prompt_generated(
             self._websocket_manager,
@@ -207,20 +209,6 @@ class ProjectToolsMixin:
             "project_id": result["project_id"],
             "message": result["message"],
         }
-
-    async def _stage_is_chain_member(self, session: Any, project_id: str, tenant_key: str) -> bool:
-        try:
-            from giljo_mcp.services.sequence_run_service import SequenceRunService
-
-            svc = SequenceRunService(
-                db_manager=self.db_manager,
-                tenant_manager=self.tenant_manager,
-                session=session,
-            )
-            run = await svc.find_active_run_for_project(project_id=str(project_id), tenant_key=tenant_key)
-            return run is not None
-        except Exception:  # noqa: BLE001 - best-effort chain detection; never break staging (fail-safe to solo)
-            return False
 
     async def implement_project(
         self,

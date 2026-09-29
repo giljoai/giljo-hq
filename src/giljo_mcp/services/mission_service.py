@@ -49,12 +49,12 @@ from giljo_mcp.services.mission_assembly import (
 )
 from giljo_mcp.services.mission_implementation_gate import (
     check_implementation_gate,
-    is_chain_member,
     promote_chain_member_on_first_worker_start,
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
 from giljo_mcp.services.protocol_survival import finalize_mission_wire_fields
+from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -124,17 +124,13 @@ class MissionService:
             async with self._get_session(tenant_key) as session:
                 job, execution = await self._fetch_job_and_execution(session, job_id, tenant_key)
 
-                if job.project_id:
-                    project, gate_response = await self._check_implementation_gate(
-                        session,
-                        job,
-                        job_id,
-                        tenant_key,
-                    )
-                    if gate_response is not None:
-                        return gate_response
+                project, gate_response = await self._check_implementation_gate(
+                    session, job, job_id, tenant_key, agent_id=execution.agent_id
+                )
+                if gate_response is not None:
+                    return gate_response
 
-                comm_thread_id = await resolve_and_enrol(self, session, job, execution, tenant_key)
+                comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key) or {}
 
                 all_project_executions, mission_lookup, current_team_state = await self._fetch_team_context(
                     session, job, execution, job_id, tenant_key
@@ -166,7 +162,9 @@ class MissionService:
                     execution.last_progress_at = now
                     status_changed = True
 
+                    await promote_chain_member_on_first_worker_start(self, session, job, tenant_key)
                     await session.commit()
+                    await broadcast_deferred_sequence_updates(session)
                     await self._repo.refresh(session, execution)
 
                     self._logger.info(
@@ -179,8 +177,6 @@ class MissionService:
                             "new_status": sanitize(execution.status),
                         },
                     )
-
-                    await promote_chain_member_on_first_worker_start(self, job, tenant_key)
             if execution and status_changed and old_status is not None:
                 try:
                     if self._websocket_manager:
@@ -237,7 +233,8 @@ class MissionService:
                 integrations=integrations,
                 chain_execution_mode=chain_execution_mode,
                 preset=preset,
-                comm_thread_id=comm_thread_id,
+                comm_thread_id=comm_thread.get("thread_id"),
+                comm_chat_id=comm_thread.get("chat_id"),
                 detected_harness=detected_harness,
                 checkin_cadence_minutes=checkin_cadence_minutes,
                 identity_status=identity_status,
@@ -312,6 +309,7 @@ class MissionService:
         job: AgentJob,
         job_id: str,
         tenant_key: str,
+        agent_id: str | None = None,
     ) -> tuple[Any, MissionResponse | None]:
         return await check_implementation_gate(
             self._logger,
@@ -319,17 +317,8 @@ class MissionService:
             job,
             job_id,
             tenant_key,
+            agent_id=agent_id,
             repo=self._repo,
-            db_manager=self.db_manager,
-            tenant_manager=self.tenant_manager,
-        )
-
-    async def _is_chain_member(self, session: AsyncSession, project_id: Any, tenant_key: str) -> bool:
-        return await is_chain_member(
-            self._logger,
-            session,
-            project_id,
-            tenant_key,
             db_manager=self.db_manager,
             tenant_manager=self.tenant_manager,
         )
@@ -343,28 +332,15 @@ class MissionService:
     ) -> str | None:
         if job.job_type != "orchestrator":
             return None
-        try:
-            from giljo_mcp.services.sequence_run_service import SequenceRunService
+        from giljo_mcp.services.sequence_run_service import SequenceRunService, active_chain_run
 
-            svc = SequenceRunService(
-                db_manager=self.db_manager,
-                tenant_manager=self.tenant_manager,
-                session=session,
-            )
-            if job.project_id:
-                run = await svc.find_active_run_for_project(project_id=str(job.project_id), tenant_key=tenant_key)
-                if run is None:
-                    return None
-                return run.get("execution_mode")
-            run = await svc.find_active_run_for_conductor(
-                conductor_agent_id=str(execution.agent_id), tenant_key=tenant_key
-            )
-            if run is None:
-                return None
-            return MULTI_TERMINAL
-        except Exception:  # noqa: BLE001 - best-effort; never break mission delivery
-            self._logger.warning("[BE-6177] chain header mode resolution failed (non-fatal); using project mode")
-            return None
+        if job.project_id:
+            run = await active_chain_run(session, job.project_id, tenant_key)
+            return run.get("execution_mode") if run is not None else None
+        run = await SequenceRunService(session=session).find_active_run_for_conductor(
+            conductor_agent_id=str(execution.agent_id), tenant_key=tenant_key
+        )
+        return MULTI_TERMINAL if run is not None else None
 
     async def _fetch_team_context(
         self,
@@ -469,6 +445,7 @@ class MissionService:
         chain_execution_mode: str | None = None,
         preset: Platform | None = None,
         comm_thread_id: str | None = None,
+        comm_chat_id: str | None = None,
         detected_harness: str | None = None,
         checkin_cadence_minutes: int | None = None,
         identity_status: str = IDENTITY_RESOLVED,
@@ -489,6 +466,7 @@ class MissionService:
             chain_execution_mode=chain_execution_mode,
             preset=preset,
             comm_thread_id=comm_thread_id,
+            comm_chat_id=comm_chat_id,
             detected_harness=detected_harness,
             checkin_cadence_minutes=checkin_cadence_minutes,
             identity_status=identity_status,
@@ -496,12 +474,7 @@ class MissionService:
             agent_profile=agent_profile,
         )
 
-    async def _resolve_comm_thread_id(
-        self,
-        session: AsyncSession,
-        job: AgentJob,
-        tenant_key: str,
-    ) -> str | None:
+    async def _resolve_comm_thread(self, session: AsyncSession, job: AgentJob, tenant_key: str) -> dict | None:
         try:
             from giljo_mcp.services.comm_thread_service import CommThreadService
 
@@ -509,7 +482,7 @@ class MissionService:
             thread = await comm_service.resolve_or_create_bound_thread(
                 project_id=str(job.project_id), tenant_key=tenant_key
             )
-            return thread.get("thread_id")
+            return thread
         except Exception:  # noqa: BLE001 - best-effort; never break mission delivery
             self._logger.warning(
                 "[BE-9012d] comm thread resolution failed (non-fatal); worker protocol renders without a bound thread",
@@ -590,6 +563,8 @@ class MissionService:
                                 await session.commit()
 
                 await self._mirror_chain_mission_for_conductor(session, job, tenant_key, mission)
+                await session.commit()
+                await broadcast_deferred_sequence_updates(session)
 
                 logger.info(
                     f"[UPDATE_AGENT_MISSION] Updated mission for job {sanitize(job_id)}",

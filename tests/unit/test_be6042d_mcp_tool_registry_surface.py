@@ -253,7 +253,7 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "finalize_job": {
         "fn": "finalize_job",
-        "params": ["job_id"],
+        "params": ["caller_job_id", "job_id"],
         "scope": "mcp:agent",
     },
     "resume_or_dismiss_job": {
@@ -306,7 +306,16 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "write_project_closeout": {
         "fn": "write_project_closeout",
-        "params": ["decisions_made", "force", "git_commits", "key_outcomes", "project_id", "summary", "tags"],
+        "params": [
+            "decisions_made",
+            "force",
+            "git_commits",
+            "key_outcomes",
+            "no_code_changes",
+            "project_id",
+            "summary",
+            "tags",
+        ],
         "scope": "mcp:agent",
     },
     "write_memory_entry": {
@@ -318,6 +327,7 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "entry_type",
             "git_commits",
             "key_outcomes",
+            "no_code_changes",
             "project_id",
             "summary",
             "tags",

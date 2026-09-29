@@ -10,7 +10,7 @@ import inspect
 import logging
 import random
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -19,6 +19,16 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.mission_assembly import assemble_mission_context, compute_protocol_etag
 from giljo_mcp.services.mission_service import MissionService
+
+
+@pytest.fixture(autouse=True)
+def _solo_chain_lookup():
+    with patch(
+        "giljo_mcp.services.sequence_run_service.SequenceRunService.find_active_run_for_project",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        yield
 
 
 _LOGGER = logging.getLogger("be9079-test")

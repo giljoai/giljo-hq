@@ -16,8 +16,8 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Staging** | The first tab on a project's page. Pick an execution mode, then click **Stage Project** to generate the orchestrator's launch prompt; the orchestrator plans the mission and spawns the agent team from there. |
-| **Implementation** | The second tab on a project's page, unlocked once staging completes. Agents do the actual work here — status, duration, steps, and messages for each one — through to closeout. |
+| **Staging** | The first side of the **Jobs** board. Pick an execution mode on a project's card, then click **Stage Project** to generate the orchestrator's launch prompt; the orchestrator plans the mission and spawns the agent team from there. |
+| **Implementation** | The second side of the **Jobs** board, where a project's card moves once you click **Implement**. Agents do the actual work here, with status, duration, steps and messages for each one, through to closeout. |
 
 **The agents — who does the work:**
 
@@ -33,9 +33,9 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Chain project** | Several projects linked together and run one after another under a single overarching goal, coordinated by the conductor — often just called "a chain." Holds 2 to 5 projects; multi-project, single-user. See the **Chain Projects** chapter. |
+| **Chain project** | Several projects linked together and run one after another under a single overarching goal, coordinated by the conductor — often just called "a chain." Holds 2 to 5 of your own projects. See the **Chain Projects** chapter. |
 | **Linking** | The act of attaching projects together into a chain, from the Projects list or the Roadmap. |
-| **Chain mission** | The overarching goal for a whole chain — the single objective all the linked projects serve together, distinct from each project's own per-project mission. Shown as **"Multi project mission"** during staging. |
+| **Chain mission** | The overarching goal for a whole chain — the single objective all the linked projects serve together, distinct from each project's own per-project mission. Shown as **"Chain goal"** in the chain's group on the Jobs board. |
 
 **Message Hub — talking with your agents:**
 

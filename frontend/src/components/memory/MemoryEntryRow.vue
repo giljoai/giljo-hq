@@ -229,12 +229,13 @@ function tagChipStyle(tag) {
   flex-shrink: 0;
 }
 
-// Canonical square tinted badge (§2): 8px radius from getAgentBadgeStyle inline
-// style; geometry + type here. Reads like the Projects serial/status badge.
+// Canonical square tinted badge (§2): tint from getAgentBadgeStyle inline
+// style; radius here, owned by the class. Reads like the Projects serial/status badge.
 .mem-badge {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
+  border-radius: $border-radius-default;
   font-size: 0.58rem;
   font-weight: 600;
   letter-spacing: 0.02em;

@@ -26,11 +26,6 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
-vi.mock('vuetify', async () => {
-  const actual = await vi.importActual('vuetify')
-  return { ...actual, useDisplay: () => ({ mobile: { value: false } }) }
-})
-
 function mountModal(props = {}) {
   return mount(DecisionModal, {
     props: { show: true, orchestratorJobId: 'job-1', ...props },

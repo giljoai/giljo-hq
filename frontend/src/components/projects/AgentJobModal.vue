@@ -101,6 +101,7 @@
 import { computed, ref, toRaw, watch } from 'vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
+import { STATUS_COLORS } from '@/utils/statusConfig'
 
 const props = defineProps({
   show: {
@@ -199,7 +200,7 @@ function getStatusColor(status) {
       return 'warning'
     case 'pending':
     default:
-      return 'grey'
+      return STATUS_COLORS.PENDING
   }
 }
 

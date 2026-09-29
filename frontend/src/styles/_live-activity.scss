@@ -1,0 +1,98 @@
+// FE-9684: the board's one vocabulary for "something is happening right now".
+// Ported from the retired project page's agent table (AgentRow.vue): a
+// breathing badge with an expanding ring, and three blinking dots after a
+// live verb. Every colour is the element's own currentColor, so a badge
+// pulses in its agent colour and a pill in its lifecycle colour.
+// Bind these classes to a LIVE status only; a still state never carries them.
+
+// A working agent's square badge: brightness breathes, two rings expand.
+.live-badge {
+  position: relative;
+  animation: live-badge-breathe 2.4s ease-in-out infinite;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    animation: live-pulse-ring 2.4s ease-out infinite;
+  }
+
+  &::after {
+    animation-delay: 1.2s;
+  }
+}
+
+// A tiny status dot: the same ring, a smaller reach.
+.live-dot-pulse {
+  --live-ring: 4px;
+
+  animation: live-pulse-ring-solid 1.8s ease-out infinite;
+}
+
+// A lifecycle pill whose state is live: a soft glow in the pill's own colour.
+.live-pill {
+  animation: live-pill-glow 2.4s ease-in-out infinite;
+}
+
+// Three dots after a live verb. Decorative: the element is aria-hidden.
+.live-dots {
+  display: inline;
+  letter-spacing: 0.02em;
+}
+
+.live-dot {
+  opacity: 0;
+  animation: live-dot-blink 1.4s infinite steps(1);
+
+  &:nth-child(2) {
+    animation-delay: 0.3s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0.6s;
+  }
+}
+
+@keyframes live-badge-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+@keyframes live-pulse-ring {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.4; }
+  70%, 100% { box-shadow: 0 0 0 var(--live-ring, 8px) currentColor; opacity: 0; }
+}
+
+@keyframes live-pulse-ring-solid {
+  0% { box-shadow: 0 0 0 0 currentColor; }
+  70%, 100% { box-shadow: 0 0 0 var(--live-ring, 4px) transparent; }
+}
+
+@keyframes live-pill-glow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 8px 1px currentColor; }
+}
+
+@keyframes live-dot-blink {
+  0%, 100% { opacity: 0; }
+  30%, 70% { opacity: 1; }
+}
+
+// Operators who ask for less motion get none: the dots stay visible and still.
+@media (prefers-reduced-motion: reduce) {
+  .live-badge,
+  .live-badge::before,
+  .live-badge::after,
+  .live-dot-pulse,
+  .live-pill,
+  .live-dot {
+    animation: none;
+  }
+
+  .live-dot {
+    opacity: 1;
+  }
+}

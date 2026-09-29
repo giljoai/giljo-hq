@@ -18,11 +18,15 @@ logger = logging.getLogger(__name__)
 
 class InputValidationMiddleware:
 
+    TOKEN_LIKE_PARAMS: ClassVar[frozenset[str]] = frozenset({"token", "code", "state"})
+
+    _SQL_COMMENT_MARKER_PATTERN: ClassVar[str] = r"(--|#|\/\*|\*\/)"
+
     SQL_INJECTION_PATTERNS: ClassVar[list[str]] = [
         r"(\bUNION\b.*\bSELECT\b)",
         r"(\bDROP\b.*\bTABLE\b)",
         r"(\bEXEC\b.*\()",
-        r"(--|#|\/\*|\*\/)",
+        _SQL_COMMENT_MARKER_PATTERN,
         r"(\bOR\b.*=.*)",
         r"(\bAND\b.*=.*)",
         r"(\bINSERT\b.*\bINTO\b)",
@@ -60,9 +64,9 @@ class InputValidationMiddleware:
         request = Request(scope, receive)
 
         for key, value in request.query_params.items():
-            if not self._is_safe(value):
+            if not self._is_safe(value, key=key):
                 logger.warning(
-                    f"Blocked unsafe query parameter: {key}={value[:50]}... "
+                    f"Blocked unsafe query parameter: {key} "
                     f"from IP: {request.client.host if request.client else 'unknown'}"
                 )
                 response = JSONResponse(
@@ -85,18 +89,22 @@ class InputValidationMiddleware:
 
         await self.app(scope, receive, send)
 
-    def _is_safe(self, value: str) -> bool:
+    def _is_safe(self, value: str, key: str | None = None) -> bool:
         if not isinstance(value, str):
             return True
 
+        skip_comment_marker = key is not None and key.lower() in self.TOKEN_LIKE_PARAMS
+
         for pattern in self.SQL_INJECTION_PATTERNS:
+            if skip_comment_marker and pattern is self._SQL_COMMENT_MARKER_PATTERN:
+                continue
             if re.search(pattern, value, re.IGNORECASE):
-                logger.debug(f"SQL injection pattern detected: {pattern} in value: {value[:50]}...")
+                logger.debug(f"SQL injection pattern detected: {pattern}")
                 return False
 
         for pattern in self.XSS_PATTERNS:
             if re.search(pattern, value, re.IGNORECASE):
-                logger.debug(f"XSS pattern detected: {pattern} in value: {value[:50]}...")
+                logger.debug(f"XSS pattern detected: {pattern}")
                 return False
 
         return True

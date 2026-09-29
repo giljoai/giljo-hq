@@ -179,3 +179,28 @@ async def test_ordinary_category_error_still_reported_and_other_categories_survi
     assert "agent_templates" not in response["categories_returned"]
     assert response["data"]["memory_360"] == {"ok": "memory_360"}
     assert response["data"]["vision_documents"] == {"ok": "vision_documents"}
+
+
+async def test_category_error_reports_a_fixed_code_not_the_raw_exception_text():
+    raw = RuntimeError(
+        "(psycopg.errors.UndefinedColumn) column products.bogus does not exist\n"
+        "[SQL: SELECT products.bogus FROM products WHERE products.tenant_key = %(tenant_key)s]\n"
+        "[parameters: {'tenant_key': 'tk_sec9353'}]"
+    )
+    a, b, c, d = _patched_loop(raw)
+
+    with a, b, c, d:
+        response = await fetch_context(
+            product_id=_FETCH_PRODUCT_ID,
+            tenant_key=_FETCH_TENANT_KEY,
+            categories=_FETCH_CATEGORIES,
+            db_manager=object(),
+        )
+
+    errors = response.get("errors", [])
+    assert [e["category"] for e in errors] == ["agent_templates"]
+    reported = errors[0]["error"]
+    assert "[SQL:" not in reported and "tenant_key" not in reported, (
+        f"raw driver text reached the MCP success payload: {reported!r}"
+    )
+    assert reported == "CATEGORY_FETCH_FAILED"

@@ -143,6 +143,13 @@ export function parseErrorResponse(error) {
   }
 
   if (!error?.response) {
+    if (!error?.isAxiosError && error?.name === 'Error' && error?.message) {
+      return {
+        errorCode: 'UNKNOWN_ERROR',
+        message: error.message,
+        isStructured: false,
+      }
+    }
     return {
       errorCode: 'NETWORK_ERROR',
       message: 'Failed to connect to server. Please check your connection.',

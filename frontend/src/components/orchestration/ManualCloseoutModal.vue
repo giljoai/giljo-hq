@@ -1,8 +1,7 @@
 <template>
   <v-dialog
     :model-value="show"
-    :fullscreen="isMobile"
-    :max-width="isMobile ? undefined : '640'"
+    max-width="640"
     persistent
     class="manual-closeout-modal"
     role="dialog"
@@ -188,8 +187,8 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useDisplay } from 'vuetify'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
   show: {
@@ -208,8 +207,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'completed'])
 
-const { mobile } = useDisplay()
-const isMobile = computed(() => mobile.value)
 
 const summary = ref('')
 const confirmed = ref(false)
@@ -285,7 +282,7 @@ const handleComplete = async () => {
     resetState()
   } catch (err) {
     console.error('[ManualCloseoutModal] Failed to complete project:', err)
-    error.value = err.response?.data?.detail || err.response?.data?.message || 'Failed to complete project'
+    error.value = parseErrorResponse(err).message || 'Failed to complete project'
   } finally {
     completing.value = false
   }

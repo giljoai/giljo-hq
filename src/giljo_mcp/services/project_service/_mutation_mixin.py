@@ -32,9 +32,8 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services.project_helpers import _build_ws_project_data
 from giljo_mcp.services.project_service._lifecycle_redirects import (
-    require_supersede_successor,
+    preflight_supersede_target,
     route_active_inactive_status_transition,
-    validate_supersede_successor,
 )
 from giljo_mcp.services.protocol_survival import build_mission_update_footer
 from giljo_mcp.services.text_field_validation import require_non_blank
@@ -212,34 +211,6 @@ class MutationMixin:
             self._logger.exception("Failed to update mission")
             raise BaseGiljoError(
                 message=f"Failed to update mission: {e!s}", context={"project_id": project_id, "tenant_key": tenant_key}
-            ) from e
-
-    async def set_early_termination(self, project_id: str, tenant_key: str | None = None) -> None:
-        try:
-            if not tenant_key:
-                tenant_key = self.tenant_manager.get_current_tenant()
-            if not tenant_key:
-                raise ValidationError(
-                    message="No tenant context available",
-                    context={"operation": "set_early_termination", "project_id": project_id},
-                )
-            async with self._get_session(tenant_key) as session:
-                project = await self._repo.get_by_id(session, tenant_key, project_id)
-                if not project:
-                    raise ResourceNotFoundError(
-                        message="Project not found or access denied",
-                        context={"project_id": project_id, "tenant_key": tenant_key},
-                    )
-                project.early_termination = True
-                project.updated_at = datetime.now(UTC)
-                await session.commit()
-        except (ResourceNotFoundError, ValidationError):
-            raise
-        except Exception as e:
-            self._logger.exception("Failed to set early_termination")
-            raise BaseGiljoError(
-                message=f"Failed to set early_termination: {e!s}",
-                context={"project_id": project_id, "tenant_key": tenant_key},
             ) from e
 
     async def complete_project(
@@ -444,22 +415,7 @@ class MutationMixin:
                         context={"project_id": project_id, "status": updates["status"]},
                     ) from e
 
-            if updates.get("successor_project_id"):
-                successor_id = updates["successor_project_id"]
-                if successor_id == project_id:
-                    raise ValidationError(
-                        message="A project cannot supersede itself.",
-                        context={"project_id": project_id},
-                    )
-                successor = await self._repo.get_by_id(session, tenant_key, successor_id)
-                if not successor:
-                    raise ValidationError(
-                        message="Successor project not found or access denied.",
-                        context={"project_id": project_id, "successor_project_id": successor_id},
-                    )
-                validate_supersede_successor(project_id, updates, successor)
-
-            require_supersede_successor(project_id, updates)
+            await preflight_supersede_target(self, project_id, updates, tenant_key, session)
 
             if updates.get("name") is not None and len(updates["name"]) > 255:
                 raise ValidationError(

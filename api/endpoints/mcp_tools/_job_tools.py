@@ -23,6 +23,7 @@ from api.endpoints.mcp_tools._base import (
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.orchestrator_caller_guard import ORCHESTRATOR_ONLY
 
 
 @mcp.tool(
@@ -37,7 +38,7 @@ from giljo_mcp.exceptions import ValidationError
     annotations=_tool_hints("get_staging_instructions", destructive=True),
 )
 async def get_staging_instructions(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     harness: Annotated[str, Field(max_length=MCP_ID_MAX, description=_HARNESS_PARAM_DESCRIPTION)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
@@ -83,7 +84,7 @@ async def update_job_mission(
     annotations=_tool_hints("report_progress", destructive=True),
 )
 async def report_progress(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     todo_items: Annotated[
         list[dict] | None,
         Field(
@@ -126,7 +127,7 @@ async def report_progress(
     annotations=_tool_hints("complete_job", destructive=True),
 )
 async def complete_job(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     result: Annotated[
         dict,
         Field(
@@ -168,24 +169,34 @@ async def complete_job(
 @mcp.tool(
     title="Finalize Job",
     description=(
-        "Accept a finished agent's work and seal the job -- the last step, after you "
-        "have reviewed what it produced. Only the orchestrator does this, and only "
-        "after complete_job. A sealed job is not woken again by new messages. If the "
-        "agent went silent and never reported, do NOT decommission it (that records "
-        "its work as failed): call complete_job(job_id, result=<what you verified>) "
-        "yourself first -- that accepts any unfinished state -- then finalize it. "
-        "If that complete_job returns COMPLETION_BLOCKED, the stalled agent left "
-        "TODOs or unread messages behind: settle its ledger with "
-        "report_progress(job_id, todo_items=[...], replace=true) and drain its "
-        "action-required messages, then retry."
+        "Accept a finished agent's work and seal the job (complete -> closed), after "
+        "reviewing it. Orchestrator only: pass caller_job_id=<your own job_id>; a worker "
+        "ends at complete_job and is refused (ORCHESTRATOR_ONLY). A sealed job is not "
+        "woken by new messages. If the agent went silent and never reported, do NOT "
+        "decommission it: call complete_job(job_id, result=<what you verified>) yourself, "
+        "then finalize. If that returns COMPLETION_BLOCKED, settle its ledger with "
+        "report_progress(job_id, todo_items=[...], replace=true), drain its "
+        "action-required messages, and retry."
     ),
     annotations=_tool_hints("finalize_job", destructive=True),
 )
 async def finalize_job(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    caller_job_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    return await _call_tool(ctx, "close_job", {"job_id": job_id})
+    try:
+        return await _call_tool(ctx, "close_job", {"job_id": job_id, "caller_job_id": caller_job_id or None})
+    except ValidationError as exc:
+        if exc.error_code != ORCHESTRATOR_ONLY:
+            raise
+        return {
+            "success": False,
+            "error": ORCHESTRATOR_ONLY,
+            "calling_agent_role": (exc.context or {}).get("caller_role", "unknown"),
+            "message": exc.message + " The job was NOT changed.",
+            "next_action": "complete_job, then the orchestrator reviews and finalizes",
+        }
 
 
 @mcp.tool(
@@ -226,7 +237,7 @@ async def resume_or_dismiss_job(
     annotations=_tool_hints("set_agent_status"),
 )
 async def set_agent_status(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     status: Annotated[
         Literal["blocked", "idle", "sleeping"],
         Field(description="Target status: 'blocked', 'idle', or 'sleeping'. Other statuses are not valid here."),
@@ -285,7 +296,7 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
     annotations=_tool_hints("get_job_mission"),
 )
 async def get_job_mission(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     protocol_etag: Annotated[
         str | None,
         Field(
@@ -440,7 +451,7 @@ async def spawn_job(
     annotations=_tool_hints("get_agent_result"),
 )
 async def get_agent_result(
-    job_id: str,
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     ctx: Context = None,
 ) -> dict[str, Any]:
     return await _call_tool(ctx, "get_agent_result", {"job_id": job_id})
@@ -458,8 +469,8 @@ async def get_agent_result(
     annotations=_tool_hints("get_workflow_status"),
 )
 async def get_workflow_status(
-    project_id: str,
-    exclude_job_id: str = "",
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    exclude_job_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"project_id": project_id}
