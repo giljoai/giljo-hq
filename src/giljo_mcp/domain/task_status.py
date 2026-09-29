@@ -22,6 +22,7 @@ class TaskStatus(enum.StrEnum):
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    ON_HOLD = "on_hold"
     COMPLETED = "completed"
     BLOCKED = "blocked"
     CANCELLED = "cancelled"
@@ -52,6 +53,11 @@ TASK_STATUS_META: dict[TaskStatus, TaskStatusMeta] = {
     TaskStatus.IN_PROGRESS: TaskStatusMeta(
         label="In Progress",
         color_token="color-agent-implementer",
+        is_lifecycle_finished=False,
+    ),
+    TaskStatus.ON_HOLD: TaskStatusMeta(
+        label="On hold",
+        color_token="color-agent-reviewer",
         is_lifecycle_finished=False,
     ),
     TaskStatus.COMPLETED: TaskStatusMeta(

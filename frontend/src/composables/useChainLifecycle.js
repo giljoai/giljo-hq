@@ -2,6 +2,7 @@ import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useChainLifecycle() {
   const { showToast } = useToast()
@@ -17,13 +18,13 @@ export function useChainLifecycle() {
         const copied = await copy(prompt)
         if (copied) {
           showToast({
-            message: 'Chain staged. Staging prompt copied — paste it into your orchestrator terminal.',
+            message: 'Chain staged. Staging prompt copied; paste it into your orchestrator terminal.',
             type: 'success',
             timeout: 6000,
           })
         } else {
           showToast({
-            message: 'Chain staged. Browser blocked clipboard — copy the staging prompt manually.',
+            message: 'Chain staged. Your browser blocked the clipboard, so copy the staging prompt manually.',
             type: 'warning',
             timeout: 6000,
           })
@@ -37,10 +38,7 @@ export function useChainLifecycle() {
       }
       return updated
     } catch (err) {
-      const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
-        'Could not stage the chain.'
+      const msg = parseErrorResponse(err).message || 'Could not stage the chain.'
       showToast({ message: msg, type: 'error', timeout: 5000 })
       return null
     }
@@ -50,16 +48,13 @@ export function useChainLifecycle() {
     try {
       const updated = await sequenceRunStore.unlockRun(run.id)
       showToast({
-        message: 'Chain unstaged — tickboxes unlocked. You can edit membership and re-stage.',
+        message: 'Chain unstaged. You can edit its projects, order and mode, then stage it again.',
         type: 'success',
         timeout: 5000,
       })
       return updated
     } catch (err) {
-      const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
-        'Could not unstage the chain.'
+      const msg = parseErrorResponse(err).message || 'Could not unstage the chain.'
       showToast({ message: msg, type: 'error', timeout: 5000 })
       return null
     }

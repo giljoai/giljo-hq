@@ -72,6 +72,7 @@
           label="Description"
           variant="outlined"
           :rows="isHandover ? 10 : 3"
+          data-test="edit-task-description"
           @update:model-value="updateField('description', $event)"
         />
 
@@ -108,6 +109,7 @@
               :items="statusSelectOptions"
               label="Status"
               variant="outlined"
+              data-test="edit-task-status"
               @update:model-value="updateField('status', $event)"
             />
           </v-col>
@@ -117,6 +119,7 @@
               :items="priorityOptions"
               label="Priority"
               variant="outlined"
+              data-test="edit-task-priority"
               @update:model-value="updateField('priority', $event)"
             />
           </v-col>

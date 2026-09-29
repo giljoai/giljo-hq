@@ -17,15 +17,24 @@ from giljo_mcp.exceptions import BaseGiljoError
 
 logger = logging.getLogger(__name__)
 
+_SANITIZED_SERVER_ERROR = (
+    "The server hit an unexpected internal error handling this request. Full details were logged server-side."
+)
+
 
 def register_exception_handlers(app):
 
     @app.exception_handler(BaseGiljoError)
     async def giljo_exception_handler(request: Request, exc: BaseGiljoError):
         status_code = exc.default_status_code
-        log_method = logger.warning if 400 <= status_code < 500 else logger.error
-        log_method(f"{exc.error_code}: {exc.message}", extra={"context": exc.context})
-        return JSONResponse(status_code=status_code, content=exc.to_dict())
+        if status_code >= 500:
+            logger.error(f"{exc.error_code}: {exc.message}", exc_info=exc, extra={"context": exc.context})
+            content = {k: v for k, v in exc.to_dict().items() if k != "context"}
+            content["message"] = _SANITIZED_SERVER_ERROR
+        else:
+            logger.warning(f"{exc.error_code}: {exc.message}", extra={"context": exc.context})
+            content = exc.to_dict()
+        return JSONResponse(status_code=status_code, content=content)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):

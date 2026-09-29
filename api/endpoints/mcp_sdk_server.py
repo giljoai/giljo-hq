@@ -46,7 +46,7 @@ from api.endpoints.mcp_tools import (  # noqa: F401  (re-export surface)
     logger,
     mcp,
 )
-from api.endpoints.mcp_tools._base import pydantic_validation_rejection
+from api.endpoints.mcp_tools._base import pydantic_validation_rejection, validation_rejection
 
 from api.endpoints.mcp_tools._chain_tools import (  # noqa: F401  (re-export surface)
     link_projects,
@@ -119,6 +119,9 @@ from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager  # n
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
+CONSTRAINT_FEATURE_DISABLED = "feature_disabled"
+
+
 
 _current_request: ContextVar[StarletteRequest | None] = ContextVar("giljo_mcp_current_request", default=None)
 
@@ -139,10 +142,25 @@ async def _headless_launch_allowed(tenant_key: str) -> bool:
     try:
         async with app_state.db_manager.get_session_async() as db:
             svc = SettingsService(db, tenant_key)
-            return bool(await svc.get_setting_value("security", "allow_headless_launch", default=True))
+            return bool(await svc.get_setting_value("security", "allow_headless_launch", default=False))
     except Exception:  # noqa: BLE001 — resolve conservatively
         logger.warning("BE-9084: headless-toggle lookup failed; defaulting to HITL (blocked)", exc_info=True)
         return False
+
+
+def _launch_implementation_hitl_result() -> CallToolResult:
+    tool = mcp._tool_manager.get_tool("launch_implementation")
+    rejection = validation_rejection(
+        field="allow_headless_launch",
+        constraint=CONSTRAINT_FEATURE_DISABLED,
+        message=(
+            "Headless launch is off for this account (off by default -- Approval Is the Pass). "
+            "A human must press Implement in the dashboard for this project, or an admin can turn "
+            "Headless on under Settings -> Agents -> Headless launch, which makes this harness's "
+            "own permission prompt for this call count as that human's approval."
+        ),
+    )
+    return tool.fn_metadata.convert_result(rejection)
 
 
 async def _launch_gate_blocked(request: StarletteRequest | None) -> bool:
@@ -188,9 +206,34 @@ async def _scope_filtered_list_tools():
     return tools
 
 
-async def _dispatch_refusal_reason(name, arguments) -> str | None:
+async def _act_first_gate_reason(name: str) -> str | None:
+    request = _request_from_context()
+    if request is None:
+        return None
+    state = request.scope.get("state", {}) if hasattr(request, "scope") else {}
+    must_change_password = state.get("must_change_password")
+    if must_change_password is None:
+        return None
+
+    from giljo_mcp.auth.dependencies import act_first_gate_violation
+
+    violation = await act_first_gate_violation(
+        must_change_password=must_change_password,
+        tenant_key=state.get("tenant_key") or "",
+        db=None,
+        route=name,
+        browser_session=False,
+    )
+    return f"{violation.error_code}: {violation.message}" if violation is not None else None
+
+
+async def _dispatch_refusal_reason(name, arguments) -> str | CallToolResult | None:
     if name in {t.name for t in mcp._tool_manager.list_tools()} and name not in TOOL_SCOPES:
         return f"Tool '{name}' has no authorization scope mapping; dispatch refused (fail-closed)"
+
+    act_first_reason = await _act_first_gate_reason(name)
+    if act_first_reason is not None:
+        return act_first_reason
 
     request = _request_from_context()
     scopes = _scopes_from_request(request)
@@ -210,10 +253,7 @@ async def _dispatch_refusal_reason(name, arguments) -> str | None:
                 f"Tool '{name}' is gated by the human Implement step (HITL mode). "
                 "Enable Headless mode in Settings to let a CLI agent answer approvals from the harness."
             )
-        return (
-            f"Tool '{name}' is gated by the human Implement step (HITL mode). "
-            "Enable Headless mode in Settings to let a CLI agent self-advance staging to implementation."
-        )
+        return _launch_implementation_hitl_result()
     return _describe_absorbed_argument_for(name, arguments)
 
 
@@ -278,6 +318,8 @@ async def _scope_gate(ctx, call_next):
         if ctx.method == "tools/call":
             params = ctx.params or {}
             reason = await _dispatch_refusal_reason(params.get("name"), params.get("arguments") or {})
+            if isinstance(reason, CallToolResult):
+                return reason
             if reason is not None:
                 return CallToolResult(content=[TextContent(type="text", text=reason)], isError=True)
             rejected = _argument_validation_result(params.get("name"), params.get("arguments") or {})

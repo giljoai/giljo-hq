@@ -94,15 +94,18 @@ async def test_verify_pin_hidden_in_saas(monkeypatch):
     monkeypatch.setattr(_GILJO_MODE_ATTR, "saas")
     req = VerifyPinRequest(username="someuser", recovery_pin="1234")
     with pytest.raises(HTTPException) as exc:
-        await verify_pin(request_data=req, db=None)
+        await verify_pin(http_request=None, request_data=req, db=None)
     assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_verify_pin_reachable_in_ce_empty(monkeypatch):
     monkeypatch.setattr(_GILJO_MODE_ATTR, "")
+    monkeypatch.setattr("api.endpoints.auth_pin_recovery.get_rate_limiter", _NoopRateLimiter)
     _patch_repo_user(monkeypatch, None)
-    resp = await verify_pin(request_data=VerifyPinRequest(username="ghost", recovery_pin="1234"), db=object())
+    resp = await verify_pin(
+        http_request=object(), request_data=VerifyPinRequest(username="ghost", recovery_pin="1234"), db=object()
+    )
     assert resp.valid is False
 
 

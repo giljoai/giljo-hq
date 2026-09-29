@@ -1,44 +1,15 @@
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 
-export function resolveJobsNavPath({ activeProject, activeProjects, activeRun } = {}) {
-  const activeMemberPid =
-    (typeof activeRun?.current_index === 'number' && activeRun?.resolved_order?.[activeRun.current_index]) ||
-    activeRun?.resolved_order?.[0] ||
-    activeRun?.project_ids?.[0]
-  const runMemberIds = [...(activeRun?.resolved_order || []), ...(activeRun?.project_ids || [])]
-  const runContainsActiveProject = !!activeProject && runMemberIds.includes(activeProject.id)
-  if (activeRun?.id && activeMemberPid && (!activeProject || runContainsActiveProject)) {
-    return `/projects/${activeMemberPid}?run=${activeRun.id}`
-  }
-  const resolvedActiveProjects = activeProjects ?? (activeProject ? [activeProject] : [])
-  if (resolvedActiveProjects.length > 1) {
-    return '/jobs-overview'
-  }
-  if (activeProject) {
-    return `/projects/${activeProject.id}?via=jobs`
-  }
-  return '/launch?via=jobs'
-}
+export const JOBS_BOARD_PATH = '/jobs-overview'
 
-export function jobsNavPathToLocation(path) {
-  const [pathname, search] = String(path || '').split('?')
-  const query = Object.fromEntries(new URLSearchParams(search || ''))
-  if (pathname.startsWith('/projects/')) {
-    return {
-      name: 'ProjectLaunch',
-      params: { projectId: pathname.slice('/projects/'.length) },
-      query,
-    }
-  }
-  if (pathname === '/jobs-overview') {
-    return { name: 'JobsViewport' }
-  }
-  return null
+export function resolveJobsNavPath() {
+  return JOBS_BOARD_PATH
 }
 
 export function isJobsRouteActive(path, query) {
   if (query?.via === 'jobs') return true
+  if (path === JOBS_BOARD_PATH || path.startsWith(`${JOBS_BOARD_PATH}/`)) return true
   if (path.startsWith('/projects/')) return true
   return false
 }

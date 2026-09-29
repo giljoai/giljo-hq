@@ -29,12 +29,12 @@ from giljo_mcp.services.product_memory_service import (
 )
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.tenant import TenantManager
-from giljo_mcp.tools._memory_helpers import (
-    _fetch_project_and_product as _resolve_project_and_product,
-)
+from giljo_mcp.tools._memory_helpers import _fetch_project_and_product as _resolve_project_and_product
 from giljo_mcp.tools._memory_helpers import (
     build_git_commit_title_required_rejection,
     emit_websocket_event,
+    git_commits_required_rejection,
+    normalize_no_code_changes,
     provided_session,
     refuse_if_superseded,
 )
@@ -332,6 +332,7 @@ async def write_360_memory(
     tags: list[str] | None = None,
     user_id: str | None = None,
     acknowledge_closeout_todo: bool = False,
+    no_code_changes: str | None = None,
     db_manager: DatabaseManager | None = None,
     session: AsyncSession | None = None,
 ) -> dict[str, Any]:
@@ -360,6 +361,7 @@ async def write_360_memory(
     key_outcomes = validated.key_outcomes
     decisions_made = validated.decisions_made
     validated_tags = validated.tags
+    no_code_changes = normalize_no_code_changes(no_code_changes, git_commits)
 
     entry_type = ENTRY_TYPE_ALIASES.get(entry_type, entry_type)
 
@@ -450,13 +452,8 @@ async def write_360_memory(
             except Exception as _exc:  # noqa: BLE001
                 logger.debug("Settings read skipped: %s", _exc)
 
-            if git_integration_enabled and not git_commits and entry_type == "project_completion":
-                return {
-                    "success": False,
-                    "error": "GIT_COMMITS_REQUIRED",
-                    "message": "Git integration is enabled. Provide at least one commit before writing 360 memory.",
-                    "project_id": project_id,
-                }
+            if git_integration_enabled and not (git_commits or no_code_changes) and entry_type == "project_completion":
+                return git_commits_required_rejection(project_id)
 
             if git_commits is not None:
                 try:
@@ -503,6 +500,7 @@ async def write_360_memory(
                 key_outcomes=key_outcomes,
                 decisions_made=decisions_made,
                 git_commits=git_commits,
+                metrics={"no_code_changes": no_code_changes} if no_code_changes else None,
                 tags=validated_tags,
                 author_job_id=UUID(author_job_id) if author_job_id else None,
                 author_name=author_info.get("author_name"),

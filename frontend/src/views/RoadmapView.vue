@@ -187,6 +187,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { agentSavedAfter, waitIsSuperseded } from '@/utils/roadmapWaitReconcile'
 import { useToast } from '@/composables/useToast'
 import { useTaskCrud } from '@/composables/useTaskCrud'
@@ -205,7 +206,7 @@ const sequenceRunStore = useSequenceRunStore()
 const { showToast } = useToast()
 const { formatDate } = useFormatDate()
 
-const TASK_STATUS_OPTIONS = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled']
+const TASK_STATUS_OPTIONS = ['pending', 'in_progress', 'on_hold', 'completed', 'blocked', 'cancelled']
 
 const loading = ref(false)
 const noActiveProduct = ref(false)
@@ -554,10 +555,7 @@ async function confirmConvert() {
     await fetchRoadmap({ notify: true })
   } catch (error) {
     console.error('[ROADMAP] Failed to convert task:', error)
-    showToast({
-      message: error.response?.data?.detail || 'Failed to convert task to project.',
-      type: 'error',
-    })
+    showToast({ message: parseErrorResponse(error).message || 'Failed to convert task to project.', type: 'error' })
   }
 }
 

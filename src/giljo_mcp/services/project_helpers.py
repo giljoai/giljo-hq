@@ -147,66 +147,58 @@ async def mark_chain_member_status(
 ) -> bool:
     from giljo_mcp.services.sequence_run_service import SequenceRunService
 
-    try:
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=test_session,
-            websocket_manager=websocket_manager,
-        )
-        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-        if run is None:
-            return False
+    svc = SequenceRunService(
+        db_manager=db_manager,
+        tenant_manager=tenant_manager,
+        session=test_session,
+        websocket_manager=websocket_manager,
+    )
+    run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key, for_update=True)
+    if run is None:
+        return False
 
-        merged_statuses = dict(run.get("project_statuses") or {})
-        current = merged_statuses.get(project_id)
-        if current == status:
-            return True
-        if not_from is not None and current in not_from:
-            logger.info(
-                "[CHAIN_MEMBER_STATUS] forward-only guard blocked run=%s project=%s current=%s target=%s (tenant=%s)",
-                run["id"],
-                sanitize(project_id),
-                current,
-                status,
-                tenant_key,
-            )
-            return False
-
-        merged_statuses[project_id] = status
-        await svc.update(
-            run_id=run["id"],
-            tenant_key=tenant_key,
-            project_statuses=merged_statuses,
-        )
+    merged_statuses = dict(run.get("project_statuses") or {})
+    current = merged_statuses.get(project_id)
+    if current == status:
+        return True
+    if not_from is not None and current in not_from:
         logger.info(
-            "[CHAIN_MEMBER_STATUS] run=%s project=%s -> %s (tenant=%s)",
+            "[CHAIN_MEMBER_STATUS] forward-only guard blocked run=%s project=%s current=%s target=%s (tenant=%s)",
             run["id"],
             sanitize(project_id),
+            current,
             status,
             tenant_key,
         )
-
-        conductor_agent_id = run.get("conductor_agent_id")
-        if status == "completed" and conductor_agent_id:
-            await _wake_conductor_on_member_closeout(
-                db_manager=db_manager,
-                tenant_manager=tenant_manager,
-                conductor_agent_id=conductor_agent_id,
-                tenant_key=tenant_key,
-                project_id=project_id,
-                test_session=test_session,
-                websocket_manager=websocket_manager,
-            )
-        return True
-    except Exception as exc:  # noqa: BLE001 — best-effort side-effect; never fail the caller
-        logger.warning(
-            "[CHAIN_MEMBER_STATUS] non-fatal: failed to set project=%s status=%s: %s",
-            sanitize(project_id),
-            status,
-            exc,
-        )
         return False
+
+    merged_statuses[project_id] = status
+    await svc.update(
+        run_id=run["id"],
+        tenant_key=tenant_key,
+        project_statuses=merged_statuses,
+        defer_broadcast=True,
+    )
+    logger.info(
+        "[CHAIN_MEMBER_STATUS] run=%s project=%s -> %s (tenant=%s)",
+        run["id"],
+        sanitize(project_id),
+        status,
+        tenant_key,
+    )
+
+    conductor_agent_id = run.get("conductor_agent_id")
+    if status == "completed" and conductor_agent_id:
+        await _wake_conductor_on_member_closeout(
+            db_manager=db_manager,
+            tenant_manager=tenant_manager,
+            conductor_agent_id=conductor_agent_id,
+            tenant_key=tenant_key,
+            project_id=project_id,
+            test_session=test_session,
+            websocket_manager=websocket_manager,
+        )
+    return True
 
 
 async def advance_chain_member_to_implementing(
@@ -221,78 +213,68 @@ async def advance_chain_member_to_implementing(
     from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
     from giljo_mcp.services.sequence_run_service import SequenceRunService
 
-    try:
-        svc = SequenceRunService(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            session=session,
-            websocket_manager=websocket_manager,
-        )
-        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
-        if run is None:
-            return False
+    svc = SequenceRunService(
+        db_manager=db_manager,
+        tenant_manager=tenant_manager,
+        session=session,
+        websocket_manager=websocket_manager,
+    )
+    run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key, for_update=True)
+    if run is None:
+        return False
 
-        resolved_order = run.get("resolved_order") or []
-        if project_id not in resolved_order:
-            return False
-        idx = resolved_order.index(project_id)
-        forward_index = max(run.get("current_index", 0), idx)
+    resolved_order = run.get("resolved_order") or []
+    if project_id not in resolved_order:
+        return False
+    idx = resolved_order.index(project_id)
+    forward_index = max(run.get("current_index", 0), idx)
 
-        merged_statuses = dict(run.get("project_statuses") or {})
-        merged_statuses[project_id] = "planning"
+    merged_statuses = dict(run.get("project_statuses") or {})
+    merged_statuses[project_id] = "planning"
 
-        resolver = SequenceChainContextResolver(
-            db_manager=db_manager,
-            tenant_manager=tenant_manager,
-            websocket_manager=websocket_manager,
-            test_session=session,
-        )
+    resolver = SequenceChainContextResolver(db_manager=db_manager, tenant_manager=tenant_manager, test_session=session)
 
-        if forward_index > 0:
-            prev_pid = resolved_order[forward_index - 1] if forward_index - 1 < len(resolved_order) else None
-            if prev_pid:
-                advanced = await resolver.advance_index_if_committed(
-                    run_id=run["id"],
-                    project_id=prev_pid,
-                    tenant_key=tenant_key,
-                    next_index=forward_index,
-                )
-                await svc.update(
-                    run_id=run["id"],
-                    tenant_key=tenant_key,
-                    status="running",
-                    project_statuses=merged_statuses,
-                )
-                if not advanced:
-                    logger.info(
-                        "[CHAIN_ADVANCE] index hold: prev project %s not closed out yet (run=%s)",
-                        prev_pid,
-                        run["id"],
-                    )
-                return advanced
+    if forward_index > 0:
+        prev_pid = resolved_order[forward_index - 1] if forward_index - 1 < len(resolved_order) else None
+        if prev_pid:
+            advanced = await resolver.advance_index_if_committed(
+                run_id=run["id"],
+                project_id=prev_pid,
+                tenant_key=tenant_key,
+                next_index=forward_index,
+            )
             await svc.update(
                 run_id=run["id"],
                 tenant_key=tenant_key,
                 status="running",
-                current_index=forward_index,
                 project_statuses=merged_statuses,
+                defer_broadcast=True,
             )
-            return True
+            if not advanced:
+                logger.info(
+                    "[CHAIN_ADVANCE] index hold: prev project %s not closed out yet (run=%s)",
+                    prev_pid,
+                    run["id"],
+                )
+            return advanced
         await svc.update(
             run_id=run["id"],
             tenant_key=tenant_key,
             status="running",
             current_index=forward_index,
             project_statuses=merged_statuses,
+            defer_broadcast=True,
         )
         return True
-    except Exception as exc:  # noqa: BLE001 — best-effort side-effect; never fail the caller
-        logger.warning(
-            "[CHAIN_ADVANCE] non-fatal: failed to advance project=%s to implementing: %s",
-            sanitize(project_id),
-            exc,
-        )
-        return False
+    await svc.update(
+        run_id=run["id"],
+        tenant_key=tenant_key,
+        status="running",
+        current_index=forward_index,
+        project_statuses=merged_statuses,
+        defer_broadcast=True,
+    )
+    return True
 
 
 async def heal_chain_member_statuses(

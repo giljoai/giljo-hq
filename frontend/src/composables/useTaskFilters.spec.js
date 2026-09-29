@@ -219,16 +219,28 @@ describe('useTaskFilters', () => {
   })
 
   describe('statusSelectOptions', () => {
-    it('exposes the five canonical task statuses (mirrors BE TaskUpdate enum)', () => {
+    it('exposes the six canonical task statuses (mirrors BE TaskUpdate enum)', () => {
       const { statusSelectOptions } = useTaskFilters(tasks)
       const values = statusSelectOptions.value.map((o) => o.value)
       expect(values).toEqual([
         'pending',
         'in_progress',
+        'on_hold',
         'completed',
         'blocked',
         'cancelled',
       ])
+    })
+
+    it('offers On hold as a settable status and as a filter', () => {
+      const { statusSelectOptions, statusFilterOptions, statusFilter, filteredTasks } = useTaskFilters(ref([
+        { id: 1, title: 'parked', status: 'on_hold', priority: 'low', task_type_id: null },
+        { id: 2, title: 'live', status: 'in_progress', priority: 'low', task_type_id: null },
+      ]))
+      expect(statusSelectOptions.value).toContainEqual({ title: 'On hold', value: 'on_hold' })
+      expect(statusFilterOptions.value).toContainEqual({ title: 'On hold', value: 'on_hold' })
+      statusFilter.value = 'on_hold'
+      expect(filteredTasks.value.map((t) => t.id)).toEqual([1])
     })
   })
 

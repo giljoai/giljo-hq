@@ -17,6 +17,10 @@ export const COLOR_FAILED = '#c6298c'
 
 export const COLOR_STAGED = '#ffc107'
 
+export const COLOR_DECISION = '#ff9800'
+
+export const COLOR_UNREAD = '#2196f3'
+
 
 export const DOT_SUCCESS = '#4caf50'
 

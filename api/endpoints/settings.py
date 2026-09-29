@@ -5,7 +5,7 @@
 
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
@@ -27,6 +27,7 @@ from giljo_mcp.services.handover_template import (
     resolve_handover_template,
     template_is_default,
 )
+from giljo_mcp.services.job_completion_closeout_gate import CLOSEOUT_MODE_AUTONOMOUS, CLOSEOUT_MODE_HITL
 from giljo_mcp.services.settings_service import (
     DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES,
     SettingsService,
@@ -116,6 +117,12 @@ class ExecutionModeDefaultUpdate(BaseModel):
         if value not in EXECUTION_MODE_DEFAULT_CHOICES:
             raise ValueError(f"must be one of {list(EXECUTION_MODE_DEFAULT_CHOICES)}")
         return value
+
+
+class CloseoutModeSetting(BaseModel):
+    """Whether a signal-bearing closeout waits for the user's approval."""
+
+    closeout_mode: Literal[CLOSEOUT_MODE_HITL, CLOSEOUT_MODE_AUTONOMOUS]
 
 
 class HandoverTemplateResponse(BaseModel):
@@ -376,6 +383,28 @@ async def update_execution_mode_default(
     await service.update_settings("general", general)
 
     return ExecutionModeDefaultResponse(execution_mode_default=request.execution_mode_default)
+
+
+@router.put(
+    "/closeout-mode",
+    response_model=CloseoutModeSetting,
+    summary="Set the account closeout mode",
+    description="'hitl' asks for approval before a closeout that needs review; 'autonomous' does not.",
+)
+async def update_closeout_mode(
+    request: CloseoutModeSetting,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> CloseoutModeSetting:
+    """Set the account's closeout mode (admin only). Other general settings are kept."""
+    logger.info("Admin %s setting closeout mode", sanitize(current_user.username))
+
+    service = SettingsService(db, current_user.tenant_key)
+    general = await service.get_settings("general")
+    general["closeout_mode"] = request.closeout_mode
+    await service.update_settings("general", general)
+
+    return request
 
 
 @router.get(

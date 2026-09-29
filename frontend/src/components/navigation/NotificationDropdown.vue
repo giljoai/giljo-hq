@@ -565,18 +565,10 @@ onUnmounted(() => {
   &:active { transform: scale(0.95); }
 }
 
-@media (max-width: 1024px) {
-  .nav-orb {
-    width: 44px;
-    height: 44px;
-  }
-}
-
 .nav-orb--bell {
   background: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.9);
 
   &:hover { background: rgba(255, 255, 255, 0.18); }
 }
-
 </style>

@@ -193,13 +193,12 @@ CORRECT:
 def _build_wake_pattern(
     execution_mode: str,
     executor_id: str,
-    tenant_key: str,
 ) -> str:
     if is_subagent_render(execution_mode):
         raw = _WAKE_BY_TOOL.get(execution_mode, _WAKE_SUBAGENT_GENERIC)
     else:
         raw = _WAKE_GENERIC
-    return raw.replace("{executor_id}", executor_id).replace("{tenant_key}", tenant_key)
+    return raw.replace("{executor_id}", executor_id)
 
 
 def _build_preset_waiting_ladder(preset: Platform) -> str:
@@ -236,7 +235,7 @@ def _generate_orchestrator_protocol(
 ) -> str:
     effective_tool = tool if tool is not None else execution_mode
     forbidden_banner = _build_forbidden_banner(execution_mode, effective_tool, is_chain_conductor)
-    wake_pattern = _build_wake_pattern(execution_mode, executor_id, tenant_key)
+    wake_pattern = _build_wake_pattern(execution_mode, executor_id)
     body = _build_orchestrator_protocol_body(
         job_id,
         tenant_key,

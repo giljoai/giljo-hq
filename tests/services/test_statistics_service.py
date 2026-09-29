@@ -385,8 +385,8 @@ async def trashed_product_dashboard(db_session, test_tenant_key):
         db_session.add_all(
             [
                 _project(tenant, "active", series=next(series), product_id=live.id),
-                _project(tenant, "completed", series=next(series), product_id=live.id, deleted_at=now),
-                _project(tenant, "completed", series=next(series), product_id=dormant.id, deleted_at=now),
+                _project(tenant, "deleted", series=next(series), product_id=live.id, deleted_at=now),
+                _project(tenant, "deleted", series=next(series), product_id=dormant.id, deleted_at=now),
                 _project(tenant, "active", series=next(series), product_id=trashed.id),
                 _project(tenant, "completed", series=next(series), product_id=trashed.id, completed_at=now),
                 _project(tenant, "completed", series=next(series), product_id=live.id, completed_at=now),
@@ -574,8 +574,8 @@ async def trashed_projects_stats(db_session, test_tenant_key):
                     execution_mode=MODE_SUBAGENT,
                     product_id=mix_product.id,
                 ),
-                _project(tenant, "cancelled", series=next(series), deleted_at=now, product_id=mix_product.id),
-                _project(tenant, "cancelled", series=next(series), deleted_at=now, product_id=mix_product.id),
+                _project(tenant, "deleted", series=next(series), deleted_at=now, product_id=mix_product.id),
+                _project(tenant, "deleted", series=next(series), deleted_at=now, product_id=mix_product.id),
             ]
         )
         await db_session.flush()

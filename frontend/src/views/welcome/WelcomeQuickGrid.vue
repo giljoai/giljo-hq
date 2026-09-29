@@ -183,10 +183,4 @@ defineEmits(['card-click'])
     grid-template-columns: repeat(2, 1fr);
   }
 }
-
-@media (max-width: $breakpoint-mobile) {
-  .quick-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

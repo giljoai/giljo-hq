@@ -35,7 +35,7 @@ vi.mock('@/services/api', () => {
       getGeneral: vi.fn(() =>
         Promise.resolve({ data: { settings: { closeout_mode: 'hitl' } } })
       ),
-      updateGeneral: vi.fn(() => Promise.resolve({ data: { success: true } })),
+      updateCloseoutMode: vi.fn(() => Promise.resolve({ data: {} })),
       getHeadlessLaunch: vi.fn(() =>
         Promise.resolve({ data: { allow_headless_launch: false } })
       ),
@@ -491,7 +491,10 @@ describe('TemplateManager — saveTemplate() error handling', () => {
 
   it('shows warning toast titled "Name Already Exists" on 400 + "already exists"', async () => {
     api.templates.create.mockRejectedValueOnce({
-      response: { status: 400, data: { detail: 'Template with this name already exists.' } },
+      response: {
+        status: 400,
+        data: { error_code: 'VALIDATIONERROR', message: 'Template with this name already exists.' },
+      },
     })
     await wrapper.vm.saveTemplate()
     expect(mockShowToast).toHaveBeenCalledWith(
@@ -501,7 +504,10 @@ describe('TemplateManager — saveTemplate() error handling', () => {
 
   it('shows warning toast titled "Name Already Exists" on 400 + "unique"', async () => {
     api.templates.create.mockRejectedValueOnce({
-      response: { status: 400, data: { detail: 'unique constraint violation on name' } },
+      response: {
+        status: 400,
+        data: { error_code: 'VALIDATIONERROR', message: 'unique constraint violation on name' },
+      },
     })
     await wrapper.vm.saveTemplate()
     expect(mockShowToast).toHaveBeenCalledWith(
@@ -511,7 +517,10 @@ describe('TemplateManager — saveTemplate() error handling', () => {
 
   it('shows generic error toast on 400 with unrelated detail', async () => {
     api.templates.create.mockRejectedValueOnce({
-      response: { status: 400, data: { detail: 'Invalid role value.' } },
+      response: {
+        status: 400,
+        data: { error_code: 'VALIDATIONERROR', message: 'Invalid role value.' },
+      },
     })
     await wrapper.vm.saveTemplate()
     expect(mockShowToast).toHaveBeenCalledWith(
@@ -521,7 +530,13 @@ describe('TemplateManager — saveTemplate() error handling', () => {
 
   it('shows generic error toast on 500', async () => {
     api.templates.create.mockRejectedValueOnce({
-      response: { status: 500, data: { detail: 'Internal server error' } },
+      response: {
+        status: 500,
+        data: {
+          error_code: 'INTERNAL_SERVER_ERROR',
+          message: 'The server hit an unexpected internal error handling this request. Full details were logged server-side.',
+        },
+      },
     })
     await wrapper.vm.saveTemplate()
     expect(mockShowToast).toHaveBeenCalledWith(
@@ -710,7 +725,7 @@ describe('TemplateManager — FE-9203 Add default agents button', () => {
 
   it('shows an error toast on failure', async () => {
     api.templates.importDefaults.mockRejectedValueOnce({
-      response: { status: 500, data: { detail: 'boom' } },
+      response: { status: 500, data: { error_code: 'INTERNAL_SERVER_ERROR', message: 'boom' } },
     })
     await wrapper.vm.importDefaultAgents()
     expect(mockShowToast).toHaveBeenCalledWith(

@@ -5,12 +5,12 @@
 
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.database import DatabaseManager
+from giljo_mcp.database import DatabaseManager, tenant_session_context
 from giljo_mcp.exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -21,9 +21,11 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.auth import User
 from giljo_mcp.repositories.user_repository import UserRepository
 from giljo_mcp.services._session_helpers import tenant_context_session
+from giljo_mcp.services.login_lockout_service import LoginLockoutService
 from giljo_mcp.services.oauth_refresh_service import (
     revoke_all_for_user as revoke_all_refresh_tokens_for_user,
 )
+from giljo_mcp.services.session_eviction import evict_user_tokens
 from giljo_mcp.utils.password_helper import async_hash_password, async_verify_password
 
 
@@ -250,3 +252,31 @@ class UserAuthService:
             f"{user.token_revocation_epoch} ({revoked_count} refresh token(s) revoked)"
         )
         return user
+
+
+
+
+async def record_failed_pin_attempt(session: AsyncSession, user: User) -> None:
+    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await session.refresh(user, attribute_names=["failed_pin_attempts", "pin_lockout_until"])
+    user.failed_pin_attempts += 1
+    if user.failed_pin_attempts >= 5:
+        user.pin_lockout_until = datetime.now(UTC) + timedelta(minutes=15)
+    await session.commit()
+
+
+async def reset_password_via_pin(session: AsyncSession, user: User, new_password: str) -> int:
+    user.password_hash = await async_hash_password(new_password)
+    user.failed_pin_attempts = 0
+    user.pin_lockout_until = None
+
+    with tenant_session_context(session, user.tenant_key):
+        revoked_count = await evict_user_tokens(session, user)
+
+    try:
+        await LoginLockoutService().clear_for_identifiers(session, [user.username, user.email])
+    except Exception:  # noqa: BLE001 - never block a password reset on lockout cleanup
+        logger.warning("login lockout clear on PIN reset failed", exc_info=True)
+
+    await session.commit()
+    return revoked_count

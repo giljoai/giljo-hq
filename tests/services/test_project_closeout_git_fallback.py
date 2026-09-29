@@ -5,6 +5,7 @@
 
 
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -85,6 +86,10 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
         "ProjectCloseoutService",
         lambda *a, **kw: fake_closeout_service,
     )
+    monkeypatch.setattr(
+        "giljo_mcp.tools._closeout_finalize.mark_chain_member_status",
+        AsyncMock(return_value=False),
+    )
 
 
 def _make_db_manager() -> Any:
@@ -92,7 +97,7 @@ def _make_db_manager() -> Any:
 
     @asynccontextmanager
     async def _session_cm():
-        yield object()
+        yield SimpleNamespace(info={})
 
     db_manager = AsyncMock()
     db_manager.get_session_async = _session_cm

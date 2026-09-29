@@ -1,13 +1,13 @@
 <template>
   <div class="chain-mission-window smooth-border" data-testid="chain-mission-window">
     <div class="chain-mission-window__label">
-      <span>Multi project mission</span>
+      <span>Chain goal</span>
     </div>
     <div class="chain-mission-window__body scrollbar-standard">
       <EmptyState
         v-if="!mission"
         icon="mdi-file-document-outline"
-        title="No overarching mission yet"
+        title="No chain goal yet"
         compact
       />
       <template v-else>

@@ -10,11 +10,11 @@
         v-if="canExportData"
         class="danger-card danger-card--enabled smooth-border"
         data-test="download-my-data-section"
-        :style="{ '--card-accent': 'var(--brand-yellow)' }"
+        :style="{ '--card-accent': 'var(--color-accent-primary)' }"
       >
         <div
           class="danger-card-icon"
-          :style="{ background: 'rgba(255,195,0,0.12)', color: 'var(--brand-yellow)' }"
+          :style="{ background: 'rgba(255,195,0,0.12)', color: 'var(--color-accent-primary)' }"
         >
           <v-icon size="20">mdi-download-outline</v-icon>
         </div>
@@ -44,14 +44,27 @@
 
           <div v-if="exportResult" class="export-result" data-test="export-result">
             <a
+              v-if="!exportLinkUsed"
               :href="exportResult.download_url"
               class="export-download-link"
               data-test="export-download-link"
               download
+              @click="exportLinkUsed = true"
             >
               <v-icon size="16" class="mr-1">mdi-download</v-icon>
               Download tenant_export.zip
             </a>
+            <v-btn
+              v-else
+              variant="text"
+              size="small"
+              color="warning"
+              prepend-icon="mdi-refresh"
+              data-test="export-generate-new-link-btn"
+              @click="onGenerateExport"
+            >
+              Generate a new link
+            </v-btn>
             <div class="export-expiry" data-test="export-expiry">
               Link expires {{ expiresAtFormatted }}
             </div>
@@ -158,11 +171,11 @@
       v-if="canEditPrompt"
       class="prompt-section danger-card danger-card--enabled smooth-border"
       data-test="orchestrator-prompt-section"
-      :style="{ '--card-accent': 'var(--brand-yellow)' }"
+      :style="{ '--card-accent': 'var(--color-accent-primary)' }"
     >
       <div
         class="danger-card-icon"
-        :style="{ background: 'rgba(255,195,0,0.12)', color: 'var(--brand-yellow)' }"
+        :style="{ background: 'rgba(255,195,0,0.12)', color: 'var(--color-accent-primary)' }"
       >
         <v-icon size="20">mdi-file-document-edit-outline</v-icon>
       </div>
@@ -201,6 +214,7 @@ import { useRouter } from 'vue-router'
 import configService from '@/services/configService'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useUserStore } from '@/stores/user'
 
@@ -230,6 +244,7 @@ const exporting = ref(false)
 const exportError = ref('')
 const exportProgress = ref(null)
 const exportResult = ref(null)
+const exportLinkUsed = ref(false)
 
 const exportPercent = computed(() => {
   const p = exportProgress.value
@@ -292,6 +307,7 @@ async function onGenerateExport() {
   exportError.value = ''
   exportProgress.value = null
   exportResult.value = null
+  exportLinkUsed.value = false
 
   if (!unsubscribeExportProgress) {
     unsubscribeExportProgress = ws.on('tenant:export_progress', handleExportProgress)
@@ -309,12 +325,7 @@ async function onGenerateExport() {
       throw new Error('Backend did not return a download URL.')
     }
   } catch (err) {
-    const data = err?.response?.data
-    const message =
-      data?.detail ||
-      data?.message ||
-      err?.message ||
-      'Could not generate export. Please try again.'
+    const message = parseErrorResponse(err).message || 'Could not generate export. Please try again.'
     exportError.value = message
     showToast({ message, type: 'error' })
   } finally {
@@ -327,7 +338,7 @@ const hasPendingDeletion = computed(
   () => accountStateStoreRef.value?.isAccountScheduledForDeletion ?? false,
 )
 const cardAccent = computed(() =>
-  hasPendingDeletion.value ? 'var(--brand-yellow)' : 'rgb(var(--v-theme-error))',
+  hasPendingDeletion.value ? 'var(--color-accent-primary)' : 'rgb(var(--v-theme-error))',
 )
 const cancellingDeletion = ref(false)
 const checkingDeleteEligibility = ref(false)
@@ -357,9 +368,8 @@ async function onCancelPendingDeletion() {
     await store.cancelDeletion()
     showToast({ message: 'Account deletion cancelled.', type: 'success' })
   } catch (err) {
-    const detail = err?.response?.data?.detail
     showToast({
-      message: detail || 'Could not cancel deletion. Please try again.',
+      message: parseErrorResponse(err).message || 'Could not cancel deletion. Please try again.',
       type: 'error',
     })
   } finally {
@@ -535,11 +545,11 @@ onMounted(async () => {
 /* SAFE-action variant — yellow accent for "Cancel pending deletion". */
 .danger-card-icon--warning {
   background: rgba(255, 195, 0, 0.12);
-  color: var(--brand-yellow);
+  color: var(--color-accent-primary);
 }
 
 .danger-card-title--warning {
-  color: var(--brand-yellow);
+  color: var(--color-accent-primary);
 }
 
 .danger-card-desc {
@@ -573,7 +583,7 @@ onMounted(async () => {
   align-items: center;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--brand-yellow);
+  color: var(--color-accent-primary);
   text-decoration: none;
 }
 

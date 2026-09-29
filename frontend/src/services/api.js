@@ -184,6 +184,17 @@ apiClient.interceptors.response.use(
       })
     }
 
+    if (error.response?.status === 403) {
+      const gateTarget = {
+        PASSWORD_CHANGE_REQUIRED: '/first-login',
+        TERMS_REACCEPTANCE_REQUIRED: '/reaccept-terms',
+      }[parsedError.errorCode]
+      if (gateTarget && window.location.pathname !== gateTarget) {
+        const { default: router } = await import('@/router')
+        router.push(gateTarget)
+      }
+    }
+
     if (!error.response) {
       console.error('[API] Network error - server may be unreachable:', error.message)
     }
@@ -335,6 +346,8 @@ export const api = {
     unstage: (id) => apiClient.post(`/api/v1/projects/${id}/unstage`),
     completeWithData: (id, data) => apiClient.post(`/api/v1/projects/${id}/complete`, data),
     archive: (id) => apiClient.post(`/api/v1/projects/${id}/archive`),
+    closeoutWithoutSummary: (id, reason) =>
+      apiClient.post(`/api/v1/projects/${id}/closeout-without-summary`, { reason }),
     launchImplementation: (id) =>
       apiClient.patch(`/api/agent-jobs/projects/${id}/launch-implementation`),
   },
@@ -386,7 +399,7 @@ export const api = {
     testDatabase: () => apiClient.get('/api/v1/config/health/database'),
 
     getGeneral: () => apiClient.get('/api/v1/settings/general'),
-    updateGeneral: (data) => apiClient.put('/api/v1/settings/general', { settings: data }),
+    updateCloseoutMode: (mode) => apiClient.put('/api/v1/settings/closeout-mode', { closeout_mode: mode }),
     getAgentSilenceThreshold: () =>
       apiClient.get('/api/v1/settings/system/agent-silence-threshold'),
     updateAgentSilenceThreshold: (minutes) =>
@@ -471,8 +484,6 @@ export const api = {
     status: (jobId) => apiClient.get(`/api/agent-jobs/${jobId}/status`),
     updateMission: (jobId, data) => apiClient.patch(`/api/jobs/${jobId}/mission`, data),
 
-    simpleHandover: (jobId) => apiClient.post(`/api/agent-jobs/${jobId}/simple-handover`),
-
     messages: (jobId) => apiClient.get(`/api/agent-jobs/${jobId}/messages`),
   },
 
@@ -528,6 +539,7 @@ export const api = {
     markRead: (id) => apiClient.post(`/api/v1/threads/${id}/read`),
     attention: () => apiClient.get('/api/v1/threads/attention'),
     search: (params) => apiClient.get('/api/v1/threads/search', { params }),
+    chainHub: (runId) => apiClient.get('/api/v1/threads/chain-hub', { params: { sequence_run_id: runId } }),
     history: (id, { includeRecipientState = false } = {}) =>
       apiClient.get(`/api/v1/threads/${id}`, {
         params: includeRecipientState ? { include_recipient_state: true } : undefined,

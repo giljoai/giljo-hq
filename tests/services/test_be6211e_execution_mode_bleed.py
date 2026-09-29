@@ -24,7 +24,7 @@ _SUBAGENT_TOOLS = ("claude-code", "codex")
 
 
 def _wake(execution_mode: str) -> str:
-    return _build_wake_pattern(execution_mode, executor_id="EXEC-1", tenant_key="TK-1")
+    return _build_wake_pattern(execution_mode, executor_id="EXEC-1")
 
 
 def test_subagent_wake_blocks_use_inline_get_agent_result_not_sleep_poll() -> None:

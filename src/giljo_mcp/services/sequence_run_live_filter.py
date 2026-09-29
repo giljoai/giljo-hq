@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
+from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
 
 
 def _run_member_ids(run: SequenceRun) -> list[str]:
@@ -46,6 +47,32 @@ async def filter_runs_with_live_members(
     return [run for run in runs if any(pid in live_project_ids for pid in _run_member_ids(run))]
 
 
+async def filter_runs_with_reviewable_members(
+    *,
+    session: AsyncSession,
+    runs: list[SequenceRun],
+    tenant_key: str,
+) -> list[SequenceRun]:
+
+    def unreviewed(run: SequenceRun) -> list[str]:
+        statuses = run.project_statuses if isinstance(run.project_statuses, dict) else {}
+        reviewed = set(run.reviewed_project_ids or [])
+        return [str(pid) for pid, st in statuses.items() if st == "completed" and pid not in reviewed]
+
+    wanted = {pid for run in runs for pid in unreviewed(run)}
+    if not wanted:
+        return runs
+    rows = await session.execute(
+        select(Project.id).where(
+            Project.tenant_key == tenant_key,
+            Project.id.in_(wanted),
+            project_not_trashed(),
+        )
+    )
+    present = {str(pid) for (pid,) in rows.all()}
+    return [run for run in runs if any(pid in present for pid in unreviewed(run))]
+
+
 async def filter_runs_by_product(
     *,
     session: AsyncSession,
@@ -64,7 +91,7 @@ async def filter_runs_by_product(
         select(Project.id).where(
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
             Project.id.in_(member_ids),
         )
     )

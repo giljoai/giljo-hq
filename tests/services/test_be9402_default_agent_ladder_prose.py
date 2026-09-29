@@ -16,10 +16,11 @@ from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
 from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 from giljo_mcp.prompts.launch_command_synth import (
     DEFAULT_CLI_TOOL,
+    render_harness_launch_block,
     resolve_binary,
-    synthesize_agent_launch,
 )
 from giljo_mcp.services.protocol_sections.chapters_reference import _CH3_CODEX
+from giljo_mcp.template_validation import resolve_harness_name
 
 
 _EXPECTED_NOTICE = (
@@ -150,13 +151,10 @@ def test_unknown_or_missing_cli_tool_still_defaults_to_claude() -> None:
     assert resolve_binary("not-a-real-harness") == CLI_BINARIES[DEFAULT_CLI_TOOL]
 
 
-def test_spawn_synthesis_launches_each_agent_into_its_configured_harness() -> None:
-    launch = synthesize_agent_launch(
-        {"agent": "tester", "cli_tool": "codex", "job_id": "job-1", "seed_prompt": "load your mission"}
-    )
+def test_configured_harness_reaches_the_launch_guidance() -> None:
+    guidance = render_harness_launch_block(resolve_harness_name("codex"), model=None, effort=None)
 
-    assert launch["cli_tool"] == "codex", "The synthesized spec must echo the configured cli_tool."
-    for os_name, command in launch["commands"].items():
-        assert "codex" in command, (
-            f"The {os_name} launch command does not invoke the configured harness binary. Got: {command!r}"
-        )
+    assert "Harness: codex" in guidance, (
+        f"the configured harness is not named in the launch guidance. Got: {guidance!r}"
+    )
+    assert "permission-bypass" in guidance, "the no-bypass rule must ride with the harness naming"

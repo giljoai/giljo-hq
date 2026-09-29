@@ -22,7 +22,6 @@ EXPECTED_PUBLIC_METHODS = frozenset(
         "get_project_type_by_id",
         "create_project",
         "update_project_mission",
-        "set_early_termination",
         "complete_project",
         "activate_project",
         "deactivate_project",

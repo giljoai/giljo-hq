@@ -6,12 +6,27 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+
+
+def _content_text(result) -> str:
+    parts = []
+    for block in result.content or []:
+        text = getattr(block, "text", None)
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def _parse_content_dict(result) -> dict[str, Any]:
+    return json.loads(_content_text(result))
 
 
 class _FakeRequest:
@@ -91,7 +106,7 @@ async def gate_client(db_manager, monkeypatch):
 
 class TestDefaultHeadlessFence:
     @pytest.mark.asyncio
-    async def test_no_row_advertises_launch_from_tools_list(self, gate_client):
+    async def test_no_row_hides_launch_from_tools_list(self, gate_client):
         new_client, holder = gate_client
         holder.state = _jwt_full_state(holder.tenant_key)
 
@@ -99,23 +114,29 @@ class TestDefaultHeadlessFence:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
-        assert "launch_implementation" in advertised, "platform default must advertise the launch gate"
+        assert "launch_implementation" not in advertised, "unset tenant must default to HITL (hidden)"
         assert "spawn_job" in advertised
         assert "stage_project" in advertised
 
     @pytest.mark.asyncio
-    async def test_no_row_allows_launch_call(self, gate_client):
+    async def test_no_row_blocks_launch_call_with_structured_refusal(self, gate_client):
         new_client, holder = gate_client
         holder.state = _jwt_full_state(holder.tenant_key)
 
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        joined = "\n".join(getattr(b, "text", "") for b in result.content)
-        assert "HITL mode" not in joined, f"platform default must not be HITL-fenced, got: {joined!r}"
+        assert not result.is_error, (
+            f"the HITL-off refusal must be Tier-2 content, not isError: {_content_text(result)!r}"
+        )
+        parsed = _parse_content_dict(result)
+        assert parsed.get("success") is False
+        assert parsed.get("error") == "VALIDATION_ERROR"
+        assert parsed.get("field") == "allow_headless_launch"
+        assert "Settings" in parsed.get("message", "") and "Implement" in parsed.get("message", "")
 
     @pytest.mark.asyncio
-    async def test_explicit_false_toggle_still_blocks(self, gate_client, db_manager):
+    async def test_explicit_false_toggle_also_blocks_with_structured_refusal(self, gate_client, db_manager):
         new_client, holder = gate_client
         await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
         holder.state = _jwt_full_state(holder.tenant_key)
@@ -123,9 +144,10 @@ class TestDefaultHeadlessFence:
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert result.is_error is True
-        joined = "\n".join(getattr(b, "text", "") for b in result.content)
-        assert "HITL mode" in joined
+        assert not result.is_error
+        parsed = _parse_content_dict(result)
+        assert parsed.get("error") == "VALIDATION_ERROR"
+        assert parsed.get("field") == "allow_headless_launch"
 
     @pytest.mark.asyncio
     async def test_explicit_false_toggle_still_hides_from_tools_list(self, gate_client, db_manager):
@@ -221,10 +243,10 @@ class TestToggleAdmitsWithNoDeclaration:
             holder.state = _jwt_orchestrator_state(holder.tenant_key)
             undeclared = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        declared_text = "\n".join(getattr(b, "text", "") for b in declared_full.content)
-        undeclared_text = "\n".join(getattr(b, "text", "") for b in undeclared.content)
-        assert "HITL mode" in declared_text
-        assert "HITL mode" in undeclared_text
+        assert not declared_full.is_error
+        assert not undeclared.is_error
+        assert _parse_content_dict(declared_full).get("error") == "VALIDATION_ERROR"
+        assert _parse_content_dict(undeclared).get("error") == "VALIDATION_ERROR"
 
 
 
@@ -243,6 +265,46 @@ class TestApiKeyBypassUnaffected:
         assert "launch_implementation" in advertised, "api_key operator must still see the launch gate"
         joined = "\n".join(getattr(b, "text", "") for b in call.content)
         assert "HITL mode" not in joined, "api_key operator must never be HITL-fenced"
+
+
+
+
+class TestWorkerProfileNeverGetsLaunchGate:
+    @pytest.mark.asyncio
+    async def test_narrower_profile_hides_launch_even_with_headless_on(self, gate_client, db_manager):
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        holder.state = {
+            "auth_method": "jwt",
+            "scopes": ["mcp:read", "mcp:write", "mcp:agent"],
+            "tool_profile": "standard",
+            "tenant_key": holder.tenant_key,
+        }
+
+        async with new_client() as session:
+            result = await session.list_tools()
+
+        assert "launch_implementation" not in {t.name for t in result.tools}, (
+            "a narrower (worker) profile must never see the launch gate, regardless of the toggle"
+        )
+
+    @pytest.mark.asyncio
+    async def test_narrower_profile_dispatch_refused_even_with_headless_on(self, gate_client, db_manager):
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        holder.state = {
+            "auth_method": "jwt",
+            "scopes": ["mcp:read", "mcp:write", "mcp:agent"],
+            "tool_profile": "standard",
+            "tenant_key": holder.tenant_key,
+        }
+
+        async with new_client() as session:
+            result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+
+        assert result.is_error is True, "a worker-profile call must be refused at dispatch"
+        joined = _content_text(result)
+        assert "not available in this session's tool profile" in joined
 
 
 
@@ -322,10 +384,10 @@ class TestRealMiddlewarePath:
         assert inner.scope_state.get("tenant_key") == tenant_key
 
         stamped = _FakeRequest(inner.scope_state)
-        assert await _launch_gate_blocked(stamped) is False
-
-        await _seed_headless_setting(db_manager, tenant_key, allow=False)
         assert await _launch_gate_blocked(stamped) is True
+
+        await _seed_headless_setting(db_manager, tenant_key, allow=True)
+        assert await _launch_gate_blocked(stamped) is False
 
 
 
@@ -338,13 +400,13 @@ class _StubUser:
 
 class TestHeadlessLaunchEndpoint:
     @pytest.mark.asyncio
-    async def test_get_defaults_to_true_when_unset(self, db_session):
+    async def test_get_defaults_to_false_when_unset(self, db_session):
         from api.endpoints.user_settings import get_headless_launch
         from giljo_mcp.tenant import TenantManager
 
         user = _StubUser(TenantManager.generate_tenant_key())
         resp = await get_headless_launch(current_user=user, db=db_session)
-        assert resp.allow_headless_launch is True
+        assert resp.allow_headless_launch is False
 
     @pytest.mark.asyncio
     async def test_put_sets_toggle_and_preserves_sibling_security_keys(self, db_session):

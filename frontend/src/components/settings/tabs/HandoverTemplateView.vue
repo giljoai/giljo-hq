@@ -88,6 +88,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const template = ref('')
 const baseline = ref('')
@@ -111,12 +112,6 @@ function applyResponse(data) {
   dirty.value = false
 }
 
-function errorMessage(error, fallback) {
-  const detail = error?.response?.data?.detail
-  if (typeof detail === 'string') return detail
-  return detail?.message || fallback
-}
-
 async function loadTemplate() {
   loading.value = true
   templateError.value = null
@@ -125,7 +120,7 @@ async function loadTemplate() {
     const response = await api.settings.getHandoverTemplate()
     applyResponse(response?.data)
   } catch (error) {
-    templateError.value = errorMessage(error, 'Failed to load the handover template.')
+    templateError.value = parseErrorResponse(error).message || 'Failed to load the handover template.'
   } finally {
     loading.value = false
   }
@@ -141,7 +136,7 @@ async function saveTemplate() {
     applyResponse(response?.data)
     templateFeedback.value = 'Handover template saved.'
   } catch (error) {
-    templateError.value = errorMessage(error, 'Failed to save the handover template.')
+    templateError.value = parseErrorResponse(error).message || 'Failed to save the handover template.'
   } finally {
     saving.value = false
   }
@@ -156,7 +151,7 @@ async function resetTemplate() {
     applyResponse(response?.data)
     templateFeedback.value = 'Reverted to the default handover template.'
   } catch (error) {
-    templateError.value = errorMessage(error, 'Failed to reset the handover template.')
+    templateError.value = parseErrorResponse(error).message || 'Failed to reset the handover template.'
   } finally {
     saving.value = false
   }

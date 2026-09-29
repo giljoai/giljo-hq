@@ -104,3 +104,34 @@ describe('ProductTabStrip — add-tab affordance', () => {
     expect(wrapper.emitted('add')).toEqual([['prod-b']])
   })
 })
+
+describe('ProductTabStrip — the All tab (FE-9680)', () => {
+  it('is absent unless the host asks for it', () => {
+    const wrapper = mount(ProductTabStrip, { props: { tabs: [TAB_A, TAB_B], viewedId: TAB_A.id } })
+    expect(wrapper.find('[data-testid="product-tab-all"]').exists()).toBe(false)
+  })
+
+  it('renders first, selected when the host says so, and emits select-all on click', async () => {
+    const wrapper = mount(ProductTabStrip, {
+      props: { tabs: [TAB_A, TAB_B], viewedId: TAB_A.id, showAll: true, allSelected: true },
+    })
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(3)
+    expect(tabs[0].attributes('data-testid')).toBe('product-tab-all')
+    expect(tabs[0].text()).toBe('All')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(tabs[1].attributes('aria-selected')).toBe('false')
+
+    await tabs[0].trigger('click')
+    expect(wrapper.emitted('select-all')).toHaveLength(1)
+  })
+
+  it('when All is not selected the viewed product tab is selected as before', () => {
+    const wrapper = mount(ProductTabStrip, {
+      props: { tabs: [TAB_A, TAB_B], viewedId: TAB_B.id, showAll: true, allSelected: false },
+    })
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs[0].attributes('aria-selected')).toBe('false')
+    expect(tabs[2].attributes('aria-selected')).toBe('true')
+  })
+})

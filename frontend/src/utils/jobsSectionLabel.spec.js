@@ -1,3 +1,4 @@
+import { jobsBoardLifecycleColor } from './jobsBoardLifecycle'
 import { describe, it, expect } from 'vitest'
 import { jobsSectionLabelFor, isReadyForReview, JOBS_SECTION_LABELS } from './jobsSectionLabel'
 
@@ -143,5 +144,31 @@ describe('isReadyForReview', () => {
       { agent_display_name: 'implementer', status: 'complete' },
     ]
     expect(isReadyForReview({ status: 'active' }, agents)).toBe(true)
+  })
+})
+
+describe('jobsSectionLabelFor on a finished project (TSK-9690)', () => {
+  const done = [
+    { agent_name: 'orchestrator', agent_display_name: 'orchestrator', status: 'complete' },
+    { agent_display_name: 'implementer', status: 'complete' },
+  ]
+  const launched = { staging_status: 'staging_complete', implementation_launched_at: '2026-09-26T13:00:00Z' }
+
+  it('a completed project reads Complete, not Implementing', () => {
+    expect(jobsSectionLabelFor({ ...launched, status: 'completed' }, done)).toBe('Complete')
+  })
+
+  it('a cancelled or terminated project reads Stopped', () => {
+    expect(jobsSectionLabelFor({ ...launched, status: 'cancelled' }, done)).toBe('Stopped')
+    expect(jobsSectionLabelFor({ ...launched, status: 'terminated' }, [])).toBe('Stopped')
+  })
+
+  it('an active project whose agents all finished still reads Review', () => {
+    expect(jobsSectionLabelFor({ ...launched, status: 'active' }, done)).toBe('Review')
+  })
+
+  it('Complete is green like a complete agent; Stopped is quiet grey', () => {
+    expect(jobsBoardLifecycleColor('Complete').toLowerCase()).toBe('#67bd6d')
+    expect(jobsBoardLifecycleColor('Stopped').toLowerCase()).toBe('#999')
   })
 })

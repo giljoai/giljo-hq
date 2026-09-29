@@ -129,17 +129,6 @@ export const AGENT_EVENT_ROUTES = {
     },
   },
 
-  'orchestrator:handover_initiated': {
-    handler: async (payload, { storeRegistry } = {}) => {
-      const agentJobsStore = storeRegistry?.agentJobs?.() ?? useAgentJobsStore()
-      agentJobsStore.handleStatusChanged?.({
-        job_id: payload?.job_id,
-        agent_id: payload?.agent_id,
-        status: 'handed_over',
-        project_id: payload?.project_id,
-      })
-    },
-  },
   'orchestrator:prompt_generated': {
     handler: async (payload, { storeRegistry } = {}) => {
       const agentJobsStore = storeRegistry?.agentJobs?.() ?? useAgentJobsStore()

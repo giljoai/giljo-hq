@@ -27,9 +27,9 @@ const messageIdOf = (n) => n?.metadata?.message_id ?? n?.payload?.message_id ?? 
 export function projectRouteFor(notification) {
   const projectId = projectIdOf(notification)
   if (!projectId) return null
-  const route = { name: 'ProjectLaunch', params: { projectId } }
+  const route = { name: 'JobsViewport', query: { project: projectId } }
   if (CLOSEOUT_NOTIFICATION_TYPES.has(notification?.type)) {
-    route.query = { tab: 'jobs' }
+    route.query.detail = '1'
   }
   return route
 }

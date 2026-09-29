@@ -62,6 +62,7 @@
 
         <v-window-item v-if="isCeMode" value="database">
           <DatabaseConnection
+            ref="databaseConnectionRef"
             :readonly="true"
             :show-title="true"
             title="PostgreSQL Database Configuration"
@@ -73,7 +74,7 @@
             @connection-error="handleDatabaseError"
           >
             <template #actions>
-              <v-btn variant="text" @click="loadDatabaseSettings({ notify: true })">
+              <v-btn variant="text" @click="reloadDatabaseSettings">
                 <v-icon start>mdi-refresh</v-icon>
                 Reload from Config
               </v-btn>
@@ -91,6 +92,7 @@ import { ref, computed, onMounted } from 'vue'
 import { getApiBaseURL } from '@/config/api'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import configService from '@/services/configService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 
@@ -148,20 +150,17 @@ async function loadNetworkSettings() {
   }
 }
 
-async function loadDatabaseSettings({ notify = false } = {}) {
+const databaseConnectionRef = ref(null)
+
+async function reloadDatabaseSettings() {
   try {
-    const response = await fetch(`${getApiBaseURL()}/api/v1/config/database`, {
-      credentials: 'include',
-    })
-    await response.json()
+    await databaseConnectionRef.value?.loadSettings()
   } catch (error) {
     console.error('Failed to load database settings:', error)
-    if (notify) {
-      showToast({
-        message: 'Failed to load database settings. Check your connection and refresh the page.',
-        type: 'error',
-      })
-    }
+    showToast({
+      message: 'Failed to load database settings. Check your connection and refresh the page.',
+      type: 'error',
+    })
   }
 }
 
@@ -209,7 +208,7 @@ async function addCookieDomain(domain) {
     console.error('[SECURITY] Failed to add cookie domain:', error)
     securityFeedback.value = {
       type: 'error',
-      message: error.response?.data?.detail || 'Failed to add domain. Please try again.',
+      message: parseErrorResponse(error).message || 'Failed to add domain. Please try again.',
     }
   }
 }
@@ -226,7 +225,7 @@ async function removeCookieDomain(domain) {
     console.error('[SECURITY] Failed to remove cookie domain:', error)
     securityFeedback.value = {
       type: 'error',
-      message: error.response?.data?.detail || 'Failed to remove domain. Please try again.',
+      message: parseErrorResponse(error).message || 'Failed to remove domain. Please try again.',
     }
   }
 }
@@ -244,7 +243,6 @@ onMounted(async () => {
   }
 
   if (isCeMode.value) {
-    await loadDatabaseSettings()
     await loadNetworkSettings()
     await loadCookieDomains()
   }

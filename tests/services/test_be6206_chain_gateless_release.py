@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.platform_registry import get_harness
+from giljo_mcp.prompts.spawn_prompt import build_agent_prompt, launch_gate_passed
 from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
@@ -28,7 +30,13 @@ pytestmark = pytest.mark.asyncio
 
 
 
-async def _seed_project(session: AsyncSession, tenant_key: str, *, staging_status: str | None = None) -> str:
+async def _seed_project(
+    session: AsyncSession,
+    tenant_key: str,
+    *,
+    staging_status: str | None = None,
+    execution_mode: str = "claude_code_cli",
+) -> str:
     product = Product(
         id=str(uuid.uuid4()),
         name=f"BE-6206 Product {uuid.uuid4().hex[:6]}",
@@ -49,7 +57,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, staging_statu
         tenant_key=tenant_key,
         product_id=product.id,
         series_number=random.randint(1, 9000),
-        execution_mode="claude_code_cli",
+        execution_mode=execution_mode,
         staging_status=staging_status,
         implementation_launched_at=None,
         created_at=datetime.now(UTC),
@@ -363,3 +371,51 @@ async def test_be9111_broadcast_failure_does_not_fail_complete_job(db_session: A
     reloaded = await _reload_project(db_session, p1, tenant)
     assert reloaded.implementation_launched_at is not None, "the stamp must persist despite the broadcast failure"
     assert reloaded.staging_status == "staging_complete", "staging_status must still flip despite the broadcast failure"
+
+
+
+
+async def test_be9670a_chain_member_two_worker_names_autonomy_flag_without_second_press(
+    db_session: AsyncSession,
+) -> None:
+    tenant = TenantManager.generate_tenant_key()
+    p1 = await _seed_project(db_session, tenant, staging_status="staging_complete", execution_mode="multi_terminal")
+    p2 = await _seed_project(db_session, tenant, staging_status="staging", execution_mode="multi_terminal")
+    head = await _reload_project(db_session, p1, tenant)
+    head.implementation_launched_at = datetime.now(UTC)
+    await db_session.flush()
+    await _run_svc(db_session).create(
+        project_ids=[p1, p2], resolved_order=[p1, p2], execution_mode="multi_terminal", tenant_key=tenant
+    )
+    job = await _seed_orchestrator_job(db_session, tenant, p2, project_phase="staging")
+    await _seed_worker(db_session, tenant, p2)
+
+    class _Tpl:
+        cli_tool = "claude"
+        model = None
+        effort = None
+
+    flag = get_harness("claude-code").autonomy_flag
+
+    def _render(project: Project) -> str:
+        return build_agent_prompt(
+            "implementer",
+            "implementer",
+            project.name,
+            "job",
+            _Tpl(),
+            multi_terminal=True,
+            launched=launch_gate_passed(project),
+        )
+
+    before = await _reload_project(db_session, p2, tenant)
+    assert flag not in _render(before), "member 2 must not name the flag before its staging-end"
+
+    result = await _completion_svc(db_session).complete_job(
+        job_id=job.job_id, result={"summary": "staging done"}, tenant_key=tenant
+    )
+    assert result.phase == "staging_end"
+
+    after = await _reload_project(db_session, p2, tenant)
+    assert after.implementation_launched_at is not None, "the gateless advance stamps member 2"
+    assert flag in _render(after), "member 2 inherits the head's approval: its worker names the flag"

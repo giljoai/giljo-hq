@@ -17,7 +17,6 @@ describe('colorUtils', () => {
       const style = getAgentBadgeStyle('orchestrator')
       expect(style.backgroundColor).toContain('rgba(212, 176, 138, 0.15)')
       expect(style.color).toBe('#D4B08A')
-      expect(style.borderRadius).toBe('8px')
     })
 
     it('returns style for synonym agent name', () => {
@@ -34,7 +33,11 @@ describe('colorUtils', () => {
       const style = getAgentBadgeStyle(null)
       expect(style).toHaveProperty('backgroundColor')
       expect(style).toHaveProperty('color')
-      expect(style).toHaveProperty('borderRadius')
+    })
+
+    it('never returns borderRadius: the badge class owns the shape', () => {
+      const style = getAgentBadgeStyle('orchestrator')
+      expect(style).not.toHaveProperty('borderRadius')
     })
   })
 })

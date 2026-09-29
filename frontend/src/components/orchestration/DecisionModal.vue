@@ -1,8 +1,7 @@
 <template>
   <v-dialog
     :model-value="show"
-    :max-width="isMobile ? undefined : '560'"
-    :fullscreen="isMobile"
+    max-width="560"
     persistent
     role="dialog"
     aria-labelledby="decision-modal-title"
@@ -49,7 +48,6 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useDisplay } from 'vuetify'
 import ApprovalCard from '@/components/orchestration/ApprovalCard.vue'
 import { useApprovalsStore } from '@/stores/useApprovalsStore'
 
@@ -67,8 +65,6 @@ const props = defineProps({
 const emit = defineEmits(['close', 'approval-decided'])
 
 const approvalsStore = useApprovalsStore()
-const { mobile } = useDisplay()
-const isMobile = computed(() => mobile.value)
 
 const liveApproval = computed(() => {
   if (!props.orchestratorJobId) return null

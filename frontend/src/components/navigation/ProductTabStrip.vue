@@ -1,16 +1,33 @@
 <template>
   <div class="product-tab-strip" role="tablist" aria-label="Open products" data-testid="product-tab-strip">
     <div
-      v-for="tab in tabs"
-      :key="tab.id"
-      class="product-tab smooth-border"
-      :class="{ 'product-tab--active': tab.id === viewedId }"
+      v-if="showAll"
+      class="product-tab product-tab--all smooth-border"
+      :class="{ 'product-tab--active': allSelected }"
     >
       <button
         type="button"
         role="tab"
         class="product-tab__select"
-        :aria-selected="tab.id === viewedId"
+        :aria-selected="allSelected"
+        title="Every product"
+        data-testid="product-tab-all"
+        @click="emit('select-all')"
+      >
+        All
+      </button>
+    </div>
+    <div
+      v-for="tab in tabs"
+      :key="tab.id"
+      class="product-tab smooth-border"
+      :class="{ 'product-tab--active': !allSelected && tab.id === viewedId }"
+    >
+      <button
+        type="button"
+        role="tab"
+        class="product-tab__select"
+        :aria-selected="!allSelected && tab.id === viewedId"
         :data-testid="`product-tab-${tab.id}`"
         :title="tab.name"
         @click="emit('select', tab.id)"
@@ -76,9 +93,17 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  showAll: {
+    type: Boolean,
+    default: false,
+  },
+  allSelected: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['select', 'close', 'add'])
+const emit = defineEmits(['select', 'close', 'add', 'select-all'])
 </script>
 
 <style scoped lang="scss">
@@ -90,6 +115,14 @@ const emit = defineEmits(['select', 'close', 'add'])
   gap: 8px;
   flex-wrap: wrap;
   width: 100%;
+}
+
+.product-tab--all {
+  border-style: dashed;
+
+  &.product-tab--active {
+    border-style: solid;
+  }
 }
 
 .product-tab {

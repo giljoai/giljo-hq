@@ -1,0 +1,79 @@
+# Copyright (c) 2024-2026 GiljoAI LLC. All rights reserved.
+# Licensed under the Elastic License 2.0.
+# See LICENSE in the project root for terms.
+# [CE] Community Edition.
+
+# NOT IMPORTABLE AND NOT COLLECTED -- the .py.txt extension keeps this out of pytest,
+# ruff and the import graph. It is DATA: the adversarial input that makes the
+# prompt-surface tenant_key guard falsifiable.
+#
+# Every function below leaks the caller's tenant_key into agent-facing text. Six shapes,
+# written by the BE-9664 reviewer against the first cut of that guard. THREE of them
+# (V1, V2, V3) passed it silently, which is why the guard grew a second, shape-based
+# check. If a future change to the guard stops flagging any of these, the meta-test in
+# tests/services/test_protocol_no_tenant_key_notes.py goes red and says which one.
+#
+# Keep these EXACT shapes. Each one is here because it defeated a specific, plausible
+# implementation of the check, not because it is pretty.
+
+
+def v1_fstring_with_aliased_key(tk):
+    """V1 -- decomposes to the whitespace-free segment "tenant_key=", so a prose scan drops it."""
+    return f"tenant_key={tk}\n"
+
+
+def v2_word_split_across_concatenation(tk):
+    """V2 -- the word never appears whole in one source token."""
+    return "tenant" "_key=" + tk
+
+
+def v3_word_held_in_a_variable(tk):
+    """V3 -- no string literal in the file contains the word at all."""
+    label = "tenant_key"
+    return f'   - {label}="{tk}"\n'
+
+
+def v4_plain_sentence(tenant_key):
+    """V4 -- caught by the prose check: an ordinary sentence naming the parameter."""
+    return f'Pass tenant_key="{tenant_key}" on every call so the server can scope you.\n'
+
+def v5_reworded_autoinject_note():
+    """V5 -- caught by the prose check: the note wording that dodged the phrase denylist."""
+    return "Note: tenant_key is auto-injected by server from your API key session\n"
+
+
+def v6_attribute_interpolation(self):
+    """V6 -- the ORIGINAL BE-9664 defect shape: an f-string interpolating the attribute."""
+    return f'   - tenant_key="{self.tenant_key}"\n'
+
+
+# --- Shapes that defeat EVERY static check, added at BE-9664 delta review -------------
+# These are why _assert_clean also asserts the tenant key VALUE is absent from rendered
+# text. No lexical or AST check can catch them: nothing names the key.
+
+
+def v7_word_built_by_explicit_concatenation(tk):
+    """V7 -- explicit ``+`` is NOT folded by ast.parse, unlike v2's implicit adjacency.
+
+    Its rendered form happens to match the old ``tenant_key="..."`` example regex, so the
+    previous guard caught it by PUNCTUATION rather than by understanding. Spelled
+    ``tenant_key: <key>`` it would have shipped, exactly as v9 does.
+    """
+    label = "tenant" + "_key"
+    return f'{label}="{tk}"\n'
+
+
+def v8_disclosure_parked_in_a_context_payload(tk):
+    """V8 -- invisible while the guard skipped whole ``context=`` keyword subtrees."""
+    return _render(context={"footer": f"tenant_key={tk}\n"})
+
+
+def v9_attribute_aliased_into_a_local(self):
+    """V9 -- the realistic one. Aliasing a long attribute into a local is ordinary code."""
+    tk = self.tenant_key
+    return f"Use {tk} when you call the server.\n"
+
+
+def _render(context):
+    """Stand-in for a template render, so V8 parses as a real call."""
+    return "".join(str(v) for v in context.values())

@@ -140,4 +140,6 @@ async def test_ready_to_advance_is_only_added_field(db_session: AsyncSession) ->
         "next_action",
         "checkin_cadence_minutes",
         "closed_agents",
+        "not_picked_up_agents",
+        "holding_agents",
     }

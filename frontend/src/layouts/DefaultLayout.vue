@@ -16,15 +16,19 @@
       flat
       color="surface"
       class="product-tab-app-bar"
+      :class="{ 'product-tab-app-bar--menu-fab': isMobile }"
       density="compact"
     >
       <ProductTabStrip
         :tabs="tabsWithBadges"
         :viewed-id="productStore.currentProductId"
         :addable-products="addableProducts"
+        :show-all="isJobsRoute"
+        :all-selected="isJobsRoute && jobsScope.allProducts"
         @select="onProductTabSelect"
         @close="onProductTabClose"
         @add="onProductTabAdd"
+        @select-all="jobsScope.selectAll()"
       />
     </v-app-bar>
 
@@ -53,6 +57,7 @@ import { ref, computed, shallowRef, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useProductStore } from '@/stores/products'
+import { useJobsScopeStore } from '@/stores/jobsScope'
 import { useProjectStatusesStore } from '@/stores/projectStatusesStore'
 import { useTaskStatusesStore } from '@/stores/taskStatusesStore'
 import { useWebSocketStore } from '@/stores/websocket'
@@ -86,6 +91,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const productStore = useProductStore()
+const jobsScope = useJobsScopeStore()
 const productActivityStore = useProductActivityStore()
 const productTabNavigation = useProductTabNavigation()
 const projectStatusesStore = useProjectStatusesStore()
@@ -99,11 +105,11 @@ useBannerPopoutLifecycle()
 
 const resyncUnregisters = []
 
-const drawer = ref(true)
 const rail = ref(false)
 const windowWidth = ref(window.innerWidth)
 const SIDEBAR_BREAKPOINT = 1024
 const isMobile = computed(() => windowWidth.value <= SIDEBAR_BREAKPOINT)
+const drawer = ref(!isMobile.value)
 
 function onResize() {
   windowWidth.value = window.innerWidth
@@ -128,8 +134,11 @@ const tabsWithBadges = computed(() =>
 )
 
 function onProductTabSelect(productId) {
+  jobsScope.selectProduct()
   productTabNavigation.selectTab(productId)
 }
+
+const isJobsRoute = computed(() => route.name === 'JobsViewport')
 
 function onProductTabClose(productId) {
   productStore.closeTab(productId)
@@ -303,5 +312,10 @@ router.afterEach(async (to, from) => {
 /* FE-9502c: product tab strip app bar */
 .product-tab-app-bar {
   padding: 0 16px;
+}
+
+/* Leave room for the fixed menu button that opens the overlay drawer */
+.product-tab-app-bar--menu-fab {
+  padding-left: 60px;
 }
 </style>

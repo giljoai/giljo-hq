@@ -20,6 +20,7 @@ from giljo_mcp.models.sequence_runs import (
 from giljo_mcp.services.sequence_run_live_filter import (
     filter_runs_by_product,
     filter_runs_with_live_members,
+    filter_runs_with_reviewable_members,
 )
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 
@@ -31,6 +32,7 @@ class SequenceRunQueryMixin:
         *,
         project_id: str,
         tenant_key: str,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
         try:
             active_statuses = ("pending", "running", "stalled")
@@ -45,6 +47,8 @@ class SequenceRunQueryMixin:
                     .order_by(SequenceRun.updated_at.desc())
                     .limit(1)
                 )
+                if for_update:
+                    stmt = stmt.with_for_update()
                 result = await session.execute(stmt)
                 run = result.scalar_one_or_none()
                 if run is None:
@@ -198,6 +202,9 @@ class SequenceRunQueryMixin:
                 result = await session.execute(stmt)
                 runs = list(result.scalars().all())
                 pending = [r for r in runs if _has_unreviewed_completed_member(r)]
+                pending = await filter_runs_with_reviewable_members(
+                    session=session, runs=pending, tenant_key=effective_tenant_key
+                )
                 pending = await self._scope_runs_to_product(
                     session=session,
                     runs=pending,

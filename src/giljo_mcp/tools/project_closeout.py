@@ -29,6 +29,7 @@ from giljo_mcp.services.product_memory_service import (
 from giljo_mcp.services.project_closeout_readiness import shape_readiness_blockers
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.services.protocol_sections.closeout_sequence import build_required_sequence
+from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
 from giljo_mcp.tools._closeout_metrics import (
@@ -41,6 +42,7 @@ from giljo_mcp.tools._memory_helpers import (
     _fetch_project_and_product,
     build_git_commit_title_required_rejection,
     emit_websocket_event,
+    normalize_no_code_changes,
     provided_session,
     refuse_if_superseded,
 )
@@ -125,6 +127,7 @@ async def _resolve_git_commits(
     project_id: str,
     tenant_key: str,
     git_commits: list[dict[str, Any]] | None,
+    no_code_changes: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None, str | None]:
     git_integration_enabled = False
     try:
@@ -137,12 +140,13 @@ async def _resolve_git_commits(
         logger.debug("Settings read skipped: %s", _exc)
 
     git_warning: str | None = None
-    if git_integration_enabled and not git_commits:
+    if git_integration_enabled and not git_commits and not no_code_changes:
         git_warning = (
             "Git integration is enabled in user settings, but no commits were provided "
             "for this closeout. Project closed without commit history. If the project "
             "directory is a git repo, the agent should have committed and passed git_commits; "
-            "if not a git repo, ask the user whether to git init future projects."
+            "if the project changed no code, pass no_code_changes='<why>' instead (never an "
+            "empty commit); if not a git repo, ask the user whether to git init future projects."
         )
         logger.warning(
             "git_commits_missing_with_integration_enabled project_id=%s tenant_key=%s",
@@ -167,7 +171,7 @@ async def _resolve_git_commits(
         )
 
     git_unavailable_reason: str | None = None
-    if not git_commits and not agent_supplied_commits:
+    if not git_commits and not agent_supplied_commits and not no_code_changes:
         git_unavailable_reason = "git not available — no agent-supplied commits. Project closed without commit history."
         logger.info(
             "git_unavailable_in_closeout project_id=%s tenant_key=%s",
@@ -227,6 +231,7 @@ async def _build_and_persist_memory_entry(
     validated_tags: list[str],
     git_commits: list[dict[str, Any]],
     db_manager: DatabaseManager,
+    no_code_changes: str | None = None,
 ) -> tuple[Any, int]:
     memory_service = ProductMemoryService(
         db_manager=db_manager,
@@ -241,6 +246,8 @@ async def _build_and_persist_memory_entry(
     significance_score = calculate_significance(project, key_outcomes, git_commits)
     token_estimate = estimate_tokens(summary, key_outcomes, decisions_made)
     metrics = build_metrics(git_commits)
+    if no_code_changes:
+        metrics["no_code_changes"] = no_code_changes
 
     params = MemoryEntryCreateParams(
         tenant_key=tenant_key,
@@ -326,7 +333,8 @@ def _build_closeout_blocked_rejection(project_id: str, blockers: list[dict[str, 
         "blockers": blockers,
         "hint": (
             "Resolve the blockers above, then retry. If an agent stalled but you ACCEPTED its "
-            "work, complete_job(job_id, result={...}) then finalize_job(job_id) -- that reaches "
+            "work, complete_job(job_id, result={...}) then finalize_job(job_id, caller_job_id=<your "
+            "own job_id>) -- that reaches "
             "closed from any state. force=true is the deliberate ABANDON path: it decommissions "
             "remaining agents, recording their work as failed. Do not use it to retire work you "
             "accepted."
@@ -346,6 +354,7 @@ async def close_project_and_update_memory(
     session: AsyncSession | None = None,
     force: bool = False,
     git_commits: list[dict[str, Any]] | None = None,
+    no_code_changes: str | None = None,
     websocket_manager: Any | None = None,
     decommission_events_out: list[AgentStatusChangeEvent] | None = None,
 ) -> dict[str, Any]:
@@ -357,6 +366,7 @@ async def close_project_and_update_memory(
         tags=tags,
         db_manager=db_manager,
     )
+    no_code_changes = normalize_no_code_changes(no_code_changes, git_commits)
 
     try:
         owns_session = session is None
@@ -407,6 +417,7 @@ async def close_project_and_update_memory(
                     project_id=project_id,
                     tenant_key=tenant_key,
                     git_commits=git_commits,
+                    no_code_changes=no_code_changes,
                 )
             except GitCommitTitleRequiredError as exc:
                 return build_git_commit_title_required_rejection(exc, project_id)
@@ -422,6 +433,7 @@ async def close_project_and_update_memory(
                 validated_tags=validated_tags,
                 git_commits=git_commits,
                 db_manager=db_manager,
+                no_code_changes=no_code_changes,
             )
 
             ws, is_chain_member = await _finalize_chain_member_closeout(
@@ -446,6 +458,8 @@ async def close_project_and_update_memory(
                 is_chain_member=is_chain_member,
             )
 
+        if owns_session:
+            await broadcast_deferred_sequence_updates(active_session)
         await broadcast_agent_status_events(
             ws,
             tenant_key=tenant_key,

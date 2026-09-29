@@ -56,6 +56,7 @@ import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ThreadCard from '@/components/hub/ThreadCard.vue'
 
@@ -122,7 +123,7 @@ async function onRename({ thread, subject }) {
     await commHub.renameThread(thread.thread_id, subject)
     showToast({ type: 'success', message: 'Thread renamed.' })
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not rename this thread.'
+    const msg = parseErrorResponse(err).message || 'Could not rename this thread.'
     showToast({ type: 'error', message: msg })
   }
 }
@@ -160,7 +161,7 @@ async function onConfirmDelete() {
     showDeleteDialog.value = false
     threadToDelete.value = null
   } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Failed to delete thread.'
+    const msg = parseErrorResponse(err).message || 'Failed to delete thread.'
     showToast({ type: 'error', message: msg })
   } finally {
     deleting.value = false

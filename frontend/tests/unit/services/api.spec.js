@@ -62,10 +62,12 @@ describe('api.js - Prompts Service', () => {
     it('all prompts methods are functions', () => {
       const methods = Object.keys(api.prompts)
 
-      // Should have 9 methods (staging, execution, agentPrompt, implementation,
-      // termination, orchestrator + FE-6165f chainStaging, chainImplementation
-      // + FE-9629 chainMember — one chain member's own orchestrator prompt)
-      expect(methods.length).toBe(9)
+      // Should have 8 methods (staging, execution, agentPrompt, implementation,
+      // orchestrator + FE-6165f chainStaging, chainImplementation
+      // + FE-9629 chainMember — one chain member's own orchestrator prompt).
+      // FE-9655a retired termination with the Stop project row action.
+      expect(methods.length).toBe(8)
+      expect(api.prompts.termination).toBeUndefined()
       expect(api.prompts.chainStaging).toBeDefined()
       expect(api.prompts.chainImplementation).toBeDefined()
       expect(api.prompts.chainMember).toBeDefined()

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 
 from api.endpoints.mcp_tools import _base
 from giljo_mcp.services.product_service import ProductAmbiguousError
@@ -37,18 +38,28 @@ def test_message_is_clean_of_the_context_dump() -> None:
     assert "tk_" not in err.message
 
 
-def test_boundary_returns_message_not_str() -> None:
+def test_the_refusal_payload_carries_the_message_not_the_str_rendering() -> None:
+    err = _build_error()
+    payload = err.as_refusal()
+
+    assert payload["success"] is False
+    assert payload["error"] == "PRODUCT_AMBIGUOUS"
+    assert payload["message"] == err.message
+    assert payload["message"] != str(err), "str(exc) appends (Context: {...}) including tenant_key"
+
+    rendered = json.dumps(payload)
+    assert "(Context:" not in rendered
+    assert "tenant_key" not in rendered
+    assert "tk_" not in rendered
+
+    assert [p["name"] for p in payload["products"]] == ["Fixture Product Alpha", "Fixture Product Beta"]
+
+
+def test_the_boundary_delegates_the_shape_instead_of_hand_rolling_it() -> None:
     source = inspect.getsource(_base._call_tool)
-    lines = source.splitlines()
 
-    idx = next(
-        (i for i, ln in enumerate(lines) if "except ProductAmbiguousError" in ln),
-        None,
-    )
-    assert idx is not None, "the ProductAmbiguousError handler moved -- re-point this test"
+    assert "except CodedRefusalError as exc:" in source, "the coded-refusal handler moved -- re-point this test"
+    assert "return exc.as_refusal()" in source, "the boundary must delegate the payload, not rebuild it"
 
-    branch = "\n".join(lines[idx : idx + 10])
-    ret = next(ln for ln in branch.splitlines() if '"error": exc.code' in ln)
-
-    assert "exc.message" in ret, f"boundary must return exc.message, got: {ret.strip()}"
-    assert "str(exc)" not in ret, "str(exc) appends (Context: {...}) including tenant_key onto agent-facing content"
+    coded_branch = source.split("except CodedRefusalError as exc:", 1)[1].split("except ", 1)[0]
+    assert "str(exc)" not in coded_branch, "str(exc) appends (Context: {...}) onto agent-facing content"

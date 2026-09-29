@@ -120,16 +120,7 @@ export const routes = [
       requiresAuth: true,
     },
   },
-  {
-    path: '/launch',
-    name: 'Launch',
-    component: () => import('@/views/LaunchRedirectView.vue'),
-    meta: {
-      layout: 'default',
-      title: 'Launch',
-      requiresAuth: true,
-    },
-  },
+  { path: '/launch', redirect: '/jobs-overview' },
   {
     path: '/jobs-overview',
     name: 'JobsViewport',
@@ -143,11 +134,15 @@ export const routes = [
   {
     path: '/projects/:projectId',
     name: 'ProjectLaunch',
-    component: () => import('@/views/ProjectLaunchView.vue'),
-    meta: {
-      layout: 'default',
-      title: 'Project Launch',
-      requiresAuth: true,
+    redirect: (to) => {
+      if (typeof to.query.run === 'string' && to.query.run) {
+        return { name: 'JobsViewport', query: { run: to.query.run } }
+      }
+      const query = { project: String(to.params.projectId) }
+      if (to.query.review === '1') query.review = '1'
+      if (to.query.decide === '1') query.decide = '1'
+      if (to.query.tab === 'jobs') query.detail = '1'
+      return { name: 'JobsViewport', query }
     },
   },
   {
@@ -314,7 +309,7 @@ export const routes = [
   },
   { path: '/tools/identity', redirect: '/admin/settings' },
   { path: '/settings/identity', redirect: '/admin/settings' },
-  { path: '/jobs', redirect: '/launch?via=jobs' },
+  { path: '/jobs', redirect: '/jobs-overview' },
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',

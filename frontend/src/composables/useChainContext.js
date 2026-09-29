@@ -1,75 +1,81 @@
-import { ref, computed, watch, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch } from 'vue'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
-import { useNotificationStore } from '@/stores/notifications'
-import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectStore } from '@/stores/projects'
-import { useAgentJobs } from '@/composables/useAgentJobs'
-import { registerReconnectResync } from '@/stores/websocketEventRouter'
 
 const WORKING_STATUSES = new Set(['implementing', 'working', 'running', 'in_progress'])
 
 const PLANNING_STATUSES = new Set(['planning'])
 
-export function useChainContext() {
-  const route = useRoute()
+const GOAL_HEADING = /^#+\s*(?:chain mission:\s*)?(.+?)\s*$/i
+
+function orderOf(run) {
+  return run?.resolved_order?.length ? run.resolved_order : run?.project_ids || []
+}
+
+function chainDisplayName(run, members = []) {
+  const firstLine = String(run?.chain_mission || '').trim().split('\n')[0] || ''
+  const heading = firstLine.match(GOAL_HEADING)
+  if (heading) return heading[1]
+  const labels = orderOf(run)
+    .map((pid) => {
+      const member = members.find((m) => m.id === pid)
+      return member?.taxonomy_alias || member?.name || ''
+    })
+    .filter(Boolean)
+  return labels.length ? labels.join(' → ') : 'Chain'
+}
+
+export function useChainContext({ runId = () => null, projectId = () => null } = {}) {
   const sequenceRunStore = useSequenceRunStore()
-  const projectStateStore = useProjectStateStore()
   const projectStore = useProjectStore()
-  const { sortedJobs } = useAgentJobs()
 
-  const run = ref(null)
-  const projects = ref([])
-
-  const runId = computed(() => {
-    const r = route.query?.run
-    return typeof r === 'string' && r ? r : null
-  })
-
-  async function resolveProjects(runObj) {
-    const ids = runObj?.resolved_order?.length
-      ? runObj.resolved_order
-      : runObj?.project_ids || []
-    if (!ids.length) {
-      projects.value = []
-      return 0
+  function findRun() {
+    const pools = [sequenceRunStore.runsById, sequenceRunStore.reviewPendingById]
+    const wantedRun = runId()
+    if (wantedRun) {
+      for (const pool of pools) {
+        if (pool.has(wantedRun)) return pool.get(wantedRun)
+      }
+      return null
     }
-    const settled = await Promise.allSettled(ids.map((id) => projectStore.fetchProject(id)))
-    projects.value = ids
+    const pid = projectId()
+    if (!pid) return null
+    for (const pool of pools) {
+      for (const run of pool.values()) {
+        if (orderOf(run).includes(pid) || run.project_ids?.includes(pid)) return run
+      }
+    }
+    return null
+  }
+
+  const run = computed(findRun)
+  const orderedIds = computed(() => orderOf(run.value))
+
+  function needsDetail(id) {
+    const known = projectStore.projectById(id)
+    return !known || known.description === undefined
+  }
+  const loadedIds = ref([])
+  async function resolveProjects(ids) {
+    if (!ids.length) return
+    await Promise.allSettled(ids.filter(needsDetail).map((id) => projectStore.fetchProject(id)))
+    loadedIds.value = ids
+  }
+  watch(
+    () => orderedIds.value.join(','),
+    () => resolveProjects(orderedIds.value),
+    { immediate: true },
+  )
+
+  const projects = computed(() =>
+    loadedIds.value
       .map((id, i) => {
-        if (settled[i].status !== 'fulfilled') return null
         const p = projectStore.projectById(id)
         return p ? { ...p, _order: i } : null
       })
-      .filter(Boolean)
-    return ids.length
-  }
-
-  async function loadRun(id) {
-    if (!id) {
-      run.value = null
-      projects.value = []
-      return
-    }
-    try {
-      const fetched = await sequenceRunStore.fetchRun(id)
-      run.value = fetched
-      const requested = await resolveProjects(fetched)
-      if (requested > 0 && projects.value.length === 0) {
-        console.warn('[useChainContext] sequence run has no resolvable members; falling back to solo', id)
-        run.value = null
-        projects.value = []
-      }
-    } catch (err) {
-      console.warn('[useChainContext] could not load sequence run', err)
-      run.value = null
-      projects.value = []
-    }
-  }
-
-  const orderedIds = computed(() =>
-    run.value?.resolved_order?.length ? run.value.resolved_order : run.value?.project_ids || [],
+      .filter(Boolean),
   )
+
   const total = computed(() => orderedIds.value.length)
   const currentIndex = computed(() =>
     typeof run.value?.current_index === 'number' ? run.value.current_index : 0,
@@ -80,18 +86,6 @@ export function useChainContext() {
     n: total.value ? Math.min(currentIndex.value + 1, total.value) : 0,
     m: total.value,
   }))
-
-  const headMission = computed(() => {
-    const headId = orderedIds.value[0]
-    if (!headId) return ''
-    const live = projectStateStore.getProjectState(headId)
-    if (live?.mission) return live.mission
-    return projects.value.find((p) => p.id === headId)?.mission || ''
-  })
-
-  const conductorAgent = computed(
-    () => (sortedJobs.value || []).find((j) => j.chain_conductor === true) || null,
-  )
 
   const conductor = computed(() => ({
     agentId: run.value?.conductor_agent_id || '',
@@ -133,44 +127,16 @@ export function useChainContext() {
     return {
       run: run.value,
       runId: run.value.id,
+      name: chainDisplayName(run.value, projects.value),
       tabs: tabs.value,
+      projects: projects.value,
       counter: counter.value,
       currentPid: currentPid.value,
-      headMission: headMission.value,
       chainMission: run.value?.chain_mission ?? '',
       conductor: conductor.value,
-      conductorAgent: conductorAgent.value,
       locked: run.value.locked === true,
     }
   })
 
-  watch(
-    () => sequenceRunStore.activeRun,
-    (ar) => {
-      if (ar && runId.value && ar.id === runId.value) run.value = ar
-    },
-  )
-
-  watch(
-    () => sequenceRunStore.retiredRunNotice,
-    (notice) => {
-      if (!notice || notice.runId !== run.value?.id) return
-      run.value = null
-      projects.value = []
-      useNotificationStore().addNotification({
-        id: `chain-retired:${notice.runId}`,
-        type: 'lifecycle',
-        severity: 'info',
-        title: 'Chain finished',
-        message: 'This chain has finished; its record was retired.',
-      })
-      sequenceRunStore.clearRetiredRunNotice()
-    },
-  )
-
-  const unregisterResync = registerReconnectResync(() => loadRun(runId.value))
-  watch(runId, (id) => loadRun(id), { immediate: true })
-  onUnmounted(() => unregisterResync())
-
-  return { chainCtx, run, projects, loadRun }
+  return { chainCtx, run, projects }
 }

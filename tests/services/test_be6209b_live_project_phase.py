@@ -6,12 +6,13 @@
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.orchestration_service import OrchestrationService
 
 
@@ -34,8 +35,9 @@ def mock_db_manager():
 
 
 @pytest.fixture
-def orchestration_service(mock_db_manager):
+def orchestration_service(mock_db_manager, monkeypatch):
     db_manager, _ = mock_db_manager
+    monkeypatch.setattr(MissionService, "_resolve_comm_thread", AsyncMock(return_value=None))
     return OrchestrationService(db_manager=db_manager, tenant_manager=MagicMock())
 
 
@@ -116,9 +118,11 @@ async def test_project_phase_reads_staging_before_launch(orchestration_service, 
     _db, session = mock_db_manager
     job, execution = _orchestrator_job_execution(frozen_phase="staging")
     _wire_session(session, job, execution, implementation_launched_at=None)
-    orchestration_service._mission._is_chain_member = AsyncMock(return_value=True)
-
-    response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key=_TENANT)
+    with patch(
+        "giljo_mcp.services.mission_implementation_gate.active_chain_run",
+        AsyncMock(return_value={"id": "run-1"}),
+    ):
+        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key=_TENANT)
 
     assert response.project_phase == "staging"
 

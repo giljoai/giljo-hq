@@ -6,7 +6,7 @@
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
@@ -30,10 +30,14 @@ from giljo_mcp.repositories.auth_repository import AuthRepository
 from giljo_mcp.services.oauth_refresh_service import (
     revoke_all_for_user as revoke_all_refresh_tokens_for_user,
 )
+from giljo_mcp.services.user_auth_service import record_failed_pin_attempt, reset_password_via_pin
+from giljo_mcp.utils.password_helper import DUMMY_BCRYPT_HASH, async_verify_password
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_GENERIC_INVALID_PIN_MESSAGE = "Invalid username or PIN"
 
 
 
@@ -103,15 +107,10 @@ async def verify_pin_and_reset_password(
             detail=f"Account locked out due to too many failed attempts. Try again in {minutes_remaining} minutes.",
         )
 
-    if not await asyncio.to_thread(
-        bcrypt.checkpw, request_data.recovery_pin.encode("utf-8"), user.recovery_pin_hash.encode("utf-8")
-    ):
-        user.failed_pin_attempts += 1
+    if not await async_verify_password(request_data.recovery_pin, user.recovery_pin_hash):
+        await record_failed_pin_attempt(db, user)
 
         if user.failed_pin_attempts >= 5:
-            user.pin_lockout_until = datetime.now(UTC) + timedelta(minutes=15)
-            await db.commit()
-
             logger.warning(
                 f"PIN lockout triggered - user: {user.username}, "
                 f"attempts: {user.failed_pin_attempts}, lockout until: {user.pin_lockout_until}"
@@ -122,8 +121,6 @@ async def verify_pin_and_reset_password(
                 detail="Account locked out due to too many failed attempts. Try again in 15 minutes.",
             )
 
-        await db.commit()
-
         attempts_remaining = 5 - user.failed_pin_attempts
         logger.warning(
             f"Invalid PIN attempt - user: {user.username}, "
@@ -132,29 +129,9 @@ async def verify_pin_and_reset_password(
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
-    user.password_hash = (
-        await asyncio.to_thread(bcrypt.hashpw, request_data.new_password.encode("utf-8"), bcrypt.gensalt())
-    ).decode("utf-8")
-    user.failed_pin_attempts = 0
-    user.pin_lockout_until = None
+    revoked_count = await reset_password_via_pin(db, user, request_data.new_password)
 
-    user.token_revocation_epoch = (user.token_revocation_epoch or 0) + 1
-    with tenant_session_context(db, user.tenant_key):
-        revoked_count = await revoke_all_refresh_tokens_for_user(db, user_id=str(user.id), tenant_key=user.tenant_key)
-
-    from giljo_mcp.services.login_lockout_service import LoginLockoutService
-
-    try:
-        await LoginLockoutService().clear_for_identifiers(db, [user.username, user.email])
-    except Exception:  # noqa: BLE001 - never block a password reset on lockout cleanup
-        logger.warning("login lockout clear on PIN reset failed", exc_info=True)
-
-    await db.commit()
-
-    logger.info(
-        f"Password reset successful via PIN - user: {user.username} "
-        f"(revocation epoch bumped to {user.token_revocation_epoch}, {revoked_count} refresh token(s) revoked)"
-    )
+    logger.info("Password reset successful via PIN (%d refresh token(s) revoked)", revoked_count)
 
     return PinPasswordResetResponse(message="Password reset successful")
 
@@ -170,7 +147,9 @@ class VerifyPinResponse(BaseModel):
 
 
 @router.post("/verify-pin", response_model=VerifyPinResponse, tags=["auth"])
-async def verify_pin(request_data: VerifyPinRequest = Body(...), db: AsyncSession = Depends(get_db_session)):
+async def verify_pin(
+    http_request: Request, request_data: VerifyPinRequest = Body(...), db: AsyncSession = Depends(get_db_session)
+):
     """
     Verify recovery PIN without resetting password.
 
@@ -178,29 +157,30 @@ async def verify_pin(request_data: VerifyPinRequest = Body(...), db: AsyncSessio
     showing the new password form. Does not modify any data.
 
     AUTH-EMAIL Phase 4: wire field `username` accepts either username OR email.
+
+    Every failure (unknown username, no PIN set, locked out, wrong PIN)
+    returns the same generic message and a comparable bcrypt-verify time.
+    Rate-limited to 3 requests per minute per IP.
     """
     if GILJO_MODE not in ("", "ce"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
+    rate_limiter = get_rate_limiter()
+    await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True)
+
     user = await AuthRepository().get_user_by_username_or_email(db, request_data.username)
 
     if not user or not user.recovery_pin_hash:
-        return VerifyPinResponse(valid=False, message="Invalid username or PIN")
+        await async_verify_password(request_data.recovery_pin, DUMMY_BCRYPT_HASH)
+        return VerifyPinResponse(valid=False, message=_GENERIC_INVALID_PIN_MESSAGE)
 
     if user.pin_lockout_until and datetime.now(UTC) < user.pin_lockout_until:
-        lockout_remaining = user.pin_lockout_until - datetime.now(UTC)
-        minutes_remaining = int(lockout_remaining.total_seconds() / 60)
-        return VerifyPinResponse(valid=False, message=f"Account locked. Try again in {minutes_remaining} minutes.")
+        await async_verify_password(request_data.recovery_pin, DUMMY_BCRYPT_HASH)
+        return VerifyPinResponse(valid=False, message=_GENERIC_INVALID_PIN_MESSAGE)
 
-    if not await asyncio.to_thread(
-        bcrypt.checkpw, request_data.recovery_pin.encode("utf-8"), user.recovery_pin_hash.encode("utf-8")
-    ):
-        user.failed_pin_attempts += 1
-        if user.failed_pin_attempts >= 5:
-            user.pin_lockout_until = datetime.now(UTC) + timedelta(minutes=15)
-        await db.commit()
-        attempts_remaining = max(0, 5 - user.failed_pin_attempts)
-        return VerifyPinResponse(valid=False, message=f"Invalid PIN. {attempts_remaining} attempts remaining.")
+    if not await async_verify_password(request_data.recovery_pin, user.recovery_pin_hash):
+        await record_failed_pin_attempt(db, user)
+        return VerifyPinResponse(valid=False, message=_GENERIC_INVALID_PIN_MESSAGE)
 
     return VerifyPinResponse(valid=True, message="PIN verified")
 

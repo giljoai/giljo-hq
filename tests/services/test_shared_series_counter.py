@@ -164,6 +164,7 @@ class TestSharedSeriesCounter:
         doomed_row = (await db_session.execute(select(Project).where(Project.id == doomed.id))).scalar_one()
         doomed_row.series_number = 9999
         doomed_row.deleted_at = datetime.now(UTC)
+        doomed_row.status = "deleted"
         await db_session.commit()
 
         survivor = await project_service.create_project(

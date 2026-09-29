@@ -17,8 +17,11 @@ from api.endpoints.mcp_tools._base import (
     mcp,
 )
 from api.endpoints.mcp_tools._inline_approval import (
+    approval_project_label,
+    harness_may_decide,
     maybe_offer_approval_inline,
     resolve_pending_inline_approval,
+    with_dashboard_only_notice,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
@@ -54,7 +57,8 @@ async def request_approval(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any] | InputRequiredResult:
-    settled = await resolve_pending_inline_approval(ctx, options)
+    may_decide = await harness_may_decide(ctx)
+    settled = await resolve_pending_inline_approval(ctx, options, may_decide=may_decide)
     if settled is not None:
         return settled
 
@@ -66,7 +70,10 @@ async def request_approval(
         "context": context,
     }
     result = await _call_tool(ctx, "request_approval", kwargs)
-    return maybe_offer_approval_inline(ctx, result, reason=reason, options=options)
+    if not may_decide:
+        return with_dashboard_only_notice(result)
+    label = await approval_project_label(ctx, project_id)
+    return maybe_offer_approval_inline(ctx, result, reason=reason, options=options, project_label=label)
 
 
 @mcp.tool(

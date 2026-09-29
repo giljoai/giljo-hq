@@ -284,7 +284,7 @@ describe('AgentMissionEditModal.vue', () => {
 
     it('displays error message on API failure', async () => {
       api.agentJobs.updateMission.mockRejectedValue({
-        response: { data: { detail: 'Custom error message' } },
+        response: { data: { error_code: 'VALIDATIONERROR', message: 'Custom error message' } },
       })
 
       wrapper = createWrapper({ modelValue: true })
@@ -525,7 +525,7 @@ describe('AgentMissionEditModal.vue', () => {
       await wrapper.vm.saveMission()
       await flushPromises()
 
-      expect(wrapper.vm.error).toBe('Failed to save mission')
+      expect(wrapper.vm.error).toBe('Network failure')
     })
   })
 })

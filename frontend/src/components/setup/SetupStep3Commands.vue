@@ -335,17 +335,4 @@ onUnmounted(() => {
   opacity: 0;
   transform: translateY(-8px);
 }
-
-/* Responsive: mobile */
-@media (max-width: 599px) {
-  .code-block-header {
-    flex-direction: column;
-    gap: 6px;
-    align-items: flex-start;
-  }
-
-  .copy-btn {
-    align-self: flex-end;
-  }
-}
 </style>

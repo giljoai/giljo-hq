@@ -144,7 +144,7 @@ def _oauth_err_text(body: dict) -> str:
     return " ".join(str(body.get(k, "")) for k in ("error", "error_description", "detail", "message"))
 
 
-AUTH_PROBE = "/api/v1/users/me/field-priority"
+AUTH_PROBE = "/api/auth/me"
 
 
 @pytest.mark.asyncio

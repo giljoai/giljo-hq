@@ -387,16 +387,4 @@ function getRoleColor(role) {
 .about-link {
   color: $color-brand-yellow;
 }
-
-// Mobile: bigger touch targets
-@media (max-width: 1024px) {
-  .nav-orb {
-    width: 44px;
-    height: 44px;
-  }
-
-  .nav-orb-initials {
-    font-size: 0.8rem;
-  }
-}
 </style>

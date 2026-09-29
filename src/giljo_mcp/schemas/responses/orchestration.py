@@ -41,11 +41,13 @@ class AgentWorkflowDetail(BaseModel):
     agent_name: str = ""
     display_name: str = ""
     status: str = ""
+    activity: str = ""
     job_type: str = ""
     unread_messages: int = 0
     action_required_unread: int = 0
     unread_by_thread: list[ThreadUnreadDetail] = []
     todos: AgentTodoCounts = AgentTodoCounts()
+    not_picked_up: bool = False
 
 
 class WorkflowStatus(BaseModel):
@@ -61,7 +63,9 @@ class WorkflowStatus(BaseModel):
     pending_agents: int = 0
     blocked_agents: int = 0
     silent_agents: int = 0
+    holding_agents: int = 0
     decommissioned_agents: int = 0
+    not_picked_up_agents: int = 0
     current_stage: str = "Not started"
     progress_percent: float = 0.0
     total_agents: int = 0
@@ -155,6 +159,8 @@ class MissionResponse(BaseModel):
     agent_name: str | None = None
     agent_display_name: str | None = None
     project_id: str | None = None
+    thread_id: str | None = Field(default=None, description="Your project's coordination thread id.")
+    chat_id: str | None = Field(default=None, description="The same thread's short handle, for example CHT-0042.")
     parent_job_id: str | None = None
     status: str | None = None
     created_at: str | None = None
@@ -259,6 +265,10 @@ class MissionResponse(BaseModel):
             data.pop("protocol_unchanged", None)
         if self.next_required_actions is None:
             data.pop("next_required_actions", None)
+        if self.thread_id is None:
+            data.pop("thread_id", None)
+        if self.chat_id is None:
+            data.pop("chat_id", None)
         if self.truncation_check is None:
             data.pop("truncation_check", None)
         if self.protocol_toc is None:
@@ -301,12 +311,24 @@ class ProgressResult(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+IMPLEMENTATION_GATE_AWAITING_LAUNCH = "AWAITING_LAUNCH"
+IMPLEMENTATION_GATE_OPEN = "OPEN"
+
+SOLO_STAGING_END_NEXT_ACTION_WHY = (
+    "Report staging complete to the user and stop. Implementation starts through one of two "
+    "doors, and the choice is the user's: they click 'Implement' in the dashboard, or they "
+    "give you an explicit go here, and then you call launch_implementation. Never call it "
+    "without that go."
+)
+
+
 class StagingDirective(BaseModel):
     """Staging-session-end directive returned by ``complete_job`` (CE-0026).
 
     Populated only when the staging-phase orchestrator calls ``complete_job``
     to end its staging session. Tells the orchestrator agent to stop and
-    informs it that the Implementation phase gate is now open.
+    reports whether the Implementation phase gate is open (BE-9653: at a solo
+    staging end it is still awaiting launch).
 
     Historical note: previously emitted by the ``send_message`` broadcast
     magic with five diagnostic statuses (NOT_BROADCAST, NOT_ORCHESTRATOR,
@@ -317,15 +339,15 @@ class StagingDirective(BaseModel):
 
     status: str = "STAGING_SESSION_COMPLETE"
     action: str = "STOP"
-    implementation_gate: str = "OPEN"
+    implementation_gate: str = IMPLEMENTATION_GATE_AWAITING_LAUNCH
     message: str = (
-        "STAGING IS COMPLETE. Your session must end NOW. "
-        "Do NOT proceed to implementation in this session. "
-        "The user will click 'Implement' in the dashboard to start "
-        "a new implementation session with a fresh orchestrator execution."
+        "STAGING IS COMPLETE. Stop here and report the staged plan to the user. "
+        "Do NOT start implementing on your own. The implementation gate is awaiting launch, "
+        "and the user chooses the door: they click 'Implement' in the dashboard, or they give "
+        "you an explicit go in this session and you then call launch_implementation."
     )
     next_action: dict[str, Any] | None = Field(
-        default_factory=lambda: build_next_action(why="Report staging complete to user and stop.")
+        default_factory=lambda: build_next_action(tool="launch_implementation", why=SOLO_STAGING_END_NEXT_ACTION_WHY)
     )
 
     model_config = ConfigDict(from_attributes=True)

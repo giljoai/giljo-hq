@@ -138,3 +138,16 @@ async def test_active_endpoint_omits_product_id_when_not_given():
 
     assert resp.status_code == 200
     assert stub.query.last_product_id is None
+
+
+async def test_active_endpoint_serializes_staging_status_and_execution_mode():
+    base = _active_detail(None).model_dump()
+    detail = ActiveProjectDetail(**{**base, "staging_status": "staging_complete", "execution_mode": "subagent"})
+    app = _build_app(_StubProjectService(detail))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/projects/active")
+
+    assert resp.status_code == 200
+    body = resp.json()[0]
+    assert body["staging_status"] == "staging_complete"
+    assert body["execution_mode"] == "subagent"

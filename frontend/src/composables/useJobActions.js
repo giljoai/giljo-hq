@@ -1,6 +1,5 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useProjectBoundThread } from '@/composables/useProjectBoundThread'
 
@@ -11,8 +10,6 @@ export function useJobActions(getJob) {
 
   const showAgentDetailsModal = ref(false)
   const showAgentJobModal = ref(false)
-  const showHandoverModal = ref(false)
-  const handoverData = ref({ retirement_prompt: '', continuation_prompt: '' })
   const jobModalInitialTab = ref('mission')
   const selectedJobId = ref(null)
 
@@ -55,55 +52,9 @@ export function useJobActions(getJob) {
     showAgentJobModal.value = true
   }
 
-  async function handleHandOver(agent) {
-    try {
-      const jobId = agent.job_id || agent.agent_id
-      const response = await api.agentJobs.simpleHandover(jobId)
-
-      if (response.data.success) {
-        handoverData.value = {
-          retirement_prompt: response.data.retirement_prompt,
-          continuation_prompt: response.data.continuation_prompt,
-        }
-        showHandoverModal.value = true
-      } else {
-        throw new Error(response.data.error || 'Session refresh failed')
-      }
-    } catch (error) {
-      console.error('[useJobActions] Hand over failed:', error)
-      const msg = error.response?.data?.detail || error.message || 'Hand over failed'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
-    }
-  }
-
-  async function handleStopProject(projectId, clipboardCopy) {
-    try {
-      const response = await api.prompts.termination(projectId)
-
-      if (response.data.prompt) {
-        const copyOk = await clipboardCopy(response.data.prompt)
-        if (!copyOk) throw new Error('Clipboard copy failed')
-
-        showToast({
-          message: `Termination prompt copied. Paste to stop all ${response.data.agent_count} agents and save progress.`,
-          type: 'warning',
-          timeout: 8000,
-        })
-      } else {
-        throw new Error('No prompt returned')
-      }
-    } catch (error) {
-      console.error('[useJobActions] Stop project failed:', error)
-      const msg = error.response?.data?.detail || error.message || 'Failed to generate termination prompt'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
-    }
-  }
-
   return {
     showAgentDetailsModal,
     showAgentJobModal,
-    showHandoverModal,
-    handoverData,
     jobModalInitialTab,
     selectedJobId,
     selectedAgent,
@@ -111,7 +62,5 @@ export function useJobActions(getJob) {
     handleStepsClick,
     handleAgentRole,
     handleAgentJob,
-    handleHandOver,
-    handleStopProject,
   }
 }

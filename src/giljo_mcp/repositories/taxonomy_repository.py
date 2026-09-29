@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.projects import Project, TaxonomyType
 from giljo_mcp.models.tasks import Task
+from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class TaxonomyRepository:
             .where(
                 Project.project_type_id == TaxonomyType.id,
                 Project.tenant_key == tenant_key,
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
             .correlate(TaxonomyType)
             .scalar_subquery()
@@ -109,7 +110,7 @@ class TaxonomyRepository:
             select(func.count(Project.id)).where(
                 Project.project_type_id == type_id,
                 Project.tenant_key == tenant_key,
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
         )
         return result.scalar() or 0
@@ -133,7 +134,7 @@ class TaxonomyRepository:
         project_query = select(func.coalesce(func.max(Project.series_number), 0)).where(
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         task_query = select(func.coalesce(func.max(Task.series_number), 0)).where(
             Task.tenant_key == tenant_key,
@@ -159,7 +160,7 @@ class TaxonomyRepository:
                 Project.tenant_key == tenant_key,
                 Project.product_id == product_id,
                 Project.series_number.is_not(None),
-                Project.deleted_at.is_(None),
+                project_not_trashed(),
             )
             .order_by(Project.series_number)
         )
@@ -180,7 +181,7 @@ class TaxonomyRepository:
             Project.tenant_key == tenant_key,
             Project.series_number == series_number,
             Project.product_id == product_id,
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         if type_id:
             query = query.where(Project.project_type_id == type_id)
@@ -212,7 +213,7 @@ class TaxonomyRepository:
             Project.series_number == series_number,
             Project.product_id == product_id,
             Project.subseries.isnot(None),
-            Project.deleted_at.is_(None),
+            project_not_trashed(),
         )
         if type_id:
             query = query.where(Project.project_type_id == type_id)

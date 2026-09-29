@@ -56,3 +56,26 @@ def test_reset_all_clears_everything():
     debounce.reset()
     assert debounce.should_run("ns1", "k", 30.0) is True
     assert debounce.should_run("ns2", "k", 30.0) is True
+
+
+
+
+def test_bucket_is_capped_after_many_distinct_keys():
+    for i in range(10_000):
+        debounce.should_run("ns", f"key-{i}", 30.0)
+
+    bucket = debounce._LAST_FIRED["ns"]
+    assert len(bucket) <= debounce._MAX_KEYS_PER_NAMESPACE
+    assert len(bucket) < 10_000
+
+
+def test_bucket_cap_evicts_oldest_first():
+    cap = debounce._MAX_KEYS_PER_NAMESPACE
+    for i in range(cap):
+        debounce.should_run("ns", f"key-{i}", 30.0)
+    debounce.should_run("ns", "key-new", 30.0)
+
+    bucket = debounce._LAST_FIRED["ns"]
+    assert len(bucket) == cap
+    assert "key-0" not in bucket, "the oldest entry must be the one evicted"
+    assert "key-new" in bucket

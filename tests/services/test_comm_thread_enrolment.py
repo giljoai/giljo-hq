@@ -45,7 +45,8 @@ def _execution() -> AgentExecution:
 
 def _mission_service(thread_id: str | None = _THREAD) -> MagicMock:
     service = MagicMock()
-    service._resolve_comm_thread_id = AsyncMock(return_value=thread_id)
+    thread = {"thread_id": thread_id, "chat_id": "CHT-9459"} if thread_id else None
+    service._resolve_comm_thread = AsyncMock(return_value=thread)
     return service
 
 
@@ -59,13 +60,13 @@ async def _run(job: AgentJob, thread_id: str | None = _THREAD):
 class TestWhoGetsEnrolled:
     async def test_an_orchestrator_is_enrolled(self):
         result, join = await _run(_job("orchestrator"))
-        assert result == _THREAD
+        assert result["thread_id"] == _THREAD
         join.assert_awaited_once()
         assert join.await_args.kwargs["thread_id"] == _THREAD
 
     async def test_a_worker_is_not_enrolled_here(self):
         result, join = await _run(_job("implementer"))
-        assert result == _THREAD, "the worker still gets its thread id for the render"
+        assert result["thread_id"] == _THREAD, "the worker still gets its thread id for the render"
         join.assert_not_awaited()
 
     async def test_an_unresolvable_thread_enrols_nobody(self):
@@ -81,7 +82,7 @@ class TestProjectLessJob:
             service, MagicMock(), _job("orchestrator", project=False), _execution(), _TENANT
         )
         assert result is None
-        service._resolve_comm_thread_id.assert_not_awaited()
+        service._resolve_comm_thread.assert_not_awaited()
 
 
 class TestFailureNeverBreaksMissionDelivery:
@@ -91,4 +92,4 @@ class TestFailureNeverBreaksMissionDelivery:
             result = await resolve_and_enrol(
                 _mission_service(), MagicMock(), _job("orchestrator"), _execution(), _TENANT
             )
-        assert result == _THREAD, "a Hub failure must not cost the agent its mission"
+        assert result["thread_id"] == _THREAD, "a Hub failure must not cost the agent its mission"

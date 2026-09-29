@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.domain.job_activity import OPEN_TODO_STATUSES
 from giljo_mcp.models import AgentTodoItem, Message
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
@@ -68,6 +69,10 @@ class AgentOperationsRepository(AgentLivenessMixin):
         session: AsyncSession,
         cutoff: datetime,
     ) -> list[AgentExecution]:
+        todo = select(AgentTodoItem.id).where(
+            AgentTodoItem.job_id == AgentExecution.job_id, AgentTodoItem.tenant_key == AgentExecution.tenant_key
+        )
+        not_holding = or_(~todo.exists(), todo.where(AgentTodoItem.status.in_(OPEN_TODO_STATUSES)).exists())
         stmt = (
             select(AgentExecution)
             .options(selectinload(AgentExecution.job).selectinload(AgentJob.project))
@@ -75,17 +80,15 @@ class AgentOperationsRepository(AgentLivenessMixin):
                 AgentExecution.status == "working",
                 or_(
                     AgentExecution.last_progress_at < cutoff,
-                    and_(
-                        AgentExecution.last_progress_at.is_(None),
-                        AgentExecution.started_at < cutoff,
-                    ),
+                    and_(AgentExecution.last_progress_at.is_(None), AgentExecution.started_at < cutoff),
                 ),
+                not_holding,
             )
         )
         with tenant_isolation_bypass(
             session,
             reason="system silence monitor scans working agents across tenants",
-            models=(AgentExecution, AgentJob, Project),
+            models=(AgentExecution, AgentJob, Project, AgentTodoItem),
         ):
             result = await session.execute(stmt)
         return list(result.scalars().all())

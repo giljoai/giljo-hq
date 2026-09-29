@@ -13,7 +13,8 @@
         class="copy-btn"
         :class="{ 'copy-btn--demoted': path === 'D' && agentActive }"
         data-testid="tutorial-copy-prompt"
-        :disabled="path === 'D' && createFailed"
+        :disabled="path === 'D' && !copyReady"
+        :aria-describedby="savingProduct ? SAVING_HINT_ID : undefined"
         :prepend-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
         @click="copyPrompt"
       >
@@ -33,6 +34,15 @@
 
       <span v-if="path === 'D' && agentDone && !createFailed" class="agent-done" data-testid="tutorial-agent-done">
         Your agent reports done — review it
+      </span>
+      <span
+        v-else-if="savingProduct"
+        :id="SAVING_HINT_ID"
+        class="prompt-saving"
+        role="status"
+        data-testid="tutorial-prompt-saving"
+      >
+        Saving your product…
       </span>
       <span v-else-if="path === 'D' && !createFailed" class="agent-waiting" data-testid="tutorial-agent-waiting">
         <span class="waiting-dot-wrap">
@@ -126,6 +136,10 @@ const agentActive = ref(false)
 const createFailed = ref(false)
 const retrying = ref(false)
 
+const SAVING_HINT_ID = 'tutorial-prompt-saving-hint'
+const copyReady = computed(() => Boolean(activeProductId.value) && !createFailed.value)
+const savingProduct = computed(() => props.path === 'D' && !activeProductId.value && !createFailed.value)
+
 const promptText = computed(() =>
   props.path === 'D'
     ? buildPromptD({ productId: activeProductId.value, saas: isSaasMode() })
@@ -134,6 +148,7 @@ const promptText = computed(() =>
 
 let copiedTimer = null
 async function copyPrompt() {
+  if (props.path === 'D' && !copyReady.value) return
   const ok = await copy(promptText.value)
   if (!ok) return
   copied.value = true
@@ -370,6 +385,12 @@ onBeforeUnmount(() => {
   font-size: 11px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   border-radius: $border-radius-default;
+}
+
+.prompt-saving {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* FE-9569 detector 3: bolder text (was --text-muted at 11px) -- the operator

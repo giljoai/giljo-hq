@@ -177,10 +177,10 @@ export const useProjectStore = defineStore('projects', () => {
     refreshList()
   }, 400)
 
-  async function fetchActiveProject() {
+  async function fetchActiveProject({ allProducts = false } = {}) {
     try {
       const productStore = useProductStore()
-      const response = await api.projects.getActive(productStore.effectiveProductId)
+      const response = await api.projects.getActive(allProducts ? null : productStore.effectiveProductId)
       const list = response.data || []
       activeProjectsMeta.value = list
       activeProjectMeta.value = list[0] || null

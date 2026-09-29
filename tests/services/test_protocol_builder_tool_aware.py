@@ -51,7 +51,7 @@ class TestCh3ToolAware:
         ch3 = _build_ch3_spawning_rules(tool="codex")
         assert "agent_profile" in ch3
         assert "get_job_mission" in ch3
-        assert "HARNESS block" in ch3
+        assert "model/effort hints" in ch3
         assert ".toml" not in ch3, "No agent file is installed any more -- BE-9605c."
 
     def test_codex_has_generic_worker_guardrail(self):

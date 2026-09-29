@@ -189,7 +189,6 @@ describe('ProjectsView.vue', () => {
           StatusBadge: true,
           BaseDialog: true,
           AddTypeModal: true,
-          AgentTipsDialog: true,
         },
         directives: {
           draggable: {},

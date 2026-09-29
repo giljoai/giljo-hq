@@ -129,7 +129,10 @@ async def test_close_job_broadcasts_product_id():
     project = MagicMock(product_id="prod-close")
 
     svc._job_repo.find_complete_execution_for_job = AsyncMock(return_value=execution)
-    svc._job_repo.get_agent_job_by_job_id = AsyncMock(return_value=job)
+    orchestrator = MagicMock(project_id="proj-1", job_type="orchestrator")
+    svc._job_repo.get_agent_job_by_job_id = AsyncMock(
+        side_effect=lambda _s, _t, job_id: orchestrator if job_id == "orch-1" else job
+    )
     svc._job_repo.get_project_by_id = AsyncMock(return_value=project)
     svc._job_repo.flush = AsyncMock()
 
@@ -141,7 +144,7 @@ async def test_close_job_broadcasts_product_id():
     original = oas_module.resolve_terminal_agent_cursors
     oas_module.resolve_terminal_agent_cursors = _no_op_cursors
     try:
-        await svc.close_job(job_id="job-1", tenant_key="test_tenant")
+        await svc.close_job(job_id="job-1", tenant_key="test_tenant", caller_job_id="orch-1")
     finally:
         oas_module.resolve_terminal_agent_cursors = original
 

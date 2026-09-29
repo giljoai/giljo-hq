@@ -404,17 +404,19 @@ async function ensureApprovalsLoaded() {
 }
 onMounted(ensureApprovalsLoaded)
 
-const DECISION_NAV_QUERY = { tab: 'jobs', decide: '1' }
+function decisionRoute(projectId) {
+  return { name: 'JobsViewport', query: { project: projectId, decide: '1' } }
+}
 function openApprovals() {
   const approvals = pendingApprovals.value
   if (approvals.length === 1 && approvals[0]?.project_id) {
-    router.push({ name: 'ProjectLaunch', params: { projectId: approvals[0].project_id }, query: DECISION_NAV_QUERY })
+    router.push(decisionRoute(approvals[0].project_id))
     return
   }
   const viewedProductId = productStore.effectiveProductId
   const inViewedProduct = approvals.find((a) => a.product_id === viewedProductId && a.project_id)
   if (inViewedProduct) {
-    router.push({ name: 'ProjectLaunch', params: { projectId: inViewedProduct.project_id }, query: DECISION_NAV_QUERY })
+    router.push(decisionRoute(inViewedProduct.project_id))
     return
   }
   router.push({ path: '/projects' })

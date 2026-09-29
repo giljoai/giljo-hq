@@ -34,7 +34,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 263
+EXPECTED_ROUTE_COUNT = 261
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -51,7 +51,6 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/agent-jobs/spawn", frozenset({"POST"})),
         ("/api/agent-jobs/{job_id}", frozenset({"GET"})),
         ("/api/agent-jobs/{job_id}/messages", frozenset({"GET"})),
-        ("/api/agent-jobs/{job_id}/simple-handover", frozenset({"POST"})),
         ("/api/approvals/", frozenset({"GET"})),
         ("/api/approvals/{approval_id}/decide", frozenset({"POST"})),
         ("/api/auth/api-keys", frozenset({"GET"})),
@@ -88,6 +87,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/notifications/{notification_id}/read", frozenset({"PATCH"})),
         ("/api/oauth/.well-known/oauth-authorization-server", frozenset({"GET"})),
         ("/api/oauth/authorize", frozenset({"POST"})),
+        ("/api/oauth/authorize/deny", frozenset({"POST"})),
         ("/api/oauth/refresh", frozenset({"POST"})),
         ("/api/oauth/register", frozenset({"POST"})),
         ("/api/oauth/revoke", frozenset({"POST"})),
@@ -105,9 +105,6 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/serena/settings", frozenset({"GET"})),
         ("/api/serena/status", frozenset({"GET"})),
         ("/api/serena/toggle", frozenset({"POST"})),
-        ("/api/setup/database/setup", frozenset({"POST"})),
-        ("/api/setup/database/test-connection", frozenset({"POST"})),
-        ("/api/setup/database/verify", frozenset({"GET"})),
         ("/api/setup/status", frozenset({"GET"})),
         ("/api/slash/execute", frozenset({"POST"})),
         ("/api/system/status", frozenset({"GET"})),
@@ -165,6 +162,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/projects/{project_id}/cancel-staging", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/complete", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/continue-working", frozenset({"POST"})),
+        ("/api/v1/projects/{project_id}/closeout-without-summary", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/deactivate", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/launch", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/orchestrator", frozenset({"GET"})),
@@ -180,10 +178,8 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/prompts/chain-member/{project_id}", frozenset({"GET"})),
         ("/api/v1/prompts/chain-staging/{run_id}", frozenset({"GET"})),
         ("/api/v1/prompts/implementation/{project_id}", frozenset({"GET"})),
-        ("/api/v1/prompts/master", frozenset({"POST"})),
         ("/api/v1/prompts/prompts/orchestrator-thin", frozenset({"POST"})),
         ("/api/v1/prompts/staging/{project_id}", frozenset({"GET"})),
-        ("/api/v1/prompts/termination/{project_id}", frozenset({"GET"})),
         ("/api/v1/roadmap", frozenset({"GET"})),
         ("/api/v1/roadmap/items/{item_id}", frozenset({"DELETE"})),
         ("/api/v1/roadmap/reorder", frozenset({"PATCH"})),
@@ -199,6 +195,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/settings/database", frozenset({"GET"})),
         ("/api/v1/settings/execution-mode-default", frozenset({"GET"})),
         ("/api/v1/settings/execution-mode-default", frozenset({"PUT"})),
+        ("/api/v1/settings/closeout-mode", frozenset({"PUT"})),
         ("/api/v1/settings/handover-template", frozenset({"GET"})),
         ("/api/v1/settings/handover-template", frozenset({"PUT"})),
         ("/api/v1/settings/handover-template/reset", frozenset({"POST"})),
@@ -253,6 +250,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/templates/{template_id}/restore/{archive_id}", frozenset({"POST"})),
         ("/api/v1/threads", frozenset({"GET"})),
         ("/api/v1/threads", frozenset({"POST"})),
+        ("/api/v1/threads/chain-hub", frozenset({"GET"})),
         ("/api/v1/threads/deleted", frozenset({"GET"})),
         ("/api/v1/threads/attention", frozenset({"GET"})),
         ("/api/v1/threads/my-turn", frozenset({"GET"})),
@@ -347,6 +345,24 @@ def test_representative_route_signatures_present(app):
 def test_route_count_exactly_preserved(app):
     real_routes = list(iter_effective_routes(app.routes))
     assert len(real_routes) == EXPECTED_ROUTE_COUNT
+
+
+SEC_9700_REMOVED_ROUTE_SIGNATURES = frozenset(
+    {
+        ("/api/setup/database/test-connection", frozenset({"POST"})),
+        ("/api/setup/database/setup", frozenset({"POST"})),
+        ("/api/setup/database/verify", frozenset({"GET"})),
+    }
+)
+
+
+def test_database_setup_routes_removed(app):
+    sigs = _route_signatures(app)
+    resurrected = SEC_9700_REMOVED_ROUTE_SIGNATURES & sigs
+    assert not resurrected, (
+        f"SEC-9700 removed these unauthenticated database-setup routes; they "
+        f"came back without an explicit decision to re-open that surface: {sorted(resurrected)}"
+    )
 
 
 def test_full_route_signature_set_equality(app):

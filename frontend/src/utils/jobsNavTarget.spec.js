@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolveJobsNavPath,
-  jobsNavPathToLocation,
+  JOBS_BOARD_PATH,
   isJobsRouteActive,
   resolveJobsNavIcon,
   JOBS_NAV_ICON_ACTIVE,
@@ -10,132 +10,73 @@ import {
 
 
 describe('resolveJobsNavPath', () => {
-  it('branch C: returns /projects/<headPid>?run=<id> when the run contains the active project', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'head' },
-      activeRun: { id: 'run-7', resolved_order: ['head', 'tail'] },
-    })
-    expect(result).toBe('/projects/head?run=run-7')
+  it('exports the board path as the single Jobs landing', () => {
+    expect(JOBS_BOARD_PATH).toBe('/jobs-overview')
   })
 
-  it('branch C: returns the run path when there is no active project to defer to', () => {
-    const result = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: { id: 'run-7', resolved_order: ['head', 'tail'] },
-    })
-    expect(result).toBe('/projects/head?run=run-7')
+  it('returns the board with no arguments at all', () => {
+    expect(resolveJobsNavPath()).toBe('/jobs-overview')
   })
 
-  it('branch C IGNORED: a run that does NOT contain the active project falls through to branch A (BE-6200)', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'solo' },
-      activeRun: { id: 'run-stale', resolved_order: ['wedged1', 'wedged2'] },
-    })
-    expect(result).toBe('/projects/solo?via=jobs')
-  })
-
-  it('branch C: falls back to project_ids[0] for the head when resolved_order is empty', () => {
-    const result = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: { id: 'run-8', resolved_order: [], project_ids: ['pA', 'pB'] },
-    })
-    expect(result).toBe('/projects/pA?run=run-8')
-  })
-
-  it('branch C: matches the active project via project_ids when resolved_order is empty', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'pB' },
-      activeRun: { id: 'run-8', resolved_order: [], project_ids: ['pA', 'pB'] },
-    })
-    expect(result).toBe('/projects/pA?run=run-8')
-  })
-
-  it('branch C ignored when the run has no resolvable head (falls through to A)', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'p1' },
-      activeRun: { id: 'run-9', resolved_order: [], project_ids: [] },
-    })
-    expect(result).toBe('/projects/p1?via=jobs')
-  })
-
-  it('branch C: mid-flight entry — lands on the active member (current_index), not the head', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'p2' },
-      activeRun: { id: 'run-mf', resolved_order: ['p1', 'p2', 'p3'], current_index: 1, project_ids: [] },
-    })
-    expect(result).toBe('/projects/p2?run=run-mf')
-  })
-
-  it('branch C: mid-flight entry falls back to head (index 0) when current_index is 0', () => {
-    const result = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: { id: 'run-mf2', resolved_order: ['p1', 'p2'], current_index: 0, project_ids: [] },
-    })
-    expect(result).toBe('/projects/p1?run=run-mf2')
-  })
-
-  it('branch C: mid-flight entry falls back to resolved_order[0] when current_index is absent', () => {
-    const result = resolveJobsNavPath({
-      activeProject: null,
-      activeRun: { id: 'run-mf3', resolved_order: ['p1', 'p2'], project_ids: [] },
-    })
-    expect(result).toBe('/projects/p1?run=run-mf3')
-  })
-
-  it('branch A: returns /projects/<id>?via=jobs when a project is active and no chain run', () => {
-    const result = resolveJobsNavPath({
-      activeProject: { id: 'p1' },
-      activeRun: null,
-    })
-    expect(result).toBe('/projects/p1?via=jobs')
-  })
-
-  it('branch B: returns /launch?via=jobs when no active project', () => {
-    const result = resolveJobsNavPath({
-      activeProject: null,
-    })
-    expect(result).toBe('/launch?via=jobs')
-  })
-
-  it('branch B: returns /launch?via=jobs when activeProject is undefined', () => {
-    const result = resolveJobsNavPath({
-      activeProject: undefined,
-    })
-    expect(result).toBe('/launch?via=jobs')
-  })
-
-  describe('branch D (FE-9525d: several active projects)', () => {
-    it('returns /jobs-overview when activeProjects has more than one entry', () => {
-      const result = resolveJobsNavPath({
-        activeProject: { id: 'p1' },
-        activeProjects: [{ id: 'p1' }, { id: 'p2' }],
-      })
-      expect(result).toBe('/jobs-overview')
-    })
-
-    it('still returns the single-project path when activeProjects has exactly one entry (byte-identical)', () => {
-      const result = resolveJobsNavPath({
-        activeProject: { id: 'solo' },
-        activeProjects: [{ id: 'solo' }],
-      })
-      expect(result).toBe('/projects/solo?via=jobs')
-    })
-
-    it('omitting activeProjects falls back to the single-project behaviour (back-compat)', () => {
-      const result = resolveJobsNavPath({
-        activeProject: { id: 'solo' },
-      })
-      expect(result).toBe('/projects/solo?via=jobs')
-    })
-
-    it('branch C (an in-flight chain run) still wins over branch D', () => {
-      const result = resolveJobsNavPath({
+  const INPUTS = [
+    ['no context at all (old branch B)', {}],
+    ['activeProject null', { activeProject: null }],
+    ['activeProject undefined', { activeProject: undefined }],
+    ['exactly one active project (old branch A)', { activeProject: { id: 'solo' }, activeProjects: [{ id: 'solo' }] }],
+    ['one active project, activeProjects omitted', { activeProject: { id: 'solo' } }],
+    [
+      'several active projects (old branch D)',
+      { activeProject: { id: 'p1' }, activeProjects: [{ id: 'p1' }, { id: 'p2' }] },
+    ],
+    [
+      'an in-flight chain containing the active project (old branch C)',
+      { activeProject: { id: 'head' }, activeRun: { id: 'run-7', resolved_order: ['head', 'tail'] } },
+    ],
+    [
+      'an in-flight chain with no active project to defer to',
+      { activeProject: null, activeRun: { id: 'run-7', resolved_order: ['head', 'tail'] } },
+    ],
+    [
+      'a stale chain that does NOT contain the active project (old BE-6200 carve-out)',
+      { activeProject: { id: 'solo' }, activeRun: { id: 'run-stale', resolved_order: ['wedged1'] } },
+    ],
+    [
+      'a chain known only by project_ids',
+      { activeProject: null, activeRun: { id: 'run-8', resolved_order: [], project_ids: ['pA', 'pB'] } },
+    ],
+    [
+      'a chain with no members',
+      { activeProject: { id: 'p1' }, activeRun: { id: 'run-9', resolved_order: [], project_ids: [] } },
+    ],
+    [
+      'mid-flight chain entry, whichever member runs',
+      {
+        activeProject: { id: 'p2' },
+        activeProjects: [{ id: 'p2' }],
+        activeRun: { id: 'run-mf', resolved_order: ['p1', 'p2', 'p3'], current_index: 1 },
+      },
+    ],
+    [
+      'several active projects AND an in-flight chain at once',
+      {
         activeProject: { id: 'p1' },
         activeProjects: [{ id: 'p1' }, { id: 'p2' }],
         activeRun: { id: 'run-1', resolved_order: ['p1', 'p2'] },
-      })
-      expect(result).toBe('/projects/p1?run=run-1')
-    })
+      },
+    ],
+  ]
+
+  it.each(INPUTS)('returns the board for %s', (_label, ctx) => {
+    expect(resolveJobsNavPath(ctx)).toBe('/jobs-overview')
+  })
+
+  it('never resolves to a project page or the retired launch page', () => {
+    for (const [, ctx] of INPUTS) {
+      const path = resolveJobsNavPath(ctx)
+      expect(path).not.toContain('/projects/')
+      expect(path).not.toContain('/launch')
+      expect(path).not.toContain('?run=')
+    }
   })
 })
 
@@ -148,7 +89,12 @@ describe('isJobsRouteActive', () => {
 
   it('returns true for any path with ?via=jobs', () => {
     expect(isJobsRouteActive('/projects/p1', { via: 'jobs' })).toBe(true)
-    expect(isJobsRouteActive('/launch', { via: 'jobs' })).toBe(true)
+    expect(isJobsRouteActive('/hub', { via: 'jobs' })).toBe(true)
+  })
+
+  it('returns true on the Jobs board itself', () => {
+    expect(isJobsRouteActive('/jobs-overview', {})).toBe(true)
+    expect(isJobsRouteActive('/jobs-overview', { run: 'run-7' })).toBe(true)
   })
 
   it('returns true for paths starting with /projects/', () => {
@@ -173,11 +119,12 @@ describe('resolveJobsNavIcon', () => {
     ['/projects/<id> solo view', '/projects/abc123', {}],
     ['/projects/<id>?run= chain member', '/projects/abc123', { run: 'run-7' }],
     ['/projects/<id>/details nested', '/projects/abc123/details', {}],
-    ['/launch?via=jobs (the FE-9110 bug)', '/launch', { via: 'jobs' }],
+    ['/hub?via=jobs (the FE-9110 bug shape)', '/hub', { via: 'jobs' }],
     ['/projects/<id>?via=jobs', '/projects/abc123', { via: 'jobs' }],
+    ['/jobs-overview the board (FE-9655e)', '/jobs-overview', {}],
+    ['/jobs-overview?run= a highlighted chain group', '/jobs-overview', { run: 'run-7' }],
   ]
   const GRAY = [
-    ['/launch (no via)', '/launch', {}],
     ['/hub', '/hub', {}],
     ['/tasks', '/tasks', {}],
     ['/projects list page', '/projects', {}],
@@ -198,32 +145,5 @@ describe('resolveJobsNavIcon', () => {
       const iconActive = resolveJobsNavIcon(path, query) === JOBS_NAV_ICON_ACTIVE
       expect(iconActive).toBe(isJobsRouteActive(path, query))
     }
-  })
-})
-
-
-describe('jobsNavPathToLocation', () => {
-  it('maps the chain-member path to the named project route carrying ?run', () => {
-    expect(jobsNavPathToLocation('/projects/member-2?run=run-1')).toEqual({
-      name: 'ProjectLaunch',
-      params: { projectId: 'member-2' },
-      query: { run: 'run-1' },
-    })
-  })
-
-  it('maps the solo project path to the named project route carrying ?via=jobs', () => {
-    expect(jobsNavPathToLocation('/projects/proj-1?via=jobs')).toEqual({
-      name: 'ProjectLaunch',
-      params: { projectId: 'proj-1' },
-      query: { via: 'jobs' },
-    })
-  })
-
-  it('maps the several-projects path to the Jobs viewport BY NAME (the route has no reachable literal path)', () => {
-    expect(jobsNavPathToLocation('/jobs-overview')).toEqual({ name: 'JobsViewport' })
-  })
-
-  it('returns null for the launch page — the caller shows its empty state instead', () => {
-    expect(jobsNavPathToLocation('/launch?via=jobs')).toBeNull()
   })
 })

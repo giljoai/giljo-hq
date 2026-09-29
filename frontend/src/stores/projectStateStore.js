@@ -116,11 +116,10 @@ export const useProjectStateStore = defineStore('projectStateDomain', () => {
     upsertProjectState(projectId, { isLaunched: Boolean(isLaunched) })
   }
 
-  function setImplementationLaunched(projectId, timestamp, source = null) {
+  function setImplementationLaunched(projectId, timestamp) {
     upsertProjectState(projectId, {
       implementationLaunched: Boolean(timestamp),
       implementationLaunchedAt: timestamp || null,
-      lastLaunchSource: source || null,
     })
   }
 
@@ -170,7 +169,7 @@ export const useProjectStateStore = defineStore('projectStateDomain', () => {
   function handleImplementationLaunched(payload) {
     const projectId = payload?.project_id
     if (!projectId) return
-    setImplementationLaunched(projectId, payload?.implementation_launched_at || null, payload?.source || null)
+    setImplementationLaunched(projectId, payload?.implementation_launched_at || null)
   }
 
   function $reset() {

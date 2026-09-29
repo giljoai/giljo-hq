@@ -27,5 +27,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* Minimal styling - authentication pages handle their own layout */
+/* Page roots are fixed scroll containers; stop them at the fixed KYB footer's
+   top edge (42px tall) so no content scrolls underneath it. */
+.v-application__wrap:has(> .kyb-footer) > .v-main > :deep(*) {
+  bottom: 42px;
+  height: auto;
+  min-height: 0;
+}
 </style>

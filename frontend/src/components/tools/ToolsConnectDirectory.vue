@@ -504,18 +504,4 @@ onUnmounted(() => {
   padding: 40px 0;
   text-align: center;
 }
-
-@media (max-width: 720px) {
-  .tools-directory {
-    grid-template-columns: 1fr;
-  }
-
-  .dir-rail {
-    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
-  }
-
-  .dir-picker-grid {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

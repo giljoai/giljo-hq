@@ -16,6 +16,16 @@ from giljo_mcp.services.orchestration_service import OrchestrationService
 
 
 @pytest.fixture(autouse=True)
+def _solo_chain_lookup():
+    with patch(
+        "giljo_mcp.services.sequence_run_service.SequenceRunService.find_active_run_for_project",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _mock_comm_thread_resolution():
     with patch(
         "giljo_mcp.services.comm_thread_service.CommThreadService.resolve_or_create_bound_thread",

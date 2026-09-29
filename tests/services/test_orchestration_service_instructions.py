@@ -71,7 +71,7 @@ class TestGetOrchestratorInstructions:
         assert "job_id" in result["identity"]
         assert "agent_id" in result["identity"]
         assert "project_id" in result["identity"]
-        assert "tenant_key" in result["identity"]
+        assert "tenant_key" not in result["identity"]
 
         assert "project_description_inline" in result
         assert "description" in result["project_description_inline"]

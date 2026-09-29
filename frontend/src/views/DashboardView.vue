@@ -1,27 +1,6 @@
 <template>
   <v-container>
     <AppAlert
-      v-if="setupStatus.requires_setup"
-      type="warning"
-      prominent
-      closable
-      class="mb-4"
-      @click:close="dismissSetupBanner"
-    >
-      <template #title>
-        <v-icon left>mdi-database-alert</v-icon>
-        Database Setup Required
-      </template>
-      <div>
-        The database is not configured. Please complete the setup process to use all features.
-      </div>
-      <v-btn color="white" variant="outlined" class="mt-3" @click="navigateToSetup">
-        <v-icon left>mdi-cog</v-icon>
-        Go to Setup Wizard
-      </v-btn>
-    </AppAlert>
-
-    <AppAlert
       v-if="showLanWelcome"
       type="success"
       prominent
@@ -239,7 +218,6 @@ import AppAlert from '@/components/ui/AppAlert.vue'
 import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import RecentMemoriesList from '@/components/dashboard/RecentMemoriesList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
-import { useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
 import { useNotificationStore } from '@/stores/notifications'
 import { notifyFailure } from '@/utils/notifyFailure'
@@ -248,7 +226,6 @@ import api from '@/services/api'
 import setupService from '@/services/setupService'
 import { useToast } from '@/composables/useToast'
 
-const router = useRouter()
 const productStore = useProductStore()
 const notificationStore = useNotificationStore()
 
@@ -275,13 +252,6 @@ function scrollFilterRight() {
   filterScrollContainer.value?.scrollBy({ left: 200, behavior: 'smooth' })
 }
 
-const setupStatus = ref({
-  setup_mode: false,
-  setup_complete: true,
-  database_configured: true,
-  database_connected: true,
-  requires_setup: false,
-})
 const showLanWelcome = ref(false)
 const serverIp = ref('localhost')
 const serverPort = ref(parseInt(window.location.port) || 7272)
@@ -468,25 +438,6 @@ function handleVisibilityChange() {
   }
 }
 
-const checkSetupStatus = async () => {
-  try {
-    const status = await setupService.checkStatus()
-    setupStatus.value = status
-  } catch (error) {
-    console.error('Failed to check setup status:', error)
-    notifyFailure(notificationStore, { operation: 'dashboard.setupStatus', error, fallbackMessage: 'Unable to check setup status.', title: 'Setup status unavailable' })
-    setupStatus.value.requires_setup = false
-  }
-}
-
-const dismissSetupBanner = () => {
-  setupStatus.value.requires_setup = false
-}
-
-const navigateToSetup = () => {
-  router.push('/setup/database')
-}
-
 const dismissLanWelcome = () => {
   showLanWelcome.value = false
   localStorage.removeItem('giljo_lan_setup_complete')
@@ -586,14 +537,10 @@ onMounted(async () => {
     }
   }
 
-  await checkSetupStatus()
-
-  if (!setupStatus.value.requires_setup) {
-    await Promise.all([
-      fetchDashboardData(),
-      fetchCallCounts(),
-    ])
-  }
+  await Promise.all([
+    fetchDashboardData(),
+    fetchCallCounts(),
+  ])
 
   startPolling()
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -959,12 +906,6 @@ onUnmounted(() => {
 @media (max-width: 960px) {
   .stat-pills {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 600px) {
-  .mini-stats {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

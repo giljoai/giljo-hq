@@ -21,6 +21,7 @@ class MemoryToolsMixin:
         force: bool = False,
         git_commits: list[dict[str, Any]] | None = None,
         tags: list[str] | None = None,
+        no_code_changes: str | None = None,
     ) -> dict[str, Any]:
         from giljo_mcp.tools.project_closeout import close_project_and_update_memory as tool_func
 
@@ -34,6 +35,7 @@ class MemoryToolsMixin:
             force=force,
             git_commits=git_commits,
             tags=tags,
+            no_code_changes=no_code_changes,
             websocket_manager=self._websocket_manager,
         )
 
@@ -85,6 +87,7 @@ class MemoryToolsMixin:
         tags: list[str] | None = None,
         user_id: str | None = None,
         acknowledge_closeout_todo: bool = False,
+        no_code_changes: str | None = None,
     ) -> dict[str, Any]:
         from giljo_mcp.tools.write_memory_entry import write_360_memory as tool_func
 
@@ -100,5 +103,6 @@ class MemoryToolsMixin:
             tags=tags,
             user_id=user_id,
             acknowledge_closeout_todo=acknowledge_closeout_todo,
+            no_code_changes=no_code_changes,
             db_manager=self.db_manager,
         )

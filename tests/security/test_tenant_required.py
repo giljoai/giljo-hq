@@ -83,6 +83,7 @@ _TENANT_LEVEL_INVENTORY: list[tuple[str, str, str, str, str]] = [
     ("settings", "/api/v1/settings", "PUT", "/system/agent-silence-threshold", "service_injected"),
     ("settings", "/api/v1/settings", "PUT", "/system/agent-checkin-cadence", "service_injected"),
     ("settings", "/api/v1/settings", "PUT", "/execution-mode-default", "service_injected"),
+    ("settings", "/api/v1/settings", "PUT", "/closeout-mode", "service_injected"),
     ("settings", "/api/v1/settings", "PUT", "/handover-template", "service_injected"),
     ("settings", "/api/v1/settings", "POST", "/handover-template/reset", "service_injected"),
 ]

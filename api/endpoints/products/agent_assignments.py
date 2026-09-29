@@ -4,15 +4,12 @@
 # [CE] Community Edition.
 
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.dependencies import get_tenant_key
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import (
-    BaseGiljoError,
     ProjectStateError,
     ResourceNotFoundError,
     ValidationError,
@@ -21,10 +18,8 @@ from giljo_mcp.models import User
 from giljo_mcp.services.product_agent_assignment_service import (
     ProductAgentAssignmentService,
 )
-from giljo_mcp.utils.log_sanitizer import sanitize
 
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -106,9 +101,6 @@ async def list_agent_assignments(
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except BaseGiljoError as e:
-        logger.exception("Failed to list agent assignments for product %s", sanitize(product_id))
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.put(
@@ -140,6 +132,3 @@ async def toggle_agent_assignment(
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ResourceNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except BaseGiljoError as e:
-        logger.exception("Failed to toggle agent assignment")
-        raise HTTPException(status_code=500, detail=str(e)) from e

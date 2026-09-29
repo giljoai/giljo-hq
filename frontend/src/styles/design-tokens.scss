@@ -64,7 +64,9 @@ $color-status-working: #ffffff; // White - matches statusConfig.js
 $color-status-complete: #67bd6d; // Green - matches statusConfig.js
 $color-status-review: #6db3e4; // Luminous-Pastel Sky Blue — review-needed status (WCAG 6.64:1)
 $color-status-failed: #c6298c; // Pink - matches statusConfig.js (failure)
-$color-status-blocked: #ff9800; // Orange - matches statusConfig.js
+$color-status-blocked: #f44336; // Red - matches statusConfig.js (FE-9687: orange is kept for "you decide")
+$color-status-silent: #e060b0; // Bright magenta - silent or never picked up (a stall), matches statusConfig.js
+$color-status-unread: #2196f3; // Blue - unread messages waiting for an agent
 
 // =========================================================================
 // 5b. COLOR TOKENS - Additional Status / Semantic Colors
@@ -74,6 +76,8 @@ $color-status-handed-over: #9e9e9e; // Grey for handed-over status
 $color-status-idle: #7a9bb5; // Muted blue-grey for idle/monitoring
 $color-status-sleeping: #9b89b3; // Soft indigo for sleeping
 $color-status-decommissioned: #757575; // Dark grey for decommissioned
+$color-status-closed: #4a9c5f; // Darker green - closed, signals finality (matches statusConfig.js)
+$color-status-pending: #9e9e9e; // Grey - not started yet (matches statusConfig.js)
 $color-status-staged: #ffc107; // Amber for staged project status
 $color-status-success: #4caf50; // Material green — generic success (not agent status)
 $color-status-error: #f44336; // Material red — generic error
@@ -289,19 +293,14 @@ $transition-all-fast:  all $transition-fast ease;
 // 14. BREAKPOINT TOKENS (FE-9536)
 // =========================================================================
 //
-// Survey of every ad-hoc `@media (max-width: ...)` cutoff in frontend/src
-// found three real bands in use (599/600, 768/840, 1024/1100/1280) and no
-// case for a fourth — so three tokens, not one-per-file. Use `max-width:
+// Phones and tablets render the fixed 1280px desktop layout scaled down
+// (index.html viewport meta, FE-9648), so no breakpoint exists for them.
+// These two bands serve narrow DESKTOP windows only. Use `max-width:
 // $breakpoint-*` directly (plain Sass variables, no interpolation needed).
 //
-// $breakpoint-mobile — phones and the narrowest portrait tablets: single-
-//   column layouts, hide non-essential table columns entirely.
-// $breakpoint-tablet — the tablet band (portrait ~768-834px, 16:9 landscape
-//   ~1024-1194px) that the pre-FE-9536 grids skipped straight over, jumping
-//   3-col -> 1-col with nothing in between. Two-column layouts live here.
+// $breakpoint-tablet — narrow windows (split screen, small laptops): multi-
+//   column grids step down to two columns here.
 // $breakpoint-compact — the point a data-dense table switches from full
-//   text columns to compact icon/abbreviated columns; wider than the other
-//   two because it is about information density, not device class.
-$breakpoint-mobile:  600px;
+//   text columns to compact icon/abbreviated columns.
 $breakpoint-tablet:  960px;
 $breakpoint-compact: 1280px;

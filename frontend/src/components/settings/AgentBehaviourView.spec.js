@@ -11,7 +11,7 @@ const apiMock = vi.hoisted(() => ({
     getAgentCheckinCadence: vi.fn(),
     updateAgentCheckinCadence: vi.fn(),
     getGeneral: vi.fn(),
-    updateGeneral: vi.fn(),
+    updateCloseoutMode: vi.fn(),
     getHeadlessLaunch: vi.fn(),
     updateHeadlessLaunch: vi.fn(),
   },

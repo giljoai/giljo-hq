@@ -396,6 +396,7 @@ import setupService from '@/services/setupService'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import { useFormatDate } from '@/composables/useFormatDate'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const { formatDate } = useFormatDate()
 
@@ -459,7 +460,7 @@ async function sendPasswordReset(targetUser, axiosPost) {
       })
     }
   } catch (err) {
-    const detail = err?.response?.data?.detail ?? 'Failed to send reset link. Please try again.'
+    const detail = parseErrorResponse(err).message || 'Failed to send reset link. Please try again.'
     showToast({ message: detail, type: 'error' })
   } finally {
     sendingReset.value = false
@@ -634,7 +635,7 @@ async function saveUser() {
     closeUserDialog()
   } catch (err) {
     console.error('[UserManager] Failed to save user:', err)
-    const errorMessage = err.response?.data?.detail || err.message || 'Failed to save user'
+    const errorMessage = parseErrorResponse(err).message || 'Failed to save user'
     if (errorMessage.toLowerCase().includes('already exists')) {
       showToast({
         message: 'Username or email already exists. Please use different values.',

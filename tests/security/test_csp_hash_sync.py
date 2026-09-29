@@ -14,8 +14,10 @@ import pytest
 from api.middleware.security import (
     CSP_SCRIPT_HASH_1,
     CSP_SCRIPT_HASH_2,
-    CSP_STYLE_HASH,
 )
+
+
+_INLINE_STYLE_RE = re.compile(r"<style\b", re.IGNORECASE)
 
 
 def _find_index_html() -> Path | None:
@@ -64,12 +66,10 @@ def test_csp_inline_hashes_match_index_html() -> None:
         "CSP_SCRIPT_HASH_1 / CSP_SCRIPT_HASH_2."
     )
 
-    assert CSP_STYLE_HASH in style_hashes, (
-        "CSP_STYLE_HASH in api/middleware/security.py does not match any inline "
-        "<style> block in frontend/index.html.\n"
-        f"  index.html style hashes: {sorted(style_hashes)}\n"
-        f"  security.py ships:       {CSP_STYLE_HASH}\n"
-        "Run `python scripts/generate_csp_hashes.py` and update CSP_STYLE_HASH."
+    assert not style_hashes and not _INLINE_STYLE_RE.search(index_html.read_text(encoding="utf-8")), (
+        "frontend/index.html carries an inline <style> block. Inline styles need a "
+        "CSP hash that breaks whenever the build minifies them (FE-9676). Put the "
+        "CSS in a stylesheet under frontend/public/ and link it instead."
     )
 
 
@@ -99,10 +99,11 @@ def test_csp_inline_hashes_match_dist_index_html() -> None:
         "update CSP_SCRIPT_HASH_1 / CSP_SCRIPT_HASH_2 in api/middleware/security.py."
     )
 
-    assert CSP_STYLE_HASH in style_hashes, (
-        "CSP_STYLE_HASH in api/middleware/security.py does not match any inline "
-        "<style> block in frontend/dist/index.html (built artifact).\n"
-        f"  dist/index.html style hashes: {sorted(style_hashes)}\n"
-        f"  security.py ships:            {CSP_STYLE_HASH}\n"
-        "Run `python scripts/generate_csp_hashes.py` and update CSP_STYLE_HASH."
+    assert not style_hashes and not _INLINE_STYLE_RE.search(dist_text), (
+        "frontend/dist/index.html (built artifact) carries an inline <style> block, "
+        "which the CSP would block in SaaS (FE-9676). Keep the splash CSS in "
+        "frontend/public/splash.css."
+    )
+    assert '<link rel="stylesheet" href="/splash.css">' in dist_text, (
+        "frontend/dist/index.html no longer links /splash.css; the start-up splash would render unstyled."
     )

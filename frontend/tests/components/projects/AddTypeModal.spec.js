@@ -199,7 +199,7 @@ describe('AddTypeModal.vue', () => {
       api.taxonomyTypes.create.mockRejectedValueOnce({
         response: {
           status: 409,
-          data: { detail: 'Abbreviation already exists' },
+          data: { error_code: 'VALIDATIONERROR', message: 'Abbreviation already exists' },
         },
       })
 
