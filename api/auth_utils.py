@@ -182,37 +182,3 @@ async def validate_api_key(api_key: str, db: AsyncSession = None) -> dict[str, A
         return None
     key, _user = resolved
     return {"name": key.name, "tenant_key": key.tenant_key, "permissions": key.permissions or ["*"]}
-
-
-def check_subscription_permission(
-    auth_context: dict[str, Any], entity_type: str, entity_id: str, tenant_key: str | None = None
-) -> bool:
-    if auth_context.get("context") == "setup":
-        return True
-
-    if not auth_context:
-        logger.warning(f"Subscription denied: no auth context for {entity_type}:{entity_id}")
-        return False
-
-    user_info = auth_context.get("user", {})
-    user_tenant_key = user_info.get("tenant_key")
-
-    if not user_tenant_key:
-        logger.warning(f"Subscription denied: missing tenant_key in user info for {entity_type}:{entity_id}")
-        return False
-
-    if tenant_key and user_tenant_key != tenant_key:
-        logger.warning(
-            f"Subscription denied: tenant mismatch "
-            f"(user: {user_tenant_key}, entity: {tenant_key}) "
-            f"for {entity_type}:{entity_id}"
-        )
-        return False
-
-    user_permissions = user_info.get("permissions", [])
-
-    if "*" in user_permissions:
-        return True
-
-
-    return True

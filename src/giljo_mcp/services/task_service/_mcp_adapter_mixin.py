@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -14,13 +15,14 @@ from giljo_mcp.domain.task_status import VALID_TASK_STATUSES
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import Task
 from giljo_mcp.services._mcp_wire_bounds import worst_case_cursor_charge
-from giljo_mcp.services.handover_validation import HANDOVER_TYPE_ABBR, require_handover_shape
-from giljo_mcp.services.next_action import task_list_next_action_field
+from giljo_mcp.services.handover_validation import DOOR_MCP
+from giljo_mcp.services.next_action import has_open_handover, task_list_next_action_field
 from giljo_mcp.services.task_service._handover_guards import (
     handover_not_convertible,
     handover_state,
     pending_handover_not_archivable,
     require_handover_description_shape,
+    resolve_create_task_type,
 )
 from giljo_mcp.services.task_service._mcp_filter_validators import (
     resolve_active_product_for_list_tasks,
@@ -38,7 +40,6 @@ from giljo_mcp.services.task_service._mcp_read_layer import (
     task_to_index_row,
 )
 from giljo_mcp.services.task_type_immutability import require_unchanged_task_type
-from giljo_mcp.services.taxonomy_ops import resolve_task_type_abbr
 from giljo_mcp.tenant import current_tenant
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
@@ -76,9 +77,7 @@ class McpAdapterMixin:
         product_id = bound_product.id
         product_name = bound_product.name
 
-        requested_type = resolve_task_type_abbr(task_type, operation="create_task")
-        if requested_type == HANDOVER_TYPE_ABBR:
-            require_handover_shape(description, operation="create_task")
+        requested_type = resolve_create_task_type(task_type, description, door=DOOR_MCP)
 
         taxonomy = TaxonomyService(db_manager=effective_db, session=self._session)
         reserved_type = await taxonomy.ensure_reserved_type(effective_tenant_key, requested_type)
@@ -106,14 +105,11 @@ class McpAdapterMixin:
         )
 
         if websocket_manager:
-            try:
-                await websocket_manager.broadcast_to_tenant(
-                    tenant_key=effective_tenant_key,
-                    event_type="task:created",
-                    data={"task_id": task_id, "title": title, "product_id": product_id},
-                )
-            except (RuntimeError, ValueError, OSError) as e:
-                self._logger.warning(f"Failed to broadcast task:created event: {e}")
+            await websocket_manager.broadcast_to_tenant(
+                tenant_key=effective_tenant_key,
+                event_type="task:created",
+                data={"task_id": task_id, "title": title, "product_id": product_id},
+            )
 
         taxonomy_alias = ""
         if assigned_series[0] is not None:
@@ -130,6 +126,18 @@ class McpAdapterMixin:
             "product_name": product_name,
             "message": f"Task '{title}' created successfully",
         }
+
+    def _under_tenant(self, tenant_key: str, call: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+
+        async def _run(*args: Any, **kwargs: Any) -> Any:
+            token = self.tenant_manager.set_current_tenant(tenant_key) if self.tenant_manager else None
+            try:
+                return await call(*args, **kwargs)
+            finally:
+                if token is not None:
+                    current_tenant.reset(token)
+
+        return _run
 
     async def update_task_for_mcp(
         self,
@@ -154,6 +162,7 @@ class McpAdapterMixin:
                 message="tenant_key is required",
                 context={"operation": "update_task_for_mcp", "task_id": task_id},
             )
+        read_task = self._under_tenant(effective_tenant_key, self.get_task)
 
         if convert_to_project:
             return await self._convert_task_for_mcp(
@@ -206,14 +215,14 @@ class McpAdapterMixin:
                     context={"operation": "update_task_for_mcp", "task_id": task_id},
                 )
             if hidden:
-                is_handover, task_status = await handover_state(self.get_task, task_id)
+                is_handover, task_status = await handover_state(read_task, task_id)
                 if is_handover and task_status == "pending":
                     return pending_handover_not_archivable(task_id)
             update_kwargs["hidden"] = hidden
 
-        await require_handover_description_shape(self.get_task, task_id, description)
+        await require_handover_description_shape(read_task, task_id, description)
 
-        await require_unchanged_task_type(self.get_task, task_id, task_type)
+        await require_unchanged_task_type(read_task, task_id, task_type)
 
         will_append_notes = bool(completion_notes) and status == "completed"
 
@@ -226,14 +235,7 @@ class McpAdapterMixin:
 
         updated_fields: list[str] = []
         if update_kwargs:
-            tenant_token = None
-            if self.tenant_manager:
-                tenant_token = self.tenant_manager.set_current_tenant(effective_tenant_key)
-            try:
-                result = await self.update_task(task_id, **update_kwargs)
-            finally:
-                if tenant_token is not None:
-                    current_tenant.reset(tenant_token)
+            result = await self._under_tenant(effective_tenant_key, self.update_task)(task_id, **update_kwargs)
             updated_fields = list(result.updated_fields)
 
         response: dict[str, Any] = {
@@ -255,7 +257,7 @@ class McpAdapterMixin:
         user_id: str | None,
         supplied: dict[str, Any],
     ) -> dict[str, Any]:
-        is_handover, _status = await handover_state(self.get_task, task_id)
+        is_handover, _status = await handover_state(self._under_tenant(tenant_key, self.get_task), task_id)
         if is_handover:
             return handover_not_convertible(task_id)
 
@@ -426,7 +428,15 @@ class McpAdapterMixin:
             "counts": counts,
             "product_id": active_product.id,
         }
-        response.update(task_list_next_action_field(mode=mode, statuses=(t.status for t in tasks)))
+        response.update(
+            task_list_next_action_field(
+                mode=mode,
+                statuses=(t.status for t in tasks),
+                open_handover=has_open_handover(
+                    (t.status, t.task_type.abbreviation if t.task_type else None) for t in tasks
+                ),
+            )
+        )
         apply_bounds(
             response,
             rows,
@@ -510,17 +520,13 @@ class McpAdapterMixin:
         description = task.description or ""
         if memory_limit and len(description) > memory_limit:
             description = description[:memory_limit] + "..."
+        summary = cls._task_to_summary_row(task)
+        created_at = summary.pop("created_at")
         return {
-            "task_id": str(task.id),
-            "title": task.title,
+            "task_id": summary.pop("task_id"),
+            "title": summary.pop("title"),
             "description": description,
-            "status": task.status,
-            "priority": task.priority,
-            "task_type": cls._task_type_block(task),
-            "taxonomy_alias": task.taxonomy_alias or "",
-            "series_number": task.series_number,
-            "subseries": task.subseries,
-            "hidden": bool(task.hidden),
+            **summary,
             "task_type_id": task.task_type_id,
             "product_id": task.product_id,
             "project_id": task.project_id,
@@ -529,5 +535,5 @@ class McpAdapterMixin:
             "actual_effort": task.actual_effort,
             "started_at": task.started_at.isoformat() if task.started_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "created_at": created_at,
         }

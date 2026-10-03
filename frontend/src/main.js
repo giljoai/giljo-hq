@@ -5,6 +5,7 @@ import { pinia } from './stores'
 import { initializeApiConfig } from './config/api'
 import configService from './services/configService'
 import setupService from './services/setupService'
+import { isSaasModeValue } from '@/composables/useGiljoMode'
 import { initSentry } from './sentry'
 import { applyNonceToApp, readCspNonce } from '@/composables/useCspNonce'
 import { maybeReloadForChunkError } from '@/utils/chunkReload'
@@ -90,7 +91,7 @@ async function bootstrap() {
 
   const saasRouteLoaders = import.meta.glob('@/saas/routes/index.js')
   const [saasRoutesLoader] = Object.values(saasRouteLoaders)
-  if (saasRoutesLoader && configService.getGiljoMode() !== 'ce') {
+  if (saasRoutesLoader && isSaasModeValue(configService.getGiljoMode())) {
     try {
       const saasRoutes = await saasRoutesLoader()
       saasRoutes.registerSaasRoutes()

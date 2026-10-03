@@ -238,6 +238,10 @@ async def update_task(
             params["hidden"] = True
         elif h in ("false", "0", "no"):
             params["hidden"] = False
+        else:
+            return validation_rejection(
+                field="hidden", constraint=CONSTRAINT_INVALID_CHOICE, message="hidden must be 'true', 'false' or empty."
+            )
     if completion_notes:
         params["completion_notes"] = completion_notes
     if convert_to_project:

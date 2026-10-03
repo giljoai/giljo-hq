@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 
-def _build_ch1_mission(tool: str = "claude-code") -> str:
+
+def _build_ch1_mission(tool: str = HARNESS_CLAUDE_CODE) -> str:
     spawn_warning_map = {
         "codex": "You do NOT call spawn_agent() (that's for implementation phase)",
         "claude-code": "You do NOT call Task() tool (that's for implementation phase)",

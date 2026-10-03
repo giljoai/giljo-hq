@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from giljo_mcp.exceptions import AuthorizationError, ResourceNotFoundError
+
 
 TASK_TYPE_FIELD = "task_type"
 TASK_TYPE_IMMUTABLE_CONSTRAINT = "immutable"
@@ -42,7 +44,7 @@ async def require_unchanged_task_type(get_task: Any, task_id: str, requested_typ
         return
     try:
         task = await get_task(task_id)
-    except Exception:  # noqa: BLE001 - not-found/permission belong to the caller, not here
+    except (ResourceNotFoundError, AuthorizationError):
         return
     current_type = getattr(getattr(task, "task_type", None), "abbreviation", None)
     if current_type is None:

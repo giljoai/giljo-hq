@@ -6,6 +6,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from giljo_mcp import database as db_module
 from giljo_mcp.config_manager import ConfigManager, DatabaseConfig
 from giljo_mcp.database import DEFAULT_MAX_OVERFLOW, DEFAULT_POOL_SIZE, DatabaseManager
@@ -124,10 +126,11 @@ class TestConnectionBudgetCheck:
 
         assert not any("budget EXCEEDED" in r.message for r in caplog.records)
 
-    def test_non_numeric_inputs_do_not_crash(self):
+    def test_non_numeric_inputs_raise_naming_the_input(self):
         from api.startup.database import check_connection_budget
 
-        check_connection_budget(pool_size=object(), max_overflow=10, workers=1, slot_budget=90)
+        with pytest.raises(ValueError, match="pool_size"):
+            check_connection_budget(pool_size=object(), max_overflow=10, workers=1, slot_budget=90)
 
     def test_worker_count_reads_web_concurrency(self, monkeypatch):
         from api.startup.database import _worker_count
@@ -136,7 +139,8 @@ class TestConnectionBudgetCheck:
         assert _worker_count() == 4
 
         monkeypatch.setenv("WEB_CONCURRENCY", "garbage")
-        assert _worker_count() == 1
+        with pytest.raises(ValueError, match="WEB_CONCURRENCY"):
+            _worker_count()
 
         monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
         assert _worker_count() == 1

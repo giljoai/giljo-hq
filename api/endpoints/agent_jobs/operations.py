@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies.websocket import WebSocketDependency, get_websocket_dependency
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.services.job_query_service import JobQueryService
@@ -29,7 +30,7 @@ router = APIRouter()
 
 @router.patch("/{job_id}/mission")
 async def update_agent_mission(
-    job_id: str,
+    job_id: IdPath,
     request: UpdateMissionRequest,
     current_user: User = Depends(get_current_active_user),
     orchestration_service: OrchestrationService = Depends(get_orchestration_service),
@@ -38,7 +39,7 @@ async def update_agent_mission(
     ws_dep: WebSocketDependency = Depends(get_websocket_dependency),
 ) -> UpdateMissionResponse:
     """
-    Update agent mission with validation and WebSocket broadcast (Handover 0244b).
+    Update agent mission with validation and WebSocket broadcast.
 
     Sprint 003c: Write routed through MissionService (no direct session.commit).
 

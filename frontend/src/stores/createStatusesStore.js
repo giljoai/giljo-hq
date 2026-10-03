@@ -36,8 +36,10 @@ export function createStatusesStore(storeId, fetchStatuses) {
       inFlight = (async () => {
         try {
           const response = await fetchStatuses()
-          const data = Array.isArray(response?.data) ? response.data : []
-          statuses.value = data
+          if (!Array.isArray(response?.data)) {
+            throw new Error(`Status list reply is not a list`)
+          }
+          statuses.value = response.data
           loaded.value = true
         } finally {
           loading.value = false

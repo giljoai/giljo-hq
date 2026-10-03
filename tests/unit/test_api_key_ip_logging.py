@@ -7,6 +7,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 
 class TestApiKeyIpLogging:
@@ -32,7 +33,7 @@ class TestApiKeyIpLogging:
 
         mock_db = AsyncMock()
         mock_db.info = {}
-        mock_db.execute = AsyncMock(side_effect=Exception("DB connection lost"))
+        mock_db.execute = AsyncMock(side_effect=OperationalError("INSERT", {}, Exception("DB connection lost")))
 
         manager = MCPSessionManager(mock_db)
         await manager.log_ip("key-123", "192.0.2.1")
@@ -89,7 +90,7 @@ class TestApiKeyIpLogging:
         mock_db = AsyncMock()
         mock_db.info = {}
         mock_db.execute = AsyncMock()
-        mock_db.commit = AsyncMock(side_effect=Exception("Commit failed"))
+        mock_db.commit = AsyncMock(side_effect=OperationalError("COMMIT", {}, Exception("Commit failed")))
 
         manager = MCPSessionManager(mock_db)
         await manager.log_ip("key-123", "198.51.100.1")

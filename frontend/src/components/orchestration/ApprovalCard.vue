@@ -56,7 +56,7 @@ import { computed, ref } from 'vue'
 import { useApprovalsStore } from '@/stores/useApprovalsStore'
 import { useToast } from '@/composables/useToast'
 import { getAgentColor } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { hexToRgba, tintedStyle } from '@/utils/colorUtils'
 import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
@@ -111,11 +111,7 @@ const agentInitials = computed(() => {
   return c?.badge || '?'
 })
 
-const agentBadgeStyle = computed(() => ({
-  backgroundColor: hexToRgba(agentColor.value, 0.15),
-  color: agentColor.value,
-  borderRadius: '8px',
-}))
+const agentBadgeStyle = computed(() => ({ ...tintedStyle(agentColor.value), borderRadius: '8px' }))
 
 const cardStyle = computed(() => ({
   '--smooth-border-color': hexToRgba(agentColor.value, 0.55),

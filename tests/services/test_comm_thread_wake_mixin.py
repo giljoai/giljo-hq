@@ -176,6 +176,7 @@ async def test_post_reply_carries_the_hold_the_line_hint(db_manager, db_session)
         thread_id=thread_id, content="over to you", from_agent="em", pass_baton_to="worker-1", tenant_key=tenant
     )
     assert baton_post["advice"] == POST_ADVICE
+    assert 'set_agent_status(status="idle")' in baton_post["advice"]
 
     action_post = await svc.post_to_thread(
         thread_id=thread_id,

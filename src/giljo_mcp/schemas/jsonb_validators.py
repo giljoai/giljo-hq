@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -39,7 +39,6 @@ from giljo_mcp.schemas.jsonb_validators_settings import (  # noqa: F401
     GitIntegrationSettings,
     IntegrationsSettingsData,
     SecuritySettingsData,
-    SerenaMcpSettings,
     SettingsData,
     validate_settings_by_category,
 )
@@ -70,7 +69,7 @@ class AgentJobMetadata(BaseModel):
     """Validates agent_jobs.job_metadata JSONB.
 
     Reflects the ACTUAL key inventory written across the spawn / launch /
-    conductor / progress write sites (BE-9000h). ``extra="allow"`` is a
+    conductor / progress write sites. ``extra="allow"`` is a
     deliberate, documented extensibility posture: several sites add ad-hoc
     server-built keys (``reused_at``, ``thin_client``, ``context_chunks``,
     demo-seed ``demo`` / ``description``) not worth enumerating. The known
@@ -107,11 +106,11 @@ class GitCommitEntry(BaseModel):
     """Single git commit in product_memory_entries.git_commits.
 
     ``files_changed`` / ``lines_added`` are optional, normalized to ``0``.
-    ``pr_url`` (BE-9256) is freeform and stored verbatim -- never parsed --
+    ``pr_url`` is freeform and stored verbatim -- never parsed --
     so this shape stays correct for GitHub, Gitea, GitLab, or any other host.
-    Length caps (BE-9256 #3) restore the old 64-char sha cap + message/author/pr_url caps -- hard rejection.
+    Length caps on sha (64 chars), message, author and pr_url -- hard rejection.
 
-    BE-9634: ``sha`` also accepts the input key ``hash``. It is the natural word
+    ``sha`` also accepts the input key ``hash``. It is the natural word
     for that field and what several git JSON formats emit, and ``extra="ignore"``
     silently DROPPED it -- so a caller that wrote ``hash`` got "sha Field
     required" for a value it had supplied, and a real closeout failed on prod
@@ -162,7 +161,7 @@ class AgentExecutionResult(BaseModel):
     Reflects the structured completion result written by orchestration_service
     when an agent calls complete_job().
 
-    BE-8003j: ``branch`` and ``pr_url`` are the web-coding hand-off fields —
+    ``branch`` and ``pr_url`` are the web-coding hand-off fields —
     first-class, documented keys for the isolated-PR delivery model (Claude Code
     web / Codex web deliver an isolated branch/PR rather than writing into a
     shared working tree). ``extra="allow"`` already tolerated them; naming them
@@ -190,7 +189,7 @@ def validate_agent_execution_result(data: dict) -> dict:
 class ProductMemoryConfig(BaseModel):
     """Validates products.product_memory JSONB.
 
-    BE-9261: seed key renamed github -> git_integration. github stays a
+    Seed key renamed github -> git_integration. github stays a
     declared field for READ tolerance of pre-rename rows only.
     """
 
@@ -246,7 +245,7 @@ class NotificationPreferences(BaseModel):
     No extra fields allowed — the schema is fully defined by
     DEFAULT_NOTIFICATION_PREFERENCES.
 
-    FE-9553 added the three notification-model preferences. Every one carries a
+    The three notification-model preferences each carry a
     default, so a row written before they existed still validates: that is the
     old-shape answer for this column (tolerance, not a migration). Note that
     the defaults here are what makes a legacy row VALID; what makes it read back
@@ -264,6 +263,9 @@ class NotificationPreferences(BaseModel):
 
 
 
+API_KEY_PERMISSIONS_MAX = 50
+ApiKeyPermission = Annotated[str, Field(max_length=200)]
+
 
 class APIKeyPermissions(BaseModel):
     """Validates api_keys.permissions JSONB.
@@ -271,15 +273,7 @@ class APIKeyPermissions(BaseModel):
     List of permission strings (e.g., ["*"], ["read", "write"]).
     """
 
-    items: list[str] = Field(default_factory=list, max_length=50)
-
-    @field_validator("items")
-    @classmethod
-    def validate_items(cls, v: list[str]) -> list[str]:
-        for item in v:
-            if len(item) > 200:
-                raise ValueError(f"Permission string exceeds 200 characters: {item[:20]}...")
-        return v
+    items: list[ApiKeyPermission] = Field(default_factory=list, max_length=API_KEY_PERMISSIONS_MAX)
 
 
 
@@ -590,7 +584,7 @@ class ProviderCancelResponse(BaseModel):
     rename. ``extra="allow"`` so provider payload shape changes (added
     top-level keys) do not break audit writes.
 
-    BE-9696 F3: ``deletion_receipts.billing_cancel_response`` no longer
+    ``deletion_receipts.billing_cancel_response`` does not
     mirrors this payload verbatim -- ``receipts.py::_minimal_cancel_response``
     validates through this model, then keeps only ``subscription_id`` and
     ``status`` (the cancellation confirmation, not the provider's full

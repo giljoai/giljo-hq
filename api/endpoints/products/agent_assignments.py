@@ -120,7 +120,7 @@ async def toggle_agent_assignment(
 
     Creates the assignment if it doesn't exist, or updates the is_active flag.
     Switching on is refused with 409 when the product already has its full
-    complement of agent roles (BE-9610a: the context budget follows the switch
+    complement of agent roles (the context budget follows the switch
     that spends it).
     """
     try:

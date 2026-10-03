@@ -47,7 +47,6 @@
           <NetworkSettingsTab
             :server-host-display="serverHostDisplay"
             :server-port="serverPort"
-            :ssl-enabled="sslEnabled"
             :loading="loading.network"
             :cookie-domains="cookieDomains"
             :cookie-loading="loading.security"
@@ -65,18 +64,15 @@
             ref="databaseConnectionRef"
             :readonly="true"
             :show-title="true"
-            title="PostgreSQL Database Configuration"
             :show-info-banner="true"
-            info-banner-text="Database settings are configured during installation"
             :show-test-button="true"
             test-button-text="Test Connection"
-            @connection-success="handleDatabaseSuccess"
             @connection-error="handleDatabaseError"
           >
             <template #actions>
-              <v-btn variant="text" @click="reloadDatabaseSettings">
+              <v-btn variant="text" data-test="db-reload-btn" @click="reloadDatabaseSettings">
                 <v-icon start>mdi-refresh</v-icon>
-                Reload from Config
+                Reload connection details
               </v-btn>
             </template>
           </DatabaseConnection>
@@ -92,7 +88,7 @@ import { ref, computed, onMounted } from 'vue'
 import { getApiBaseURL } from '@/config/api'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
-import { parseErrorResponse } from '@/utils/errorMessages'
+import { parseErrorResponse, fetchResponseError } from '@/utils/errorMessages'
 import configService from '@/services/configService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 
@@ -113,9 +109,8 @@ const loading = ref({
   security: false,
 })
 
-const serverHostDisplay = ref('localhost')
-const serverPort = ref(parseInt(window.location.port) || 7272)
-const sslEnabled = ref(false)
+const serverHostDisplay = ref('')
+const serverPort = ref(null)
 
 const cookieDomains = ref([])
 const securityFeedback = ref(null)
@@ -126,25 +121,12 @@ async function loadNetworkSettings() {
     const response = await fetch(`${getApiBaseURL()}/api/v1/config/network-info`, {
       credentials: 'include',
     })
-    if (!response.ok) {
-      throw new Error(`network-info endpoint failed: ${response.statusText}`)
-    }
+    if (!response.ok) throw await fetchResponseError(response)
     const info = await response.json()
-    serverHostDisplay.value = info.host_display || 'localhost'
-    serverPort.value = info.port || parseInt(window.location.port) || 7272
-
-    const cfgResp = await fetch(`${getApiBaseURL()}/api/v1/config`, {
-      credentials: 'include',
-    })
-    if (cfgResp.ok) {
-      const config = await cfgResp.json()
-      sslEnabled.value = Boolean(config.features?.ssl_enabled)
-    }
+    serverHostDisplay.value = info.host_display
+    serverPort.value = info.port
   } catch (error) {
-    console.error('[SYSTEM SETTINGS] Failed to load network settings:', error)
-    serverHostDisplay.value = window.location.hostname || 'localhost'
-    serverPort.value = parseInt(window.location.port) || 7272
-    sslEnabled.value = false
+    showToast({ message: `Could not load the network settings: ${parseErrorResponse(error).message}`, type: 'error' })
   } finally {
     loading.value.network = false
   }
@@ -162,10 +144,6 @@ async function reloadDatabaseSettings() {
       type: 'error',
     })
   }
-}
-
-function handleDatabaseSuccess(_result) {
-  // Database connection successful
 }
 
 function handleDatabaseError(error) {

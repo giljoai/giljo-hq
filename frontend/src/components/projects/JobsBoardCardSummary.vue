@@ -14,7 +14,7 @@
             <i class="jb-summary-dot" :style="{ backgroundColor: getStatusColor(jobStatusWord(agent)) }" aria-hidden="true" />
           </span>
         </template>
-        <div>{{ getPrimaryAgentLabel(agent) }} &middot; {{ getStatusLabel(jobStatusWord(agent), agent.block_reason) }}</div>
+        <div>{{ getPrimaryAgentLabel(agent) }} &middot; {{ jobStatusLabel(agent) }}</div>
       </v-tooltip>
     </span>
 
@@ -40,8 +40,8 @@
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel } from '@/utils/agentDisplay'
-import { getStatusLabel, getStatusColor } from '@/utils/statusConfig'
-import { jobStatusWord, isLiveStatusWord } from '@/utils/jobStatusWord'
+import { getStatusColor } from '@/utils/statusConfig'
+import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
 
 defineProps({
   agents: {

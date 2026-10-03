@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import TemplatesTable from './TemplatesTable.vue'
+import { getAgentColor } from '@/config/agentColors'
 
 
 const dataTableStub = {
@@ -348,5 +349,24 @@ describe('TemplatesTable — BE-9646: reset visibility follows factory origin', 
     const wrapper = mountTable({ templates: [tpl] })
 
     expect(wrapper.find('[title="Reset to Default"]').exists()).toBe(false)
+  })
+})
+
+
+describe('TemplatesTable — role badge tint', () => {
+  it('tints the badge with the role colour at 15% and fades an inactive row', () => {
+    const wrapper = mountTable({
+      templates: [
+        makeTemplate({ id: 1, role: 'analyzer', product_active: true }),
+        makeTemplate({ id: 2, role: 'analyzer', product_active: false }),
+      ],
+    })
+    const styles = wrapper.findAll('.template-role-badge').map((b) => b.attributes('style'))
+    const { hex } = getAgentColor('analyzer')
+    const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')
+    expect(styles).toEqual([
+      `background-color: rgba(${rgb}, 0.15); color: rgb(${rgb}); opacity: 1;`,
+      `background-color: rgba(${rgb}, 0.15); color: rgb(${rgb}); opacity: 0.4;`,
+    ])
   })
 })

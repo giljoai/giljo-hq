@@ -678,135 +678,6 @@ describe('WebSocket V2 Store - Error Handling', () => {
   })
 })
 
-describe('WebSocket V2 Store - Subscription Management', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    setActivePinia(createPinia())
-    MockWebSocket.reset()
-  })
-
-  afterEach(async () => {
-    const store = useWebSocketStore()
-    if (store.isConnected || store.isConnecting || store.isReconnecting) {
-      store.disconnect()
-    }
-    await vi.advanceTimersByTimeAsync(0)
-    vi.runAllTimers()
-    await vi.advanceTimersByTimeAsync(0)
-    vi.useRealTimers()
-  })
-
-  it('test_subscribe_sends_subscribe_message', async () => {
-    const store = useWebSocketStore()
-
-    await store.connect()
-    await vi.advanceTimersByTimeAsync(0)
-
-    MockWebSocket.sentMessages = [] // Clear connection messages
-
-    store.subscribe('project', '123')
-
-    expect(MockWebSocket.sentMessages).toContainEqual({
-      type: 'subscribe',
-      entity_type: 'project',
-      entity_id: '123'
-    })
-  })
-
-  it('test_unsubscribe_sends_unsubscribe_message', async () => {
-    const store = useWebSocketStore()
-
-    await store.connect()
-    await vi.advanceTimersByTimeAsync(0)
-
-    store.subscribe('agent', '456')
-    MockWebSocket.sentMessages = [] // Clear
-
-    store.unsubscribe('agent', '456')
-
-    expect(MockWebSocket.sentMessages).toContainEqual({
-      type: 'unsubscribe',
-      entity_type: 'agent',
-      entity_id: '456'
-    })
-  })
-
-  it('test_subscriptions_are_tracked', async () => {
-    const store = useWebSocketStore()
-
-    await store.connect()
-    await vi.advanceTimersByTimeAsync(0)
-
-    store.subscribe('project', '1')
-    store.subscribe('agent', '2')
-    store.subscribe('task', '3')
-
-    expect(store.subscriptions).toContain('project:1')
-    expect(store.subscriptions).toContain('agent:2')
-    expect(store.subscriptions).toContain('task:3')
-  })
-
-  it('test_resubscribe_on_reconnect', async () => {
-    const store = useWebSocketStore()
-
-    await store.connect()
-    await vi.advanceTimersByTimeAsync(0)
-
-    // Create subscriptions
-    store.subscribe('project', 'proj1')
-    store.subscribe('agent', 'agent1')
-
-    MockWebSocket.sentMessages = []
-
-    // Disconnect and reconnect
-    const wsInstance = MockWebSocket.instances[0]
-    wsInstance.close(1006, 'Connection lost')
-    await vi.advanceTimersByTimeAsync(0)
-
-    await vi.advanceTimersByTimeAsync(1000)
-    await vi.advanceTimersByTimeAsync(0)
-
-    // Should re-send subscribe messages
-    const subscribeMessages = MockWebSocket.sentMessages.filter(
-      msg => msg.type === 'subscribe'
-    )
-
-    expect(subscribeMessages).toContainEqual({
-      type: 'subscribe',
-      entity_type: 'project',
-      entity_id: 'proj1'
-    })
-    expect(subscribeMessages).toContainEqual({
-      type: 'subscribe',
-      entity_type: 'agent',
-      entity_id: 'agent1'
-    })
-  })
-
-  it('test_convenience_methods_subscribeToProject_and_subscribeToAgent', async () => {
-    const store = useWebSocketStore()
-
-    await store.connect()
-    await vi.advanceTimersByTimeAsync(0)
-
-    MockWebSocket.sentMessages = []
-
-    store.subscribeToProject('project-123')
-    store.subscribeToAgent('agent-456')
-
-    expect(MockWebSocket.sentMessages).toContainEqual({
-      type: 'subscribe',
-      entity_type: 'project',
-      entity_id: 'project-123'
-    })
-    expect(MockWebSocket.sentMessages).toContainEqual({
-      type: 'subscribe',
-      entity_type: 'agent',
-      entity_id: 'agent-456'
-    })
-  })
-})
-
 describe('WebSocket V2 Store - Connection Listeners', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -933,19 +804,18 @@ describe('WebSocket V2 Store - Debug & Stats', () => {
     vi.useRealTimers()
   })
 
-  it('test_getConnectionInfo_returns_comprehensive_state', async () => {
+  it('test_getDebugInfo_returns_connection_state', async () => {
     const store = useWebSocketStore()
 
     await store.connect()
     await vi.advanceTimersByTimeAsync(0)
 
-    const info = store.getConnectionInfo()
+    const info = store.getDebugInfo()
 
     expect(info).toHaveProperty('state')
     expect(info).toHaveProperty('clientId')
     expect(info).toHaveProperty('reconnectAttempts')
     expect(info).toHaveProperty('messageQueueSize')
-    expect(info).toHaveProperty('subscriptionsCount')
     expect(info).toHaveProperty('stats')
   })
 
@@ -960,7 +830,6 @@ describe('WebSocket V2 Store - Debug & Stats', () => {
     expect(debugInfo).toHaveProperty('isConnected')
     expect(debugInfo).toHaveProperty('isConnecting')
     expect(debugInfo).toHaveProperty('wsUrl')
-    expect(debugInfo).toHaveProperty('subscriptions')
   })
 
   it('test_setDebugMode_enables_debug_logging', () => {
@@ -990,7 +859,7 @@ describe('WebSocket V2 Store - Debug & Stats', () => {
     wsInstance.simulateMessage({ type: 'event1' })
     wsInstance.simulateMessage({ type: 'event2' })
 
-    const info = store.getConnectionInfo()
+    const info = store.getDebugInfo()
     expect(info.stats.messagesSent).toBeGreaterThanOrEqual(2)
     expect(info.stats.messagesReceived).toBeGreaterThanOrEqual(2)
   })

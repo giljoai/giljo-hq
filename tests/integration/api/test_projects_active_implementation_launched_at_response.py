@@ -37,7 +37,9 @@ class _FakeQuery:
         self._detail = detail
         self.last_product_id: str | None = "UNCALLED"
 
-    async def get_active_projects(self, product_id: str | None = None) -> list[ActiveProjectDetail]:
+    async def get_active_projects(
+        self, product_id: str | None = None, include_unreviewed: bool = False
+    ) -> list[ActiveProjectDetail]:
         self.last_product_id = product_id
         return [self._detail] if self._detail is not None else []
 

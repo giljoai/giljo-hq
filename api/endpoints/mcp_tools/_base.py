@@ -94,7 +94,7 @@ MCP_HEAVY_TOOL_META: dict[str, int] = {"anthropic/maxResultSizeChars": MCP_MAX_R
 GIT_COMMITS_DESC = (
     "Commits from this project's branch. Each entry needs a non-empty title. Pass "
     "{sha, message, author?, pr_url?} dicts, or tab-separated '<sha>\\t<subject>\\t<author>' "
-    "lines from: git log --format='%H%x09%s%x09%an' <base>..HEAD"
+    "lines from: git log --format='%H%x09%s%x09%an' <base>..HEAD. [] means checked, none to report."
 )
 
 CURSOR_DESC = (
@@ -371,27 +371,33 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         logger.exception("MCP tool dispatch '%s' raised an unexpected error", method_name)
         raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
 
-    job_id = kwargs.get("job_id")
-    if job_id and should_run("mcp_posthooks", job_id, _POSTHOOK_DEBOUNCE_SECONDS):
-        try:
-            from api.app_state import state as app_state
-            from giljo_mcp.services.heartbeat import touch_heartbeat
-            from giljo_mcp.services.silence_detector import auto_clear_silent
+    from api.app_state import state as app_state
+    from api.endpoints.mcp_tools._silence_scope import stale_board_line
 
-            ws_manager = getattr(app_state, "websocket_manager", None)
+    job_id = kwargs.get("job_id")
+    if job_id and app_state.db_manager is None:
+        logger.warning("post-hooks skipped for job_id=%s: db_manager not initialised", job_id)
+    elif job_id and should_run("mcp_posthooks", job_id, _POSTHOOK_DEBOUNCE_SECONDS):
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from giljo_mcp.services.heartbeat import touch_heartbeat
+        from giljo_mcp.services.silence_detector import auto_clear_silent
+
+        ws_manager = getattr(app_state, "websocket_manager", None)
+        try:
             async with app_state.db_manager.get_session_async() as db:
                 if method_name in SILENCE_CLEARING_TOOLS:
                     try:
                         await auto_clear_silent(db, job_id, ws_manager, tenant_key=tenant_key)
-                    except (OSError, RuntimeError, ValueError, TypeError, AttributeError, KeyError):
-                        logger.warning("auto_clear_silent failed for job_id=%s (non-blocking)", job_id)
+                    except SQLAlchemyError:
+                        logger.warning("auto_clear_silent failed for job_id=%s (non-blocking)", job_id, exc_info=True)
 
                 try:
                     await touch_heartbeat(db, job_id, tenant_key=tenant_key)
-                except (OSError, RuntimeError, ValueError, TypeError, AttributeError, KeyError):
-                    logger.debug("heartbeat update failed for job_id=%s (non-blocking)", job_id)
-        except (OSError, RuntimeError, ValueError, TypeError, AttributeError, KeyError):
-            logger.debug("post-hooks failed for job_id=%s (non-blocking)", job_id)
+                except SQLAlchemyError:
+                    logger.warning("heartbeat update failed for job_id=%s (non-blocking)", job_id, exc_info=True)
+        except SQLAlchemyError:
+            logger.warning("post-hooks failed for job_id=%s (non-blocking)", job_id, exc_info=True)
 
     if isinstance(result, BaseModel):
         result = result.model_dump(mode="json")
@@ -401,5 +407,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         if not isinstance(meta, dict):
             meta = {}
         meta["skills_version"] = _SKILLS_VERSION
+        if board := await stale_board_line(tenant_key, method_name, kwargs):
+            meta["board"] = board
         result["_meta"] = meta
     return result

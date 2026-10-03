@@ -24,12 +24,12 @@ describe('statusConfig.js', () => {
   });
 
   describe('getStatusLabel with awaiting_user', () => {
-    it('returns Decision Required for awaiting_user', () => {
-      expect(getStatusLabel('awaiting_user')).toBe('Decision Required');
+    it('returns Needs decision for awaiting_user', () => {
+      expect(getStatusLabel('awaiting_user')).toBe('Needs decision');
     });
 
-    it('returns Needs Input for plain blocked agent', () => {
-      expect(getStatusLabel('blocked')).toBe('Needs Input');
+    it('returns Blocked for plain blocked agent', () => {
+      expect(getStatusLabel('blocked')).toBe('Blocked');
     });
 
     it('returns normal label for other statuses', () => {

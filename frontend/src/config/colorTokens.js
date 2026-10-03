@@ -33,5 +33,3 @@ export const COLOR_SUCCESS_SETUP = '#6bcf7f'
 
 
 export const COLOR_CARD_GIT = '#90CAF9'
-
-export const COLOR_CARD_SERENA = '#CE93D8'

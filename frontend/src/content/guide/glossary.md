@@ -33,7 +33,7 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Chain project** | Several projects linked together and run one after another under a single overarching goal, coordinated by the conductor — often just called "a chain." Holds 2 to 5 of your own projects. See the **Chain Projects** chapter. |
+| **Chain project** | Several projects linked together and run one after another under a single overarching goal, coordinated by the conductor — often just called "a chain." Holds 2 to 10 of your own projects. See the **Chain Projects** chapter. |
 | **Linking** | The act of attaching projects together into a chain, from the Projects list or the Roadmap. |
 | **Chain mission** | The overarching goal for a whole chain — the single objective all the linked projects serve together, distinct from each project's own per-project mission. Shown as **"Chain goal"** in the chain's group on the Jobs board. |
 

@@ -164,6 +164,14 @@ export function parseErrorResponse(error) {
   }
 }
 
+export async function fetchResponseError(response) {
+  const data = await response.json().catch(() => ({}))
+  return Object.assign(new Error(`HTTP ${response.status}`), {
+    isAxiosError: true,
+    response: { status: response.status, data },
+  })
+}
+
 export default {
   getErrorMessage,
   parseErrorResponse,

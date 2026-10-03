@@ -73,15 +73,8 @@ function isSameTenant(payload) {
 
 // eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported in tests/stores/websocketEventRouter.*.spec.js (outside src/)
 export function defaultShouldRoute(type, payload) {
-  const currentTenantKey = useUserStore()?.currentUser?.tenant_key
-
-  if (!currentTenantKey) {
-    return true
-  }
-
-  if (payload?.tenant_key && payload.tenant_key !== currentTenantKey) {
-    return false
-  }
+  if (!useUserStore()?.currentUser?.tenant_key) return true
+  if (!isSameTenant(payload)) return false
 
   if (PROJECT_SCOPED_EVENTS.has(type)) {
     const projectTabsStore = useProjectTabsStore()
@@ -183,8 +176,7 @@ export function routeGlobalActivityEvent(rawEvent, { storeRegistry = STORE_REGIS
   if (type === 'agent:status_changed' && (payload?.user_approval_id || payload?.decided_option_id)) {
     const approvalsStore = storeRegistry?.approvals?.() ?? useApprovalsStore()
     approvalsStore.handleStatusEvent(payload).catch((error) => {
-      // eslint-disable-next-line no-console
-      console.debug('[websocketEventRouter] global-activity approvals refresh failed:', error?.message)
+      console.warn('[websocketEventRouter] global-activity approvals refresh failed:', error)
     })
   }
 
@@ -219,7 +211,6 @@ export function routeProductActivityEvent(rawEvent, { storeRegistry = STORE_REGI
 }
 
 let isInitialized = false
-const unregister = []
 
 export function initWebsocketEventRouter({
   wsStore = null,
@@ -234,46 +225,38 @@ export function initWebsocketEventRouter({
   const resolvedWsStore = wsStore || useWebSocketStore()
   const resolvedShouldRoute = shouldRoute || defaultShouldRoute
 
-  unregister.push(
-    resolvedWsStore.on('*', (event) =>
-      routeWebsocketEvent(event, {
-        eventMap,
-        storeRegistry,
-        shouldRoute: resolvedShouldRoute,
-      }).catch((error) => {
+  resolvedWsStore.on('*', (event) =>
+    routeWebsocketEvent(event, {
+      eventMap,
+      storeRegistry,
+      shouldRoute: resolvedShouldRoute,
+    }).catch((error) => {
 
-        console.error('[websocketEventRouter] Unhandled routing error:', error)
-      }),
-    ),
-  )
-
-  unregister.push(
-    resolvedWsStore.on('*', (event) => {
-      try {
-        routeGlobalActivityEvent(event, { storeRegistry })
-      } catch (error) {
-        console.error('[websocketEventRouter] Unhandled global-activity routing error:', error)
-      }
+      console.error('[websocketEventRouter] Unhandled routing error:', error)
     }),
   )
 
-  unregister.push(
-    resolvedWsStore.on('*', (event) => {
-      try {
-        routeProductActivityEvent(event, { storeRegistry })
-      } catch (error) {
-        console.error('[websocketEventRouter] Unhandled product-activity routing error:', error)
-      }
-    }),
-  )
+  resolvedWsStore.on('*', (event) => {
+    try {
+      routeGlobalActivityEvent(event, { storeRegistry })
+    } catch (error) {
+      console.error('[websocketEventRouter] Unhandled global-activity routing error:', error)
+    }
+  })
 
-  unregister.push(
-    resolvedWsStore.onConnectionChange((connectionEvent) => {
-      if (connectionEvent?.state === 'connected' && connectionEvent?.isReconnect) {
-        return runReconnectResyncs()
-      }
-    }),
-  )
+  resolvedWsStore.on('*', (event) => {
+    try {
+      routeProductActivityEvent(event, { storeRegistry })
+    } catch (error) {
+      console.error('[websocketEventRouter] Unhandled product-activity routing error:', error)
+    }
+  })
+
+  resolvedWsStore.onConnectionChange((connectionEvent) => {
+    if (connectionEvent?.state === 'connected' && connectionEvent?.isReconnect) {
+      return runReconnectResyncs()
+    }
+  })
 
   isInitialized = true
 }

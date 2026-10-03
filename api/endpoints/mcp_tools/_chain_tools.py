@@ -10,10 +10,12 @@ from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
+    MCP_ID_MAX,
     MCP_MISSION_MAX,
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._schema_helpers import nullable_enum_schema
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
@@ -31,7 +33,7 @@ from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 )
 async def link_projects(
     project_ids: Annotated[
-        list[str],
+        list[Annotated[str, Field(max_length=MCP_ID_MAX)]],
         Field(
             description=(
                 "The projects to link, as ids, in the order they should run. At least two, "
@@ -50,7 +52,7 @@ async def link_projects(
         ),
     ] = None,
     ordered: Annotated[
-        list[str] | None,
+        list[Annotated[str, Field(max_length=MCP_ID_MAX)]] | None,
         Field(
             description=(
                 "Only if the run order differs from the order of project_ids: the same ids, "
@@ -61,7 +63,7 @@ async def link_projects(
     execution_mode: Annotated[
         str | None,
         Field(
-            json_schema_extra={"enum": ["subagent", "multi_terminal"]},
+            json_schema_extra=nullable_enum_schema(["subagent", "multi_terminal"]),
             description=(
                 "How the work runs: 'subagent' (this session drives the worker agents itself, "
                 "the usual choice) or 'multi_terminal' (a separate terminal per agent)."
@@ -99,7 +101,7 @@ async def link_projects(
     annotations=_tool_hints("unlink_projects", destructive=True),
 )
 async def unlink_projects(
-    run_id: Annotated[str, Field(description="The id of the linked group, from link_projects.")],
+    run_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The id of the linked group, from link_projects.")],
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Cancel a linked run, releasing its not-yet-run members (BE-9554).

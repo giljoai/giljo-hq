@@ -147,10 +147,6 @@ def generate_tenant_key(project_name: str | None = None) -> str:
     return TenantManager.generate_tenant_key(project_name)
 
 
-def validate_tenant_key(tenant_key: str | None) -> bool:
-    return TenantManager.validate_tenant_key(tenant_key)
-
-
 def get_current_tenant() -> str | None:
     return TenantManager.get_current_tenant()
 

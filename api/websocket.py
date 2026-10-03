@@ -13,9 +13,9 @@ from uuid import uuid4
 
 import asyncpg
 import websockets.exceptions
-from fastapi import HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.exceptions import WebSocketException
 
-from api.auth_utils import check_subscription_permission
 from api.broker.base import WebSocketBrokerMessage, WebSocketEventBroker
 from giljo_mcp.events.schemas import EventFactory, bound_event_message
 from giljo_mcp.logging import ErrorCode
@@ -25,6 +25,7 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 _WS_SEND_TIMEOUT_SECONDS = 5
+_MAX_CLIENT_ID_LENGTH = 128
 
 
 class WebSocketManager:
@@ -32,8 +33,6 @@ class WebSocketManager:
     def __init__(self):
         self.active_connections: dict[str, WebSocket] = {}
         self.auth_contexts: dict[str, dict[str, Any]] = {}
-        self.subscriptions: dict[str, set[str]] = {}
-        self.entity_subscribers: dict[str, set[str]] = {}
         self.tenant_connections: dict[str, set[str]] = {}
         self._background_tasks: set[asyncio.Task] = set()
         self._event_broker: WebSocketEventBroker | None = None
@@ -167,7 +166,7 @@ class WebSocketManager:
             try:
                 await asyncio.wait_for(websocket.send_text(payload), timeout=_WS_SEND_TIMEOUT_SECONDS)
                 return (client_id, True)
-            except (RuntimeError, ValueError, KeyError, TimeoutError, OSError) as e:
+            except (RuntimeError, ValueError, KeyError, TimeoutError, OSError, WebSocketDisconnect) as e:
                 logger.warning(
                     "websocket_send_failed error_code=%s client_id=%s tenant_key=%s event_type=%s error_message=%s",
                     ErrorCode.WS_MESSAGE_SEND_FAILED.value,
@@ -203,7 +202,7 @@ class WebSocketManager:
                         origin=self._broker_origin,
                     )
                 )
-            except (RuntimeError, ValueError, KeyError, asyncpg.PostgresError) as e:
+            except (RuntimeError, ValueError, KeyError, OSError, asyncpg.PostgresError, asyncpg.InterfaceError) as e:
                 logger.warning(
                     "websocket_broker_publish_failed error_code=%s tenant_key=%s event_type=%s error_message=%s",
                     ErrorCode.WS_BROADCAST_FAILED.value,
@@ -234,17 +233,17 @@ class WebSocketManager:
         return await close_tenant_sockets(self, tenant_key, reason=reason, publish_to_broker=publish_to_broker)
 
     async def connect(self, websocket: WebSocket, client_id: str, auth_context: dict[str, Any] | None = None):
+        if len(client_id) > _MAX_CLIENT_ID_LENGTH:
+            raise WebSocketException(code=1008, reason="Invalid client id")
         existing = self.active_connections.get(client_id)
-
-        old_tenant = self.auth_contexts.get(client_id, {}).get("tenant_key")
-        if old_tenant and old_tenant != (auth_context or {}).get("tenant_key"):
-            self._deindex_tenant_connection(client_id, old_tenant)
+        new_tenant = (auth_context or {}).get("tenant_key")
+        if existing is not None and self.auth_contexts.get(client_id, {}).get("tenant_key") != new_tenant:
+            raise WebSocketException(code=1008, reason="Client id in use")
 
         self.active_connections[client_id] = websocket
         self.auth_contexts[client_id] = auth_context or {}
-        self.subscriptions[client_id] = set()
 
-        self._index_tenant_connection(client_id, (auth_context or {}).get("tenant_key"))
+        self._index_tenant_connection(client_id, new_tenant)
 
         if existing is not None and self._unwrap_websocket_connection(existing) is not websocket:
             logger.info("Superseding pre-existing WebSocket for client_id=%s on reconnect", client_id)
@@ -273,53 +272,7 @@ class WebSocketManager:
         if client_id in self.auth_contexts:
             del self.auth_contexts[client_id]
 
-        if client_id in self.subscriptions:
-            for entity_key in self.subscriptions[client_id]:
-                if entity_key in self.entity_subscribers:
-                    self.entity_subscribers[entity_key].discard(client_id)
-                    if not self.entity_subscribers[entity_key]:
-                        del self.entity_subscribers[entity_key]
-            del self.subscriptions[client_id]
-
         logger.info(f"WebSocket disconnected: {client_id}")
-
-    async def subscribe(self, client_id: str, entity_type: str, entity_id: str, tenant_key: str | None = None):
-
-        auth_context = self.auth_contexts.get(client_id, {})
-        if not check_subscription_permission(auth_context, entity_type, entity_id, tenant_key):
-            logger.warning(
-                "unauthorized_subscription_attempt error_code=%s client_id=%s entity_type=%s entity_id=%s tenant_key=%s",
-                ErrorCode.WS_AUTHENTICATION_FAILED.value,
-                client_id,
-                entity_type,
-                entity_id,
-                tenant_key,
-            )
-            raise HTTPException(status_code=403, detail="Not authorized to subscribe to this entity")
-
-        entity_key = f"{entity_type}:{entity_id}"
-
-        if client_id in self.subscriptions:
-            self.subscriptions[client_id].add(entity_key)
-
-        if entity_key not in self.entity_subscribers:
-            self.entity_subscribers[entity_key] = set()
-        self.entity_subscribers[entity_key].add(client_id)
-
-        logger.debug(f"Client {client_id} subscribed to {entity_key}")
-
-    async def unsubscribe(self, client_id: str, entity_type: str, entity_id: str):
-        entity_key = f"{entity_type}:{entity_id}"
-
-        if client_id in self.subscriptions:
-            self.subscriptions[client_id].discard(entity_key)
-
-        if entity_key in self.entity_subscribers:
-            self.entity_subscribers[entity_key].discard(client_id)
-            if not self.entity_subscribers[entity_key]:
-                del self.entity_subscribers[entity_key]
-
-        logger.debug(f"Client {client_id} unsubscribed from {entity_key}")
 
     async def send_json(self, data: dict, client_id: str):
         if client_id in self.active_connections:
@@ -381,38 +334,8 @@ class WebSocketManager:
             exclude_client=exclude_client,
         )
 
-    async def notify_entity_update(self, entity_type: str, entity_id: str, update_data: dict):
-        entity_key = f"{entity_type}:{entity_id}"
-
-        if entity_key in self.entity_subscribers:
-            message = {"type": "entity_update", "entity_type": entity_type, "entity_id": entity_id, "data": update_data}
-
-            disconnected = []
-            for client_id in list(self.entity_subscribers[entity_key]):
-                websocket = self.active_connections.get(client_id)
-                if websocket is None:
-                    continue
-                try:
-                    await asyncio.wait_for(websocket.send_json(message), timeout=_WS_SEND_TIMEOUT_SECONDS)
-                except Exception as _exc:
-                    logger.exception(
-                        "websocket_notify_error error_code=%s client_id=%s",
-                        ErrorCode.WS_MESSAGE_SEND_FAILED.value,
-                        client_id,
-                    )
-                    disconnected.append(client_id)
-
-            for client_id in disconnected:
-                self.disconnect(client_id)
-
     def get_connection_count(self) -> int:
         return len(self.active_connections)
-
-    def get_subscription_count(self, entity_type: str | None = None, entity_id: str | None = None) -> int:
-        if entity_type and entity_id:
-            entity_key = f"{entity_type}:{entity_id}"
-            return len(self.entity_subscribers.get(entity_key, []))
-        return sum(len(subs) for subs in self.subscriptions.values())
 
 
 

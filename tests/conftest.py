@@ -33,6 +33,8 @@ except ImportError:
 
 os.environ.setdefault("DB_PASSWORD", "test-password")
 os.environ.setdefault("JWT_SECRET", "test_secret_key")
+if os.environ.get("GILJO_MODE", "").strip().lower() == "saas":
+    os.environ.setdefault("GILJO_PUBLIC_URL", "https://app.example.test")
 
 from giljo_mcp.models import Product  # noqa: E402 -- must follow DATABASE_URL setup above
 from giljo_mcp.services.project_service import ProjectService  # noqa: E402
@@ -41,6 +43,7 @@ from giljo_mcp.tenant import TenantManager  # noqa: E402
 from tests.fixtures.base_fixtures import (  # noqa: E402
     db_manager,
     db_session,
+    restored_app_state,
     restored_global_client_resolver,
     restored_global_protected_surface_patterns,
     restored_global_terms_accepted_check,
@@ -199,6 +202,12 @@ def _general_rate_limit_test_bypass(request):
 
 
 @pytest.fixture(autouse=True)
+def _restore_app_state():
+    with restored_app_state():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _restore_global_wake_relay():
     with restored_global_wake_relay():
         yield
@@ -309,7 +318,7 @@ async def test_product(db_session, test_tenant_key):
 
 
 def pytest_configure(config):
-    import os
+    config.args[:] = sorted(config.args, key=lambda arg: Path(arg.split("::")[0]).parent.as_posix())
 
     db_url = os.environ.get("DATABASE_URL", "")
     if db_url and "/giljo_mcp" in db_url and "/giljo_mcp_test" not in db_url:

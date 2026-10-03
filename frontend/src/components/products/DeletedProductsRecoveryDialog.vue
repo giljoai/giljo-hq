@@ -43,7 +43,7 @@
                 title="Restore product"
                 aria-label="Restore deleted product"
                 data-testid="product-recover-restore"
-                @click="handleRestore(product.id)"
+                @click="emit('restore', product.id)"
               ></v-btn>
               <v-btn
                 icon="mdi-delete-forever"
@@ -55,7 +55,7 @@
                 title="Permanently delete product"
                 aria-label="Permanently delete product"
                 data-testid="product-recover-purge"
-                @click="handlePurge(product.id)"
+                @click="emit('purge', product.id)"
               ></v-btn>
             </div>
           </template>
@@ -72,7 +72,7 @@
 
     <template #actions>
       <v-spacer />
-      <v-btn variant="text" data-testid="product-recover-close" @click="closeDialog">Close</v-btn>
+      <v-btn variant="text" data-testid="product-recover-close" @click="emit('update:modelValue', false)">Close</v-btn>
       <v-btn
         color="error"
         variant="flat"
@@ -80,7 +80,7 @@
         :disabled="deletedProducts.length === 0 || purgingAll"
         :loading="purgingAll"
         data-testid="product-recover-purge-all"
-        @click="handlePurgeAll"
+        @click="emit('purge-all')"
       >
         Delete All
       </v-btn>
@@ -121,20 +121,4 @@ const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
 })
-
-const closeDialog = () => {
-  emit('update:modelValue', false)
-}
-
-const handleRestore = (productId) => {
-  emit('restore', productId)
-}
-
-const handlePurge = (productId) => {
-  emit('purge', productId)
-}
-
-const handlePurgeAll = () => {
-  emit('purge-all')
-}
 </script>

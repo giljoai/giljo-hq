@@ -775,10 +775,18 @@ async def test_be9332_broadcast_failure_does_not_fail_staging(
     lifecycle_mcp_client, ws_spy, db_session, primary_tenant_key, monkeypatch
 ):
 
-    async def _boom(**_kwargs):
-        raise RuntimeError("simulated WebSocket failure")
+    from unittest.mock import AsyncMock, MagicMock
 
-    monkeypatch.setattr(ws_spy, "broadcast_to_tenant", _boom)
+    from fastapi import WebSocketDisconnect
+
+    from api.websocket import WebSocketManager
+
+    dead = WebSocketManager()
+    socket = MagicMock()
+    socket.send_text = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+    dead.active_connections["dead-client"] = socket
+    dead.tenant_connections[primary_tenant_key] = {"dead-client"}
+    monkeypatch.setattr(ws_spy, "broadcast_to_tenant", dead.broadcast_to_tenant)
 
     new_client, _switch = lifecycle_mcp_client
     seeded = await _seed_product_project(db_session, primary_tenant_key)

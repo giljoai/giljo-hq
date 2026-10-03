@@ -94,10 +94,10 @@ describe('ProjectCreateEditDialog - validate-on-click (silent-disable regression
     })
   })
 
-  it('the Create button is not statically disabled (clickable so validation can surface)', async () => {
+  it('the Save button is not statically disabled (clickable so validation can surface)', async () => {
     const wrapper = mountDialog()
     await flushPromises()
-    const createBtn = wrapper.findAll('button').find((b) => b.text().includes('Create'))
+    const createBtn = wrapper.findAll('button').find((b) => b.text() === 'Save')
     expect(createBtn).toBeTruthy()
     expect(createBtn.attributes('disabled')).toBeFalsy()
   })

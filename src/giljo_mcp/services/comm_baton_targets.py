@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.exceptions import CodedRefusalError
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.services.comm_author_identity import registered_id_for_label
 
@@ -18,6 +19,19 @@ RESERVED_BATON_TARGETS = frozenset({"all", "none"})
 
 BATON_TARGET_NOT_A_PARTICIPANT = "BATON_TARGET_NOT_A_PARTICIPANT"
 TARGET_IS_A_DISPLAY_NAME = "TARGET_IS_A_DISPLAY_NAME"
+
+
+class HubTargetRefusedError(CodedRefusalError):
+
+    default_status_code = 409
+
+    def __init__(self, refusal: dict[str, Any]):
+        super().__init__(refusal["hint"], error_code=refusal["error"], context=refusal)
+        self.code = refusal["error"]
+        self.refusal = refusal
+
+    def as_refusal(self) -> dict[str, Any]:
+        return dict(self.refusal)
 
 
 def _display_name_rejection(

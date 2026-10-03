@@ -1,4 +1,3 @@
-// eslint-allow giljo-internal/no-manual-api-url-composition
 import configService from '@/services/configService'
 import { getApiBaseUrl, getWsBaseUrl } from '@/composables/useApiUrl'
 
@@ -18,14 +17,7 @@ export async function initializeApiConfig() {
       security: backendConfig.security,
     }
 
-    const resolvedBase = getApiBaseUrl()
-    const apiProtocol =
-      runtimeConfig.api?.protocol || (typeof window !== 'undefined' && window.location?.protocol === 'https:' ? 'https' : 'http')
-    const backendBase =
-      runtimeConfig.api?.host && runtimeConfig.api?.port
-        ? `${apiProtocol}://${runtimeConfig.api.host}:${runtimeConfig.api.port}`
-        : ''
-    const newBaseURL = resolvedBase || backendBase
+    const newBaseURL = getApiBaseUrl()
 
     API_CONFIG.REST_API.baseURL = newBaseURL
     API_CONFIG.WEBSOCKET.url = runtimeConfig.websocket?.url || getWsBaseUrl() || DEFAULT_WS_URL

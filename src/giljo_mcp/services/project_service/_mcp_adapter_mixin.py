@@ -107,14 +107,11 @@ class McpAdapterMixin:
         )
 
         if ws:
-            try:
-                await ws.broadcast_to_tenant(
-                    tenant_key=effective_tenant_key,
-                    event_type="project:created",
-                    data={"project_id": str(project.id), "name": project.name, "product_id": product_id},
-                )
-            except (RuntimeError, ValueError, OSError) as e:
-                logger.warning(f"Failed to broadcast project:created event: {e}")
+            await ws.broadcast_to_tenant(
+                tenant_key=effective_tenant_key,
+                event_type="project:created",
+                data={"project_id": str(project.id), "name": project.name, "product_id": product_id},
+            )
 
         response: dict[str, Any] = {
             "success": True,

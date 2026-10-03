@@ -37,7 +37,7 @@ class GitToggleRequest(BaseModel):
 class GitSettingsRequest(BaseModel):
     """Request to update Git advanced settings.
 
-    BE-9148: ``include_commit_history``/``branch_strategy`` were retired (never
+    ``include_commit_history``/``branch_strategy`` were retired (never
     consumed). A client still POSTing them is tolerated — Pydantic ignores the
     unknown fields and the request succeeds unchanged.
     """
@@ -91,15 +91,12 @@ async def toggle_git_integration(
 
     logger.info("Git integration toggled to %s by user %s", sanitize(request.enabled), sanitize(current_user.username))
 
-    try:
-        await ws_dep.broadcast_to_tenant(
-            tenant_key=tenant_key,
-            event_type="product:git:settings:changed",
-            data={"enabled": request.enabled, "settings": git_settings},
-        )
-        logger.info("[WEBSOCKET] Broadcasted git integration change to tenant %s", sanitize(tenant_key))
-    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-        logger.warning("[WEBSOCKET] Failed to broadcast git integration update: %s", sanitize(str(ws_error)))
+    await ws_dep.broadcast_to_tenant(
+        tenant_key=tenant_key,
+        event_type="product:git:settings:changed",
+        data={"enabled": request.enabled, "settings": git_settings},
+    )
+    logger.info("[WEBSOCKET] Broadcasted git integration change to tenant %s", sanitize(tenant_key))
 
     return GitToggleResponse(
         success=True,

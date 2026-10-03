@@ -187,6 +187,43 @@ async def test_summary_mode_carries_one_response_level_hint(two_tenant_service_s
     assert all("next_action" not in row for row in response["tasks"])
 
 
+_HANDOVER_BODY = (
+    "## Verify before trusting\n- x -- check with: y\n\n"
+    "## Waiting on the operator\n- nothing\n\n## Cannot testify\n- nothing"
+)
+
+
+async def test_a_page_holding_an_open_handover_tells_the_successor_to_complete_it(two_tenant_service_setup):
+    tenant = two_tenant_service_setup["tenant_a"]
+    task_service = two_tenant_service_setup["task_service_a"]
+    await task_service.create_task_for_mcp(
+        title="IMP-9732 handover probe",
+        description=_HANDOVER_BODY,
+        task_type="HND",
+        tenant_key=tenant,
+        db_manager=two_tenant_service_setup["db_manager"],
+    )
+
+    response = await task_service.list_tasks_for_mcp(tenant_key=tenant, mode="summary")
+
+    assert na.TASK_HANDOVER_HINT in response["next_action"]["why"]
+
+
+async def test_a_page_of_ordinary_tasks_does_not_carry_the_handover_sentence(two_tenant_service_setup):
+    tenant = two_tenant_service_setup["tenant_a"]
+    task_service = two_tenant_service_setup["task_service_a"]
+    await task_service.create_task_for_mcp(
+        title="IMP-9732 ordinary probe",
+        description="",
+        tenant_key=tenant,
+        db_manager=two_tenant_service_setup["db_manager"],
+    )
+
+    response = await task_service.list_tasks_for_mcp(tenant_key=tenant, mode="summary")
+
+    assert na.TASK_HANDOVER_HINT not in response["next_action"]["why"]
+
+
 async def test_index_mode_stays_lean(two_tenant_service_setup):
     tenant = two_tenant_service_setup["tenant_a"]
     task_service = two_tenant_service_setup["task_service_a"]

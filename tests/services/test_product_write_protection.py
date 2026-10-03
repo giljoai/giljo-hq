@@ -300,7 +300,7 @@ class TestApiKeyTenantKeyConsistency:
         second_result = MagicMock()
         second_result.scalar_one_or_none.return_value = user
 
-        mock_db.execute = AsyncMock(side_effect=[first_result, second_result])
+        mock_db.execute = AsyncMock(side_effect=[first_result, second_result, MagicMock(), MagicMock()])
         mock_db.commit = AsyncMock()
 
         mock_request = MagicMock()
@@ -337,7 +337,7 @@ class TestApiKeyTenantKeyConsistency:
         second_result = MagicMock()
         second_result.scalar_one_or_none.return_value = None
 
-        mock_db.execute = AsyncMock(side_effect=[first_result, second_result])
+        mock_db.execute = AsyncMock(side_effect=[first_result, second_result, MagicMock(), MagicMock()])
         mock_db.commit = AsyncMock()
 
         mock_request = MagicMock()
@@ -376,7 +376,7 @@ class TestApiKeyTenantKeyConsistency:
         second_result = MagicMock()
         second_result.scalar_one_or_none.return_value = None
 
-        mock_db.execute = AsyncMock(side_effect=[first_result, second_result])
+        mock_db.execute = AsyncMock(side_effect=[first_result, second_result, MagicMock(), MagicMock()])
         mock_db.commit = AsyncMock()
 
         mock_request = MagicMock()

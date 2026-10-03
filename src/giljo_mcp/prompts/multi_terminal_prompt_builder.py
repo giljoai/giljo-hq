@@ -5,6 +5,7 @@
 
 
 from giljo_mcp.branding import MCP_ALIAS
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.platform_registry import Platform
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
@@ -19,7 +20,7 @@ _AGENT_SEED_TOOLS = (
     f"{_PREFIX}complete_job",
 )
 
-_TOOLSEARCH_HARNESS_TOOLS = frozenset({"claude", "claude-code"})
+_TOOLSEARCH_HARNESS_TOOLS = frozenset({"claude", HARNESS_CLAUDE_CODE})
 
 
 def build_agent_seed_lines(cli_tool: str, job_id: str) -> list[str]:
@@ -66,7 +67,7 @@ class MultiTerminalPromptBuilder:
             "# GiljoAI Implementation Phase - Orchestrator",
             "",
         ]
-        if tool == "claude-code":
+        if tool == HARNESS_CLAUDE_CODE:
             lines.extend(
                 [
                     "## STEP 0: TOOLSEARCH BOOTSTRAP (Claude Code only — first action)",
@@ -79,10 +80,10 @@ class MultiTerminalPromptBuilder:
                     "",
                 ]
             )
-        health_check_call = f"{_PREFIX}health_check()" if tool == "claude-code" else "health_check()"
+        health_check_call = f"{_PREFIX}health_check()" if tool == HARNESS_CLAUDE_CODE else "health_check()"
         get_job_mission_call = (
             f'{_PREFIX}get_job_mission(job_id="{orchestrator_id}")'
-            if tool == "claude-code"
+            if tool == HARNESS_CLAUDE_CODE
             else f'get_job_mission(job_id="{orchestrator_id}")'
         )
         lines.extend(

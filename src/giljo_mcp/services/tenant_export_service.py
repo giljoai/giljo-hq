@@ -95,6 +95,13 @@ def _fidelity_restore_order() -> list[str]:
     return capture_table_names()
 
 
+async def live_schema_head(session: AsyncSession) -> str:
+    if (await session.execute(text("SELECT to_regclass('alembic_version')"))).scalar() is None:
+        return "unknown"
+    heads = (await session.execute(text("SELECT version_num FROM alembic_version ORDER BY 1"))).scalars().all()
+    return ",".join(heads) or "unknown"
+
+
 class TenantExportService:
 
     def __init__(
@@ -135,6 +142,7 @@ class TenantExportService:
             )
 
         vision_entries = self._collect_vision_files(model_data.get("VisionDocument", []))
+        alembic_revision = await live_schema_head(self.db_session)
 
         zip_path = await asyncio.to_thread(
             self._write_zip,
@@ -142,6 +150,7 @@ class TenantExportService:
             model_data=model_data,
             vision_entries=vision_entries,
             model_counts=model_counts,
+            alembic_revision=alembic_revision,
             fidelity=fidelity,
         )
 
@@ -229,6 +238,7 @@ class TenantExportService:
         model_data: dict[str, list[dict[str, Any]]],
         vision_entries: list[tuple[str, Path]],
         model_counts: dict[str, int],
+        alembic_revision: str,
         fidelity: bool = False,
     ) -> Path:
         tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — closed below
@@ -277,6 +287,7 @@ class TenantExportService:
                 tenant_key=tenant_key,
                 model_counts=model_counts,
                 file_entries=file_entries,
+                alembic_revision=alembic_revision,
                 fidelity=fidelity,
             )
             manifest_blob = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
@@ -290,19 +301,10 @@ class TenantExportService:
         tenant_key: str,
         model_counts: dict[str, int],
         file_entries: list[dict[str, Any]],
+        alembic_revision: str,
         fidelity: bool = False,
     ) -> dict[str, Any]:
         from giljo_mcp import __version__ as _giljo_version
-
-        try:
-            from alembic.config import Config as AlembicConfig
-            from alembic.script import ScriptDirectory
-
-            cfg = AlembicConfig(str(Path.cwd() / "alembic.ini"))
-            script = ScriptDirectory.from_config(cfg)
-            head = script.get_current_head() or "unknown"
-        except Exception:  # noqa: BLE001 — boundary, optional metadata
-            head = "unknown"
 
         manifest: dict[str, Any] = {
             "schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -310,7 +312,7 @@ class TenantExportService:
             "exported_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "tenant_key": tenant_key,
             "giljo_mcp_version": _giljo_version,
-            "alembic_revision": head,
+            "alembic_revision": alembic_revision,
             "model_counts": model_counts,
             "models": {name: {"file": f"data/{name}.json", "count": count} for name, count in model_counts.items()},
             "files": file_entries,
@@ -358,21 +360,18 @@ class TenantExportService:
     ) -> None:
         if not self.websocket_manager:
             return
-        try:
-            event = EventFactory.tenant_envelope(
-                event_type="tenant:export_progress",
-                tenant_key=tenant_key,
-                data={
-                    "model": model,
-                    "current": current,
-                    "total": total,
-                    "records": records,
-                    "phase": phase,
-                },
-            )
-            await self.websocket_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as exc:
-            logger.debug("export progress emit failed (non-blocking): %s", exc)
+        event = EventFactory.tenant_envelope(
+            event_type="tenant:export_progress",
+            tenant_key=tenant_key,
+            data={
+                "model": model,
+                "current": current,
+                "total": total,
+                "records": records,
+                "phase": phase,
+            },
+        )
+        await self.websocket_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
 
 

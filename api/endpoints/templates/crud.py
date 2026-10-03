@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints._boundary_types import ID_MAX, IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import AuthorizationError, ProjectStateError, TemplateNotFoundError, ValidationError
 from giljo_mcp.models import AgentTemplate, User
@@ -30,10 +31,6 @@ def _is_system_managed_role(role: str | None) -> bool:
 
 
 def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
-    merged_content = template.system_instructions or ""
-    if template.user_instructions:
-        merged_content = f"{merged_content}\n\n{template.user_instructions}"
-
     return TemplateResponse(
         id=template.id,
         tenant_key=template.tenant_key,
@@ -67,7 +64,7 @@ def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
 
 @router.get("/{template_id}/profile.md", response_class=Response)
 async def download_template_profile(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -98,7 +95,7 @@ async def download_template_profile(
 
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -106,7 +103,6 @@ async def get_template(
     """
     Get template by ID for the current tenant.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.debug("User %s getting template %s", sanitize(current_user.username), sanitize(template_id))
 
@@ -123,9 +119,9 @@ async def list_templates(
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
-    role: str | None = Query(None, description="Filter by role"),
+    role: str | None = Query(None, max_length=ID_MAX, description="Filter by role"),
     is_active: bool | None = Query(None, description="Filter by active status"),
-    product_id: str | None = Query(None, description="Show only the agents this product owns"),
+    product_id: str | None = Query(None, max_length=ID_MAX, description="Show only the agents this product owns"),
 ) -> list[TemplateResponse]:
     """
     List agents for the current tenant.
@@ -151,10 +147,10 @@ async def create_template(
     """
     Create a new template.
 
-    Routes through ``TemplateService.create_template_from_request`` (BE-8000j) —
+    Routes through ``TemplateService.create_template_from_request`` —
     the owning service performs all validation, materialization, and the write.
     This endpoint only translates the service's domain exceptions into their HTTP
-    status codes: ``ValidationError`` -> 400, and (BE-9394) ``ProjectStateError`` ->
+    status codes: ``ValidationError`` -> 400, and ``ProjectStateError`` ->
     409 when a born-active template would exceed the active-slot cap. The update
     endpoint has always translated that same rejection to 409; without this arm the
     create-side refusal would surface as an unhandled 500.
@@ -176,7 +172,7 @@ async def create_template(
 
 @router.put("/{template_id}", response_model=TemplateResponse)
 async def update_template(
-    template_id: str,
+    template_id: IdPath,
     updates: TemplateUpdate,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
@@ -185,7 +181,7 @@ async def update_template(
     """
     Update an existing template.
 
-    Routes through ``TemplateService.update_template_from_request`` (BE-8000j) —
+    Routes through ``TemplateService.update_template_from_request`` —
     the owning service performs the guards, archive, active-limit check, and write.
     This endpoint translates the service's domain exceptions to their existing HTTP
     status codes and fires the (unchanged) real-time WebSocket event.
@@ -232,12 +228,12 @@ async def update_template(
 
 @router.delete("/{template_id}")
 async def delete_template(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
 ) -> dict:
-    """Soft-delete (trash) a template — BE-6137.
+    """Soft-delete (trash) a template.
 
     Stamps ``deleted_at`` so the template drops out of every live read.
     ``POST /{template_id}/restore`` restores it within 30 days.
@@ -245,9 +241,6 @@ async def delete_template(
     Guards preserved from the former hard-delete:
     - 404 if not found for this tenant
     - 403 if the role is system-managed
-
-    ``hard_delete_template`` is retained for the future permanent-purge path
-    (TSK-6132). It is no longer called from this default delete route.
     """
     try:
         tenant_key = current_user.tenant_key
@@ -281,11 +274,11 @@ async def delete_template(
 
 @router.post("/{template_id}/restore", response_model=TemplateResponse)
 async def recover_template(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     template_service: TemplateService = Depends(get_template_service),
 ) -> TemplateResponse:
-    """Restore a soft-deleted (trashed) template within the 30-day window — BE-6137.
+    """Restore a soft-deleted (trashed) template within the 30-day window.
 
     Clears ``deleted_at`` so the template re-enters every live read. Archives
     survive and re-surface automatically.
@@ -314,11 +307,11 @@ async def recover_template(
 
 @router.post("/import-defaults", response_model=dict)
 async def import_default_agent_templates(
-    product_id: str = Query(..., description="Product that will own the imported agents"),
+    product_id: str = Query(..., max_length=ID_MAX, description="Product that will own the imported agents"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Add the default agents to a product — additive only (FE-9203).
+    """Add the default agents to a product — additive only.
 
     Agents belong to a product, so this names the product that will own them.
     Existing agents are NEVER modified: a free default name is created as seeded,
@@ -350,7 +343,7 @@ async def import_default_agent_templates(
 
 @router.get("/stats/active-count", response_model=dict)
 async def get_active_count(
-    product_id: str = Query(..., description="Product whose roster is being measured"),
+    product_id: str = Query(..., max_length=ID_MAX, description="Product whose roster is being measured"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -358,7 +351,7 @@ async def get_active_count(
     """
     How many of this product's agent-role slots are in use.
 
-    BE-9610a: per product, because the budget exists so one orchestrator's roster
+    Per product, because the budget exists so one orchestrator's roster
     fits one context window, and a roster is assembled for one product. Counts
     distinct ROLES -- three copies of the same role share one slot, which is what
     the cap has always enforced.

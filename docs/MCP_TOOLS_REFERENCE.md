@@ -1,6 +1,6 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-09-02*
+*Last updated: 2026-10-02*
 
 ## Overview
 
@@ -24,12 +24,27 @@ Every tool carries one of three permission scopes:
 
 | Scope | Meaning | Count |
 |-------|---------|-------|
-| `mcp:read` | Read-only — fetches data, never mutates state. | 13 |
+| `mcp:read` | Reads. Fetches data without changing it, with one exception: `get_thread_history` with `mark_read=true` records your read position. | 13 |
 | `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 10 |
 | `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 26 |
 | **Total** | | **49** |
 
-Tools are organized by functional category below; each entry lists its scope.
+Every tool also carries MCP behaviour hints, which a client can use to decide when to
+ask you before a call runs. 12 tools are marked read-only: every `mcp:read` tool except
+`get_thread_history`, which is not, because of `mark_read`. 19 tools are marked
+destructive, meaning a call can overwrite or remove data you already have:
+`apply_context_tuning`, `complete_job`, `decide_approval`, `finalize_job`,
+`get_staging_instructions`, `giljo_setup`, `launch_implementation`, `post_to_thread`,
+`report_progress`, `save_roadmap`, `stage_project`, `unlink_projects`,
+`update_job_mission`, `update_product_context`, `update_project`,
+`update_project_mission`, `update_task`, `update_thread` and `write_project_closeout`.
+No tool is marked idempotent, and no tool is marked open-world: none of them contacts an
+outside service.
+
+Tools are organized by functional category below; each entry lists its scope. Where an
+entry states a limit (a maximum length, a maximum number of items, or a fixed set of
+allowed values), an argument that breaks it is refused with a `VALIDATION_ERROR` before
+the tool runs, and nothing is written.
 
 ### `next_action` on project and task reads
 
@@ -72,7 +87,7 @@ before creating or reading projects and tasks.
 
 ### create_project `mcp:write`
 
-**Purpose:** Create a new project, bound by default to the active product. `project_type`
+**Purpose:** Create a new project under the product you name. `project_type`
 plus `series_number` form a taxonomy serial such as `FE-0001`; the `suffix` enables
 chain steps (a/b/c). Unknown `project_type` values are rejected with the list of valid
 types. The project is created inactive; activate it from the dashboard. The response
@@ -86,31 +101,33 @@ names the product the project landed on.
 | series_number | int | No | Sequential number within the type series (0 = auto-assign). |
 | suffix | str | No | Chain-step suffix (e.g. `a`, `b`, `c`) sharing one `series_number`. |
 | bootstrap_template_vars | dict | No | Optional template variables for project bootstrap. Consumed only for `CTX` project types; ignored otherwise. |
-| product_id | str | No | Product UUID to bind the project to. Omit to use the active product — but the active product is shared, mutable state, so pass this explicitly when you know your product: another session, or the user switching products in the dashboard, changes the active product mid-session and an omitted `product_id` follows that change. |
+| product_id | str | No | Product UUID to bind the project to. Pass it whenever you know your product. Omitting it uses your default product only when your account has a single product; with several, the call is refused with `PRODUCT_AMBIGUOUS`, which lists your products, and nothing is created. An id that is not one of your own products is refused and nothing is created. |
 
 ---
 
 ### update_project `mcp:write`
 
 **Purpose:** Update project metadata (name, description, status, type, series
-positioning). Omitted fields remain unchanged.
+positioning, successor). Omitted fields remain unchanged.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | project_id | str | Yes | ID of the project to update. |
 | name | str | No | New project name. |
 | description | str | No | New description. |
-| status | str | No | New lifecycle status. Setting `completed` on a solo project runs the full archive lifecycle (deactivation, terminal-state selection from early_termination, completed_at stamping, agent closure) — the same sequence as the dashboard's Archive button. |
+| status | str | No | New lifecycle status: `active`, `inactive`, `parked`, `cancelled`, `completed` or `superseded`. Empty keeps the current one. `parked` sets a project aside without cancelling it. `completed` finishes a solo project and runs the full archive lifecycle, the same sequence as the dashboard's Archive button; it needs a closeout written first (see `force`). `superseded` requires `successor_project_id` in the same call. A project inside a running chain is finished by its conductor, not here. |
 | project_type | str | No | New taxonomy type abbreviation. |
 | series_number | int | No | New series number. |
 | suffix | str | No | New chain-step suffix. |
+| successor_project_id | str | No | The project that replaced this one's work. Required with `status="superseded"` (otherwise refused with `SUPERSEDE_REQUIRES_SUCCESSOR`) and meaningless without it. Must be an active, completed or inactive project. |
+| force | bool | No | Only meaningful with `status="completed"`. Without a closeout entry, finishing is refused with `CLOSEOUT_BLOCKED` naming what is outstanding; pass `true` to finish anyway, deliberately without a closeout record. Default `false`. |
 
 ---
 
 ### list_projects `mcp:read`
 
-**Purpose:** List projects for the active product with server-side filtering, search,
-and pagination. By default returns only active-lifecycle projects (excludes
+**Purpose:** List projects for your default product, or the product you pass, with
+server-side filtering, search, and pagination. By default returns only active-lifecycle projects (excludes
 completed/cancelled) in summary form. Prefer `mode` (`triage`/`planning`/`audit`/
 `forensic`) over numeric `depth`.
 
@@ -125,13 +142,14 @@ completed/cancelled) in summary form. Prefer `mode` (`triage`/`planning`/`audit`
 | include_superseded | bool | No | `false` | Include superseded projects (work replaced by a successor). Hidden by default even under `include_completed=true`; an explicit `status="superseded"` also surfaces them. |
 | hidden | str | No | `""` | Tri-state: `"true"` only hidden, `"false"` exclude hidden, `""` no filter. |
 | mode | str | No | `""` | **Preferred.** `triage` / `planning` / `audit` / `forensic`. Overrides `depth` and `summary_only`. |
-| memory_limit | int | No | `5` | Caps trailing 360-memory entries per project in audit mode (max 50). |
+| memory_limit | int | No | `0` | Caps 360-memory entries per project (max 50). `0` uses the mode's default, which is 5 in audit mode; forensic mode ignores the cap unless you set it. |
 | summary_only | bool | No | `true` | Back-compat. Ignored when `mode` is supplied. |
 | depth | int | No | `0` | Back-compat numeric detail 0-3. Prefer `mode`. |
 | status_filter | str | No | `""` | Legacy. Prefer `status`. `"all"` implies `include_completed=true`. A genuine conflict with `status` (different effective meaning) is refused, naming both values. |
 | query | str | No | `""` | Case-insensitive substring search against name, id, description, `project_alias`, and `taxonomy_alias` (e.g. `"oauth"`, `"BE-1042"`). Max 200 characters. Empty = no search. |
-| limit | int | No | `50` | Max rows to return (max `500`). `0` = use the default. A value above the max is **rejected**, not silently clamped. A response cut by this bound sets `truncated=true`; read `counts.matched` for how many rows the filters actually match. |
+| limit | int | No | `0` | Max rows to return (max `500`). `0` uses the default of 50. A value above the max is **rejected**, not silently clamped. A response cut by this bound sets `truncated=true`; read `counts.matched` for how many rows the filters actually match. |
 | cursor | str | No | `""` | Opaque continuation token from a previous response's `truncation.next_cursor`. Pass it back **with the same filters** to keep walking; a filter change mid-walk is refused rather than silently answered from the wrong set. Keep walking until a response comes back `truncated=false` — every project is then returned exactly once. Changing `limit` or `mode` mid-walk is fine. |
+| product_id | str | No | `""` | Product UUID to list projects for. Omit to use your default product, but pass it when you know your product: the default is shared state that another session, or the dashboard, can change mid-session. An id that is not one of your own products is refused; it never falls back to the default. |
 
 **Modes:** `triage` (id/name/status/type/dates — pick a project) · `planning`
 (+ description, mission, agent counts) · `audit` (+ memory headlines + agent summaries)
@@ -176,13 +194,18 @@ with suggested next actions.
 
 ### stage_project `mcp:agent`
 
-**Purpose:** Drive the staging endpoint for a project and return the orchestrator launch
-prompt (orchestrator/agent ids, prompt, token estimate) for the chosen execution mode.
+**Purpose:** Prepare a project and return its staging plan (orchestrator/agent ids,
+prompt, token estimate) for the chosen execution mode. Staging always ends at a human
+approval gate: nothing is implemented until the user approves it with the dashboard's
+Implement button or with `launch_implementation`. Approving also makes an inactive
+project active. The `action` parameter can also undo staging.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| project_id | str | Yes | ID of the project to stage. |
-| mode | str | No | Execution mode (ADR-010). 2 canonical values: `multi_terminal` (default, one terminal per agent) / `subagent` (one orchestrator session drives the workers). Plus 2 short per-CLI hint aliases — `claude`, `codex` — each collapsing to `subagent` plus a harness hint for the staging prose flavor. |
+| project_id | str | Yes | ID of the project to stage. At most 64 characters. |
+| mode | str | No | How the work runs: `subagent` (one session drives the worker agents itself) or `multi_terminal` (a separate terminal per agent). There is no built-in default: this is the user's choice, so ask them. If omitted and your account has no default mode, the call is refused with `EXECUTION_MODE_REQUIRED`, naming both modes. Values used by earlier versions are still accepted and run as `subagent`. Applies only to `action="stage"`. |
+| mission | str | No | Optional goal to write as the project mission before staging, through `update_project_mission`. Omit to leave an existing mission untouched. |
+| action | str | No | `stage` (default) prepares the project. `unstage` reverts a staged project before the agent was contacted; `cancel_staging` abandons staging that is underway; `restage` clears the mission and the staging state, retires the earlier orchestrator and creates a fresh one so staging starts over (refused once implementation has launched). |
 
 ---
 
@@ -213,20 +236,26 @@ deliberate. (Renamed from `implement_project`, which never implemented anything.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| project_id | str | Yes | The project to fetch the implementation prompt for. |
+| project_id | str | Yes | The project to fetch the implementation prompt for. At most 64 characters. |
 
 ---
 
 ### launch_implementation `mcp:agent`
 
-**Purpose:** Release the implementation-phase gate for a staged project from the CLI
-(the CLI door of the two-door implement gate). Idempotent; stamps
-`implementation_launched_at`. Kept out of the orchestrator auto-tool bundle so an agent
-cannot self-unlock.
+**Purpose:** Release the implementation-phase gate for a staged project: the second of
+the two human-authorized doors (the first is the dashboard's Implement button). Reachable
+from any MCP client, not only a CLI; whether it is served depends on your account's
+Headless setting, which is off by default. A second call is harmless and returns
+`already_launched=true`; stamps `implementation_launched_at`. Not offered to a worker
+agent the platform spawned, so a worker cannot release its own gate. Launching also makes
+an inactive project active (`project_active` in the response confirms it); a project
+launched earlier, or one in another status such as parked, is left as it is and
+`next_action` names what to do.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | project_id | str | Yes | ID of the staged project to release. |
+| mission | str | No | Optional goal to write as the project mission, through `update_project_mission`, before the gate is released. Omit to launch with the mission written during staging. |
 
 ---
 
@@ -236,10 +265,10 @@ cannot self-unlock.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| project_ids | list[str] | Yes | The projects to link, as ids, in the order they should run (>= 2 distinct). Capped at the server's MAX_SEQUENCE_PROJECTS. |
-| execution_mode | str | No | How the work runs: `subagent` (this session drives the worker agents itself — the usual choice) or `multi_terminal` (a separate terminal per agent). The legacy per-CLI tokens are still accepted as aliases and fold onto `subagent`. |
+| project_ids | list[str] | Yes | The projects to link, as ids, in the order they should run (>= 2 distinct). Capped at the server's MAX_SEQUENCE_PROJECTS. Each id is at most 64 characters. |
+| execution_mode | str or null | No | How the work runs: `subagent` (this session drives the worker agents itself, the usual choice) or `multi_terminal` (a separate terminal per agent). It is the user's choice: omitted, the call returns `EXECUTION_MODE_REQUIRED` with both options and links nothing, so ask them and call again. Values used by earlier versions are still accepted and run as `subagent`. |
 | mission | str | No | The shared goal for the whole group. Optional — pass it now, or write it later once the work is planned. |
-| ordered | list[str] | No | Only if the run order differs from `project_ids`: the same ids, rearranged. |
+| ordered | list[str] | No | Only if the run order differs from `project_ids`: the same ids, rearranged. Each id is at most 64 characters. |
 
 ---
 
@@ -249,7 +278,7 @@ cannot self-unlock.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| run_id | str | Yes | The id of the linked group, returned by `link_projects`. |
+| run_id | str | Yes | The id of the linked group, returned by `link_projects`. At most 64 characters. |
 
 ---
 
@@ -267,7 +296,8 @@ member is recorded automatically.
 
 **Purpose:** Close a project and write a 360 Memory entry with a sequential history
 entry, called by the orchestrator at completion. All agents must be
-complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSocket event.
+complete/closed/decommissioned first. With git integration on, it needs `git_commits`,
+`no_code_changes`, or `git_commits=[]`. Triggers a `product_memory_updated` WebSocket event.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -278,6 +308,7 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 | git_commits | list[dict] | No | Commit records associated with the project. |
 | tags | list[str] | No | Classification tags. |
 | force | bool | No | Force-close: auto-decommission remaining agents before closing. Use only when a prior `CLOSEOUT_BLOCKED` response says so (e.g. a leftover "waiting" orchestrator after work ran outside a staged session). Refused while the calling orchestrator itself is still active; a specialist still in flight — including one marked "silent" — is decommissioned (recorded as failed/replaced/abandoned). Do not use it to retire an agent whose work you accepted — `complete_job` then `finalize_job` that agent instead. Default `false`. |
+| no_code_changes | str | No | If nothing was committed, say why here instead of passing `git_commits`. At most 500 characters. |
 
 ---
 
@@ -286,7 +317,7 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 ### create_task `mcp:write`
 
 **Purpose:** Create a task (a single-step deferral / technical debt item), or a
-session handover, bound by default to the active product. The serial
+session handover, under the product you name. The serial
 (`taxonomy_alias`, e.g. `TSK-0067` or `HND-9641`) is auto-assigned from one counter
 shared with projects; there is no per-type numbering.
 
@@ -296,6 +327,8 @@ shared with projects; there is no per-type numbering.
 | description | str | Yes | Detailed task description. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. Default `medium`. |
 | task_type | str | No | `TSK` (default) for an ordinary task, or `HND` for a session handover. Any other value is refused, naming the valid ones. An `HND` is additionally refused unless its `description` carries all three of these headings (see below). |
+| assigned_to | str | No | Agent or user to assign the task to. |
+| product_id | str | No | Product UUID to bind the task to. Pass it whenever you know your product. Omitting it uses your default product only when your account has a single product; with several, the call is refused with `PRODUCT_AMBIGUOUS`, which lists your products, and nothing is created. A `product_id` that does not belong to your account is refused and nothing is created; it never falls back to another product. |
 
 **Handover shape (`task_type="HND"`).** A handover is read by someone who was not
 there, cannot ask you anything, and has no way to tell a verified claim from a
@@ -315,8 +348,6 @@ the worst possible moment.
 A handover **cannot be converted to a project** (`HANDOVER_NOT_CONVERTIBLE`) and a
 **pending** one cannot be archived (`PENDING_HANDOVER_NOT_ARCHIVABLE`); see
 `update_task`.
-| assigned_to | str | No | Agent or user to assign the task to. |
-| product_id | str | No | Product UUID to bind the task to. Omit to use the active product — but the active product is shared, mutable state, so pass this explicitly when you know your product: another session, or the user switching products in the dashboard, changes the active product mid-session and an omitted `product_id` follows that change. A `product_id` that does not belong to your account is rejected outright; it never silently falls back to the active product. |
 
 ---
 
@@ -341,7 +372,7 @@ the successor is verifying its claims. **Completed** = verified, not merely read
 | status | str | No | `pending` / `in_progress` / `on_hold` / `completed` / `blocked` / `cancelled`. `on_hold` parks an undecided task: it stays open and does not stamp `started_at`. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. |
 | task_type | str | No | A task's type is fixed at creation and cannot be changed. Passing the task's own current type is a harmless no-op; passing a different one is refused with a `VALIDATION_ERROR` on field `task_type`, and the whole call writes nothing (any other fields in the same call are not applied either). Create a new task of the type you want instead. |
-| hidden | str | No | UI declutter flag (the UI calls it "archived"). Setting it on a **pending** handover is refused with `PENDING_HANDOVER_NOT_ARCHIVABLE`: a handover nobody has read must not leave the list. Move it off `pending` first. |
+| hidden | str | No | UI declutter flag (the UI calls it "archived"). Accepts `true` / `1` / `yes` or `false` / `0` / `no` (any letter case); empty leaves it unchanged, and any other value is refused with a `VALIDATION_ERROR` on field `hidden`. Setting it on a **pending** handover is refused with `PENDING_HANDOVER_NOT_ARCHIVABLE`: a handover nobody has read must not leave the list. Move it off `pending` first. |
 | completion_notes | str | No | Note appended to the audit trail when `status=completed` (folds in the retired `complete_task` tool); a no-op otherwise. |
 | convert_to_project | bool | No | Promote this task to a project in one atomic step — the same conversion the dashboard's task-to-project wizard runs. A project is created from the task, any subtasks and roadmap card re-point to it at the same roadmap position, and **the task row is deleted** (its `task_id` stops resolving). The new project is **inactive and untyped** — tag it afterward with `update_project(project_id, project_type=...)`. It lands on the task's own product, not whichever product is active, and the response names that product. Only `title` may be combined with this flag (to name the new project); any other field combined with it is refused and changes nothing, since the task row is gone before it could apply. **Refused outright for a handover** (`HANDOVER_NOT_CONVERTIBLE`): a handover records a session that already happened, and since the conversion deletes the task row, converting one would destroy the record. Default `false`. |
 
@@ -349,8 +380,8 @@ the successor is verifying its claims. **Completed** = verified, not merely read
 
 ### list_tasks `mcp:read`
 
-**Purpose:** List tasks for the active product with projection modes, search, and
-pagination. Agents see hidden and non-hidden rows alike by default.
+**Purpose:** List tasks for your default product, or the product you pass, with
+projection modes, search, and pagination. Agents see hidden and non-hidden rows alike by default.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -362,8 +393,9 @@ pagination. Agents see hidden and non-hidden rows alike by default.
 | summary_only | bool | No | `false` | Alias for `mode="summary"`. Ignored when `mode` is also passed explicitly. |
 | memory_limit | int | No | `0` | Truncates description length in `full` mode. |
 | query | str | No | `""` | Case-insensitive substring search against title, description, and `taxonomy_alias` (e.g. `"oauth"`, `"TSK-9438"`). Empty = no search filter. |
-| limit | int | No | `50` | Max tasks to return (max `500`). `0` = use the default. The response always states whether it was cut, independent of this value. |
+| limit | int | No | `0` | Max tasks to return (max `500`). `0` uses the default of 50. The response always states whether it was cut, independent of this value. |
 | cursor | str | No | `""` | Opaque continuation token from a previous response's `truncation.next_cursor`. Pass it back **with the same filters**; a filter change mid-walk is refused. Keep walking until `truncated=false` — every task is then returned exactly once. Changing `limit` or `mode` mid-walk is fine. |
+| product_id | str | No | `""` | Product UUID to list tasks for. Omit to use your default product, but pass it when you know your product: the default is shared state that another session, or the dashboard, can change mid-session. An id that is not one of your own products is refused; it never falls back to the default. |
 
 **Response shape:** every response carries board-wide totals (how many tasks are done,
 how many are still open, and the date range they span) plus `counts.matched` for the
@@ -383,9 +415,9 @@ any earlier entry for the same project or task. Defaults to your default product
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| items | list[dict] | Yes | Roadmap items to upsert. Each: `{item_type: 'project'\|'task', project_id OR task_id, sort_order (0-100000), risk?: 'low'\|'med'\|'high', complexity?: 'light'\|'med'\|'heavy', blocked?: bool, blocked_reason?: str (<=500 chars)}`. `project_id` / `task_id` accept either the row id or its taxonomy alias (`BE-0001`, `IMP-0086`), so no lookup call is needed. A rejection names every bad row at once, as a 422, never a DB 500. |
+| items | list[dict] | Yes | Roadmap items to upsert. Each: `{item_type: 'project'\|'task', project_id OR task_id, sort_order (0-100000), risk?: 'low'\|'med'\|'high', complexity?: 'light'\|'med'\|'heavy', blocked?: bool, blocked_reason?: str (<=500 chars)}`. `project_id` / `task_id` accept either the row id or its taxonomy alias (`BE-0001`, `IMP-0086`), so no lookup call is needed. A rejection names every bad row at once, as a 422, never a DB 500. At most 10000 items. |
 | summary | str | No | Roadmap narrative summary (the AI insight banner copy). Empty string leaves it unchanged. |
-| remove | list[dict] | No | Items to drop from the roadmap. Each: `{item_type, project_id\|task_id}`. Idempotent; removes the roadmap entry only, never the project/task. |
+| remove | list[dict] or null | No | Items to drop from the roadmap. Omit (or pass null) to remove nothing. Each: `{item_type, project_id\|task_id}`. Idempotent; removes the roadmap entry only, never the project/task. At most 10000 items. |
 | patch_fields | bool | No | Patch only the fields each item carries; omitted fields keep their stored value, explicitly empty ones are cleared. `blocked` and `blocked_reason` patch together. Default false. |
 | product_id | str | No | Product UUID to persist the roadmap for. Omit to use your default product — but pass it when you know it: the default is shared, mutable state another session can move mid-session. |
 
@@ -393,10 +425,13 @@ any earlier entry for the same project or task. Defaults to your default product
 
 ### get_roadmap `mcp:read`
 
-**Purpose:** Read the current roadmap for the active product. Returns items sorted by
-`sort_order` ascending with status and blocked state.
+**Purpose:** Read the current roadmap for your default product, or the product you pass.
+Returns items sorted by `sort_order` ascending with status and blocked state, or
+`roadmap=null` with `items=[]` when no roadmap exists yet.
 
-**Parameters:** None.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| product_id | str | No | Product UUID to read the roadmap for. Omit to use your default product. An id that does not belong to your account is refused; it never falls back to the default product. |
 
 ---
 
@@ -420,9 +455,10 @@ ignores it. There is no agent file to install or look up.
 | agent_display_name | str | Yes | Human-readable agent name shown in the dashboard. |
 | agent_name | str | Yes | Internal agent identifier matching a template. |
 | project_id | str | Yes | ID of the parent project. |
-| mission | str | No | The specific task this agent must accomplish. |
+| mission | str | No | The specific task this agent must accomplish. Omit it for a two-phase spawn: the agent is created `staged` and can receive messages now, and `update_job_mission` writes the mission later, moving it to `waiting`. |
 | phase | int | No | Execution phase number for ordering. |
 | predecessor_job_id | str | No | Job that must complete before this one starts. |
+| inline_seed | bool | No | In `multi_terminal` mode, return the actual start-up prompt inline instead of a pointer to the dashboard's Copy prompt button. No effect in `subagent` mode, which always returns it inline. Default `false`. |
 
 ---
 
@@ -466,16 +502,16 @@ percent and step counts and auto-wakes idle/sleeping/blocked agents to `working`
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | job_id | str | Yes | The agent's job ID. |
-| todo_items | list[dict] | No | Full replacement TODO list. Each item: `{content: str, status: 'pending'\|'in_progress'\|'completed'}`. Include ALL items — completed + in_progress + pending — never a partial list. |
-| todo_append | list[dict] | No | New items to append without replacing the stored list. Same item format as `todo_items`. Use this to add work discovered mid-task without overwriting what is already there. |
+| todo_items | list[dict] | No | Full replacement TODO list. Each item: `{content: str, status: 'pending'\|'in_progress'\|'completed'}`. Include ALL items — completed + in_progress + pending — never a partial list. At most 10000 items. |
+| todo_append | list[dict] | No | New items to append without replacing the stored list. Same item format as `todo_items`. Use this to add work discovered mid-task without overwriting what is already there. At most 10000 items. |
 | replace | bool | No | Required (`true`) when `todo_items` is SHORTER than the stored list — otherwise the call is rejected rather than silently dropping items. Default `false`. |
 
 ---
 
 ### complete_job `mcp:agent`
 
-**Purpose:** Mark a job completed with a structured result. Rejected if unread messages
-or incomplete TODOs remain. Phase-aware: a staging orchestrator gets a
+**Purpose:** Mark a job completed with a structured result. Rejected if action-required
+Hub messages or incomplete TODOs remain; there is no bypass. Phase-aware: a staging orchestrator gets a
 `staging_directive.action='STOP'` (do NOT call closeout from the staging session);
 an implementation orchestrator and deliverable agents close normally.
 
@@ -483,8 +519,8 @@ an implementation orchestrator and deliverable agents close normally.
 |-----------|------|----------|-------------|
 | job_id | str | Yes | The agent's job ID. |
 | result | dict | Yes | Structured result (`summary`, `artifacts`, `commits`). |
-| acknowledge_closeout_todo | bool | No | Auto-completes the closeout-describing TODO. Default `false`. |
-| acknowledge_messages_on_complete | bool | No | Drains unread messages before the gate check. Default `false`. |
+| acknowledge_closeout_todo | bool | No | Retired and ignored: the closeout TODO completes on its own, and other open TODOs block either way. Do not pass it. |
+| acknowledge_messages_on_complete | bool | No | Retired and ignored: only action-required posts block completion. Read them with `get_thread_history(unread_only=true, mark_read=true)`, act, and retry. Do not pass it. |
 
 ---
 
@@ -569,11 +605,13 @@ status (active/completed/blocked/closed/silent/decommissioned/pending) and a
 `user_approvals` row and flips the calling agent to `awaiting_user`. The agent's
 `complete_job` is refused until a user resolves the approval via the dashboard or
 `POST /api/approvals/{id}/decide`. At most one `pending` approval per execution.
+Orchestrator jobs only: a worker's call is refused with `ORCHESTRATOR_ONLY_APPROVAL`, and
+a worker escalates through `post_to_thread` instead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| job_id | str | Yes | Calling agent's `job_id`. |
-| project_id | str | Yes | Project the approval belongs to. |
+| job_id | str | Yes | Calling agent's `job_id`. At most 64 characters. |
+| project_id | str | Yes | Project the approval belongs to. At most 64 characters. |
 | reason | str | Yes | Plain-English explanation shown to the user (max 2000 chars). |
 | options | list[dict] | Yes | `{id, label}` option dicts (1-10 items, unique ids). |
 | context | dict | No | Optional structured payload (max 16 KB serialized). |
@@ -728,7 +766,7 @@ retired `search_threads` tool.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| status | str | No | Filter by thread status. |
+| status | str | No | Filter by thread status: `open`, `active`, `resolved` or `closed`. Empty (the default) does not filter. |
 | owner | str | No | Filter by `next_action_owner`. |
 | product_id | str | No | Filter by product. |
 | project_id | str | No | Filter by project. |
@@ -750,7 +788,7 @@ thread (it takes its name from that project).
 | status | str | No | New status. Omit to leave unchanged. |
 | product_id | str | No | Product UUID to retag the thread with. Omit to leave unchanged. |
 | clear_product | bool | No | Explicitly null the thread's product back to product-less. Default `false`. |
-| project_ids | list[str] | No | Full-replace the thread's project tags (0-50 UUIDs). Omit to leave tags untouched; pass `[]` to clear all. A thread may tag zero, one, or many projects. |
+| project_ids | list[str] | No | Full-replace the thread's project tags (0-50 UUIDs, at most 50 items, each at most 64 characters). Omit to leave tags untouched; pass `[]` to clear all. A thread may tag zero, one, or many projects. |
 
 ---
 
@@ -790,38 +828,41 @@ flagged `requires_action`. The four cursor params require `as_participant`;
 depth control; multiple categories in one call replace nine individual context tools.
 Categories: `product_core`, `vision_documents`, `tech_stack`, `architecture`, `testing`,
 `memory_360`, `git_history`, `agent_templates`, `project`, `self_identity`, `tasks`,
-`todos`, `chain`, `threads`. `threads` returns the account's recent Hub conversation
+`todos`, `chain`, `threads`, `products`. `products` lists the id, name and visibility of
+every product you own, so you can resolve a product name to its id. `threads` returns the account's recent Hub conversation
 threads (read-only — it never writes or marks anything read) using the same fixed cap
 on every call, not tunable via `depth_config`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| product_id | str | Yes | ID of the product to fetch context for. |
+| product_id | str | No | ID of the product to fetch context for. At most 64 characters. Optional when `project_id` is supplied (the product is resolved from the project) and for the categories that are not tied to one product (`products`, `threads`, `project`, `chain`, `self_identity`, `todos`). |
 | project_id | str | No | Project for project-scoped context. |
-| agent_name | str | No | Agent name for the `self_identity` category. |
+| agent_name | str | No | Agent name for the `self_identity` category. At most 200 characters. |
 | job_id | str | No | Agent job UUID (required for the `todos` category). |
-| categories | list[str] | Yes | One or more category strings (list explicitly; `"all"` not accepted). |
+| categories | list[str] | Yes | One or more category strings (list explicitly; `"all"` not accepted). At most 100 items. |
 | depth_config | dict | No | Per-category depth overrides. |
-| output_format | str | No | `structured` (default) or `flat`. |
+| output_format | str | No | `structured` (default) or `flat`; any other value is refused. |
 
 ---
 
 ### search_memory `mcp:read`
 
-**Purpose:** Keyword-search the 360 memory (accumulated project closeouts/handovers) to answer "have we solved X before?". Case-insensitive substring/full-text match over each entry's `summary`, `key_outcomes`, `decisions_made`, `project_name` and `tags`, with an optional exact-`tag` filter. Tenant + active-product scoped (never pass `tenant_key`; an active product is required, same contract as `list_projects`). Returns relevance-ranked headlines `[{sequence, project_id, project_alias, project_name, summary, tags, type, score}]`. An empty query or no match returns an empty result, not an error. Distinct from `get_context(['memory_360'])` (recent-N by recency, not search) and `list_threads(query=)` (Hub chat, not memory).
+**Purpose:** Keyword-search the 360 memory (accumulated project closeouts/handovers) to answer "have we solved X before?". Case-insensitive substring/full-text match over each entry's `summary`, `key_outcomes`, `decisions_made`, `project_name`, `tags` and `git_commits` (a closeout's commit messages), with an optional exact-`tag` filter. Scoped to your account and to your default product, or the product you pass (never pass `tenant_key`). Returns relevance-ranked headlines `[{sequence, project_id, project_alias, project_name, summary, tags, type, score}]`. An empty query or no match returns an empty result, not an error. Distinct from `get_context(['memory_360'])` (recent-N by recency, not search) and `list_threads(query=)` (Hub chat, not memory).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | query | str | Yes | Case-insensitive keyword/substring to search for (max 2000 chars). |
 | tag | str | No | Optional exact tag filter (controlled vocabulary, e.g. `bug-fix`). |
 | limit | int | No | Max headlines to return (default 10, max 50). |
+| product_id | str | No | Product UUID to search. Omit to use your default product, but pass it when you know your product. An id that is not one of your own products is refused; it never falls back to the default. |
 
 ---
 
 ### write_memory_entry `mcp:agent`
 
 **Purpose:** Write a 360 memory entry for project completion or agent handover. Appends
-to the product's `sequential_history`.
+to the product's `sequential_history`. With git integration on, a `project_completion`
+entry needs `git_commits`, `no_code_changes`, or `git_commits=[]`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -830,10 +871,11 @@ to the product's `sequential_history`.
 | key_outcomes | list[str] | Yes | Concrete outcomes delivered. |
 | decisions_made | list[str] | Yes | Architectural/design decisions made (cite any deferred task/project IDs). |
 | entry_type | str | No | `baseline` (foundation context) / `decision` (a choice with rationale) / `architecture` (structural notes) / `discovery` (surprising finding worth remembering) — any specialist agent may write these. `project_completion` (closeout) is **orchestrator-only**; a specialist passing it is refused with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. `project_closeout` is accepted as an alias for it. Default `project_completion`. **To hand a session over, create a task of type `HND` instead** — `session_handover` and `handover_closeout` are no longer accepted here. Entries already stored under those types are untouched and still read back normally. |
-| author_job_id | str | No | Job ID of the authoring agent (usually the orchestrator's `job_id`). |
+| author_job_id | str | No | Job ID of the authoring agent (usually the orchestrator's `job_id`). At most 64 characters. |
 | git_commits | list[dict] | No | Commit records. Every entry must carry a non-empty commit title — a titleless entry is refused with `GIT_COMMIT_TITLE_REQUIRED`. Pass `{sha, message, author?, pr_url?}` dicts (preferred), or tab-delimited porcelain strings (`git log --format='%H%x09%s%x09%an' <base>..HEAD`). |
 | tags | list[str] | No | Max 8 tags, each from the server-enforced 16-tag vocabulary: change-type (`feature`/`bug-fix`/`refactor`/`perf`/`security`/`docs`/`test`/`chore`), domain (`frontend`/`backend`/`database`/`api`/`infrastructure`/`ui-ux`/`integration`), operational (`migration`). |
 | acknowledge_closeout_todo | bool | No | Auto-completes your own self-referential closeout TODOs (e.g. "Write series summary") before the closeout-readiness gate evaluates, resolving the chicken-and-egg where the TODO this write satisfies would otherwise block the write. Non-closeout TODOs still block. Default `false`. |
+| no_code_changes | str | No | If nothing was committed, say why here instead of passing `git_commits`. At most 500 characters. |
 
 ---
 
@@ -887,7 +929,7 @@ calling `update_product_context`. (Renamed from `get_vision_doc`, to match
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| product_id | str | Yes | ID of the product whose vision document to retrieve. |
+| product_id | str | Yes | ID of the product whose vision document to retrieve. At most 64 characters. |
 | chunk | int | No | Chunk index to fetch. Omit on the first call for metadata. |
 
 ---
@@ -907,8 +949,10 @@ The tech/architecture/quality/testing prose is grouped into four typed dicts
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | product_id | str | Yes | ID of the product to update. |
-| product_name / product_description | str | No | Product identity fields. |
+| product_name | str | No | New product name. Empty keeps the current one. |
+| product_description | str | No | New product description. Empty keeps the current one. |
 | core_features | str | No | Key product features. |
+| extraction_custom_instructions | str | No | Custom instructions that steer future vision-document extraction for this product (e.g. `focus on backend architecture`). The same field the dashboard's product form writes. |
 | project_path | str | No | Absolute path of the user's local codebase folder you are operating from. Omit if you have no filesystem access inside the user's repository — never guess. Like `product_name`, it is user-owned and skipped when already set. |
 | tech_stack | dict | No | Group: `programming_languages`, `frontend_frameworks`, `backend_frameworks`, `databases`, `infrastructure`, `target_platforms` (list from: `windows`, `linux`, `macos`, `android`, `ios`, `web`, `all`). |
 | architecture | dict | No | Group: `architecture_pattern`, `design_patterns`, `api_style`, `architecture_notes`, `coding_conventions`, `brand_guidelines`. |
@@ -916,8 +960,9 @@ The tech/architecture/quality/testing prose is grouped into four typed dicts
 | testing | dict | No | Group: `testing_strategy`, `testing_frameworks`, `test_coverage_target` (int 0-100). |
 | vision_summaries | list[dict] | No | Per-document AI summaries (`doc_id`, `light`, `medium`). |
 | consolidated_vision | dict | No | Product-level aggregate summary (`light`, `medium`). |
-| force | bool | No | Override merge guards. |
+| force | bool | No | Updating a field that already holds a value is refused with `Fields already populated` unless this is `true`. Reviewing an existing product is the common case, so most calls that touch `tech_stack`, `architecture` or `quality` on such a product need it. Default `false`. |
 | emit_completion | bool | No | Set `true` on your final staged call. Re-checks the completion state and signals the dashboard even when this call writes no new fields. Default `false`. |
+| is_active | bool or null | No | Show (`true`) or hide (`false`) this product's tab, like the dashboard's show/hide button. Omit to leave it unchanged. Several products may be shown at once. It does not change your default product; to work on a specific product, pass its `product_id` to each call. |
 
 ---
 
@@ -932,9 +977,9 @@ applies, it does not propose.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | product_id | str | Yes | ID of the product to tune. |
-| proposals | list[dict] | Yes | Typed proposals (BE-9118): each requires `section` and `drift_detected`; optional `proposed_value` (str/dict/list, capped), `confidence` (`high`/`medium`/`low`), `current_summary`, `evidence`, `reasoning`. |
+| proposals | list[dict] | Yes | Typed proposals (BE-9118): each requires `section` and `drift_detected`; optional `proposed_value` (str/dict/list, capped), `confidence` (`high`/`medium`/`low`), `current_summary`, `evidence`, `reasoning`. At most 100 items. |
 | overall_summary | str | No | Narrative summary of the tuning analysis. |
-| force | bool | No | Override guards. |
+| force | bool | No | Updating a field that already holds a value is refused with `Fields already populated` unless this is `true`. Default `false`. |
 
 ---
 
@@ -953,7 +998,7 @@ agents directory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| platform | str | No | `claude_code`, `codex_cli`, `opencode`, `generic`. Default auto-detects. |
+| platform | str | No | The coding tool you are running in: `claude_code`, `codex_cli`, `opencode` or `generic`. Decides where skills are installed. Default `claude_code`; it is not detected for you, so pass your own tool. The wrong platform installs skills where your tool never reads them, and nothing reports an error. |
 | harness | str | No | Optional session harness preset: `web_sandbox`\|`desktop_app`\|`chat` (omit for a terminal-capable CLI). |
 | product_id | str | No | Product UUID to bind this repository to. The returned instructions then include writing a marker block into `CLAUDE.md` and `AGENTS.md`, so later calls from this repo never hit a product-ambiguity rejection. Omit on a tenant with zero or several products; the response says what to do next. |
 | scope | str | No | **Retired.** There is no install scope any more; passing any value is refused with a structured rejection that names the replacement. Omit it. |
@@ -978,7 +1023,7 @@ agents directory.
 | Tasks | 2 write · 1 read | create_task, update_task, list_tasks |
 | Roadmap | 1 write · 1 read | save_roadmap, get_roadmap |
 | Agent Jobs & Lifecycle | 12 agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, finalize_job, resume_or_dismiss_job, set_agent_status, get_agent_result, get_workflow_status, request_approval, decide_approval |
-| Agent Message Hub | 5 agent · 5 read | create_thread, join_thread, post_to_thread, set_next_actor, update_thread, get_my_turn, get_participant_liveness, list_threads, get_thread_history |
+| Agent Message Hub | 5 agent · 4 read | create_thread, join_thread, post_to_thread, set_next_actor, update_thread, get_my_turn, get_participant_liveness, list_threads, get_thread_history |
 | Context & Memory | 2 read · 1 agent | get_context, search_memory, write_memory_entry |
 | Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_document, update_product_context, apply_context_tuning |
 | Setup | 1 write | giljo_setup |

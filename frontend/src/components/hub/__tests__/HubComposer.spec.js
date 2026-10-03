@@ -457,18 +457,22 @@ describe('HubComposer', () => {
     expect(wrapper.vm.recipientItems.map((p) => p.participant_id)).toEqual([EVERYONE, 'p-agent'])
   })
 
-  const POST_REFUSAL = {
-    success: false,
-    error: 'TARGET_IS_A_DISPLAY_NAME',
-    thread_id: 'thr-001',
-    requested: 'implementer',
-    registered_id: 'agent-7',
-    hint: 'implementer is a display name held by agent-7 — address agent-7 instead.',
+  function postRefusal() {
+    const err = new Error('Request failed with status code 409')
+    err.response = {
+      status: 409,
+      data: {
+        error_code: 'TARGET_IS_A_DISPLAY_NAME',
+        message: 'implementer is a display name held by agent-7 — address agent-7 instead.',
+        context: { thread_id: 'thr-001', requested: 'implementer', registered_id: 'agent-7' },
+      },
+    }
+    return err
   }
 
   it('KEEPS the operator text when the server declines the post', async () => {
     store.selectedThreadId = 'thr-001'
-    postMessageMock.mockResolvedValue({ data: POST_REFUSAL })
+    postMessageMock.mockRejectedValue(postRefusal())
 
     const wrapper = mountComposer(pinia)
     wrapper.vm.content = 'a message worth not losing'
@@ -482,7 +486,7 @@ describe('HubComposer', () => {
 
   it('tells the operator WHY it was declined, using the server hint', async () => {
     store.selectedThreadId = 'thr-001'
-    postMessageMock.mockResolvedValue({ data: POST_REFUSAL })
+    postMessageMock.mockRejectedValue(postRefusal())
 
     const wrapper = mountComposer(pinia)
     wrapper.vm.content = 'hello'

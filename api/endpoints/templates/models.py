@@ -26,7 +26,30 @@ CATEGORY_MAX_LENGTH = 50
 PRODUCT_ID_MAX_LENGTH = 36
 
 
-class TemplateCreate(BaseModel):
+class _TemplateFieldRules(BaseModel):
+    """Field checks shared by template create and update requests."""
+
+    @field_validator("user_instructions", check_fields=False)
+    @classmethod
+    def validate_user_instructions_size(cls, v: str | None) -> str | None:
+        if v and len(v.encode("utf-8")) > MAX_USER_INSTRUCTIONS_SIZE:
+            raise ValueError("User instructions exceed 50KB limit")
+        return v
+
+    @field_validator("model", "effort", check_fields=False)
+    @classmethod
+    def normalize_hint_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip() or "inherit"
+
+    @field_validator("cli_tool", mode="before", check_fields=False)
+    @classmethod
+    def validate_harness(cls, v: str | None) -> str:
+        return validate_harness_name(v)
+
+
+class TemplateCreate(_TemplateFieldRules):
     """Request model for creating a template"""
 
     product_id: str = Field(..., max_length=PRODUCT_ID_MAX_LENGTH, description="Product this agent belongs to")
@@ -66,27 +89,8 @@ class TemplateCreate(BaseModel):
     is_active: bool = Field(default=False, description="Deprecated, inert: the per-product switch is the control")
     category: str | None = Field(None, max_length=CATEGORY_MAX_LENGTH, description="Template category (deprecated)")
 
-    @field_validator("user_instructions")
-    @classmethod
-    def validate_user_instructions_size(cls, v: str | None) -> str | None:
-        if v and len(v.encode("utf-8")) > MAX_USER_INSTRUCTIONS_SIZE:
-            raise ValueError("User instructions exceed 50KB limit")
-        return v
 
-    @field_validator("model", "effort")
-    @classmethod
-    def normalize_hint_fields(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        return v.strip() or "inherit"
-
-    @field_validator("cli_tool", mode="before")
-    @classmethod
-    def validate_harness(cls, v: str | None) -> str:
-        return validate_harness_name(v)
-
-
-class TemplateUpdate(BaseModel):
+class TemplateUpdate(_TemplateFieldRules):
     """Request model for updating a template"""
 
     system_instructions: str | None = Field(
@@ -105,25 +109,6 @@ class TemplateUpdate(BaseModel):
     tags: list[str] | None = None
     is_default: bool | None = None
     is_active: bool | None = None
-
-    @field_validator("user_instructions")
-    @classmethod
-    def validate_user_instructions_size(cls, v: str | None) -> str | None:
-        if v and len(v.encode("utf-8")) > MAX_USER_INSTRUCTIONS_SIZE:
-            raise ValueError("User instructions exceed 50KB limit")
-        return v
-
-    @field_validator("model", "effort")
-    @classmethod
-    def normalize_hint_fields(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        return v.strip() or "inherit"
-
-    @field_validator("cli_tool", mode="before")
-    @classmethod
-    def validate_harness(cls, v: str | None) -> str:
-        return validate_harness_name(v)
 
 
 class TemplateResponse(BaseModel):
@@ -179,7 +164,7 @@ class TemplateHistoryResponse(BaseModel):
 
 
 class TemplateResetFailure(BaseModel):
-    """One agent a bulk reset could not complete, and why (BE-9646)."""
+    """One agent a bulk reset could not complete, and why."""
 
     name: str
     error: str

@@ -5,11 +5,11 @@
 
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.endpoints._boundary_types import IdPath, IdQuery
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import ProjectStateError, ResourceNotFoundError
 from giljo_mcp.models import User
@@ -22,6 +22,7 @@ from .models import (
     ProjectDeleteResponse,
     ProjectPurgeResponse,
     ProjectResponse,
+    ProjectReviewedResponse,
     PurgedProject,
 )
 
@@ -54,7 +55,7 @@ def _build_project_response(proj, agents=None) -> ProjectResponse:
 
 @router.post("/{project_id}/activate", response_model=ProjectResponse)
 async def activate_project(
-    project_id: str,
+    project_id: IdPath,
     force: bool = False,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
@@ -99,7 +100,7 @@ async def activate_project(
 
 @router.post("/{project_id}/deactivate", response_model=ProjectResponse)
 async def deactivate_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
@@ -133,7 +134,7 @@ async def deactivate_project(
 
 @router.post("/{project_id}/cancel", response_model=ProjectResponse)
 async def cancel_project(
-    project_id: str,
+    project_id: IdPath,
     reason: str | None = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
@@ -169,7 +170,7 @@ async def cancel_project(
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)
 async def restore_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
@@ -201,12 +202,12 @@ async def restore_project(
 
 @router.post("/{project_id}/cancel-staging", response_model=ProjectResponse)
 async def cancel_project_staging(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
     """
-    Cancel project staging and rollback (Handover 0108).
+    Cancel project staging and rollback.
 
     State Transition: staging → cancelled
 
@@ -238,7 +239,7 @@ async def cancel_project_staging(
 
 @router.post("/{project_id}/restage")
 async def restage_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> dict:
@@ -249,13 +250,13 @@ async def restage_project(
         - Project must have staging_status in ('staging', 'staging_complete')
         - Recovery from 'staging_complete' is rejected once implementation is
           launched (implementation_launched_at set) -- restaging would strand
-          already-spawned implementation jobs (BE-6047)
+          already-spawned implementation jobs
         - Orchestrator execution must not be actively running ('working'/'blocked')
 
     Actions:
         - Resets staging_status to null
-        - Clears mission, releasing the execution_mode lock (BE-6047)
-        - Preserves the project's chosen execution_mode (BE-6047: no longer
+        - Clears mission, releasing the execution_mode lock
+        - Preserves the project's chosen execution_mode (no longer
           force-reset to 'multi_terminal')
         - Clears implementation_launched_at
         - Decommissions existing orchestrator
@@ -297,11 +298,11 @@ async def restage_project(
 
 @router.post("/{project_id}/reset")
 async def reset_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> dict:
-    """FE-6180: Reset a project to its original pre-stage state (destructive rewind).
+    """Reset a project to its original pre-stage state (destructive rewind).
 
     The "Reset" escape hatch — unconditionally clears the staging artifacts
     (staging_status / mission / implementation_launched_at), sets status=inactive,
@@ -323,7 +324,7 @@ async def reset_project(
 
 @router.post("/{project_id}/unstage")
 async def unstage_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> dict:
@@ -334,7 +335,7 @@ async def unstage_project(
     has not yet been launched).  Once the agent is launched the status moves to
     'staging', which is handled by /restage instead of this endpoint.
 
-    Clears mission (BE-6047), releasing the execution_mode lock so the user can
+    Clears mission, releasing the execution_mode lock so the user can
     re-pick the orchestration mode after unstaging.
     """
     logger.info(
@@ -355,7 +356,7 @@ async def unstage_project(
 
 @router.delete("/deleted", response_model=ProjectPurgeResponse)
 async def purge_all_deleted_projects(
-    product_id: str | None = None,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectPurgeResponse:
@@ -382,7 +383,7 @@ async def purge_all_deleted_projects(
 
 @router.delete("/{project_id}/purge", response_model=ProjectPurgeResponse)
 async def purge_deleted_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectPurgeResponse:
@@ -400,12 +401,7 @@ async def purge_deleted_project(
 
     result = await project_service.deletion.nuclear_delete_project(project_id)
 
-    project_info = {
-        "id": project_id,
-        "name": result.project_name,
-        "tenant_key": "",
-        "deleted_at": datetime.now(UTC).isoformat(),
-    }
+    project_info = {"id": project_id, "name": result.project_name, "tenant_key": current_user.tenant_key}
 
     return ProjectPurgeResponse(
         success=True,
@@ -417,12 +413,12 @@ async def purge_deleted_project(
 
 @router.post("/{project_id}/archive", response_model=ProjectResponse)
 async def archive_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
     """
-    Archive a completed project (Handover 0412).
+    Archive a completed project.
 
     Marks project as 'completed' and sets completed_at timestamp.
     This is used when the user confirms project closeout and wants to archive it
@@ -451,9 +447,26 @@ async def archive_project(
     return _build_project_response(proj)
 
 
+@router.post("/{project_id}/reviewed", response_model=ProjectReviewedResponse)
+async def mark_project_reviewed(
+    project_id: IdPath,
+    current_user: User = Depends(get_current_active_user),
+    project_service: ProjectService = Depends(get_project_service),
+) -> ProjectReviewedResponse:
+    """
+    Record that you reviewed a finished project.
+
+    The Review window's Close button calls this so the project leaves the Jobs
+    board's "Done, not reviewed" group. Repeating the call keeps the first review
+    time. A project that has not finished is refused with 409.
+    """
+    reviewed_at = await project_service.mark_project_reviewed(project_id=project_id, tenant_key=current_user.tenant_key)
+    return ProjectReviewedResponse(id=project_id, reviewed_at=reviewed_at)
+
+
 @router.delete("/{project_id}", response_model=ProjectDeleteResponse)
 async def delete_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectDeleteResponse:
@@ -476,13 +489,13 @@ async def delete_project(
 
 @router.post("/{project_id}/launch", response_model=ProjectLaunchResponse)
 async def launch_project(
-    project_id: str,
+    project_id: IdPath,
     launch_config: dict[str, Any | None] = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectLaunchResponse:
     """
-    Launch project orchestrator (Handover 0504).
+    Launch project orchestrator.
 
     Creates orchestrator agent job and generates thin-client launch prompt.
     Activates the project if not already active.

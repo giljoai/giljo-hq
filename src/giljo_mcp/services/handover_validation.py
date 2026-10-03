@@ -13,6 +13,9 @@ from giljo_mcp.exceptions import ValidationError
 
 HANDOVER_TYPE_ABBR = "HND"
 
+DOOR_MCP = "mcp"
+DOOR_REST = "rest"
+
 REQUIRED_HANDOVER_HEADINGS: tuple[str, ...] = (
     "## Verify before trusting",
     "## Waiting on the operator",

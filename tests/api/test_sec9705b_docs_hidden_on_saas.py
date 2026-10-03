@@ -28,6 +28,7 @@ def _build(monkeypatch, mode: str, static_dir: str | None):
 
     monkeypatch.setattr(app_module, "GILJO_MODE", mode)
     monkeypatch.setattr(app_module.state, "config", _StaticConfig(static_dir) if static_dir else None)
+    monkeypatch.setattr("api.wiring.events.read_config", lambda path=None: {"paths": {"static": static_dir}})
     return app_module.create_app()
 
 

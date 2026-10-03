@@ -80,13 +80,6 @@ describe('useJobsBoardLiveRefresh (FE-9689)', () => {
     expect(refreshAgents.mock.calls.map((c) => c[0]).sort()).toEqual(['p1', 'p2'])
   })
 
-  it('reads a project id nested under data', () => {
-    mountDefault()
-    ws.fire('agent:silent', { data: { project_id: 'p2' } })
-    vi.advanceTimersByTime(300)
-    expect(refreshAgents).toHaveBeenCalledWith('p2')
-  })
-
   it('an agent event for a project not on the board reloads the board (it may have just arrived)', () => {
     mountDefault()
     ws.fire('agent:created', { project_id: 'p-new' })

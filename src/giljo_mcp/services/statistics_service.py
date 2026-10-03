@@ -87,30 +87,3 @@ class StatisticsService:
         async with self._get_session(tenant_key) as session:
             rows = await self._job_repo.get_mcp_tool_call_counts(session, tenant_key, since)
         return [{"tool_name": name, "total_calls": count} for name, count in rows]
-
-
-    async def get_system_stats(
-        self,
-        tenant_key: str,
-    ) -> dict[str, int]:
-        async with self._get_session(tenant_key) as session:
-            total_agents = await self._job_repo.count_total_agents(session, tenant_key)
-            return {
-                "total_projects": await self._product_repo.count_total_projects(session, tenant_key),
-                "active_projects": await self._product_repo.count_projects_by_status(session, tenant_key, "active"),
-                "completed_projects": await self._product_repo.count_projects_by_status(
-                    session, tenant_key, "completed"
-                ),
-                "total_agents": total_agents,
-                "active_agents": await self._job_repo.count_active_agents(session, tenant_key),
-                "total_messages": await self._product_repo.count_total_messages(session, tenant_key),
-                "pending_messages": await self._product_repo.count_messages_by_status(session, tenant_key, "pending"),
-                "total_tasks": await self._product_repo.count_total_tasks(session, tenant_key),
-                "completed_tasks": await self._product_repo.count_completed_tasks(session, tenant_key),
-                "total_agents_spawned": total_agents,
-                "total_jobs_completed": await self._job_repo.count_completed_agents(session, tenant_key),
-                "projects_staged": await self._product_repo.count_projects_staged(session, tenant_key),
-                "projects_cancelled": await self._product_repo.count_projects_by_status(
-                    session, tenant_key, "cancelled"
-                ),
-            }

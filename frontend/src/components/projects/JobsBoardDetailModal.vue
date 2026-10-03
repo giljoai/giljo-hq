@@ -70,16 +70,16 @@
                   </button>
                   <br />
                   <span class="jb-idlabel jb-idlabel--second">Job ID</span>
-                  <span class="jb-uuid" data-testid="jb-detail-job-id">{{ agent.job_id || agent.id || '—' }}</span>
+                  <span class="jb-uuid" data-testid="jb-detail-job-id">{{ agent.job_id || '—' }}</span>
                   <button
-                    v-if="agent.job_id || agent.id"
+                    v-if="agent.job_id"
                     class="jb-copy-btn"
                     :class="{ 'jb-copy-btn--done': copiedField === jobCopyKey(agent) }"
                     type="button"
                     :title="`Copy job ID`"
                     :aria-label="`Copy job ID`"
                     data-testid="jb-detail-copy-job"
-                    @click="handleCopy(jobCopyKey(agent), agent.job_id || agent.id)"
+                    @click="handleCopy(jobCopyKey(agent), agent.job_id)"
                   >
                     <v-icon v-if="copiedField === jobCopyKey(agent)" size="14">mdi-check</v-icon>
                     <v-icon v-else size="14">mdi-content-copy</v-icon>

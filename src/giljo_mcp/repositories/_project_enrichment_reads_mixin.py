@@ -48,15 +48,23 @@ class ProjectEnrichmentReadsMixin:
         session: AsyncSession,
         tenant_key: str,
         product_id: str | None = None,
+        include_unreviewed: bool = False,
     ) -> list[Project]:
+        statuses = (
+            [ProjectStatus.ACTIVE.value, ProjectStatus.COMPLETED.value]
+            if include_unreviewed
+            else ProjectStatus.ACTIVE.value
+        )
         conditions = self._build_list_conditions(
             tenant_key,
-            ProjectStatus.ACTIVE.value,
+            statuses,
             include_cancelled=False,
             product_id=product_id,
             hidden=None,
             search=None,
         )
+        if include_unreviewed:
+            conditions.append(or_(Project.status == ProjectStatus.ACTIVE.value, Project.reviewed_at.is_(None)))
         stmt = (
             select(Project)
             .options(selectinload(Project.project_type))

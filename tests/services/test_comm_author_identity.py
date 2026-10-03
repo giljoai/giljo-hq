@@ -85,12 +85,11 @@ async def test_a_uuid_shaped_slug_is_still_an_agent():
 
 
 async def test_be9379_bare_user_id_no_longer_attributes_to_the_user():
-    repo = _FakeRepo()
-    identity = await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1")
+    from giljo_mcp.exceptions import ValidationError
 
-    assert identity.kind == "agent"
-    assert identity.agent_id == "orchestrator"
-    assert "as_user" in identity.warning
+    repo = _FakeRepo()
+    with pytest.raises(ValidationError, match="from_agent"):
+        await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1")
 
 
 async def test_as_user_attributes_to_the_principal_without_advisory():
@@ -119,13 +118,12 @@ async def test_as_user_without_a_principal_is_refused():
         await _resolve(repo, _FakeUserRepo(None), as_user=True)
 
 
-async def test_no_agent_and_no_principal_attributes_to_orchestrator():
-    repo = _FakeRepo()
-    identity = await _resolve(repo)
+async def test_no_agent_and_no_principal_is_refused():
+    from giljo_mcp.exceptions import ValidationError
 
-    assert identity.kind == "agent"
-    assert identity.agent_id == "orchestrator"
-    assert identity.warning is not None
+    repo = _FakeRepo()
+    with pytest.raises(ValidationError, match="from_agent"):
+        await _resolve(repo)
 
 
 

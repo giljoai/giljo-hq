@@ -101,13 +101,13 @@ describe('useTaskCrud', () => {
   })
 
   describe('openHandoverDialog', () => {
-    it('opens the dialog with task_type HND and the given template text', () => {
-      const result = crud.openHandoverDialog('## Verify before trusting\n- x')
+    it('opens the dialog with task_type HND and an empty description', () => {
+      const result = crud.openHandoverDialog()
       expect(result).toEqual({ noProduct: false })
       expect(crud.showTaskDialog.value).toBe(true)
       expect(crud.editingTask.value).toBeNull()
       expect(crud.currentTask.value.task_type).toBe('HND')
-      expect(crud.currentTask.value.description).toBe('## Verify before trusting\n- x')
+      expect(crud.currentTask.value.description).toBe('')
       expect(crud.currentTask.value.title).toBe('')
     })
   })

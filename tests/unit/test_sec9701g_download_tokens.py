@@ -32,7 +32,7 @@ class TestMarkReadyAndMarkFailedRaiseOnDbFailure:
         db_session.commit = _boom
 
         with pytest.raises(DatabaseError):
-            await manager.mark_ready(token)
+            await manager.mark_ready(token, tenant_key=tenant_key)
 
     async def test_mark_failed_raises_database_error_on_commit_failure(self, db_session: AsyncSession) -> None:
         tenant_key = TenantManager.generate_tenant_key()
@@ -45,19 +45,19 @@ class TestMarkReadyAndMarkFailedRaiseOnDbFailure:
         db_session.commit = _boom
 
         with pytest.raises(DatabaseError):
-            await manager.mark_failed(token, "staging blew up")
+            await manager.mark_failed(token, "staging blew up", tenant_key=tenant_key)
 
     async def test_mark_ready_still_returns_false_for_an_unknown_token(self, db_session: AsyncSession) -> None:
         tenant_key = TenantManager.generate_tenant_key()
         manager = TokenManager(db_session)
         with tenant_session_context(db_session, tenant_key):
-            assert await manager.mark_ready("ghost-token") is False
+            assert await manager.mark_ready("ghost-token", tenant_key=tenant_key) is False
 
     async def test_mark_failed_still_returns_false_for_an_unknown_token(self, db_session: AsyncSession) -> None:
         tenant_key = TenantManager.generate_tenant_key()
         manager = TokenManager(db_session)
         with tenant_session_context(db_session, tenant_key):
-            assert await manager.mark_failed("ghost-token", "irrelevant") is False
+            assert await manager.mark_failed("ghost-token", "irrelevant", tenant_key=tenant_key) is False
 
 
 class TestClaimDownloadEnforcesSingleUse:

@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.platform_registry import Platform, get_platform
+from giljo_mcp.platform_registry import Platform
 from giljo_mcp.services.conductor_job_minter import projectless_conductor_staging_directive
 from giljo_mcp.services.protocol_sections.chapters_chain import (
     _build_ch_capability,
@@ -29,13 +29,10 @@ def build_conductor_staging_response(
     preset: Platform | None = None,
 ) -> dict[str, Any]:
     chain_mode = chain_ctx.execution_mode
-    platform = get_platform(chain_mode)
-    can_spawn = platform.can_spawn_terminals if platform is not None else True
 
     orchestrator_protocol = {
         "ch_capability": _build_ch_capability(
             execution_mode=chain_mode,
-            can_spawn_terminals=can_spawn,
             preset=preset,
         ),
         "ch_chain_staging": _build_ch_chain_staging(

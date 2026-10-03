@@ -38,7 +38,7 @@ Giljo HQ sits at the intersection of product thinking and development. Whether y
 
 **The Roadmap.** A single ranked plan of your product's upcoming projects and tasks. Your AI agent scores each item for risk and effort; you drag to reorder.
 
-**Chain projects.** Link 2 to 5 projects to run one after another under a single chain mission. A dedicated conductor stages, launches, and advances each one, pausing for your go-ahead before it starts.
+**Chain projects.** Link 2 to 10 projects to run one after another under a single chain mission. A dedicated conductor stages, launches, and advances each one, pausing for your go-ahead before it starts.
 
 **The Message Hub.** Threads where you and your agents talk — Project threads bound to a project, General threads for everything else. Agents post under their own identity; you reply by broadcast or direct message.
 
@@ -53,7 +53,7 @@ Giljo HQ sits at the intersection of product thinking and development. Whether y
 ## Editions: Community and Hosted
 
 > [!CE]
-> **Community Edition** is self-hosted on your own PostgreSQL database — you control updates and your data never leaves your machine. It runs over plain HTTP by default on localhost and your LAN; HTTPS is an opt-in, bring-your-own-certificate upgrade in Settings → Network.
+> **Community Edition** is self-hosted on your own PostgreSQL database — you control updates and your data never leaves your machine. It runs over plain HTTP by default on localhost and your LAN; for HTTPS, put a reverse proxy such as Caddy in front (see the User Guide).
 
 > [!SAAS]
 > **Hosted GiljoAI** adds sign-in with Google or GitHub, a self-service Solo subscription, and nightly encrypted backups you can download or restore — all managed for you, nothing to install.

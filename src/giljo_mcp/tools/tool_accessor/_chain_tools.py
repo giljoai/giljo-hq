@@ -17,6 +17,7 @@ from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import ACCEPTED_EXECUTION_MODES, VALID_EXECUTION_MODES
 from giljo_mcp.schemas.service_responses import build_next_action
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.sequence_run_service import MAX_CHAIN_MISSION_CHARS, SequenceRunService
 
 
@@ -235,7 +236,7 @@ class ChainToolsMixin:
             )
 
         awaiting_implement = [
-            pid for pid in ordered_distinct if found[pid][2] == "staging_complete" and found[pid][3] is None
+            pid for pid in ordered_distinct if found[pid][2] == STAGING_COMPLETE and found[pid][3] is None
         ]
         if awaiting_implement:
             return self._reject(

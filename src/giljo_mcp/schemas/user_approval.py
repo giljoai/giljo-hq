@@ -62,7 +62,7 @@ class RequestApprovalInput(BaseModel):
 
 
 class DecideApprovalInput(BaseModel):
-    """Validated input for the ``decide_approval`` MCP tool (BE-9499d).
+    """Validated input for the ``decide_approval`` MCP tool.
 
     Mirrors ``ApprovalDecideRequest`` (the REST ``/decide`` body, api/endpoints/
     approvals.py) so both doors reject malformed input identically before either
@@ -78,7 +78,7 @@ class DecideApprovalInput(BaseModel):
 class UserApprovalRead(BaseModel):
     """Read-side projection of a user_approvals row.
 
-    FE-9511: ``banner_state`` and ``taxonomy_alias`` are NOT columns on
+    ``banner_state`` and ``taxonomy_alias`` are NOT columns on
     ``UserApproval`` -- they are computed by
     ``UserApprovalService._build_reads_with_banner_context`` from the
     approval's project and requesting execution, so ``model_validate`` on the

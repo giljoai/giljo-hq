@@ -8,7 +8,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.domain.project_status import ProjectStatus
@@ -19,6 +19,19 @@ from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
 
 
 logger = logging.getLogger(__name__)
+
+
+def _live_orchestrators(tenant_key: str, project_id: str) -> Select:
+    return (
+        select(AgentExecution)
+        .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
+        .where(
+            AgentJob.project_id == project_id,
+            AgentExecution.agent_display_name == "orchestrator",
+            AgentExecution.tenant_key == tenant_key,
+            ~AgentExecution.status.in_(["decommissioned"]),
+        )
+    )
 
 
 class ProjectLifecycleRepository:
@@ -49,17 +62,7 @@ class ProjectLifecycleRepository:
         tenant_key: str,
         project_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
-            .where(
-                AgentJob.project_id == project_id,
-                AgentExecution.agent_display_name == "orchestrator",
-                AgentExecution.tenant_key == tenant_key,
-                ~AgentExecution.status.in_(["decommissioned"]),
-            )
-        )
-        result = await session.execute(stmt)
+        result = await session.execute(_live_orchestrators(tenant_key, project_id))
         return result.scalar_one_or_none()
 
     async def find_decommissioned_executions(
@@ -87,16 +90,7 @@ class ProjectLifecycleRepository:
         tenant_key: str,
         project_id: str,
     ) -> list[AgentExecution]:
-        result = await session.execute(
-            select(AgentExecution)
-            .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
-            .where(
-                AgentJob.project_id == project_id,
-                AgentExecution.agent_display_name == "orchestrator",
-                AgentExecution.tenant_key == tenant_key,
-                ~AgentExecution.status.in_(["decommissioned"]),
-            )
-        )
+        result = await session.execute(_live_orchestrators(tenant_key, project_id))
         return list(result.scalars().all())
 
     async def count_non_orchestrator_executions(
@@ -422,19 +416,8 @@ class ProjectLifecycleRepository:
         tenant_key: str,
         project_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
-            .where(
-                AgentJob.project_id == project_id,
-                AgentExecution.agent_display_name == "orchestrator",
-                AgentExecution.tenant_key == tenant_key,
-                ~AgentExecution.status.in_(["decommissioned"]),
-            )
-            .order_by(AgentExecution.started_at.desc())
-        )
-        result = await session.execute(stmt)
-        return result.scalars().first()
+        stmt = _live_orchestrators(tenant_key, project_id).order_by(AgentExecution.started_at.desc())
+        return (await session.execute(stmt)).scalars().first()
 
     async def get_user(
         self,

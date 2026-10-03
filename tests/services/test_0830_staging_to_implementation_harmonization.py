@@ -701,9 +701,12 @@ class TestImplementationPromptGateUsesProjectFlags:
         assert set(TERMINAL_EXECUTION_STATUSES) == {"complete", "closed", "decommissioned"}
 
     def test_gate_checks_staging_complete_flag(self):
+        from giljo_mcp.services.next_action import STAGING_COMPLETE
+
         src = self._source()
         assert "staging_status" in src
-        assert "staging_complete" in src
+        assert "STAGING_COMPLETE" in src
+        assert STAGING_COMPLETE == "staging_complete"
 
     def test_gate_checks_implementation_launched_at(self):
         src = self._source()

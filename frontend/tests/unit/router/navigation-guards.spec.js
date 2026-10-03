@@ -22,7 +22,6 @@ vi.mock('@/services/api', () => ({
 // Mock setup service
 vi.mock('@/services/setupService', () => ({
   default: {
-    checkStatus: vi.fn().mockResolvedValue({ database_initialized: true }),
   },
 }))
 

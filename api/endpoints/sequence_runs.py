@@ -113,14 +113,14 @@ class UpdateSequenceRunRequest(BaseModel):
     locked: bool | None = Field(
         default=None,
         description=(
-            "Edit lock (FE-6171). Stage -> true (membership/tickboxes locked); Unstage -> false. "
+            "Edit lock. Stage -> true (membership/tickboxes locked); Unstage -> false. "
             "Unstage (false) is refused with 422 once the run is staging-complete / running (ultralocked)."
         ),
     )
     chain_mission: str | None = Field(
         default=None,
         description=(
-            "Conductor-owned cross-project chain plan (BE-6185). Editable via the FE pen pre-Implement; "
+            "Conductor-owned cross-project chain plan. Editable via the FE pen pre-Implement; "
             "refused with 422 once the run is staging-complete / running (read-only after Implement)."
         ),
     )
@@ -181,7 +181,7 @@ async def list_sequence_runs(
     include_review_pending: bool = Query(
         default=False,
         description=(
-            "FE-9104: when true, ALSO include recent terminal runs that still have a "
+            "When true, ALSO include recent terminal runs that still have a "
             "completed-but-unreviewed member, so the chain review surface stays reachable "
             "after a cold refresh. Appended (deduped) to the status-filtered active set."
         ),
@@ -190,14 +190,14 @@ async def list_sequence_runs(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> list[dict[str, Any]]:
-    """List this tenant's sequence runs filtered by status (BE-6165e).
+    """List this tenant's sequence runs filtered by status.
 
     The durable-election read-back: the cockpit hydrates locked "In chain"
     checkboxes from here and detects an orphaned run for the reset hatch. 422 on
     an unknown status value. With ``include_review_pending=true`` the response also
-    carries terminal runs awaiting review (FE-9104) — additive, tenant-scoped.
+    carries terminal runs awaiting review — additive, tenant-scoped.
 
-    ``product_id`` (FE-9627) narrows both halves to runs whose member projects
+    ``product_id`` narrows both halves to runs whose member projects
     belong to that product — the tab being viewed. Omitted, the response stays
     tenant-wide exactly as before. A product_id this tenant does not own is a
     422, never a silent tenant-wide fallback.
@@ -281,13 +281,13 @@ async def remove_sequence_run_member(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """Remove ONE project from a run's membership (FE-6171 granular removal).
+    """Remove ONE project from a run's membership.
 
     Untick on /projects or /roadmap (Editing tier only) calls this to drop a member
     from ``project_ids`` / ``resolved_order``. When removal leaves exactly one
     project the run dissolves (status=cancelled); the lone project is NOT
-    auto-activated (FE-6174b removed collapse-to-solo — reduce-to-1 is a warning,
-    never an auto-flip). Refuses (422) when the run is staging-complete / running
+    auto-activated (reducing a run to one member is a warning, never an
+    auto-flip). Refuses (422) when the run is staging-complete / running
     (ultralocked) — only Terminate/Release end such a run. 404 if the run is not
     found for this tenant. Returns the updated (or dissolved) run dict.
     """
@@ -316,7 +316,7 @@ async def mark_sequence_run_member_reviewed(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """Durably record that a chain member has been reviewed (BE-9098).
+    """Durably record that a chain member has been reviewed.
 
     The FE calls this when the user closes a member's review pane so the "Review"
     badge SURVIVES refresh/navigation (it was client-only before). Append-only +
@@ -354,7 +354,7 @@ async def release_sequence_run(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """End a run and free its membership (BE-6165e convenience verb).
+    """End a run and free its membership.
 
     ``mode=graceful`` -> terminated (requires the in-flight project already closed
     out; 422 otherwise). ``mode=cancel`` -> cancelled (the killed-terminals escape
@@ -381,7 +381,7 @@ async def stop_sequence_run(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """Stop a running chain (FE-9632): end the run and stand its members down.
+    """Stop a running chain: end the run and stand its members down.
 
     The running-chain screen's Stop control, and the safe one: the work already done is
     never thrown away. A project that already finished stays finished. The project that
@@ -410,7 +410,7 @@ async def deactivate_sequence_run(
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """Back out of a chain (FE-6178): rewind every member to its original state.
+    """Back out of a chain: rewind every member to its original state.
 
     The /projects "Deactivate Chain" escape hatch — the chain equivalent of solo
     Deactivate, and the DESTRUCTIVE one. Every member is returned to pre-staging: its

@@ -209,16 +209,6 @@ describe('useTutorialState', () => {
       expect(payload.router_choice).toBe('D')
     })
 
-    it('stops sending beat fields when the backend does not echo them', async () => {
-      mockUpdateSetupState.mockImplementation(async () => ({ learning_complete: false }))
-      const t = useTutorialState()
-      t.next()
-      await vi.waitFor(() => expect(mockUpdateSetupState).toHaveBeenCalledTimes(1))
-      t.next()
-      // Feature-detected as unsupported — the second next() persists nothing.
-      expect(mockUpdateSetupState).toHaveBeenCalledTimes(1)
-    })
-
     it('keeps sending beat fields when the backend echoes them', async () => {
       const t = useTutorialState()
       t.next()

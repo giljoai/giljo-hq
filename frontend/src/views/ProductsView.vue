@@ -169,7 +169,6 @@
     <ProductTuningDialog
       v-model="showTuningDialog"
       :product="tuningProduct"
-      @refresh-product="handleProductRefresh"
     />
 
     <ProductDeleteDialog
@@ -333,14 +332,12 @@ async function setDefaultProduct(product) {
     showToast({
       message: `${product.name} set as default`,
       type: 'success',
-      timeout: 3000,
     })
   } catch (error) {
     console.error('Failed to set default product:', error)
     showToast({
       message: 'Failed to set default product. Try again or refresh the page.',
       type: 'error',
-      timeout: 5000,
     })
   }
 }
@@ -357,14 +354,12 @@ async function removeVisionDocument(doc) {
     showToast({
       message: `Deleted vision document: ${doc.document_name}`,
       type: 'success',
-      timeout: 3000,
     })
   } catch (error) {
     console.error('Failed to delete vision document:', error)
     showToast({
       message: 'Failed to delete vision document. Try again or refresh the page.',
       type: 'error',
-      timeout: 5000,
     })
   }
 }
@@ -381,7 +376,6 @@ async function showProductDetails(product) {
     showToast({
       message: 'Could not load full product details. Refresh and retry.',
       type: 'error',
-      timeout: 5000,
     })
   }
   selectedProduct.value = full || product
@@ -401,10 +395,12 @@ async function handleProductRefresh() {
   if (selectedProduct.value) {
     const full = await productStore.fetchProductById(selectedProduct.value.id)
     selectedProduct.value = full || selectedProduct.value
-    const visionResult = await api.visionDocuments
-      .listByProduct(selectedProduct.value.id)
-      .catch(() => null)
-    if (visionResult) detailsVisionDocuments.value = visionResult.data || []
+    try {
+      const visionResult = await api.visionDocuments.listByProduct(selectedProduct.value.id)
+      detailsVisionDocuments.value = visionResult.data || []
+    } catch (error) {
+      showToast({ message: `Could not refresh the vision documents: ${parseErrorResponse(error).message}`, type: 'error' })
+    }
   }
 
   if (tuningProduct.value) {
@@ -426,7 +422,6 @@ async function editProduct(product) {
     showToast({
       message: 'Could not load full product details. Some fields may be empty — refresh and retry.',
       type: 'error',
-      timeout: 5000,
     })
   }
   editingProduct.value = full || product
@@ -451,7 +446,6 @@ async function confirmDelete(product) {
       showToast({
         message: 'Failed to load deletion impact. Refresh the page and try again.',
         type: 'error',
-        timeout: 5000,
       })
     }
   } finally {
@@ -479,7 +473,6 @@ async function saveProduct(payload) {
     showToast({
       message: wasCreating ? 'Product created' : 'Product updated successfully',
       type: 'success',
-      timeout: wasCreating ? 6000 : 3000,
     })
 
     editingProduct.value = null
@@ -496,7 +489,6 @@ async function saveProduct(payload) {
       showToast({
         message: parsed?.message || 'Failed to save product. Check your connection and try again.',
         type: 'error',
-        timeout: 5000,
       })
     }
   } finally {
@@ -524,7 +516,6 @@ async function confirmDeleteProduct() {
     showToast({
       message: `${productName} moved to trash. Recoverable for 10 days.`,
       type: 'info',
-      timeout: 4000,
     })
   } catch (error) {
     if (error?.response?.status === 404) {
@@ -532,13 +523,12 @@ async function confirmDeleteProduct() {
       const productName = deletingProduct.value?.name || 'Product'
       deletingProduct.value = null
       await loadProducts()
-      showToast({ message: `${productName} was already removed.`, type: 'info', timeout: 3000 })
+      showToast({ message: `${productName} was already removed.`, type: 'info' })
     } else {
       console.error('Failed to delete product:', error)
       showToast({
         message: 'Failed to move product to trash. Try again or refresh the page.',
         type: 'error',
-        timeout: 5000,
       })
     }
   } finally {
@@ -556,8 +546,10 @@ async function closeDialog() {
   if (autoSavedForAnalysis.value) {
     try {
       await productStore.deleteProduct(autoSavedForAnalysis.value)
-    } catch {
-      // Silently ignore — product may already be deleted
+    } catch (error) {
+      if (error?.response?.status !== 404) {
+        showToast({ message: `Could not remove the draft product: ${parseErrorResponse(error).message}`, type: 'error' })
+      }
     }
     autoSavedForAnalysis.value = null
   }
@@ -596,8 +588,8 @@ onMounted(async () => {
   }
   try {
     await settingsStore.fetchFieldToggleConfig()
-  } catch {
-    // Field toggle config not available
+  } catch (error) {
+    showToast({ message: `Could not load the field settings: ${parseErrorResponse(error).message}`, type: 'error' })
   }
 })
 </script>

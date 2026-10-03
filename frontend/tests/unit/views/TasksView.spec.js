@@ -137,9 +137,8 @@ describe('TasksView - Task Statistics', () => {
 
     await flushPromises()
     expect(wrapper.text()).toContain('Tasks')
-    // FE-9365f: the toolbar went icon-only (Projects parity) — the label lives in the
-    // title/aria attributes now, not the text.
-    expect(wrapper.find('[title="New task"]').exists()).toBe(true)
+    // The toolbar is icon-only: the New task entry is identified by its aria-label.
+    expect(wrapper.find('[aria-label="Create new task"]').exists()).toBe(true)
   })
 })
 
@@ -409,17 +408,14 @@ describe('TasksView - Filter Controls', () => {
 })
 
 // FE-9643c: the "+" control is now a menu offering "New task" (unchanged
-// behavior) and "New Agent Handover" (pre-fills from the live template).
-describe('TasksView - New Agent Handover menu entry (FE-9643c)', () => {
+// behavior) and "New Agent Handover" (the six-field handover form).
+describe('TasksView - New Agent Handover menu entry', () => {
   let vuetify
 
   beforeEach(() => {
     setActivePinia(createPinia())
     vuetify = createVuetify({ components, directives })
     vi.clearAllMocks()
-    api.settings.getHandoverTemplate.mockResolvedValue({
-      data: { handover_template: '## Verify before trusting\n- <fill this in>', is_default: true },
-    })
   })
 
   it('offers a "New Agent Handover" menu entry alongside New task', async () => {
@@ -443,13 +439,7 @@ describe('TasksView - New Agent Handover menu entry (FE-9643c)', () => {
     expect(api.settings.getHandoverTemplate).not.toHaveBeenCalled()
   })
 
-  it('New Agent Handover fetches the live template and opens the dialog pre-filled', async () => {
-    api.settings.getHandoverTemplate.mockResolvedValue({
-      data: {
-        handover_template: '## Verify before trusting\n- checked with pytest',
-        is_default: false,
-      },
-    })
+  it('New Agent Handover opens the dialog empty, without fetching the template', async () => {
     const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
     await flushPromises()
     useProductStore().currentProductId = 'product-1'
@@ -457,10 +447,10 @@ describe('TasksView - New Agent Handover menu entry (FE-9643c)', () => {
     await wrapper.find('[data-testid="new-handover-menu-item"]').trigger('click')
     await flushPromises()
 
-    expect(api.settings.getHandoverTemplate).toHaveBeenCalledTimes(1)
+    expect(api.settings.getHandoverTemplate).not.toHaveBeenCalled()
     expect(wrapper.vm.showTaskDialog).toBe(true)
     expect(wrapper.vm.currentTask.task_type).toBe('HND')
-    expect(wrapper.vm.currentTask.description).toBe('## Verify before trusting\n- checked with pytest')
+    expect(wrapper.vm.currentTask.description).toBe('')
   })
 
   it('New Agent Handover shows the No Product dialog instead of fetching when no product is open', async () => {
@@ -478,18 +468,6 @@ describe('TasksView - New Agent Handover menu entry (FE-9643c)', () => {
     expect(wrapper.vm.showNoProductDialog).toBe(true)
     expect(wrapper.vm.showTaskDialog).toBe(false)
     expect(api.settings.getHandoverTemplate).not.toHaveBeenCalled()
-  })
-
-  it('surfaces a toast and does not open the dialog when the template fetch fails', async () => {
-    api.settings.getHandoverTemplate.mockRejectedValueOnce(new Error('network down'))
-    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
-    await flushPromises()
-    useProductStore().currentProductId = 'product-1'
-
-    await wrapper.find('[data-testid="new-handover-menu-item"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.vm.showTaskDialog).toBe(false)
   })
 })
 

@@ -155,18 +155,18 @@ class TestCommunityEditionIsNotStarved:
 
 class TestPostureConstantsMatchTheDeployedArtefact:
 
-    def test_prod_web_worker_count_matches_railway_toml(self):
-        railway_toml = REPO_ROOT / "railway.toml"
-        if not railway_toml.is_file():
-            pytest.skip(reason="railway.toml is SaaS-only and absent from the CE export -- INF-9577")
+    def test_prod_web_worker_count_matches_railway_config(self):
+        railway_ts = REPO_ROOT / ".railway" / "railway.ts"
+        if not railway_ts.is_file():
+            pytest.skip(reason=".railway/railway.ts is SaaS-only and absent from the CE export -- INF-9577")
 
-        text = railway_toml.read_text(encoding="utf-8")
+        text = railway_ts.read_text(encoding="utf-8")
         match = re.search(r"WEB_CONCURRENCY:-(\d+)", text)
-        assert match, "railway.toml no longer carries a WEB_CONCURRENCY default to pin against"
+        assert match, ".railway/railway.ts no longer carries a WEB_CONCURRENCY default to pin against"
 
         declared = int(match.group(1))
         assert declared == REFERENCE_WEB_WORKERS, (
-            f"railway.toml now defaults WEB_CONCURRENCY to {declared}, but this module "
+            f".railway/railway.ts now defaults WEB_CONCURRENCY to {declared}, but this module "
             f"still sizes the budget for {REFERENCE_WEB_WORKERS}. Re-run the arithmetic before "
             f"changing this constant — more workers means smaller per-worker pools, not "
             f"a bigger budget."

@@ -41,6 +41,7 @@ from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDelet
 from giljo_mcp.services._comm_thread_wake_mixin import CommThreadWakeMixin
 from giljo_mcp.services.comm_author_identity import resolve_and_register_author, validate_post_author_input
 from giljo_mcp.services.comm_baton_targets import (
+    HubTargetRefusedError,
     broadcast_reply_should_clear_baton,
     enrol_addressee,
     post_target_rejection,
@@ -132,10 +133,15 @@ class CommThreadService(
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         tk = self._resolve_tenant(tenant_key)
+        if creator_type not in VALID_PARTICIPANT_TYPES:
+            raise ValidationError(
+                f"Unknown creator_type {creator_type!r}. Valid: {sorted(VALID_PARTICIPANT_TYPES)}",
+                context={"operation": "comm_thread.create"},
+            )
         async with self._scoped_session(tk) as session:
             if not product_id:
                 product_id = await self._resolve_create_product_id(
-                    session, tk, product_id=product_id, project_id=project_id, sequence_run_id=sequence_run_id
+                    session, tk, project_id=project_id, sequence_run_id=sequence_run_id
                 )
             thread = await self._repo.create_thread(
                 session,
@@ -148,13 +154,12 @@ class CommThreadService(
                 sequence_run_id=sequence_run_id,
             )
             if creator_id:
-                ctype = creator_type if creator_type in VALID_PARTICIPANT_TYPES else "agent"
                 await self._repo.add_participant(
                     session,
                     tk,
                     thread.id,
                     participant_id=creator_id,
-                    participant_type=ctype,
+                    participant_type=creator_type,
                     display_name=creator_display_name,
                     role="creator",
                 )
@@ -253,11 +258,11 @@ class CommThreadService(
                 thread_id,
                 to_participant=to_participant,
                 pass_baton_to=pass_baton_to,
-                author_id=from_agent or user_id or "orchestrator",
+                author_id=from_agent or user_id,
                 current_owner=thread.next_action_owner,
             )
             if rejection is not None:
-                return rejection
+                raise HubTargetRefusedError(rejection)
 
             baton_passed = baton_cleared = False
             if pass_baton_to and pass_baton_to != "none":

@@ -17,16 +17,22 @@ class SettingsData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class GeneralSettingsData(SettingsData):
+    """Validates settings.settings_data for category='general'; other keys pass through."""
+
+    handover_template: str | None = None
+
+
 
 
 class GitIntegrationSettings(BaseModel):
     """Validates git_integration block within integrations settings.
 
-    BE-9103: ``max_commits`` was removed — commit depth is owned solely by the
+    ``max_commits`` was removed — commit depth is owned solely by the
     per-user Context-tab knob (UserFieldPriority ``git_history``), read by
     ``get_git_history``.
 
-    BE-9148: ``include_commit_history`` and ``branch_strategy`` were retired —
+    ``include_commit_history`` and ``branch_strategy`` were retired —
     they were round-tripped through the git settings API but never consumed by
     the git-history fetch chain (only ``enabled`` gates fetch). As with
     ``max_commits``, a stale ``include_commit_history``/``branch_strategy``/
@@ -38,27 +44,19 @@ class GitIntegrationSettings(BaseModel):
     use_in_prompts: bool = False
 
 
-class SerenaMcpSettings(BaseModel):
-    """Validates serena_mcp block within integrations settings."""
-
-    use_in_prompts: bool = False
-
-
 class IntegrationsSettingsData(BaseModel):
     """Validates settings.settings_data for category='integrations'."""
 
     git_integration: GitIntegrationSettings = Field(default_factory=GitIntegrationSettings)
-    serena_mcp: SerenaMcpSettings = Field(default_factory=SerenaMcpSettings)
 
 
 class SecuritySettingsData(BaseModel):
     """Validates settings.settings_data for category='security'.
 
-    BE-9148: ``ssl_enabled``/``ssl_cert_path``/``ssl_key_path`` and the
-    ``rate_limiting`` block were retired. SSL is owned by the file-based
-    ConfigManager (``features.ssl_enabled`` + ``paths.ssl_*``, surfaced by
-    ``get_ssl_enabled()``), and rate limiting by the env-configured limiter
-    (``api/middleware/rate_limiter.py``); the DB-backed copies were validated
+    ``ssl_enabled``/``ssl_cert_path``/``ssl_key_path`` and the
+    ``rate_limiting`` block were retired. The server serves plain HTTP (HTTPS comes
+    from an optional reverse proxy) and rate limiting is owned by the env-configured
+    limiter (``api/middleware/rate_limiter.py``); the DB-backed copies were validated
     and seeded but never read. Legacy ``ssl_*``/``rate_limiting`` keys on an
     existing security row are tolerated (Pydantic's default ``extra='ignore'``
     drops them on the next write) and are never read.
@@ -81,5 +79,6 @@ SETTINGS_CATEGORY_VALIDATORS: dict[str, type[BaseModel]] = {
 def validate_settings_by_category(category: str, data: dict) -> dict:
     validator_cls = SETTINGS_CATEGORY_VALIDATORS.get(category)
     if validator_cls is None:
-        return SettingsData(**data).model_dump(exclude_none=False)
+        open_cls = GeneralSettingsData if category == "general" else SettingsData
+        return open_cls(**data).model_dump(exclude_unset=True)
     return validator_cls(**data).model_dump(exclude_none=False)

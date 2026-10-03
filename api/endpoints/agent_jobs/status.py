@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
+from api.endpoints._boundary_types import ID_MAX, IdPath, IdQuery
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
 from giljo_mcp.services.orchestration_service import OrchestrationService
@@ -66,14 +67,17 @@ def job_to_response(job: dict) -> JobResponse:
         reactivation_count=job.get("reactivation_count", 0),
         not_picked_up=job.get("not_picked_up", False),
         activity=job.get("activity") or job.get("status", ""),
+        orchestrator_state=job.get("orchestrator_state"),
     )
 
 
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
-    project_id: str | None = Query(None, description="Filter by project ID"),
+    project_id: IdQuery = None,
     status: str | None = Query(
-        None, description="Filter by status (waiting, working, blocked, complete, silent, decommissioned)"
+        None,
+        max_length=ID_MAX,
+        description="Filter by status (waiting, working, blocked, complete, silent, decommissioned)",
     ),
     agent_display_name: str | None = Query(
         None, description="Filter by agent display name (orchestrator, implementer, etc.)"
@@ -148,14 +152,14 @@ async def list_jobs(
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
-    job_id: str,
+    job_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     orchestration_service: OrchestrationService = Depends(get_orchestration_service),
 ) -> JobResponse:
     """
     Get job details by job_id.
 
-    BE-9330: reads the job/execution ROW (same producer as the list endpoint
+    Reads the job/execution ROW (same producer as the list endpoint
     above), not ``get_agent_mission``. The mission call returns a protocol
     payload built for agent delivery, and two of its properties made it unfit
     to back a details read: on the implementation-launch gate's BLOCKED branch

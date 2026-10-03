@@ -10,7 +10,10 @@ from datetime import date
 from typing import Any
 
 
-GILJO_MODE = os.environ.get("GILJO_MODE", "ce").lower()
+_mode = os.environ.get("GILJO_MODE", "ce").lower()
+if _mode not in ("ce", "saas", ""):
+    raise RuntimeError(f"GILJO_MODE={_mode!r} is not a known edition; set it to 'ce' or 'saas'.")
+GILJO_MODE = _mode
 
 
 def member_management_enabled() -> bool:
@@ -46,7 +49,7 @@ class APIState:
         self.startup_complete: bool = False
         self.degraded_services: list[str] = []
         self.license: Any = None
-        self.pending_migration: bool = False
+        self.pending_migration: bool | None = False
         self.update_available: dict | None = None
         self.health_detail: dict[str, str] = {}
         self.update_checker_task: asyncio.Task | None = None

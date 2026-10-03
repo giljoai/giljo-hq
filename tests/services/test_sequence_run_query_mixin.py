@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import random
+import itertools
 import uuid
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import ResourceNotFoundError
@@ -53,6 +53,9 @@ async def _create_product(session: AsyncSession, tenant_key: str) -> str:
     return product_id
 
 
+_SERIALS = itertools.count(1)
+
+
 async def _create_project(session: AsyncSession, tenant_key: str, product_id: str) -> str:
     project_id = str(uuid.uuid4())
     session.add(
@@ -65,7 +68,7 @@ async def _create_project(session: AsyncSession, tenant_key: str, product_id: st
             status="completed",
             tenant_key=tenant_key,
             execution_mode="multi_terminal",
-            series_number=random.randint(1, 9000),
+            series_number=next(_SERIALS),
         )
     )
     await session.commit()
@@ -192,3 +195,56 @@ async def test_list_review_pending_drops_run_whose_completed_members_are_gone(
     after = [r["id"] for r in await svc.list_review_pending(tenant_key=tenant)]
     assert ghost["id"] not in after
     assert soft["id"] not in after
+
+
+async def test_listed_runs_carry_their_members_product_id(db_session: AsyncSession, cleanup_tenants: list[str]) -> None:
+    tenant = TenantManager.generate_tenant_key()
+    cleanup_tenants.append(tenant)
+
+    product_a = await _create_product(db_session, tenant)
+    product_b = await _create_product(db_session, tenant)
+    gone = await _create_project(db_session, tenant, product_a)
+    live_b = await _create_project(db_session, tenant, product_b)
+    await db_session.execute(update(Project).where(Project.id == live_b).values(status="inactive"))
+    await db_session.commit()
+    active = await _create_run(db_session, tenant, [gone, live_b])
+    await db_session.execute(delete(Project).where(Project.id == gone))
+    await db_session.commit()
+
+    done_a = await _create_project(db_session, tenant, product_a)
+    term = await _create_run(db_session, tenant, [done_a])
+    await _set_run(db_session, term["id"], status="completed")
+
+    svc = _seq_svc(db_session)
+    listed = {r["id"]: r for r in await svc.list_active(tenant_key=tenant)}
+    assert listed[active["id"]]["product_id"] == product_b
+
+    pending = {r["id"]: r for r in await svc.list_review_pending(tenant_key=tenant)}
+    assert pending[term["id"]]["product_id"] == product_a
+
+
+async def test_chain_review_stamps_the_same_project_field_and_group_display_is_unchanged(
+    db_session: AsyncSession, cleanup_tenants: list[str]
+) -> None:
+    tenant = TenantManager.generate_tenant_key()
+    cleanup_tenants.append(tenant)
+
+    product_id = await _create_product(db_session, tenant)
+    p1 = await _create_project(db_session, tenant, product_id)
+    p2 = await _create_project(db_session, tenant, product_id)
+    term = await _create_run(db_session, tenant, [p1, p2])
+    await _set_run(db_session, term["id"], status="completed")
+    svc = _seq_svc(db_session)
+
+    async def stamp(pid: str):
+        return (await db_session.execute(select(Project.reviewed_at).where(Project.id == pid))).scalar_one()
+
+    assert await stamp(p1) is None
+    await svc.mark_member_reviewed(run_id=term["id"], project_id=p1, tenant_key=tenant)
+    assert await stamp(p1) is not None
+    assert await stamp(p2) is None
+    assert [r["id"] for r in await svc.list_review_pending(tenant_key=tenant)] == [term["id"]]
+
+    await svc.mark_member_reviewed(run_id=term["id"], project_id=p2, tenant_key=tenant)
+    assert await stamp(p2) is not None
+    assert await svc.list_review_pending(tenant_key=tenant) == []

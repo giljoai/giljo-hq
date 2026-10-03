@@ -549,9 +549,8 @@ async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: 
     finally:
         state.websocket_manager = original
 
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 409, resp.text
     body = resp.json()
-    assert body["success"] is False
-    assert body["error"] == "TARGET_IS_A_DISPLAY_NAME"
-    assert body["registered_id"] == "36eac157-uuid"
+    assert body["error_code"] == "TARGET_IS_A_DISPLAY_NAME"
+    assert body["context"]["registered_id"] == "36eac157-uuid"
     mock_ws.broadcast_event_to_tenant.assert_not_called()

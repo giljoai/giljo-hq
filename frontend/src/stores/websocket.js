@@ -31,8 +31,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   const messageQueue = ref([])
 
-  const subscriptions = ref(new Map())
-
   const eventHandlers = ref(new Map())
 
   const connectionListeners = ref(new Set())
@@ -143,8 +141,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
           notifyConnectionListeners('connected', { isReconnect: isReconnectAttempt })
 
-          resubscribeAll()
-
           resolve()
         }
 
@@ -207,6 +203,17 @@ export const useWebSocketStore = defineStore('websocket', () => {
     })
   }
 
+  function stopLivenessTimers() {
+    if (stableTimer.value) {
+      clearTimeout(stableTimer.value)
+      stableTimer.value = null
+    }
+    if (pingInterval.value) {
+      clearInterval(pingInterval.value)
+      pingInterval.value = null
+    }
+  }
+
   function disconnect() {
     log('Disconnecting')
 
@@ -215,17 +222,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
       reconnectTimer.value = null
     }
 
-    if (stableTimer.value) {
-      clearTimeout(stableTimer.value)
-      stableTimer.value = null
-    }
+    stopLivenessTimers()
 
     reconnectPolicy.disarm()
-
-    if (pingInterval.value) {
-      clearInterval(pingInterval.value)
-      pingInterval.value = null
-    }
 
     if (ws.value) {
       ws.value.close(1000, 'Client disconnect')
@@ -239,15 +238,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
   function handleDisconnect(_event) {
     connectionStatus.value = 'disconnected'
 
-    if (stableTimer.value) {
-      clearTimeout(stableTimer.value)
-      stableTimer.value = null
-    }
-
-    if (pingInterval.value) {
-      clearInterval(pingInterval.value)
-      pingInterval.value = null
-    }
+    stopLivenessTimers()
 
     notifyConnectionListeners('disconnected')
 
@@ -367,12 +358,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
         send({ type: 'pong' })
         break
 
-      case 'subscribed':
-      case 'unsubscribed':
-        log(`${type} to ${payload.entity_type}:${payload.entity_id}`)
-        addEvent('subscription', `${type} ${payload.entity_type}:${payload.entity_id}`)
-        break
-
       case 'error':
         log('Server error', payload)
         stats.value.lastError = `Server error: ${payload.message || payload.error}`
@@ -451,80 +436,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
   }
 
 
-  function subscribe(entityType, entityId) {
-    const key = `${entityType}:${entityId}`
-
-    const currentCount = subscriptions.value.get(key) || 0
-    const nextCount = currentCount + 1
-    subscriptions.value.set(key, nextCount)
-
-    if (currentCount > 0) {
-      log(`Subscription refcount incremented for ${key} (${nextCount})`)
-      return key
-    }
-
-    const success = send({
-      type: 'subscribe',
-      entity_type: entityType,
-      entity_id: entityId,
-    })
-
-    if (success || !isConnected.value) {
-      log(`Subscribed to ${key}`)
-    }
-
-    return key
-  }
-
-  function unsubscribe(entityType, entityId) {
-    const key = `${entityType}:${entityId}`
-
-    const currentCount = subscriptions.value.get(key) || 0
-
-    if (currentCount <= 0) {
-      log(`Not subscribed to ${key}`)
-      return false
-    }
-
-    if (currentCount > 1) {
-      const nextCount = currentCount - 1
-      subscriptions.value.set(key, nextCount)
-      log(`Subscription refcount decremented for ${key} (${nextCount})`)
-      return true
-    }
-
-    send({ type: 'unsubscribe', entity_type: entityType, entity_id: entityId })
-
-    subscriptions.value.delete(key)
-    log(`Unsubscribed from ${key}`)
-    return true
-  }
-
-  function resubscribeAll() {
-    log(`Re-subscribing to ${subscriptions.value.size} subscriptions`)
-
-    subscriptions.value.forEach((count, key) => {
-      if (!count || count <= 0) {
-        return
-      }
-      const [entityType, entityId] = key.split(':')
-      send({
-        type: 'subscribe',
-        entity_type: entityType,
-        entity_id: entityId,
-      })
-    })
-  }
-
-  function subscribeToProject(projectId) {
-    return subscribe('project', projectId)
-  }
-
-  function subscribeToAgent(agentId) {
-    return subscribe('agent', agentId)
-  }
-
-
   function log(message, data = null) {
     if (config.debug) {
       const safeMsg = String(message).replace(/[\n\r\t]/g, ' ')
@@ -549,19 +460,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
   }
 
-  function getConnectionInfo() {
-    return {
-      state: connectionStatus.value,
-      clientId: clientId.value,
-      reconnectAttempts: reconnectAttempts.value,
-      maxReconnectAttempts: config.maxReconnectAttempts,
-      messageQueueSize: messageQueue.value.length,
-      subscriptionsCount: subscriptions.value.size,
-      stats: stats.value,
-      eventHistory: eventHistory.value.slice(0, 10),
-    }
-  }
-
   function getDebugInfo() {
     return {
       state: connectionStatus.value,
@@ -572,7 +470,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
       reconnectAttempts: reconnectAttempts.value,
       maxReconnectAttempts: config.maxReconnectAttempts,
       messageQueueSize: messageQueue.value.length,
-      subscriptions: Array.from(subscriptions.value.keys()),
       stats: stats.value,
       eventHistory: eventHistory.value.slice(0, 10),
       debug: config.debug,
@@ -592,7 +489,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
     reconnectAttempts,
     clientId,
     messageQueueSize: computed(() => messageQueue.value.length),
-    subscriptions: computed(() => Array.from(subscriptions.value.keys())),
 
     isConnected,
     isConnecting,
@@ -608,12 +504,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
     off,
     onConnectionChange,
 
-    subscribe,
-    unsubscribe,
-    subscribeToProject,
-    subscribeToAgent,
-
-    getConnectionInfo,
     getDebugInfo,
     setDebugMode,
   }

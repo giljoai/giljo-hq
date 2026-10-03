@@ -408,70 +408,61 @@ class NotificationService:
             self._logger.debug("No WebSocket manager available for notification:new")
             return
 
-        try:
-            payload_dict = notification.payload if isinstance(notification.payload, dict) else {}
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="notification:new",
-                data={
-                    "id": str(notification.id),
-                    "user_id": notification.user_id,
-                    "type": notification.type,
-                    "severity": notification.severity,
-                    "title": notification.title,
-                    "body": notification.body,
-                    "payload": notification.payload,
-                    "project_id": payload_dict.get("project_id"),
-                    "product_id": payload_dict.get("product_id"),
-                    "surface": notification.surface,
-                    "role_filter": notification.role_filter,
-                    "cta_label": notification.cta_label,
-                    "cta_route": notification.cta_route,
-                    "dismissible": notification.dismissible,
-                    "created_at": notification.created_at.isoformat() if notification.created_at else None,
-                },
-            )
-        except (RuntimeError, ValueError) as exc:
-            self._logger.warning("Failed to emit notification:new WS event: %s", exc, exc_info=True)
+        payload_dict = notification.payload if isinstance(notification.payload, dict) else {}
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="notification:new",
+            data={
+                "id": str(notification.id),
+                "user_id": notification.user_id,
+                "type": notification.type,
+                "severity": notification.severity,
+                "title": notification.title,
+                "body": notification.body,
+                "payload": notification.payload,
+                "project_id": payload_dict.get("project_id"),
+                "product_id": payload_dict.get("product_id"),
+                "surface": notification.surface,
+                "role_filter": notification.role_filter,
+                "cta_label": notification.cta_label,
+                "cta_route": notification.cta_route,
+                "dismissible": notification.dismissible,
+                "created_at": notification.created_at.isoformat() if notification.created_at else None,
+            },
+        )
 
     async def _emit_updated(self, tenant_key: str, notification: Notification) -> None:
         if not self._websocket_manager:
             self._logger.debug("No WebSocket manager available for notification:updated")
             return
 
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="notification:updated",
-                data={
-                    "id": str(notification.id),
-                    "user_id": notification.user_id,
-                    "type": notification.type,
-                    "severity": notification.severity,
-                    "title": notification.title,
-                    "body": notification.body,
-                    "payload": notification.payload,
-                    "surface": notification.surface,
-                    "role_filter": notification.role_filter,
-                    "cta_label": notification.cta_label,
-                    "cta_route": notification.cta_route,
-                    "dismissible": notification.dismissible,
-                    "created_at": notification.created_at.isoformat() if notification.created_at else None,
-                },
-            )
-        except (RuntimeError, ValueError) as exc:
-            self._logger.warning("Failed to emit notification:updated WS event: %s", exc, exc_info=True)
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="notification:updated",
+            data={
+                "id": str(notification.id),
+                "user_id": notification.user_id,
+                "type": notification.type,
+                "severity": notification.severity,
+                "title": notification.title,
+                "body": notification.body,
+                "payload": notification.payload,
+                "surface": notification.surface,
+                "role_filter": notification.role_filter,
+                "cta_label": notification.cta_label,
+                "cta_route": notification.cta_route,
+                "dismissible": notification.dismissible,
+                "created_at": notification.created_at.isoformat() if notification.created_at else None,
+            },
+        )
 
     async def _emit_resolved(self, tenant_key: str, notification_ids: list[str]) -> None:
         if not self._websocket_manager or not notification_ids:
             self._logger.debug("No WebSocket manager available for notification:resolved")
             return
 
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="notification:resolved",
-                data={"ids": notification_ids},
-            )
-        except (RuntimeError, ValueError) as exc:
-            self._logger.warning("Failed to emit notification:resolved WS event: %s", exc, exc_info=True)
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="notification:resolved",
+            data={"ids": notification_ids},
+        )

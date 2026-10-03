@@ -120,7 +120,7 @@ describe('SetupStep2Connect', () => {
 
     const onCall = mockWsOn.mock.calls.find((call) => call[0] === 'setup:tool_connected')
     expect(onCall).toBeTruthy()
-    onCall[1]({ tool_name: 'mcp_connected' })
+    onCall[1]({ tool_name: 'generic' })
     await nextTick()
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
   })
@@ -132,7 +132,7 @@ describe('SetupStep2Connect', () => {
     expect(canProceed[0]).toEqual([false])
 
     const handler = mockWsOn.mock.calls.find((call) => call[0] === 'setup:tool_connected')[1]
-    handler({ tool_name: 'mcp_connected' })
+    handler({ tool_name: 'generic' })
     await nextTick()
     const all = wrapper.emitted('can-proceed')
     expect(all[all.length - 1]).toEqual([true])
@@ -142,7 +142,7 @@ describe('SetupStep2Connect', () => {
     const wrapper = mountStep2({ selectedTools: ['claude_code'] })
     await flushPromises()
     const handler = mockWsOn.mock.calls.find((call) => call[0] === 'setup:tool_connected')[1]
-    handler({ tool_name: 'mcp_connected' })
+    handler({ tool_name: 'generic' })
     await nextTick()
     const stepData = wrapper.emitted('step-data')
     const last = stepData[stepData.length - 1][0]

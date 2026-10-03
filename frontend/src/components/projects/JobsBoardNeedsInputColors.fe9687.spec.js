@@ -62,18 +62,20 @@ describe('needsInputColor (FE-9687)', () => {
   })
 })
 
-describe('Needs Input card colours (FE-9687)', () => {
+describe('Needs card colours (FE-9687)', () => {
   it.each(CASES)('a $kind card takes its reason colour on the edge; the lifecycle pill is grey', ({ kind, color, agents }) => {
     const wrapper = mountCard(agents)
     const card = wrapper.find('[data-testid="jobs-board-card"]')
     expect(card.attributes('style')).toContain(`--jb-edge: ${color}`)
 
     const lifecycle = wrapper.find('[data-testid="jb-lifecycle-pill"]')
-    expect(lifecycle.text()).toBe('Needs Input')
+    expect(lifecycle.text()).toBe(kind === 'decision' ? 'Needs decision' : 'Needs attention')
+    expect(card.attributes('data-lifecycle')).toBe(kind === 'decision' ? 'Needs decision' : 'Needs attention')
     expect(lifecycle.element.style.color).toBe(rgb(GREY))
 
     const reason = wrapper.find('[data-testid="jb-status-pill"]')
     if (kind === 'decision') {
+      expect(reason.element.tagName).toBe('BUTTON')
       expect(reason.classes()).toContain('jb-status-pill--decision')
     } else {
       expect(reason.element.style.color).toBe(rgb(color))
@@ -81,7 +83,7 @@ describe('Needs Input card colours (FE-9687)', () => {
   })
 })
 
-describe('Needs Input stylesheet colours (FE-9687)', () => {
+describe('Needs card stylesheet colours (FE-9687)', () => {
   const read = (p) => readFileSync(resolve(__dirname, p), 'utf8')
   const tokens = read('../../styles/design-tokens.scss')
   const main = read('../../styles/main.scss')

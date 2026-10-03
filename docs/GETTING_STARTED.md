@@ -95,7 +95,7 @@ The project's card on the **Implementation** side of the **Jobs** board shows li
 
 Click **Jobs detail** on the card to open the full view of the project. Talk to your agents from its message composer (**Broadcast** to all or **Direct** to one), or open the full conversation in the **Message Hub** with the card's Hub button.
 
-If an agent needs a decision from you mid-run, the card says **Your decision needed** and **Jobs detail** shows a **Decision Required** banner. Check in with the orchestrator, then click the banner to open the decision dialog and pick an option. That is the only place approvals are decided.
+If an agent needs a decision from you mid-run, the card says **Your decision needed** and **Jobs detail** shows a **Needs decision** banner. Check in with the orchestrator, then click the banner to open the decision dialog and pick an option. That is the only place approvals are decided.
 
 When every agent has finished, the card shows a **Review project** button (**Jobs detail** shows **"Saving project memory…"** while the 360 Memory entry is written). Click **Review project** to see the closeout summary, then **Close**. You stay on the board, and the reviewed project leaves it. You can reopen the summary any time from the project's serial badge on the **Projects** page.
 

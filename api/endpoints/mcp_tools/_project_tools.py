@@ -11,6 +11,7 @@ from pydantic import Field
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
+    CONSTRAINT_INVALID_CHOICE,
     CURSOR_DESC,
     MCP_DESCRIPTION_MAX,
     MCP_HEAVY_TOOL_META,
@@ -24,7 +25,9 @@ from api.endpoints.mcp_tools._base import (
     _parse_iso_datetime_param,
     blank_text_rejection,
     mcp,
+    validation_rejection,
 )
+from api.endpoints.mcp_tools._schema_helpers import enum_schema_without_default
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.services.project_service._mcp_list_bounds import (
     _QUERY_MAX_LENGTH,
@@ -63,7 +66,7 @@ def _normalize_list_projects_filters(
     elif str(hidden).lower() in ("false", "0", "no"):
         hidden_arg = False
     else:
-        hidden_arg = None
+        raise ValueError(f"hidden must be 'true', 'false' or empty, got {hidden!r}")
 
     return status_arg, pt_arg, hidden_arg
 
@@ -95,8 +98,8 @@ async def diagnose_project_state(
         "product list is in the error) -- nothing is created on a bare guess. project_type is a "
         "taxonomy abbreviation (e.g. FE, BE, INF); the reserved 'TSK' type is task-only and is never "
         "valid here. series_number is auto-assigned server-side -- omit it for a normal create. "
-        "Project is created inactive; activation and the implementation-launch gate are both "
-        "separate, explicit steps (either door -- see get_giljo_guide). The response names the "
+        "Project is created inactive. Launching its implementation makes it active; the launch "
+        "gate is a separate, explicit step (either door -- see get_giljo_guide). The response names the "
         "product the project landed on and carries TWO aliases: alias is the short permanent "
         "share code (e.g. A1B2C3, never changes), taxonomy_alias is the human-readable serial "
         "(e.g. BE-0007) -- quote taxonomy_alias to people, use project_id in tool calls. See "
@@ -402,7 +405,10 @@ async def list_projects(
     serializes a docstring Args: block to the schema, so this stayed one
     source of truth instead of two that could disagree.
     """
-    status_arg, pt_arg, hidden_arg = _normalize_list_projects_filters(status, project_type, hidden)
+    try:
+        status_arg, pt_arg, hidden_arg = _normalize_list_projects_filters(status, project_type, hidden)
+    except ValueError as exc:
+        return validation_rejection(field="hidden", constraint=CONSTRAINT_INVALID_CHOICE, message=str(exc))
 
     return await _call_tool(
         ctx,
@@ -571,11 +577,11 @@ async def update_project(
         "Project.description (the user's INPUT requirements). Orchestrator-only, called after "
         "creating the execution strategy during staging. Triggers a WebSocket UI update."
     ),
-    annotations=_tool_hints("update_project_mission"),
+    annotations=_tool_hints("update_project_mission", destructive=True),
 )
 async def update_project_mission(
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
-    mission: Annotated[str, Field(max_length=MCP_MISSION_MAX)],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
+    mission: Annotated[str, Field(max_length=MCP_MISSION_MAX, description="The new mission text for the project.")],
     ctx: Context = None,
 ) -> dict[str, Any]:
     return await _call_tool(
@@ -591,40 +597,33 @@ async def update_project_mission(
 @mcp.tool(
     title="Stage Project",
     description=(
-        "Stage a project: drive the staging endpoint and return the orchestrator staging prompt. "
-        "The one thing to ask the user is `mode` -- how the work runs, not which tool they use "
-        "(that is detected automatically); omit it and you get an EXECUTION_MODE_REQUIRED refusal "
-        "naming both modes to put to your user, unless the account has set a default under "
-        "Tools -> Agents. To set the project's goal at the same time, pass `mission` -- it is "
-        "written through update_project_mission, the same single writer, which is also where "
-        "you author or change a mission on its own. MCP equivalent of the dashboard "
-        "'copy staging prompt' button. HUMAN GATE: after staging, STOP -- get_implementation_prompt "
-        "cannot run until the implementation gate is crossed through one of its two doors: the dashboard "
-        "'Implement' button, or launch_implementation over MCP (tenant-toggle gated; not always "
-        "available). Activation is a further, separate step after that -- crossing the gate does "
-        "not activate the project. See get_giljo_guide for the staging -> human-gate -> implement "
-        "lifecycle. "
-        "The staging REVERSE GEAR lives on the `action` parameter: 'unstage' (revert 'staged' back "
-        "to ready, before the agent was contacted), 'restage' (reset staging and mint a fresh "
-        "orchestrator once staging is underway), and 'cancel_staging' (abandon staging entirely -- "
-        "requires the project to be INACTIVE with staging_status='staging', i.e. staging is "
-        "underway but not yet complete; if the project has already reached 'staged', use "
-        "'unstage' instead). "
-        "`mode` is ignored for every action other than the default 'stage'."
+        "Prepares a project in your own private Giljo HQ workspace and returns its staging plan. "
+        "Staging always ends at a human approval gate: nothing is implemented until the user "
+        "approves it with the Implement button in the dashboard or with launch_implementation. "
+        "Approving also makes an inactive project active. "
+        "Ask the user which `mode` to use (subagent or multi_terminal); if it is omitted and the "
+        "account has no default, the call is refused with EXECUTION_MODE_REQUIRED and names both "
+        "modes. Pass `mission` to set the project's goal at the same time; it is written through "
+        "update_project_mission, which is also where you change a mission on its own. The `action` parameter "
+        "can undo staging: 'unstage' reverts a staged project before the agent was contacted, "
+        "'cancel_staging' abandons staging that is underway, and 'restage' clears the mission and "
+        "the staging state, retires the earlier orchestrator and creates a fresh one so staging "
+        "starts over (refused once implementation has launched). `mode` only applies to the "
+        "default 'stage' action. No outside service is contacted."
     ),
     annotations=_tool_hints("stage_project", destructive=True),
 )
 async def stage_project(
-    project_id: str,
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The project to stage.")],
     mode: Annotated[
         str,
         Field(
-            json_schema_extra={"enum": ["multi_terminal", "subagent"]},
+            json_schema_extra=enum_schema_without_default(["multi_terminal", "subagent"]),
             description=(
                 "How the work runs: 'subagent' (one session drives the worker agents itself) "
-                "or 'multi_terminal' (a separate terminal per agent). Which coding tool you "
-                "are using is detected automatically -- do not ask the user for it. ASK your "
-                "user for this one; omitting it is refused, not defaulted."
+                "or 'multi_terminal' (a separate terminal per agent). This is the user's "
+                "choice, so ask them. The coding tool in use is detected automatically. If "
+                "omitted and the account has no default, the call is refused."
             ),
         ),
     ] = "",
@@ -639,7 +638,10 @@ async def stage_project(
             ),
         ),
     ] = "",
-    action: Literal["stage", "unstage", "restage", "cancel_staging"] = "stage",
+    action: Annotated[
+        Literal["stage", "unstage", "restage", "cancel_staging"],
+        Field(description="'stage' (default) prepares the project; the other three undo staging, as described above."),
+    ] = "stage",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
@@ -666,7 +668,9 @@ async def stage_project(
     annotations=_tool_hints("get_implementation_prompt"),
 )
 async def get_implementation_prompt(
-    project_id: Annotated[str, Field(description="The project to fetch the implementation prompt for.")],
+    project_id: Annotated[
+        str, Field(max_length=MCP_ID_MAX, description="The project to fetch the implementation prompt for.")
+    ],
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Renamed from ``implement_project`` (BE-9554).
@@ -697,17 +701,17 @@ async def get_implementation_prompt(
         "already_launched=true). NOT offered to a platform-spawned worker on a narrower toolset, so "
         "a worker cannot self-unlock. Turning Headless on signs your harness's own permission prompt "
         "for THIS call as your approval -- run that harness with a bypass/skip-permissions flag and "
-        "nobody was actually asked. Launching does NOT activate the project -- that is a separate, "
-        "explicit step (update_project(status='active') or the dashboard's Activate control); the "
-        "response's `project_active` field and, when false, a `next_action` string name exactly what "
-        "to do next. Optional `mission` writes the goal via update_project_mission (the same single "
-        "writer the standalone tool uses) before the gate is stamped; omit to launch with the mission "
-        "already authored during staging."
+        "nobody was actually asked. Launching also makes an inactive project active, so it shows in "
+        "the dashboard Jobs view; `project_active` in the response confirms it. A project launched "
+        "earlier, or one holding another status such as parked, is left as it is: `project_active` is "
+        "then false and `next_action` names what to do. Optional `mission` writes the goal via "
+        "update_project_mission (the same single writer the standalone tool uses) before the gate is "
+        "stamped; omit to launch with the mission already authored during staging."
     ),
     annotations=_tool_hints("launch_implementation", destructive=True),
 )
 async def launch_implementation(
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
     mission: Annotated[
         str,
         Field(

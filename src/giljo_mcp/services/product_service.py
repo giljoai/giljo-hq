@@ -105,14 +105,11 @@ class ProductService:
     async def _emit_websocket_event(self, event_type: str, data: dict[str, Any]) -> None:
         if not self._websocket_manager:
             return
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=self.tenant_key,
-                event_type=event_type,
-                data={**data, "tenant_key": self.tenant_key},
-            )
-        except (RuntimeError, ValueError) as e:
-            self._logger.warning(f"Failed to emit WebSocket event {event_type}: {e}", exc_info=True)
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=self.tenant_key,
+            event_type=event_type,
+            data={**data, "tenant_key": self.tenant_key},
+        )
 
     def _validate_target_platforms(self, target_platforms: list[str]) -> tuple[bool, str | None]:
         if not target_platforms:

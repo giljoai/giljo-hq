@@ -11,7 +11,7 @@ const { mockArchive, mockGetMemoryEntries, mockRouterPush, mockShowToast } = vi.
 
 vi.mock('@/services/api', () => ({
   default: {
-    projects: { archive: mockArchive },
+    projects: { archive: mockArchive, markReviewed: vi.fn().mockResolvedValue({ data: {} }) },
     products: { getMemoryEntries: mockGetMemoryEntries },
   },
 }))

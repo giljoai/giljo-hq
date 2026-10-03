@@ -128,7 +128,7 @@ def test_sub_orchestrator_emits_no_chain_chapters() -> None:
 def test_ch_capability_multi_terminal_branch() -> None:
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_capability
 
-    cap = _build_ch_capability(execution_mode="multi_terminal", can_spawn_terminals=True)
+    cap = _build_ch_capability(execution_mode="multi_terminal")
 
     assert "EXECUTION MODE = multi_terminal" in cap, "must state the resolved mode as fact"
     assert "IMMUTABLE" in cap, "must state the mode is immutable"
@@ -141,7 +141,7 @@ def test_ch_capability_multi_terminal_branch() -> None:
 def test_ch_capability_subagent_mode_isolation_is_best_effort() -> None:
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_capability
 
-    cap = _build_ch_capability(execution_mode="claude_code_cli", can_spawn_terminals=False)
+    cap = _build_ch_capability(execution_mode="claude_code_cli")
     low = cap.lower()
 
     assert "claude_code_cli" in cap, "must name the resolved subagent mode"
@@ -157,8 +157,8 @@ def test_ch_capability_subagent_mode_isolation_is_best_effort() -> None:
 def test_ch_capability_is_a_contract_not_a_probe() -> None:
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_capability
 
-    for mode, spawn in (("multi_terminal", True), ("claude_code_cli", True), ("codex_cli", False)):
-        cap = _build_ch_capability(execution_mode=mode, can_spawn_terminals=spawn)
+    for mode in ("multi_terminal", "claude_code_cli", "codex_cli"):
+        cap = _build_ch_capability(execution_mode=mode)
         assert "CONTRACT" in cap, f"{mode}: must render as a contract"
         assert "no per-project gate" in cap.lower(), f"{mode}: must state there is NO per-project gate"
         assert "launch_implementation" not in cap.lower(), f"{mode}: gateless — launch_implementation must be gone"
@@ -293,15 +293,12 @@ def test_chain_drive_threads_real_job_id() -> None:
     assert "<your job_id>" not in chapter, "the placeholder must be replaced"
 
 
-def test_ch_capability_probe_removed_regardless_of_can_spawn() -> None:
+def test_ch_capability_probe_removed() -> None:
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_capability
 
-    for spawn in (True, False):
-        cap = _build_ch_capability(execution_mode="claude_code_cli", can_spawn_terminals=spawn)
-        assert "CAN YOU OPEN AN INDEPENDENT OS TERMINAL" not in cap, (
-            f"can_spawn={spawn}: the runtime probe must be gone"
-        )
-        assert "RE-STAGE" in cap, f"can_spawn={spawn}: fail-loud fallback must instruct re-staging"
+    cap = _build_ch_capability(execution_mode="claude_code_cli")
+    assert "CAN YOU OPEN AN INDEPENDENT OS TERMINAL" not in cap, "the runtime probe must be gone"
+    assert "RE-STAGE" in cap, "fail-loud fallback must instruct re-staging"
 
 
 def test_conductor_implementation_emits_conductor_chapter() -> None:

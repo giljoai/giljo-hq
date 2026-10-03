@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user
 
 from giljo_mcp.models.auth import User
@@ -70,7 +71,7 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         TestConfigSchema(
             quality_standards=tc.quality_standards,
             test_strategy=tc.test_strategy,
-            coverage_target=tc.coverage_target or 80,
+            coverage_target=tc.coverage_target if tc.coverage_target is not None else 80,
             testing_frameworks=tc.testing_frameworks,
         )
         if tc
@@ -202,7 +203,7 @@ async def list_products(
     """
     List all products for the current tenant.
 
-    BE-6066 P4: returns the LEAN ``ProductListResponse`` — identity/flags/counts +
+    Returns the LEAN ``ProductListResponse`` — identity/flags/counts +
     vision AGGREGATES, NOT the full detail graph. The 4 heavy relations
     (tech_stack / architecture / test_config / vision_documents) are no longer
     eager-loaded or serialized here; full detail loads on demand via
@@ -230,10 +231,10 @@ async def list_deleted_products(
     service: ProductService = Depends(get_product_service),
 ) -> list[DeletedProductResponse]:
     """
-    List soft-deleted products (Handover 0070).
+    List soft-deleted products.
 
     Uses ProductService.list_deleted_products() for database operations.
-    Handover 0731d: Purge date computation moved from service to endpoint layer.
+    Purge date computation moved from service to endpoint layer.
     """
     products = await service.lifecycle.list_deleted_products()
 
@@ -265,7 +266,7 @@ async def list_deleted_products(
 
 @router.get("/{product_id}", response_model=ProductResponse)
 async def get_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductResponse:
@@ -287,7 +288,7 @@ async def get_product(
 
 @router.put("/{product_id}", response_model=ProductResponse)
 async def update_product(
-    product_id: str,
+    product_id: IdPath,
     updates: ProductUpdate,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),

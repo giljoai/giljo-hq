@@ -4,14 +4,14 @@ import { setActivePinia, createPinia } from 'pinia'
 const h = vi.hoisted(() => ({
   viewedProductId: null,
   listRuns: vi.fn(() => Promise.resolve({ data: [] })),
-  getRun: vi.fn(() => Promise.resolve({ data: {} })),
+  updateRun: vi.fn(() => Promise.resolve({ data: {} })),
 }))
 
 vi.mock('@/services/api', () => ({
   default: {
     sequenceRuns: {
       list: (...a) => h.listRuns(...a),
-      get: (...a) => h.getRun(...a),
+      update: (...a) => h.updateRun(...a),
     },
   },
 }))
@@ -64,74 +64,23 @@ describe('sequenceRunStore.hydrate — product scoping (FE-9627)', () => {
   })
 })
 
-
-describe('sequenceRunStore — the open run does not survive a scoped hydrate (FE-9631)', () => {
-  let store
-
-  const foreignRun = () => ({
-    id: 'run-yapper',
-    project_ids: ['yapper-p1', 'yapper-p2'],
-    resolved_order: ['yapper-p1', 'yapper-p2'],
-    project_statuses: { 'yapper-p1': 'completed', 'yapper-p2': 'pending' },
-    status: 'stalled',
-  })
-
+describe('sequenceRunStore — a run keeps the product the list read names', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    store = useSequenceRunStore()
-    h.listRuns.mockClear()
-    h.getRun.mockReset()
-    h.getRun.mockResolvedValue({ data: foreignRun() })
     h.viewedProductId = null
   })
 
-  it('clears the open run when the scoped hydrate no longer returns it', async () => {
-    h.viewedProductId = 'prod-yapper'
-    await store.fetchRun('run-yapper')
-    expect(store.activeRun.id).toBe('run-yapper')
+  it('hydrate keeps product_id, and a patch response without one does not erase it', async () => {
+    const listed = { id: 'r1', status: 'running', project_ids: ['p1'], resolved_order: ['p1'], product_id: 'prod-b' }
+    h.listRuns.mockResolvedValueOnce({ data: [listed] })
+    const store = useSequenceRunStore()
 
-    h.viewedProductId = 'prod-hermes'
-    h.listRuns.mockResolvedValueOnce({ data: [] })
-    await store.hydrate()
+    await store.hydrate(undefined, { allProducts: true })
+    expect(store.runsById.get('r1').product_id).toBe('prod-b')
 
-    expect(store.activeRuns).toEqual([])
-    expect(store.reviewPendingRun).toBeNull()
-    expect(store.activeRun).toBeNull()
-  })
-
-  it('does not re-seed the election set from a run the scoped hydrate did not return', async () => {
-    h.viewedProductId = 'prod-hermes'
-    h.listRuns.mockResolvedValueOnce({ data: [] })
-    await store.hydrate()
-
-    await store.fetchRun('run-yapper')
-
-    expect(store.activeRuns).toEqual([])
-    expect(store.isProjectInActiveChain('yapper-p1')).toBe(false)
-    expect(store.reviewPendingRun).toBeNull()
-  })
-
-  it('counter-case: a hydrate that DOES return the open run keeps it (cockpit on its own product)', async () => {
-    h.viewedProductId = 'prod-yapper'
-    await store.fetchRun('run-yapper')
-
-    h.listRuns.mockResolvedValueOnce({ data: [foreignRun()] })
-    await store.hydrate()
-
-    expect(store.activeRun.id).toBe('run-yapper')
-    expect(store.reviewPendingRun?.id).toBe('run-yapper')
-    expect(store.isProjectInActiveChain('yapper-p1')).toBe(true)
-  })
-
-  it('counter-case: a terminal open run surfaced as review-pending by the scoped hydrate is kept (FE-9104)', async () => {
-    h.viewedProductId = 'prod-yapper'
-    await store.fetchRun('run-yapper')
-
-    h.listRuns.mockResolvedValueOnce({ data: [{ ...foreignRun(), status: 'completed' }] })
-    await store.hydrate()
-
-    expect(store.activeRun.id).toBe('run-yapper')
-    expect(store.reviewPendingById.has('run-yapper')).toBe(true)
-    expect(store.reviewPendingRun?.id).toBe('run-yapper')
+    const { product_id: _omitted, ...single } = listed
+    h.updateRun.mockResolvedValueOnce({ data: single })
+    await store.patchRun('r1', { locked: true })
+    expect(store.runsById.get('r1').product_id).toBe('prod-b')
   })
 })

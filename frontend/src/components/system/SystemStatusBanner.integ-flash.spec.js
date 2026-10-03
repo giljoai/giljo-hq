@@ -10,7 +10,6 @@ const h = vi.hoisted(() => ({
   dismissInteg: vi.fn(),
   dismissAgent: vi.fn(),
   git: { value: false },
-  serena: { value: false },
   resolved: { value: false },
   dist: { value: { active: 2 } },
   refreshDeferred: { value: null },
@@ -45,19 +44,16 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
   return {
     useIntegrationStatus: () => {
       const gitEnabled = ref(h.git.value)
-      const serenaEnabled = ref(h.serena.value)
       const resolved = ref(h.resolved.value)
       return {
         gitEnabled,
-        serenaEnabled,
         resolved,
         loading: ref(false),
         refresh: () =>
           h.refreshDeferred.value.promise.then(
-            ({ git, serena, failed }) => {
+            ({ git, failed }) => {
               if (failed) return
               gitEnabled.value = git
-              serenaEnabled.value = serena
               resolved.value = true
             },
           ),
@@ -117,7 +113,6 @@ describe('SystemStatusBanner integration nudge — resolved-status gating (FE-92
     h.integShow.fn = () => true
     h.agentShow.fn = () => false
     h.git.value = false
-    h.serena.value = false
     h.resolved.value = false
     h.dist.value = { active: 2 }
   })
@@ -127,23 +122,17 @@ describe('SystemStatusBanner integration nudge — resolved-status gating (FE-92
     expect(wrapper.find(NUDGE).exists()).toBe(false)
   })
 
-  it('stays absent through resolution on a box where both integrations are enabled', async () => {
+  it('stays absent through resolution on a box where Git is enabled', async () => {
     const wrapper = await mountPending()
     expect(wrapper.find(NUDGE).exists()).toBe(false)
-    await settleWith({ git: true, serena: true })
+    await settleWith({ git: true })
     expect(wrapper.find(NUDGE).exists()).toBe(false)
   })
 
-  it('LOAD-BEARING: still appears after resolution when integrations are genuinely off', async () => {
+  it('LOAD-BEARING: still appears after resolution when Git is genuinely off', async () => {
     const wrapper = await mountPending()
     expect(wrapper.find(NUDGE).exists()).toBe(false)
-    await settleWith({ git: false, serena: false })
-    expect(wrapper.find(NUDGE).exists()).toBe(true)
-  })
-
-  it('LOAD-BEARING: appears after resolution when only one integration is on', async () => {
-    const wrapper = await mountPending()
-    await settleWith({ git: true, serena: false })
+    await settleWith({ git: false })
     expect(wrapper.find(NUDGE).exists()).toBe(true)
   })
 
@@ -155,7 +144,7 @@ describe('SystemStatusBanner integration nudge — resolved-status gating (FE-92
 
   it('dismissal cadence is untouched: dismiss still persists and hides the row', async () => {
     const wrapper = await mountPending()
-    await settleWith({ git: false, serena: false })
+    await settleWith({ git: false })
     expect(wrapper.find(NUDGE).exists()).toBe(true)
 
     const dismiss = wrapper.find(`${NUDGE} [data-testid="banner-dismiss"]`)

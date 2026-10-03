@@ -114,26 +114,30 @@ export const useMemoryStore = defineStore('memory', () => {
     return entry
   }
 
-  async function fetchMemoryEntries(productId, { limit = 100 } = {}) {
-    if (!productId) return
+  async function _load(productId, { limit, search }) {
     const seq = ++loadSeq
     loading.value = true
     error.value = null
     try {
-      const response = await api.products.getMemoryEntries(productId, { limit })
+      const response = await api.products.getMemoryEntries(productId, search ? { limit, search } : { limit })
       if (seq !== loadSeq) return
       const list = response?.data?.entries || []
       byId.value = new Map()
       for (const entry of list) _upsertEntry(entry)
       loadedProductId.value = productId
-      serverSearch.value = false
+      serverSearch.value = Boolean(search)
     } catch (err) {
       if (seq !== loadSeq) return
       error.value = err.message
-      console.error('Failed to fetch memory entries:', err)
+      console.error(`Failed to ${search ? 'search' : 'fetch'} memory entries:`, err)
     } finally {
       if (seq === loadSeq) loading.value = false
     }
+  }
+
+  async function fetchMemoryEntries(productId, { limit = 100 } = {}) {
+    if (!productId) return
+    await _load(productId, { limit })
   }
 
   function searchMemoryEntries(productId, term, { limit = 100 } = {}) {
@@ -153,24 +157,7 @@ export const useMemoryStore = defineStore('memory', () => {
       await fetchMemoryEntries(productId, { limit })
       return
     }
-    const seq = ++loadSeq
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.products.getMemoryEntries(productId, { limit, search: trimmed })
-      if (seq !== loadSeq) return
-      const list = response?.data?.entries || []
-      byId.value = new Map()
-      for (const entry of list) _upsertEntry(entry)
-      loadedProductId.value = productId
-      serverSearch.value = true
-    } catch (err) {
-      if (seq !== loadSeq) return
-      error.value = err.message
-      console.error('Failed to search memory entries:', err)
-    } finally {
-      if (seq === loadSeq) loading.value = false
-    }
+    await _load(productId, { limit, search: trimmed })
   }
 
   function handleMemoryEntryWritten(productId, entry) {

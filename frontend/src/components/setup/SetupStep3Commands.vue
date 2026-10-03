@@ -67,10 +67,6 @@ import { TEXT_MUTED_BLUE as COLOR_MUTED, COLOR_SUCCESS_SETUP as COLOR_SUCCESS } 
 import { TOOL_META } from '@/config/setupTools'
 
 const props = defineProps({
-  selectedTools: {
-    type: Array,
-    required: true,
-  },
   connectedTools: {
     type: Array,
     required: true,

@@ -88,18 +88,6 @@
             <div class="startup-card-title">Learning</div>
             <div class="startup-card-desc">Understand products, projects, agents, memory, and slash commands.</div>
           </div>
-          <div
-            v-if="isCe"
-            class="startup-card smooth-border"
-            style="--card-accent: var(--agent-implementer-primary)"
-            @click="showCertModal = true"
-          >
-            <div class="startup-card-icon" style="background: var(--agent-implementer-tinted); color: var(--agent-implementer-primary)">
-              <v-icon size="20">mdi-certificate</v-icon>
-            </div>
-            <div class="startup-card-title">Certificate Trust</div>
-            <div class="startup-card-desc">Trust the HTTPS certificate your server uses so AI coding tools can connect.</div>
-          </div>
         </div>
       </v-window-item>
 
@@ -126,70 +114,11 @@
 
         <div class="connect-grid mb-5">
           <AgentExport />
-          <SerenaIntegrationCard
-            :enabled="serenaEnabled"
-            :loading="toggling"
-            @update:enabled="toggleSerena"
-          />
           <GitIntegrationCard
             :enabled="gitEnabled"
             :loading="togglingGit"
             @update:enabled="toggleGit"
           />
-
-          <div
-            v-if="isCe"
-            class="intg-line smooth-border"
-            style="--card-accent: var(--agent-implementer-primary)"
-            data-testid="cert-trust-line"
-          >
-            <div
-              class="intg-line-icon intg-line-icon--link"
-              style="background: var(--agent-implementer-tinted); color: var(--agent-implementer-primary)"
-              title="Open the certificate trust steps"
-              @click="showCertModal = true"
-            >
-              <v-icon size="22">mdi-certificate</v-icon>
-            </div>
-
-            <div class="intg-line-main">
-              <div class="intg-line-title-row">
-                <span class="intg-line-title">Certificate Trust</span>
-                <v-tooltip location="top" max-width="400">
-                  <template #activator="{ props }">
-                    <v-icon v-bind="props" size="small" style="color: var(--text-muted)">mdi-help-circle-outline</v-icon>
-                  </template>
-                  <div>
-                    <strong>One-time setup for servers running HTTPS</strong>
-                    <p class="mt-2 mb-0">
-                      Command-line AI tools built on Node (Claude Code, Codex CLI, OpenCode)
-                      do not read your operating system&rsquo;s trust store, so they refuse a
-                      private or self-signed certificate even after your browser has accepted it.
-                    </p>
-                    <p class="mt-2 mb-0 text-body-small">
-                      The steps cover downloading the certificate, installing it, and pointing
-                      Node at it. Skip them if your server runs over plain HTTP.
-                    </p>
-                  </div>
-                </v-tooltip>
-              </div>
-              <div class="intg-line-sub">AI tool refusing to connect over HTTPS? Trust your server&rsquo;s certificate.</div>
-            </div>
-
-            <div class="intg-line-action">
-              <v-btn
-                color="primary"
-                variant="outlined"
-                size="small"
-                class="intg-toggle-pill"
-                data-testid="cert-trust-open"
-                @click="showCertModal = true"
-              >
-                <v-icon start size="16">mdi-open-in-new</v-icon>
-                Open
-              </v-btn>
-            </div>
-          </div>
         </div>
 
         <div class="credentials-section">
@@ -198,10 +127,6 @@
       </v-window-item>
     </v-window>
 
-    <CertTrustModal
-      v-model="showCertModal"
-      @continue="recordCertTrustDismissal"
-    />
     </div>
 
   </v-container>
@@ -219,12 +144,8 @@ const productName = PRODUCT_NAME
 import AgentExport from '@/components/AgentExport.vue'
 import ContextPriorityConfig from '@/components/settings/ContextPriorityConfig.vue'
 import ToolsConnectDirectory from '@/components/tools/ToolsConnectDirectory.vue'
-import SerenaIntegrationCard from '@/components/settings/integrations/SerenaIntegrationCard.vue'
 import GitIntegrationCard from '@/components/settings/integrations/GitIntegrationCard.vue'
 import setupService from '@/services/setupService'
-import { isCeModeValue } from '@/composables/useGiljoMode'
-import CertTrustModal from '@/components/setup/CertTrustModal.vue'
-import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 import BannerPreferencesCard from '@/components/settings/BannerPreferencesCard.vue'
 import BellPreferencesCard from '@/components/settings/BellPreferencesCard.vue'
 import PopoutPreferencesCard from '@/components/settings/PopoutPreferencesCard.vue'
@@ -241,51 +162,10 @@ function normalizeTab(tab) {
   if (tab === 'integrations' || tab === 'api-keys') return 'connect'
   return tab
 }
-const isCe = ref(false)
-const showCertModal = ref(false)
-const serenaEnabled = ref(false)
-const toggling = ref(false)
 
 const gitEnabled = ref(false)
 
 const togglingGit = ref(false)
-
-async function loadEditionMode() {
-  try {
-    const status = await setupService.checkEnhancedStatus()
-    isCe.value = isCeModeValue(status?.mode)
-  } catch {
-    isCe.value = false
-  }
-}
-
-async function checkSerenaStatus() {
-  try {
-    const status = await setupService.getSerenaStatus()
-    serenaEnabled.value = status.enabled || false
-  } catch (error) {
-    console.error('[USER SETTINGS] Failed to check Serena status:', error)
-    serenaEnabled.value = false
-  }
-}
-
-async function toggleSerena(enabled) {
-  toggling.value = true
-  try {
-    const result = await setupService.toggleSerena(enabled)
-    if (result.success) {
-      serenaEnabled.value = result.enabled
-    } else {
-      serenaEnabled.value = !enabled
-      console.error('[USER SETTINGS] Failed to toggle Serena:', result.message)
-    }
-  } catch (error) {
-    console.error('[USER SETTINGS] Error toggling Serena:', error)
-    serenaEnabled.value = !enabled
-  } finally {
-    toggling.value = false
-  }
-}
 
 onMounted(async () => {
   const route = router.currentRoute.value
@@ -295,8 +175,6 @@ onMounted(async () => {
     if (normalized) activeTab.value = normalized
   }
 
-  await checkSerenaStatus()
-  await loadEditionMode()
 
 
   await loadGitSettings()
@@ -364,10 +242,6 @@ function handleGitIntegrationUpdate(data) {
 
 <style lang="scss" scoped>
 @use '../styles/design-tokens' as *;
-/* FE-9339: the Certificate Trust line is authored inline in this view rather than as
-   a component, so it needs the shared line-card styles its three grid siblings pull
-   in through their own scoped blocks. No new card CSS. */
-@use '../styles/intg-card';
 .settings-subtitle {
   color: var(--text-muted);
 }

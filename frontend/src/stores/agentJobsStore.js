@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import isEqual from 'lodash-es/isEqual'
 import debounce from 'lodash-es/debounce'
 import api from '@/services/api'
+import { extractJobsFromResponse } from '@/composables/useAgentJobs'
 import { AGENT_STATUS_PRIORITY } from '@/utils/constants'
 
 function ensureArray(value) {
@@ -104,51 +105,34 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     discardPendingUpdates()
   }
 
-  function upsertJob(patch) {
+  function _resolvePatch(patch) {
     const jobId = patch?.job_id || patch?.id || patch?.agent_id
     const agentId = patch?.agent_id
+    const byField = (field, value) => {
+      if (!value) return null
+      for (const [key, job] of jobsById.value.entries()) {
+        if (job[field] === value) return key
+      }
+      return null
+    }
+    const has = (key) => (key && jobsById.value.has(key) ? key : null)
+    const existingKey =
+      has(patch?.execution_id) || has(patch?.unique_key) || byField('agent_id', agentId) || byField('job_id', jobId)
+    const cleanPatch = Object.fromEntries(Object.entries(patch || {}).filter(([_, v]) => v !== undefined))
+    return {
+      jobId,
+      agentId,
+      existingKey,
+      uniqueKey: existingKey || patch?.execution_id || patch?.unique_key || jobId,
+      cleanPatch,
+    }
+  }
+
+  function upsertJob(patch) {
+    const { jobId, agentId, existingKey, uniqueKey, cleanPatch } = _resolvePatch(patch)
     if (!jobId && !agentId) return
 
-    let existingJob = null
-    let existingKey = null
-
-    if (patch?.execution_id && jobsById.value.has(patch.execution_id)) {
-      existingKey = patch.execution_id
-      existingJob = jobsById.value.get(existingKey)
-    }
-
-    if (!existingJob && patch?.unique_key && jobsById.value.has(patch.unique_key)) {
-      existingKey = patch.unique_key
-      existingJob = jobsById.value.get(existingKey)
-    }
-
-    if (!existingJob && agentId) {
-      for (const [key, job] of jobsById.value.entries()) {
-        if (job.agent_id === agentId) {
-          existingKey = key
-          existingJob = job
-          break
-        }
-      }
-    }
-
-    if (!existingJob && jobId) {
-      for (const [key, job] of jobsById.value.entries()) {
-        if (job.job_id === jobId) {
-          existingKey = key
-          existingJob = job
-          break
-        }
-      }
-    }
-
-    const uniqueKey = existingKey || patch?.execution_id || patch?.unique_key || jobId
-
-    const cleanPatch = Object.fromEntries(
-      Object.entries(patch || {}).filter(([_, v]) => v !== undefined)
-    )
-
-    const previous = existingJob || jobsById.value.get(uniqueKey)
+    const previous = jobsById.value.get(uniqueKey)
     const nextJob = normalizeJob({ ...(previous || {}), ...cleanPatch, job_id: jobId || previous?.job_id })
 
     if (previous && isEqual(previous, nextJob)) {
@@ -178,42 +162,8 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
   }
 
   function upsertJobDebounced(patch) {
-    const jobId = patch?.job_id || patch?.id || patch?.agent_id
-    const agentId = patch?.agent_id
-
-    let uniqueKey = null
-
-    if (patch?.execution_id && jobsById.value.has(patch.execution_id)) {
-      uniqueKey = patch.execution_id
-    }
-    if (!uniqueKey && patch?.unique_key && jobsById.value.has(patch.unique_key)) {
-      uniqueKey = patch.unique_key
-    }
-    if (!uniqueKey && agentId) {
-      for (const [key, job] of jobsById.value.entries()) {
-        if (job.agent_id === agentId) {
-          uniqueKey = key
-          break
-        }
-      }
-    }
-    if (!uniqueKey && jobId) {
-      for (const [key, job] of jobsById.value.entries()) {
-        if (job.job_id === jobId) {
-          uniqueKey = key
-          break
-        }
-      }
-    }
-    if (!uniqueKey) {
-      uniqueKey = patch?.execution_id || patch?.unique_key || jobId
-    }
-
+    const { uniqueKey, cleanPatch } = _resolvePatch(patch)
     if (!uniqueKey) return
-
-    const cleanPatch = Object.fromEntries(
-      Object.entries(patch || {}).filter(([_, v]) => v !== undefined)
-    )
 
     const existing = pendingUpdates.get(uniqueKey)
     if (existing) {
@@ -237,11 +187,9 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     let rows = []
     try {
       const response = await api.agentJobs.list(projectId)
-      const data = response?.data
-      rows = Array.isArray(data) ? data : data?.jobs || data?.rows || []
+      rows = extractJobsFromResponse(response?.data)
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.debug('[agentJobsStore] messages-waiting refresh failed (non-fatal):', error)
+      console.warn('[agentJobsStore] messages-waiting refresh failed:', error)
       return
     }
     for (const raw of ensureArray(rows)) {
@@ -316,8 +264,7 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
         }
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.debug('[agentJobsStore] mission top-up failed (non-fatal):', error)
+      console.warn('[agentJobsStore] mission top-up failed:', error)
     } finally {
       missionTopUpInFlight.delete(jobId)
       if (missionTopUpQueued.delete(jobId)) {
@@ -329,11 +276,6 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
   function maybeTopUpMission(payload) {
     if (!payload?.mission_truncated) return
     topUpMission(payload.job_id || payload.agent_id || payload.id)
-  }
-
-  function handleCreated(payload) {
-    upsertJob(payload)
-    maybeTopUpMission(payload)
   }
 
   function handleUpdated(payload) {
@@ -446,20 +388,8 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     debouncedFetchWaitingCounts.cancel()
   }
 
-  const jobsByIdProxy = new Proxy(
-    {},
-    {
-      get: (target, prop) => {
-        if (prop === 'value') {
-          return jobsById.value
-        }
-        return undefined
-      },
-    }
-  )
-
   return {
-    jobsById: jobsByIdProxy,
+    jobsById,
 
     jobs,
     sortedJobs,
@@ -474,7 +404,7 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     refreshMessagesWaitingCounts,
     topUpMission,
 
-    handleCreated,
+    handleCreated: handleUpdated,
     handleUpdated,
     handleStatusChanged,
     handleMissionLengthUpdated,

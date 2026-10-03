@@ -6,14 +6,12 @@
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
     OrchestrationError,
     ResourceNotFoundError,
@@ -29,6 +27,7 @@ from giljo_mcp.platform_registry import (
     tool_for_mode,
 )
 from giljo_mcp.repositories.mission_repository import MissionRepository
+from giljo_mcp.schemas.jsonb_validators import validate_agent_execution_result
 from giljo_mcp.schemas.service_responses import build_next_action
 from giljo_mcp.services.conductor_staging_builder import resolve_conductor_early_return
 from giljo_mcp.services.execution_mode_gate import (
@@ -36,6 +35,7 @@ from giljo_mcp.services.execution_mode_gate import (
     execution_mode_not_selected_message,
     execution_mode_selected,
 )
+from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.mission_orchestration_builders import (
     NO_AGENTS_ASSIGNED_NOTE,
     STAGING_FILTER_NOTE,
@@ -46,6 +46,7 @@ from giljo_mcp.services.mission_orchestration_builders import (
     check_staging_redirect,
     maybe_build_ctx_self_close_directive,
 )
+from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.services.protocol_builder import _get_user_config
 from giljo_mcp.services.protocol_survival import staging_orchestrator_actions
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
@@ -338,12 +339,13 @@ class MissionOrchestrationService:
             tenant_key=tenant_key,
         )
 
-        integrations = {}
+        integrations, headless_launch = {}, False
         try:
             from giljo_mcp.services.settings_service import SettingsService
 
             settings_svc = SettingsService(session, tenant_key)
             integrations = await settings_svc.get_settings("integrations")
+            headless_launch = bool(await settings_svc.get_setting_value("security", "allow_headless_launch"))
         except Exception as _exc:  # noqa: BLE001
             logger.warning("[INTEGRATIONS] Failed to read settings from DB")
 
@@ -388,6 +390,7 @@ class MissionOrchestrationService:
             "templates": templates,
             "category_metadata": category_metadata,
             "integrations": integrations,
+            "headless_launch": headless_launch,
             "orchestrator_prompt_override": getattr(orchestrator_override, "content", None),
             "orchestrator_override": orchestrator_override,
             "project_type_abbreviation": project_type_abbreviation,
@@ -420,26 +423,19 @@ class MissionOrchestrationService:
         tenant_key: str,
     ) -> dict[str, Any]:
         project = ctx["project"]
-        execution = ctx["execution"]
-        now = datetime.now(UTC)
+        summary = directive.get("closeout_note", "hash already fresh at project launch")
+        ProjectLifecycleService.stamp_completed(project, summary)
 
-        project.status = ProjectStatus.COMPLETED
-        project.completed_at = now
-        project.updated_at = now
-        project.closeout_executed_at = now
-        project.orchestrator_summary = directive.get("closeout_note", "hash already fresh at project launch")
-
-        if execution is not None:
-            execution.status = "complete"
-            execution.completed_at = now
-            execution.progress = 100
-            execution.result = {
-                "summary": directive.get("closeout_note", "hash already fresh at project launch"),
+        result = validate_agent_execution_result(
+            {
+                "summary": summary,
                 "ctx_self_close": True,
                 "vision_inputs_hash": directive.get("vision_inputs_hash"),
                 "consolidated_vision_hash": directive.get("consolidated_vision_hash"),
             }
-
+        )
+        completion = JobCompletionService(self.db_manager, self.tenant_manager)
+        await completion.apply_completion(session, ctx["agent_job"], ctx["execution"], result, tenant_key)
         await session.flush()
 
         from giljo_mcp.services.project_helpers import mark_chain_member_status
@@ -536,7 +532,6 @@ class MissionOrchestrationService:
             project_path = getattr(product, "project_path", None)
 
         integrations = ctx.get("integrations", {})
-        include_serena = integrations.get("serena_mcp", {}).get("use_in_prompts", False)
         git_integration_enabled = integrations.get("git_integration", {}).get("enabled", False)
 
         response: dict[str, Any] = {
@@ -554,26 +549,9 @@ class MissionOrchestrationService:
             "thin_client": True,
             "architecture": "toggle_based",
             "integrations": {
-                "serena_mcp_enabled": include_serena,
                 "git_integration_enabled": git_integration_enabled,
             },
         }
-
-        if include_serena:
-            from giljo_mcp.prompt_generation.serena_instructions import for_role
-
-            response["serena_guidance"] = for_role("orchestrator", enabled=True)
-            response["mcp_tools_available"].extend(
-                [
-                    "find_symbol",
-                    "get_symbols_overview",
-                    "find_referencing_symbols",
-                    "search_for_pattern",
-                    "replace_symbol_body",
-                    "insert_after_symbol",
-                    "insert_before_symbol",
-                ]
-            )
 
         execution_mode = effective_execution_mode(
             getattr(project, "execution_mode", None), getattr(ctx.get("chain_ctx"), "execution_mode", None)
@@ -625,6 +603,7 @@ class MissionOrchestrationService:
                 "chain_ctx": chain_ctx,
                 "preset": ctx.get("preset"),
                 "detected_harness": ctx.get("detected_harness"),
+                "headless_launch": bool(ctx.get("headless_launch", False)),
             },
         )
 

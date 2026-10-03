@@ -13,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_tenant_key
+from api.endpoints._boundary_types import ID_MAX, IdPath
 from api.schemas.vision_document import (
     DeleteResponse,
     VisionDocumentResponse,
@@ -21,6 +22,7 @@ from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.config_manager import get_config
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models import Product, User
+from giljo_mcp.models.products import VisionDocumentType
 from giljo_mcp.security.upload_guard import (
     UploadContentError,
     UploadFilenameError,
@@ -105,13 +107,13 @@ async def _read_upload_capped(upload: UploadFile, max_bytes: int) -> bytes:
 @router.post("/", response_model=VisionDocumentResponse, status_code=status.HTTP_201_CREATED)
 async def create_vision_document(
     request: Request,
-    product_id: str = Form(...),
-    document_name: str = Form(...),
-    document_type: str = Form("vision"),
+    product_id: str = Form(..., max_length=ID_MAX),
+    document_name: str = Form(..., max_length=255),
+    document_type: VisionDocumentType = Form("vision"),
     content: str | None = Form(None),
     vision_file: UploadFile | None = File(None),
     display_order: int = Form(0),
-    version: str = Form("1.0.0"),
+    version: str = Form("1.0.0", max_length=50),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -120,7 +122,7 @@ async def create_vision_document(
     """
     Create a new vision document for a product.
 
-    **Storage** (BE-5115: inline-only): Complete document stored in
+    **Storage** (inline-only): Complete document stored in
     `vision_document` TEXT column. Uploaded files are decoded to UTF-8 text
     and persisted inline; nothing is written to disk. `storage_type` is
     always `'inline'`, `vision_path` is always `NULL`.
@@ -293,7 +295,7 @@ async def create_vision_document(
 
 @router.get("/{document_id}", response_model=VisionDocumentResponse)
 async def get_vision_document(
-    document_id: str,
+    document_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -302,7 +304,7 @@ async def get_vision_document(
     """
     Get a single vision document by ID.
 
-    **Handover 0246b**: Returns full document including vision_document content.
+    Returns full document including vision_document content.
     Used for "Full" preview in product details dialog.
 
     **Multi-Tenant Isolation**: Only returns document if it belongs to the authenticated tenant.
@@ -335,7 +337,7 @@ async def get_vision_document(
 
 @router.get("/product/{product_id}", response_model=list[VisionDocumentResponse])
 async def list_vision_documents(
-    product_id: str,
+    product_id: IdPath,
     active_only: bool = True,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -369,7 +371,7 @@ async def list_vision_documents(
 
 @router.put("/{document_id}", response_model=VisionDocumentResponse)
 async def update_vision_document(
-    document_id: str,
+    document_id: IdPath,
     content: str = Form(...),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -425,7 +427,7 @@ async def update_vision_document(
 
 @router.delete("/{document_id}", response_model=DeleteResponse)
 async def delete_vision_document(
-    document_id: str,
+    document_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -434,7 +436,7 @@ async def delete_vision_document(
     """
     Soft-delete (trash) a vision document.
 
-    **BE-6130b soft-delete**:
+    **Soft delete**:
     - Stamps ``deleted_at`` so the doc drops out of every live read.
     - Its MCPContextIndex chunks are LEFT INTACT (cascade only fires on a hard
       delete) and excluded from retrieval, so ``POST /{id}/restore`` recovers the
@@ -493,7 +495,7 @@ async def delete_vision_document(
 
 @router.get("/product/{product_id}/deleted", response_model=list[VisionDocumentResponse])
 async def list_deleted_vision_documents(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -510,7 +512,7 @@ async def list_deleted_vision_documents(
 
 @router.post("/{document_id}/restore", response_model=VisionDocumentResponse)
 async def restore_vision_document(
-    document_id: str,
+    document_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -555,7 +557,7 @@ async def restore_vision_document(
 
 @router.post("/products/{product_id}/regenerate-consolidated", response_model=dict)
 async def regenerate_consolidated_vision(
-    product_id: str,
+    product_id: IdPath,
     force: bool = False,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
@@ -564,7 +566,7 @@ async def regenerate_consolidated_vision(
     """
     Manually regenerate consolidated vision summaries for a product.
 
-    **Handover 0377 Phase 4**: Admin endpoint for forcing regeneration.
+    Admin endpoint for forcing regeneration.
 
     **Use Cases**:
     - Consolidation algorithm changed (want to regenerate with new logic)
@@ -614,8 +616,8 @@ async def regenerate_consolidated_vision(
 
 @router.get("/{document_id}/ai-summary/{level}")
 async def get_ai_summary(
-    document_id: str,
-    level: str,
+    document_id: IdPath,
+    level: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     tenant_key: str = Depends(get_tenant_key),
@@ -623,7 +625,7 @@ async def get_ai_summary(
     """
     Get AI summary content for a vision document at a given compression level.
 
-    BE-5117b: Reads directly from VisionDocument.summary_light / summary_medium
+    Reads directly from VisionDocument.summary_light / summary_medium
     columns; the legacy per-doc summary table was dropped.
 
     Args:

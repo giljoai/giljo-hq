@@ -37,7 +37,7 @@
     >
       <v-icon icon="mdi-clipboard-check-outline" size="20" class="closeout-decision-icon" />
       <div class="closeout-decision-content">
-        <span class="closeout-decision-title">Decision Required</span>
+        <span class="closeout-decision-title">Needs decision</span>
         <span class="closeout-decision-desc">
           Check in with the orchestrator in chat, then click here to decide.
         </span>

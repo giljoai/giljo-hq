@@ -22,10 +22,9 @@ _saas_pin_missing_warned = False
 
 
 def _saas_pinned_base_url() -> str | None:
-    if os.environ.get("GILJO_MODE", "").strip().lower() != "saas":
-        return None
-    pinned = os.environ.get("GILJO_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if not pinned:
+    saas_mode = os.environ.get("GILJO_MODE", "").strip().lower() == "saas"
+    pinned = os.environ.get("GILJO_PUBLIC_BASE_URL", "").strip().rstrip("/") if saas_mode else ""
+    if saas_mode and not pinned:
         global _saas_pin_missing_warned  # noqa: PLW0603 — process-wide log-once flag
         if not _saas_pin_missing_warned:
             _saas_pin_missing_warned = True
@@ -35,11 +34,21 @@ def _saas_pinned_base_url() -> str | None:
                 "gate should have prevented this (SEC-9227h)."
             )
         return None
-    return pinned
+    return pinned or None
 
 
 def get_public_url() -> str:
-    return os.environ.get("GILJO_PUBLIC_URL", "").strip().rstrip("/") or GILJO_PUBLIC_URL_DEFAULT
+    configured = os.environ.get("GILJO_PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    if os.environ.get("GILJO_MODE", "").strip().lower() == "saas":
+        pinned = _saas_pinned_base_url()
+        if not pinned:
+            raise RuntimeError(
+                "GILJO_MODE=saas needs GILJO_PUBLIC_URL or GILJO_PUBLIC_BASE_URL; refusing localhost links"
+            )
+        return pinned
+    return GILJO_PUBLIC_URL_DEFAULT
 
 
 def get_public_base_url(request: Request) -> str:

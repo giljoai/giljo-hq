@@ -145,7 +145,6 @@
       :project-types="projectTypes"
       @saved="onDialogSaved"
       @clear-mission="showClearMissionDialog = true"
-      @type-created="onTypeCreated"
     />
 
     <BaseDialog
@@ -641,10 +640,6 @@ function onDialogSaved() {
 function onClearMissionConfirmed() {
   createEditDialogRef.value?.clearMissionData()
   showClearMissionDialog.value = false
-}
-
-function onTypeCreated() {
-  // No-op: useProjectTaxonomy.handleTypeCreated already pushes to projectTypes
 }
 
 onMounted(async () => {

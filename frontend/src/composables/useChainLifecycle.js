@@ -20,26 +20,23 @@ export function useChainLifecycle() {
           showToast({
             message: 'Chain staged. Staging prompt copied; paste it into your orchestrator terminal.',
             type: 'success',
-            timeout: 6000,
           })
         } else {
           showToast({
             message: 'Chain staged. Your browser blocked the clipboard, so copy the staging prompt manually.',
             type: 'warning',
-            timeout: 6000,
           })
         }
       } else {
         showToast({
           message: 'Chain staged (no staging prompt available yet).',
           type: 'success',
-          timeout: 4000,
         })
       }
       return updated
     } catch (err) {
       const msg = parseErrorResponse(err).message || 'Could not stage the chain.'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
+      showToast({ message: msg, type: 'error' })
       return null
     }
   }
@@ -50,12 +47,11 @@ export function useChainLifecycle() {
       showToast({
         message: 'Chain unstaged. You can edit its projects, order and mode, then stage it again.',
         type: 'success',
-        timeout: 5000,
       })
       return updated
     } catch (err) {
       const msg = parseErrorResponse(err).message || 'Could not unstage the chain.'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
+      showToast({ message: msg, type: 'error' })
       return null
     }
   }

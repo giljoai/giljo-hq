@@ -92,6 +92,11 @@ def get_client_resolver() -> ClientResolver:
     return _resolver
 
 
+async def _resolve_client(client_id: str, tenant_key: str) -> ResolvedClient | None:
+    resolved = _resolver(client_id, tenant_key)
+    return await resolved if inspect.isawaitable(resolved) else resolved
+
+
 class OAuthService:
 
     def __init__(self, db_session: AsyncSession) -> None:
@@ -111,11 +116,7 @@ class OAuthService:
     ) -> None:
         if not tenant_key:
             raise ValueError("tenant_key is required for authorize-request validation")
-        resolver_result = _resolver(client_id, tenant_key)
-        if inspect.isawaitable(resolver_result):
-            resolved = await resolver_result
-        else:
-            resolved = resolver_result
+        resolved = await _resolve_client(client_id, tenant_key)
         if resolved is None:
             raise ValueError(f"Invalid client_id: no client registered for '{client_id}'")
 
@@ -172,11 +173,7 @@ class OAuthService:
         tenant_key: str,
         client_secret: str | None,
     ) -> ResolvedClient:
-        resolver_result = _resolver(client_id, tenant_key)
-        if inspect.isawaitable(resolver_result):
-            resolved = await resolver_result
-        else:
-            resolved = resolver_result
+        resolved = await _resolve_client(client_id, tenant_key)
 
         if resolved is None:
             raise ValueError("invalid_client: unknown client_id")
@@ -329,6 +326,25 @@ class OAuthService:
             code_resource=auth_code.resource,
         )
 
+        return await self._consume_code_and_issue_pair(
+            code=code,
+            client_id=client_id,
+            auth_code=auth_code,
+            token_audience=bound_resource if bound_resource is not None else audience,
+            idem_signature=idem_signature,
+        )
+
+    async def _consume_code_and_issue_pair(
+        self,
+        *,
+        code: str,
+        client_id: str,
+        auth_code: OAuthAuthorizationCode,
+        token_audience: str | None,
+        idem_signature: str,
+    ) -> dict:
+        from giljo_mcp.services import oauth_refresh_service as _refresh
+
         with tenant_session_context(self._db, auth_code.tenant_key):
             consumed = await self._db.execute(
                 update(OAuthAuthorizationCode)
@@ -353,8 +369,6 @@ class OAuthService:
             if user is None:
                 raise ValueError("User associated with authorization code not found")
 
-            token_audience = bound_resource if bound_resource is not None else audience
-
             access_token = JWTManager.create_access_token(
                 user_id=UUID(user.id),
                 username=user.username,
@@ -377,7 +391,6 @@ class OAuthService:
                 "expires_in": ACCESS_TOKEN_LIFETIME_SECONDS,
             }
 
-            persisted_aud = token_audience or ""
             refresh_token = await _refresh.issue_refresh_token(
                 self._db,
                 family_id=_refresh.new_family_id(),
@@ -385,7 +398,7 @@ class OAuthService:
                 tenant_key=user.tenant_key,
                 user_id=user.id,
                 scope=auth_code.scope,
-                aud=persisted_aud,
+                aud=token_audience or "",
                 lifetime_seconds=REFRESH_TOKEN_LIFETIME_SECONDS,
                 origin_code_hash=_refresh.hash_authorization_code(code),
             )

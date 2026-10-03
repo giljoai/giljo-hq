@@ -10,13 +10,13 @@ Linking is the act of attaching projects together into a chain.
 
 1. Go to **Projects** in the left navigation.
 2. Click the chain-link button in the toolbar (**"Link projects (chain mode)"**). A **Linked** checkbox column appears in the project table.
-3. Tick the projects you want in the chain. A chain holds **2 to 5 projects** — a hint appears if you have selected too few or too many.
+3. Tick the projects you want in the chain. A chain holds **2 to 10 projects** — a hint appears if you have selected too few or too many.
 
 The order you want the projects to run in is the order they carry in the table. Projects already locked into a running chain are shown as unavailable so you cannot double-book them.
 
 ### Launching a Chain
 
-Once you have linked 2 to 5 projects, an action bar appears at the top of the project list with a launch button labeled **"Run sequential (N/5)"**, where N is how many projects you currently have linked.
+Once you have linked 2 to 10 projects, an action bar appears at the top of the project list with a launch button labeled **"Run sequential (N/10)"**, where N is how many projects you currently have linked.
 
 Clicking it does not run the chain by itself — the dashboard cannot spawn agents. It queues the linked projects as a pending run. From there, an agent connected through your AI coding tool picks up that pending run and becomes the **conductor**, which does the actual work: staging the first project, then launching, watching, and advancing through the rest in order.
 

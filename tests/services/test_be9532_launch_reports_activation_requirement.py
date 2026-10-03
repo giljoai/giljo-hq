@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
 
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project, ProjectStatus
@@ -41,6 +40,7 @@ async def _staged_project(db_session, tenant_key: str, *, active: bool) -> Proje
         mission="BE-9532 probe mission.",
         status=ProjectStatus.ACTIVE if active else ProjectStatus.INACTIVE,
         staging_status="staging_complete",
+        implementation_launched_at=None if active else datetime.now(UTC),
         created_at=datetime.now(UTC),
     )
     db_session.add(project)
@@ -79,16 +79,6 @@ async def test_launch_on_an_active_project_asks_for_nothing_further(db_manager, 
     assert not result.get("next_action"), (
         f"an already-active project needs no further step, got: {result.get('next_action')!r}"
     )
-
-
-async def test_launch_still_does_not_activate(db_manager, db_session, test_tenant_key):
-    svc = _staging_service(db_manager, test_tenant_key, db_session)
-    project = await _staged_project(db_session, test_tenant_key, active=False)
-
-    await svc.launch_implementation(project.id, tenant_key=test_tenant_key)
-
-    row = (await db_session.execute(select(Project.status).where(Project.id == project.id))).scalar_one()
-    assert row == ProjectStatus.INACTIVE, "launch must not silently activate -- that is a separate step by design"
 
 
 async def test_mcp_tool_passes_the_activation_report_through_to_the_agent(

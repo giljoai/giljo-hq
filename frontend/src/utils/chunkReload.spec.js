@@ -75,7 +75,7 @@ describe('maybeReloadForChunkError', () => {
     expect(triggered).toBe(false)
     expect(reload).not.toHaveBeenCalled()
     expect(toast).toHaveBeenCalledTimes(1)
-    expect(toast).toHaveBeenCalledWith(__testing.STALE_MESSAGE, { timeout: 0 })
+    expect(toast).toHaveBeenCalledWith(__testing.STALE_MESSAGE)
   })
 
   it('reloads again once the sentinel is stale (older than the window) — new deploy case', () => {

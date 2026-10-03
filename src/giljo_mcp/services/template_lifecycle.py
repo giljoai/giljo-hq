@@ -109,7 +109,7 @@ async def restore_template(
 
         service._logger.info("Restored template %s (tenant %s)", sanitize(template_id), tenant_key)
         return template
-    except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+    except BaseGiljoError:
         raise
     except Exception as e:
         service._logger.exception("Failed to restore template %s", sanitize(template_id))
@@ -134,7 +134,7 @@ async def list_deleted_templates(
 
         async with service._get_session(tenant_key) as session:
             return await service._repo.list_deleted(session, tenant_key)
-    except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+    except BaseGiljoError:
         raise
     except Exception as e:
         service._logger.exception("Failed to list deleted templates")

@@ -119,7 +119,7 @@
                 <div class="doc-card-heading">
                   <v-icon color="primary" class="mr-2">mdi-file-document</v-icon>
                   <div class="doc-card-heading-text">
-                    <div class="doc-card-title">{{ doc.filename || doc.document_name }}</div>
+                    <div class="doc-card-title">{{ doc.document_name }}</div>
                     <div class="doc-card-meta">
                       <span
                         class="doc-meta-pill doc-analysis-pill smooth-border"
@@ -324,6 +324,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { hexToRgba } from '@/utils/colorUtils'
 import { getAgentColor } from '@/config/agentColors'
 import { getStatusColor } from '@/utils/statusConfig'
@@ -408,7 +409,7 @@ async function handleRestore(doc) {
     await api.visionDocuments.restore(doc.id)
     deletedDocuments.value = deletedDocuments.value.filter((d) => d.id !== doc.id)
     showToast({
-      message: `Restored: ${doc.filename || doc.document_name}`,
+      message: `Restored: ${doc.document_name}`,
       type: 'success',
     })
     emit('refresh-product')
@@ -521,18 +522,12 @@ async function showConsolidatedSummary(depth) {
       for (const doc of props.visionDocuments) {
         let content = doc.vision_document
         if (!content) {
-          try {
-            const response = await api.visionDocuments.get(doc.id)
-            const fullDoc = response.data
-            content = fullDoc.vision_document
-            doc.vision_document = content
-            doc.original_token_count = fullDoc.original_token_count
-          } catch (err) {
-            console.warn('[ProductDetailsDialog] failed to hydrate doc', doc.id, err)
-            content = ''
-          }
+          const { data: fullDoc } = await api.visionDocuments.get(doc.id)
+          content = fullDoc.vision_document
+          doc.vision_document = content
+          doc.original_token_count = fullDoc.original_token_count
         }
-        const name = doc.filename || doc.document_name || `doc_${doc.id}`
+        const name = doc.document_name
         parts.push(`# ${name}\n\n${content || ''}`)
         totalTokens += doc.original_token_count || 0
       }
@@ -543,8 +538,10 @@ async function showConsolidatedSummary(depth) {
       consolidatedSummaryHash.value = props.product?.consolidated_vision_hash || ''
       consolidatedSummaryDialog.value = true
     } catch (error) {
-      console.error('Failed to assemble full vision context:', error)
-      showToast({ message: 'Could not load full vision context.', type: 'error' })
+      showToast({
+        message: `Could not load full vision context: ${parseErrorResponse(error).message}`,
+        type: 'error',
+      })
     }
     return
   }

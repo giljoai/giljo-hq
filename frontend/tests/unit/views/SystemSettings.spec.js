@@ -389,8 +389,13 @@ describe('SystemSettings.vue', () => {
       expect(regenerateBtn.exists()).toBe(false)
     })
 
-    it('falls back to default values when config fails to load', async () => {
-      global.fetch.mockRejectedValueOnce(new Error('Network error'))
+    it('shows a failed network read instead of inventing an address', async () => {
+      const passthrough = global.fetch.getMockImplementation()
+      global.fetch.mockImplementation((url) =>
+        url.includes('/api/v1/config/network-info')
+          ? Promise.resolve({ ok: false, status: 503, statusText: 'Service Unavailable', json: async () => ({}) })
+          : passthrough(url),
+      )
 
       wrapper = mount(SystemSettings, {
         global: {
@@ -405,9 +410,42 @@ describe('SystemSettings.vue', () => {
       await wrapper.vm.$nextTick()
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      // On failure, fall back to the address this client reached the server on.
-      expect(wrapper.vm.serverHostDisplay).toBe('localhost')
-      expect(wrapper.vm.serverPort).toBe(7272)
+      expect(showToastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error', message: expect.stringContaining('Could not load the network settings') }),
+      )
+      expect(wrapper.vm.serverHostDisplay).toBe('')
+      expect(wrapper.vm.serverPort).toBe(null)
+    })
+
+    it('a failed network read shows the server\'s message, not the HTTP status text', async () => {
+      const passthrough = global.fetch.getMockImplementation()
+      global.fetch.mockImplementation((url) =>
+        url.includes('/api/v1/config/network-info')
+          ? Promise.resolve({
+              ok: false,
+              status: 500,
+              statusText: 'Internal Server Error',
+              json: async () => ({ error_code: 'HTTP_ERROR', message: 'boom network' }),
+            })
+          : passthrough(url),
+      )
+
+      wrapper = mount(SystemSettings, {
+        global: {
+          plugins: [vuetify, router, pinia],
+          stubs: {
+            DatabaseConnection: { template: '<div>Database Connection Mock</div>' },
+            UserManager: { template: '<div>User Manager Mock</div>' },
+          },
+        },
+      })
+
+      await wrapper.vm.$nextTick()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(showToastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error', message: expect.stringContaining('boom network') }),
+      )
     })
 
     it('renders child component tabs correctly', async () => {
@@ -566,10 +604,10 @@ describe('SystemSettings.vue', () => {
     })
   })
 
-  // The Reload from Config button re-reads the database settings through the
+  // The Reload button re-reads the database settings through the
   // DatabaseConnection form it sits in. The form's own mount-time read stays
   // silent; only a failed click raises the error toast.
-  describe('Reload from Config', () => {
+  describe('Reload', () => {
     async function mountOnDatabaseTab() {
       const w = mount(SystemSettings, {
         global: { plugins: [vuetify, router, pinia] },
@@ -580,7 +618,7 @@ describe('SystemSettings.vue', () => {
     }
 
     function reloadButton(w) {
-      return w.findAll('button').find((b) => b.text().includes('Reload from Config'))
+      return w.find('[data-test="db-reload-btn"]')
     }
 
     function shownHost(w) {

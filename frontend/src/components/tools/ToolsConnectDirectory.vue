@@ -69,6 +69,7 @@
           @toggle-key-mode="toggleKeyMode"
           @mark-configured="markConfigured"
         />
+        <ConnectAgentLink />
         <div class="dir-window-foot">
           <span class="dir-remove-link" role="button" tabindex="0" data-testid="dir-remove-tool" @click="removeTool(selectedId)">
             Remove tool
@@ -90,10 +91,14 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useWebSocketStore } from '@/stores/websocket'
 import api from '@/services/api'
+import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { SETUP_TOOLS, TOOL_META, toolName, toolIdForHarness, harnessForToolId } from '@/config/setupTools'
 import ConnectToolCard from '@/components/setup/ConnectToolCard.vue'
+import ConnectAgentLink from '@/components/setup/ConnectAgentLink.vue'
 
 const userStore = useUserStore()
+const { showToast } = useToast()
 const wsStore = useWebSocketStore()
 
 const fleetIds = ref([...(userStore.currentUser?.setup_selected_tools ?? [])])
@@ -201,32 +206,39 @@ function openPicker() {
   mode.value = 'picker'
 }
 
+async function persistFleet(next, previous, what) {
+  fleetIds.value = next
+  try {
+    await userStore.updateSetupState({ setup_selected_tools: [...next] })
+    return true
+  } catch (e) {
+    fleetIds.value = previous
+    showToast({ message: `Could not ${what}: ${parseErrorResponse(e).message}`, type: 'error' })
+    return false
+  }
+}
+
 async function addTool(id) {
   if (!fleetIds.value.includes(id)) {
-    fleetIds.value = [...fleetIds.value, id]
-    try {
-      await userStore.updateSetupState({ setup_selected_tools: [...fleetIds.value] })
-    } catch (e) {
-      console.warn('[ToolsConnectDirectory] Failed to persist tool selection:', e)
-    }
+    const saved = await persistFleet([...fleetIds.value, id], fleetIds.value, `add ${toolName(id)}`)
+    if (!saved) return
   }
   selectTool(id)
 }
 
 async function removeTool(id) {
-  fleetIds.value = fleetIds.value.filter((t) => t !== id)
-  try {
-    await userStore.updateSetupState({ setup_selected_tools: [...fleetIds.value] })
-  } catch (e) {
-    console.warn('[ToolsConnectDirectory] Failed to persist tool removal:', e)
-  }
+  const saved = await persistFleet(fleetIds.value.filter((t) => t !== id), fleetIds.value, `remove ${toolName(id)}`)
+  if (!saved) return
   const harness = harnessForToolId(id)
   if (harness) {
     try {
       await api.connect.removeConnection(harness)
       await fetchCredentialStatus()
     } catch (e) {
-      console.warn('[ToolsConnectDirectory] Failed to clear stored connection:', e)
+      showToast({
+        message: `${toolName(id)} was removed but its stored connection could not be cleared: ${parseErrorResponse(e).message}`,
+        type: 'error',
+      })
     }
   }
   if (selectedId.value === id) {

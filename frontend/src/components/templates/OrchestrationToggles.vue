@@ -15,11 +15,12 @@
       </div>
       <div class="setting-row-control">
         <v-switch
-          v-model="closeoutModeHitl"
+          :model-value="closeoutModeHitl"
           color="primary"
           density="compact"
           hide-details
           aria-label="Require user approval before project closeout"
+          :disabled="Boolean(loadError)"
           data-testid="closeout-mode-toggle"
           @update:model-value="toggleCloseoutMode"
         />
@@ -41,16 +42,22 @@
       </div>
       <div class="setting-row-control">
         <v-switch
-          v-model="allowHeadless"
+          :model-value="allowHeadless"
           color="primary"
           density="compact"
           hide-details
           aria-label="Allow a headless CLI agent to self-advance from staging to implementation"
+          :disabled="Boolean(loadError)"
           data-testid="headless-launch-toggle"
           @update:model-value="toggleHeadless"
         />
       </div>
     </div>
+
+    <p v-if="loadError" class="text-body-small mt-2" data-testid="orchestration-toggles-error">
+      <v-icon size="16" color="error" class="mr-1">mdi-alert-circle</v-icon>
+      Could not load these settings: {{ loadError }}
+    </p>
   </div>
 </template>
 
@@ -58,12 +65,14 @@
 import { ref, onMounted } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const { showToast } = useToast()
 
 const closeoutModeHitl = ref(true)
 
 const allowHeadless = ref(false)
+const loadError = ref('')
 
 async function toggleCloseoutMode(enabled) {
   const newMode = enabled ? 'hitl' : 'autonomous'
@@ -77,21 +86,17 @@ async function toggleCloseoutMode(enabled) {
         : 'Orchestrator will close projects autonomously',
       type: 'success',
     })
-  } catch {
+  } catch (error) {
     closeoutModeHitl.value = previousValue
-    showToast({ message: 'Failed to save closeout setting.', type: 'error' })
+    showToast({ message: `Failed to save closeout setting: ${parseErrorResponse(error).message}`, type: 'error' })
   }
 }
 
 async function loadCloseoutMode() {
-  try {
-    const generalRes = await api.settings.getGeneral()
-    const generalSettings = generalRes.data?.settings || {}
-    if (generalSettings.closeout_mode) {
-      closeoutModeHitl.value = generalSettings.closeout_mode === 'hitl'
-    }
-  } catch {
-    // Default stays true (hitl)
+  const generalRes = await api.settings.getGeneral()
+  const generalSettings = generalRes.data?.settings || {}
+  if (generalSettings.closeout_mode) {
+    closeoutModeHitl.value = generalSettings.closeout_mode === 'hitl'
   }
 }
 
@@ -106,56 +111,28 @@ async function toggleHeadless(enabled) {
         : 'HITL mode — the human Implement step is enforced',
       type: 'success',
     })
-  } catch {
+  } catch (error) {
     allowHeadless.value = previousValue
-    showToast({ message: 'Failed to save headless setting.', type: 'error' })
+    showToast({ message: `Failed to save headless setting: ${parseErrorResponse(error).message}`, type: 'error' })
   }
 }
 
 async function loadHeadlessLaunch() {
-  try {
-    const res = await api.settings.getHeadlessLaunch()
-    allowHeadless.value = !!res.data?.allow_headless_launch
-  } catch {
-    // Default stays false (HITL), matching the server default (BE-9670b)
-  }
+  const res = await api.settings.getHeadlessLaunch()
+  allowHeadless.value = !!res.data?.allow_headless_launch
 }
 
-onMounted(() => {
-  loadCloseoutMode()
-  loadHeadlessLaunch()
+onMounted(async () => {
+  const failed = (await Promise.allSettled([loadCloseoutMode(), loadHeadlessLaunch()])).find(
+    (r) => r.status === 'rejected',
+  )
+  if (failed) loadError.value = parseErrorResponse(failed.reason).message
 })
 </script>
 
 <style scoped lang="scss">
-/* FE-9616: the row chrome (name, help, right-aligned control) is the shared
-   .setting-row pattern in main.scss. What stays here is what CANNOT live there:
-   scoped CSS does not cross a component boundary, so these switch colours must
-   travel with the markup -- the same boundary TemplatesTable.vue documents for
-   its row toggles. */
+/* Row chrome is the shared .setting-row pattern in main.scss; switch colours are global in App.vue. */
 .setting-row :deep(.v-switch .v-selection-control) {
   min-height: auto;
-}
-
-// Custom toggle colors for these HITL v-switches: green when ON, faded blue when OFF
-// Duplicated into TemplatesTable.vue for the row-level template toggles (scoped CSS boundary)
-.v-switch {
-  :deep(.v-switch__thumb) {
-    background-color: rgba(33, 150, 243, 0.4); // Faded blue when OFF
-  }
-
-  :deep(.v-switch__track) {
-    background-color: rgba(33, 150, 243, 0.2); // Faded blue track when OFF
-  }
-}
-
-.v-switch :deep(.v-selection-control--dirty) {
-  .v-switch__thumb {
-    background-color: rgb(var(--v-theme-success));
-  }
-
-  .v-switch__track {
-    background-color: rgba(76, 175, 80, 0.3); // Green track when ON
-  }
 }
 </style>

@@ -265,6 +265,22 @@ describe('UserManager — reset-link action (FE-6008 D)', () => {
       type: 'error',
     })
   })
+
+  it('shows the server message and no "emailed" toast when the reset email cannot be sent (503)', async () => {
+    const wrapper = mountManager(1)
+    await flushPromises()
+
+    const message = 'The reset email to dev@example.com could not be sent. Nothing was changed; please try again.'
+    const mockAxiosPost = vi.fn().mockRejectedValue({
+      response: { status: 503, data: { error_code: 'HTTP_ERROR', message } },
+    })
+
+    await wrapper.vm.sendPasswordReset(mockOtherUser, mockAxiosPost)
+
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith({ message, type: 'error' })
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
+  })
 })
 
 // ================================================================= Tests ===

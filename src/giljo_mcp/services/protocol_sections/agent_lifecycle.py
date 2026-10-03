@@ -16,6 +16,7 @@ from giljo_mcp.services.protocol_sections.orchestrator_body import (
     _PHASE3_CLOSEOUT_START,  # noqa: F401 — re-exported for back-compat (test imports)
     _PROGRESS_REPORTING_ANCHOR,  # noqa: F401 — re-exported for back-compat (test imports)
     _WORKER_SPAWN_BLOCK_START,  # noqa: F401 — re-exported for back-compat (test imports)
+    _apply_anchor_slice,
     _build_orchestrator_protocol_body,
     render_capability_ladder,
 )
@@ -201,6 +202,11 @@ def _build_wake_pattern(
     return raw.replace("{executor_id}", executor_id)
 
 
+_BANNER_SLEEP_ORDER = " You wait via the sleep-and-check pattern."
+_AUTO_CHECKIN_OFFER_START = "**If you want periodic auto-check-in:**"
+_STATUS_LEGEND_ANCHOR = "**Blocked vs Idle vs Sleeping:**"
+
+
 def _build_preset_waiting_ladder(preset: Platform) -> str:
     return render_capability_ladder(
         preferred=(
@@ -248,4 +254,6 @@ def _generate_orchestrator_protocol(
     body = apply_thread_reference(body, comm_thread_id)
     if preset is None:
         return forbidden_banner + body
-    return _build_preset_waiting_ladder(preset) + "\n\n" + forbidden_banner + body
+    banner = "" if is_chain_conductor else forbidden_banner.replace(_BANNER_SLEEP_ORDER, "")
+    body = _apply_anchor_slice(body, _AUTO_CHECKIN_OFFER_START, _STATUS_LEGEND_ANCHOR, "")
+    return _build_preset_waiting_ladder(preset) + "\n\n" + banner + body

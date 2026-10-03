@@ -8,12 +8,24 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import Message, ProductMemoryEntry, Project
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.tasks import MessageRecipient
+
+
+async def latest_execution_for_job(
+    session: AsyncSession, tenant_key: str, job_id: str, status_clause: ColumnElement[bool]
+) -> AgentExecution | None:
+    result = await session.execute(
+        select(AgentExecution)
+        .where(AgentExecution.job_id == job_id, AgentExecution.tenant_key == tenant_key, status_clause)
+        .order_by(AgentExecution.started_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 class AgentJobRepository:
@@ -85,18 +97,7 @@ class AgentJobRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status == "blocked",
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await latest_execution_for_job(session, tenant_key, job_id, AgentExecution.status == "blocked")
 
     async def find_complete_execution_for_job(
         self,
@@ -104,18 +105,7 @@ class AgentJobRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status == "complete",
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await latest_execution_for_job(session, tenant_key, job_id, AgentExecution.status == "complete")
 
     async def find_active_execution_for_job(
         self,
@@ -123,18 +113,9 @@ class AgentJobRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
+        return await latest_execution_for_job(
+            session, tenant_key, job_id, AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES)
         )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
 
     async def get_project_by_id(
         self,

@@ -51,7 +51,7 @@ def _build_stacked_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RateLimitMiddleware, requests_per_minute=300)
     app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(InputValidationMiddleware, strict_mode=False)
+    app.add_middleware(InputValidationMiddleware)
     app.add_middleware(
         CSRFProtectionMiddleware,
         exempt_paths=["/health"],

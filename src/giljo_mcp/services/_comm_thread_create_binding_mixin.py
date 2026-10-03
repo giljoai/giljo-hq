@@ -20,7 +20,6 @@ class CommThreadCreateBindingMixin:
         session: AsyncSession,
         tenant_key: str,
         *,
-        product_id: str | None,
         project_id: str | None,
         sequence_run_id: str | None,
     ) -> str | None:

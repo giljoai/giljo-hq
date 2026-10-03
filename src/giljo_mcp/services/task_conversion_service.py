@@ -18,11 +18,12 @@ from giljo_mcp.exceptions import (
     ResourceNotFoundError,
     ValidationError,
 )
-from giljo_mcp.models import Project, Task
+from giljo_mcp.models import Task
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.repositories.task_repository import TaskRepository
 from giljo_mcp.schemas.service_responses import ConversionResult
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.project_service._mutation_mixin import insert_new_project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -58,7 +59,7 @@ class TaskConversionService:
                 return await self._convert_to_project_impl(
                     session, task_id, project_name, strategy, include_subtasks, user_id
                 )
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to convert task {task_id} to project")
@@ -121,27 +122,19 @@ class TaskConversionService:
             )
 
 
-        project_type_id: str | None = None
-        project_series_number: int | None = task.series_number
-        if project_series_number is None:
-            await self._project_repo.lock_rows_for_series_shared(session, tenant_key, bound_product.id)
-            project_series_number = await self._project_repo.get_next_series_number_shared(
-                session, tenant_key, bound_product.id
-            )
-
-        final_project_name = project_name or task.title
-        new_project = Project(
-            name=final_project_name,
-            description=task.description or f"Project created from task: {task.title}",
-            mission="",
-            product_id=bound_product.id,
+        new_project = await insert_new_project(
+            session,
+            self._project_repo,
             tenant_key=tenant_key,
+            name=project_name or task.title,
+            mission="",
+            description=task.description or f"Project created from task: {task.title}",
+            product_id=bound_product.id,
             status=ProjectStatus.INACTIVE,
-            project_type_id=project_type_id,
-            series_number=project_series_number,
+            project_type_id=None,
+            series_number=task.series_number,
+            subseries=None,
         )
-
-        await self._repo.add_project(session, new_project)
         await self._repo.flush(session)
 
         task.converted_to_project_id = new_project.id
@@ -192,7 +185,7 @@ class TaskConversionService:
         try:
             async with self._get_session(self.tenant_manager.get_current_tenant()) as session:
                 return await self._get_summary_impl(session, product_id)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to get task summary")

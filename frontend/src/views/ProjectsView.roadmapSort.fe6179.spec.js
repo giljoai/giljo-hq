@@ -31,7 +31,6 @@ vi.mock('@/stores/projects', () => ({
     loading: false,
     deletedProjects: [],
     hiddenProjects: [],
-    activeProjectMeta: null,
     fetchProjects: h.fetchProjects,
     fetchActiveProject: h.fetchActiveProject,
     fetchHiddenProjects: vi.fn().mockResolvedValue(undefined),

@@ -183,35 +183,6 @@ def _get_external_host() -> str:
     return ""
 
 
-def get_ssl_enabled() -> bool:
-    if _get_network_mode() == "localhost":
-        return False
-    with contextlib.suppress(Exception):
-        import yaml
-
-        config_path = Path.cwd() / "config.yaml"
-
-        if config_path.exists():
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-
-            ssl_enabled = bool(config.get("features", {}).get("ssl_enabled", False))
-            if not ssl_enabled:
-                return False
-
-            ssl_cert = config.get("paths", {}).get("ssl_cert")
-            ssl_key = config.get("paths", {}).get("ssl_key")
-            if ssl_cert and ssl_key and (not Path(ssl_cert).exists() or not Path(ssl_key).exists()):
-                print_warning(
-                    "SSL cert/key files not found — startup falling back to HTTP probe. "
-                    "Restore certs or re-run install to fix HTTPS."
-                )
-                return False
-            return True
-
-    return False
-
-
 def get_network_ip() -> str | None:
     network_mode = _get_network_mode()
 
@@ -457,11 +428,9 @@ def _patch_env_from_config() -> None:
     if not external_host or external_host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
         return
 
-    ssl_enabled = get_ssl_enabled()
     api_port, _ = get_config_ports()
-    proto = "https" if ssl_enabled else "http"
     desired = {
-        "GILJO_PUBLIC_URL": f"{proto}://{external_host}:{api_port}",
+        "GILJO_PUBLIC_URL": f"http://{external_host}:{api_port}",
         "VITE_API_URL": "",
         "VITE_WS_URL": "",
     }
@@ -473,7 +442,10 @@ def _patch_env_from_config() -> None:
         for key, want in desired.items():
             if line.startswith(key + "="):
                 seen.add(key)
-                if line[len(key) + 1 :].strip() != want:
+                current = line[len(key) + 1 :].strip()
+                if key == "GILJO_PUBLIC_URL" and current.lower().startswith("https://"):
+                    continue
+                if current != want:
                     lines[idx] = key + "=" + want
                     os.environ[key] = want
                     changed = True
@@ -518,15 +490,6 @@ def run_database_migrations() -> bool:
     except Exception as e:
         print_error(f"Unexpected error during database migrations: {e}")
         return False
-
-
-def resolve_ssl_decision(no_ssl: bool = False) -> bool:
-    ssl_enabled = get_ssl_enabled() and not no_ssl
-    if not ssl_enabled:
-        os.environ["GILJO_FORCE_HTTP"] = "1"
-    else:
-        os.environ.pop("GILJO_FORCE_HTTP", None)
-    return ssl_enabled
 
 
 
@@ -637,7 +600,6 @@ def run_startup(
     verbose: bool = False,
     no_browser: bool = False,
     no_migrations: bool = False,
-    no_ssl: bool = False,
 ) -> int:
     print_header("Giljo HQ - Unified Startup v3.0")
 
@@ -693,10 +655,7 @@ def run_startup(
     is_first_run, _state = check_first_run()
 
     api_port, frontend_port = get_config_ports()
-    ssl_enabled = resolve_ssl_decision(no_ssl=no_ssl)
-    if no_ssl and not ssl_enabled:
-        print_warning("SSL disabled via --no-ssl flag (HTTP mode forced)")
-    http_proto = "https" if ssl_enabled else "http"
+    http_proto = "http"
 
     stop_services()
 
@@ -821,7 +780,7 @@ def run_startup(
     frontend_process = start_frontend_server(verbose=verbose)
 
     print_header("Waiting for Services")
-    api_ready = wait_for_api_ready(api_port, max_attempts=60, interval=0.5, ssl_enabled=ssl_enabled)
+    api_ready = wait_for_api_ready(api_port, max_attempts=60, interval=0.5)
 
     if not api_ready:
         print_warning("API did not respond to health check, but continuing anyway")
@@ -973,12 +932,9 @@ def stop_services() -> int:
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output (show console windows on Windows)")
 @click.option("--no-browser", is_flag=True, help="Skip automatic browser launch (show URLs instead)")
 @click.option("--no-migrations", is_flag=True, help="Skip automatic database migrations")
-@click.option("--no-ssl", is_flag=True, help="Force HTTP even if HTTPS is configured (for Docker/CI/reverse-proxy)")
 @click.option("--stop", is_flag=True, help="Stop all running GiljoAI services")
 @click.option("--dev", is_flag=True, help="Force development mode (Vite dev server with hot-reload)")
-def main(
-    check_only: bool, verbose: bool, no_browser: bool, no_migrations: bool, no_ssl: bool, stop: bool, dev: bool
-) -> None:
+def main(check_only: bool, verbose: bool, no_browser: bool, no_migrations: bool, stop: bool, dev: bool) -> None:
     """
     Giljo HQ - Unified Startup Script
 
@@ -998,7 +954,6 @@ def main(
                 verbose=verbose,
                 no_browser=no_browser,
                 no_migrations=no_migrations,
-                no_ssl=no_ssl,
             )
     except KeyboardInterrupt:
         print_info("\nStartup cancelled by user")

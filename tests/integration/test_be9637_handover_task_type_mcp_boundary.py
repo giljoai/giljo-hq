@@ -206,6 +206,25 @@ async def test_an_hnd_missing_any_required_heading_is_refused_at_the_boundary(ta
     )
 
 
+async def test_an_hnd_with_only_a_prior_work_section_is_still_refused_over_mcp(task_boundary):
+    client, _tenant_key, product_id = task_boundary
+    async with client() as s:
+        result = await s.call_tool(
+            "create_task",
+            {
+                "title": "agent handover, one section",
+                "description": "## Where I left off\nStopped at the rebase.",
+                "task_type": "HND",
+                "product_id": product_id,
+            },
+        )
+    payload = _payload(result)
+    assert payload["success"] is False, payload
+    assert payload["error"] == "VALIDATION_ERROR", payload
+    for heading in ("## Verify before trusting", "## Waiting on the operator", "## Cannot testify"):
+        assert heading in payload["message"], payload["message"]
+
+
 async def test_a_refused_handover_writes_nothing(task_boundary, db_manager):
     client, tenant_key, product_id = task_boundary
     async with client() as s:

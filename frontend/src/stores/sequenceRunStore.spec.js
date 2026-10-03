@@ -36,13 +36,6 @@ describe('sequenceRunStore (FE-6165f)', () => {
       })
     })
 
-    it('tolerates a wrapped {sequence_runs:[]} payload as a fallback', async () => {
-      api.sequenceRuns.list.mockResolvedValueOnce({ data: { sequence_runs: [run('r9', ['pZ'])] } })
-      await store.hydrate()
-      expect(store.activeRuns).toHaveLength(1)
-      expect(store.isProjectInActiveChain('pZ')).toBe(true)
-    })
-
     it('rebuilds (drops a run no longer in the active list)', async () => {
       api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['pA']), run('r2', ['pB'])] })
       await store.hydrate()
@@ -89,37 +82,14 @@ describe('sequenceRunStore (FE-6165f)', () => {
     })
   })
 
-  describe('setActiveRun / fetchRun', () => {
-    it('setActiveRun stores the cockpit run and adds active runs to the election set', () => {
-      store.setActiveRun(run('r5', ['pQ'], 'pending'))
-      expect(store.activeRun.id).toBe('r5')
-      expect(store.isProjectInActiveChain('pQ')).toBe(true)
-    })
-
-    it('setActiveRun does NOT add a terminal run to the election set', () => {
-      store.setActiveRun(run('r6', ['pT'], 'completed'))
-      expect(store.activeRun.id).toBe('r6')
-      expect(store.isProjectInActiveChain('pT')).toBe(false)
-    })
-
-    it('fetchRun GETs the run and sets it active', async () => {
-      api.sequenceRuns.get.mockResolvedValueOnce({ data: run('r7', ['pH'], 'running') })
-      const r = await store.fetchRun('r7')
-      expect(r.id).toBe('r7')
-      expect(store.activeRun.id).toBe('r7')
-      expect(api.sequenceRuns.get).toHaveBeenCalledWith('r7')
-    })
-  })
-
   describe('patchRun', () => {
-    it('PATCHes and refreshes the cockpit run + election entry', async () => {
-      store._testSetActiveRun(run('r1', ['pA'], 'running'))
+    it('PATCHes and refreshes the election entry', async () => {
       store._testSeedRuns([run('r1', ['pA'], 'running')])
       api.sequenceRuns.update.mockResolvedValueOnce({ data: run('r1', ['pA'], 'running', { execution_mode: 'subagent' }) })
       const updated = await store.patchRun('r1', { execution_mode: 'subagent' })
       expect(api.sequenceRuns.update).toHaveBeenCalledWith('r1', { execution_mode: 'subagent' })
       expect(updated.execution_mode).toBe('subagent')
-      expect(store.activeRun.execution_mode).toBe('subagent')
+      expect(store.runsById.get('r1').execution_mode).toBe('subagent')
     })
 
     it('drops the run from the election set when PATCHed to a terminal status', async () => {
@@ -142,10 +112,8 @@ describe('sequenceRunStore (FE-6165f)', () => {
 
   it('$reset clears all state', () => {
     store._testSeedRuns([run('r1', ['pA'])])
-    store._testSetActiveRun(run('r1', ['pA']))
     store.$reset()
     expect(store.activeRuns).toHaveLength(0)
-    expect(store.activeRun).toBeNull()
   })
 })
 
@@ -194,9 +162,7 @@ describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
   })
 
   it('does NOT eject when a member closes but the run stays active (still in hydrate list)', async () => {
-    const activeRunData = run('r1', ['p1', 'p2'], 'running')
-    store._testSeedRuns([activeRunData])
-    store._testSetActiveRun(activeRunData)
+    store._testSeedRuns([run('r1', ['p1', 'p2'], 'running')])
 
     api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['p1', 'p2'], 'running', {
       project_statuses: { p1: 'completed', p2: 'implementing' },
@@ -206,38 +172,8 @@ describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
 
     expect(store.isProjectInActiveChain('p1')).toBe(true)
     expect(store.isProjectInActiveChain('p2')).toBe(true)
-    expect(store.activeRun?.project_statuses?.p1).toBe('completed')
+    expect(store.runsById.get('r1')?.project_statuses?.p1).toBe('completed')
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
-  })
-
-  it('does fetch the terminal run when the whole run completes (genuine whole-run termination)', async () => {
-    const activeRunData = run('r1', ['p1', 'p2'], 'running')
-    store._testSeedRuns([activeRunData])
-    store._testSetActiveRun(activeRunData)
-
-    api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
-    api.sequenceRuns.get.mockResolvedValueOnce({
-      data: run('r1', ['p1', 'p2'], 'completed', { project_statuses: { p1: 'completed', p2: 'completed' } }),
-    })
-
-    await store.handleSequenceUpdated({ run_id: 'r1' })
-
-    expect(store.isProjectInActiveChain('p1')).toBe(false)
-    expect(api.sequenceRuns.get).toHaveBeenCalledWith('r1')
-  })
-
-  it('clears the stale activeRun and raises a retired-run notice when the run is genuinely gone', async () => {
-    const activeRunData = run('r1', ['p1', 'p2'], 'running')
-    store._testSeedRuns([activeRunData])
-    store._testSetActiveRun(activeRunData)
-
-    api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
-    api.sequenceRuns.get.mockRejectedValueOnce({ response: { status: 404 } })
-
-    await store.handleSequenceUpdated({ run_id: 'r1' })
-
-    expect(store.activeRun).toBeNull()
-    expect(store.retiredRunNotice).toEqual({ runId: 'r1' })
   })
 })
 
@@ -249,10 +185,9 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
     store = useSequenceRunStore()
   })
 
-  it('updates activeRun.chain_mission when conductor writes chain mission (still-active run)', async () => {
+  it('updates chain_mission when conductor writes chain mission (still-active run)', async () => {
     const initial = run('r1', ['p1', 'p2'], 'pending', { chain_mission: null, locked: true })
     store._testSeedRuns([initial])
-    store._testSetActiveRun(initial)
 
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', {
@@ -263,15 +198,14 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    expect(store.activeRun?.chain_mission).toBe('Build A then wire B')
+    expect(store.runsById.get('r1')?.chain_mission).toBe('Build A then wire B')
     expect(store.isProjectInActiveChain('p1')).toBe(true)
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 
-  it('updates activeRun.locked to true when Stage Chain is pressed (still-active run)', async () => {
+  it('updates locked to true when Stage Chain is pressed (still-active run)', async () => {
     const initial = run('r1', ['p1', 'p2'], 'pending', { locked: false, chain_mission: null })
     store._testSeedRuns([initial])
-    store._testSetActiveRun(initial)
 
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: null })],
@@ -279,13 +213,12 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    expect(store.activeRun?.locked).toBe(true)
+    expect(store.runsById.get('r1')?.locked).toBe(true)
   })
 
   it('arms chainImplementReady-relevant fields in one sequence:updated round-trip', async () => {
     const initial = run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: null })
     store._testSeedRuns([initial])
-    store._testSetActiveRun(initial)
 
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: 'Full delivery plan' })],
@@ -293,8 +226,8 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    expect(store.activeRun?.locked).toBe(true)
-    expect(store.activeRun?.chain_mission).toBe('Full delivery plan')
+    expect(store.runsById.get('r1')?.locked).toBe(true)
+    expect(store.runsById.get('r1')?.chain_mission).toBe('Full delivery plan')
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 })

@@ -77,7 +77,7 @@ class AgentJobManager:
 
                 return (job_id, new_agent_id)
 
-        except (ResourceNotFoundError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to spawn execution")
@@ -101,7 +101,7 @@ class AgentJobManager:
 
                 return len(executions)
 
-        except (ResourceNotFoundError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to complete job")

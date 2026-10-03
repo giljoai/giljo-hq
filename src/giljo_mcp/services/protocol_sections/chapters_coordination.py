@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from giljo_mcp.platform_registry import Platform
+
 
 def _build_ch_team(team_state: list[dict] | None) -> str:
     if not team_state:
@@ -99,8 +101,15 @@ MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
 """
 
 
-def _build_thread_loop_directive() -> str:
-    return """════════════════════════════════════════════════════════════════════════════
+_LOOP_MECHANISM_ASIDE = " (reuse the existing sleep-and-check mechanism)"
+_LOOP_SHELL_SLEEP_STEP = """  4. Use the env-aware shell sleep between checks if you sleep in-shell (Claude
+     Code: the `sleep 1 N` workaround — `sleep` sums its args and the harness only
+     inspects the first; `sleep 1 120` waits ~2 min). PowerShell: `Start-Sleep -Seconds N`.
+"""
+
+
+def _build_thread_loop_directive(preset: Platform | None = None) -> str:
+    directive = """════════════════════════════════════════════════════════════════════════════
           LOOP / SLEEP DIRECTIVE (user-requested, thread-scoped)
 ════════════════════════════════════════════════════════════════════════════
 
@@ -133,6 +142,9 @@ report that you are done. (This directive disappears from your mission once ever
 armed thread is closed.)
 ────────────────────────────────────────────────────────────────────────────
 """
+    if preset is None:
+        return directive
+    return directive.replace(_LOOP_MECHANISM_ASIDE, "").replace(_LOOP_SHELL_SLEEP_STEP, "")
 
 
 def _build_ch_orchestrator_authority(cli_mode: bool) -> str:

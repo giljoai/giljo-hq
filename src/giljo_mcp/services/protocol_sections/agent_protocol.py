@@ -45,21 +45,12 @@ def _generate_agent_protocol(
 
     todo_phrase = task_list_phrase(tool)
 
-    if job_type == "orchestrator":
-        phase1_step4 = (
-            f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE coordination):\n"
-            "   - Orchestration ONLY: spawning, monitoring, coordinating, unblocking, closing out\n"
-            "   - NEVER include implementation, testing, or documentation tasks — those belong to your agents\n"
-            '   - Count and announce: "X steps to complete: [list items]"\n'
-            "   - NEVER skip this step - planning prevents poor execution"
-        )
-    else:
-        phase1_step4 = (
-            f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE implementation):\n"
-            "   - Break mission into 3-7 specific, actionable tasks\n"
-            '   - Count and announce: "X steps to complete: [list items]"\n'
-            "   - NEVER skip this step - planning prevents poor execution"
-        )
+    phase1_step4 = (
+        f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE implementation):\n"
+        "   - Break mission into 3-7 specific, actionable tasks\n"
+        '   - Count and announce: "X steps to complete: [list items]"\n'
+        "   - NEVER skip this step - planning prevents poor execution"
+    )
 
     protocol_framing = "These are your lifecycle operating procedures. Follow them from startup through completion.\n\n"
 

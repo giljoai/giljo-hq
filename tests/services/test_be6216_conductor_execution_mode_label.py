@@ -66,7 +66,7 @@ def test_banner_and_ch_capability_yield_single_execution_mode_value() -> None:
         tool="multi_terminal",
         is_chain_conductor=True,
     )
-    ch_cap = _build_ch_capability(execution_mode="claude_code_cli", can_spawn_terminals=True)
+    ch_cap = _build_ch_capability(execution_mode="claude_code_cli")
 
     assert _OLD_COLLIDING not in banner
     assert "EXECUTION_MODE" not in banner

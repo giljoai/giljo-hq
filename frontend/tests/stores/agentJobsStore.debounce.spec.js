@@ -43,7 +43,7 @@ describe('agentJobsStore - Phase 1: Deep equality check', () => {
   it('upsertJob with identical data does not trigger reactivity', () => {
     seedJob(store)
 
-    const mapBefore = store.jobsById.value
+    const mapBefore = store.jobsById
 
     // Act: upsert with the exact same data
     store.upsertJob({
@@ -59,13 +59,13 @@ describe('agentJobsStore - Phase 1: Deep equality check', () => {
     })
 
     // Assert: Map reference should be unchanged (no new Map created)
-    expect(store.jobsById.value).toBe(mapBefore)
+    expect(store.jobsById).toBe(mapBefore)
   })
 
   it('upsertJob with changed data triggers reactivity', () => {
     seedJob(store)
 
-    const mapBefore = store.jobsById.value
+    const mapBefore = store.jobsById
 
     // Act: upsert with different progress value
     store.upsertJob({
@@ -75,7 +75,7 @@ describe('agentJobsStore - Phase 1: Deep equality check', () => {
     })
 
     // Assert: Map reference should be different (new Map was created)
-    expect(store.jobsById.value).not.toBe(mapBefore)
+    expect(store.jobsById).not.toBe(mapBefore)
     expect(store.getJob('agent-1').progress).toBe(75)
   })
 })
@@ -95,7 +95,7 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
 
   it('handleProgressUpdate queues debounced updates', () => {
     seedJob(store)
-    const mapBefore = store.jobsById.value
+    const mapBefore = store.jobsById
 
     // Act: fire a progress update
     store.handleProgressUpdate({
@@ -107,13 +107,13 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
     })
 
     // Assert: Map reference should NOT have changed yet (debounced)
-    expect(store.jobsById.value).toBe(mapBefore)
+    expect(store.jobsById).toBe(mapBefore)
 
     // Act: flush debounce timer
     vi.advanceTimersByTime(300)
 
     // Assert: Now it should have changed
-    expect(store.jobsById.value).not.toBe(mapBefore)
+    expect(store.jobsById).not.toBe(mapBefore)
     expect(store.getJob('agent-1').progress).toBe(80)
     expect(store.getJob('agent-1').current_task).toBe('Writing tests')
   })
@@ -122,7 +122,7 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
     seedJob(store)
 
     // Capture initial Map reference
-    const mapAfterSeed = store.jobsById.value
+    const mapAfterSeed = store.jobsById
 
     // Act: fire 3 rapid progress updates
     store.handleProgressUpdate({
@@ -145,20 +145,20 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
     })
 
     // Assert: no changes yet
-    expect(store.jobsById.value).toBe(mapAfterSeed)
+    expect(store.jobsById).toBe(mapAfterSeed)
 
     // Act: flush
     vi.advanceTimersByTime(300)
 
     // Assert: only the final merged state is applied (single Map swap)
-    expect(store.jobsById.value).not.toBe(mapAfterSeed)
+    expect(store.jobsById).not.toBe(mapAfterSeed)
     expect(store.getJob('agent-1').progress).toBe(80)
     expect(store.getJob('agent-1').last_progress_at).toBe('2026-03-14T10:00:03Z')
   })
 
   it('handleStatusChanged flushes immediately', () => {
     seedJob(store)
-    const mapBefore = store.jobsById.value
+    const mapBefore = store.jobsById
 
     // Act: fire a status change (should be immediate, no debounce)
     store.handleStatusChanged({
@@ -167,7 +167,7 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
     })
 
     // Assert: Map reference should have changed immediately
-    expect(store.jobsById.value).not.toBe(mapBefore)
+    expect(store.jobsById).not.toBe(mapBefore)
     expect(store.getJob('agent-1').status).toBe('silent')
   })
 
@@ -203,13 +203,13 @@ describe('agentJobsStore - Phase 2: Debounced store updates', () => {
     })
 
     // Assert: no changes yet
-    const mapBefore = store.jobsById.value
+    const mapBefore = store.jobsById
 
     // Act: flush
     vi.advanceTimersByTime(300)
 
     // Assert: fields from both updates should be merged
-    expect(store.jobsById.value).not.toBe(mapBefore)
+    expect(store.jobsById).not.toBe(mapBefore)
     const job = store.getJob('agent-1')
     expect(job.progress).toBe(90)
     expect(job.current_task).toBe('Running linter')

@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.models.schemas import ProjectSummaryResponse
@@ -25,12 +26,12 @@ router = APIRouter()
 
 @router.get("/{project_id}/summary", response_model=ProjectSummaryResponse)
 async def get_project_summary(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectSummaryResponse:
     """
-    Get comprehensive project summary with metrics (Handover 0504).
+    Get comprehensive project summary with metrics.
 
     Returns project overview including job statistics, completion metrics,
     and activity timestamps for dashboard display.
@@ -75,7 +76,7 @@ async def get_project_summary(
 
 @router.get("/{project_id}/orchestrator", response_model=OrchestratorResponse)
 async def get_project_orchestrator(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> OrchestratorResponse:
@@ -83,10 +84,10 @@ async def get_project_orchestrator(
     Get the orchestrator job for a project.
 
     Returns the orchestrator AgentExecution (executor) with AgentJob (work order) data.
-    Supports orchestrator succession (Handover 0080) - returns latest instance.
+    Supports orchestrator succession - returns latest instance.
     If no orchestrator exists, creates one automatically using the dual-model pattern.
 
-    Migration (Handover 0367b):
+    Migration:
     - Queries AgentExecution joined with AgentJob (legacy model removed)
     - Creates BOTH AgentJob (work order) + AgentExecution (executor instance)
     - Response maps from AgentExecution fields + AgentJob.mission
@@ -104,7 +105,7 @@ async def get_project_orchestrator(
         HTTPException 500: Database error
 
     Note:
-        Handover 0506: Removed auto-creation. Returns null orchestrator if none exists.
+        Removed auto-creation. Returns null orchestrator if none exists.
         Frontend shows "Re-launch Orchestrator" button when orchestrator is null.
     """
     from sqlalchemy import select

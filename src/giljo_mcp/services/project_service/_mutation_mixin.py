@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.domain.project_status import (
     IMMUTABLE_PROJECT_STATUSES,
@@ -23,6 +24,7 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.models.projects import Project
 from giljo_mcp.platform_registry import ACCEPTED_EXECUTION_MODES, mode_csv
+from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import (
     ProjectCompleteResult,
     ProjectData,
@@ -30,6 +32,7 @@ from giljo_mcp.schemas.service_responses import (
     ProjectLaunchResult,
     ProjectMissionUpdateResult,
 )
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.project_helpers import _build_ws_project_data
 from giljo_mcp.services.project_service._lifecycle_redirects import (
     preflight_supersede_target,
@@ -43,6 +46,78 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 ALWAYS_MUTABLE_FIELDS: frozenset[str] = frozenset({"hidden"})
 
 _SUPERSEDE_TRANSITION_FIELDS: frozenset[str] = frozenset({"status", "successor_project_id"})
+
+
+async def insert_new_project(
+    session: AsyncSession,
+    repo: ProjectRepository,
+    *,
+    tenant_key: str,
+    name: str,
+    mission: str,
+    description: str,
+    product_id: str | None,
+    status: str,
+    project_type_id: str | None,
+    series_number: int | None,
+    subseries: str | None,
+) -> Project:
+    require_non_blank(name, field="name", operation="create_project", entity="Project", max_length=255)
+
+    if product_id is None or not str(product_id).strip():
+        raise ValidationError(
+            message=(
+                "A project must belong to a product. Pass the product_id of one of your "
+                "own products (or omit it on the MCP tool to bind to the active product)."
+            ),
+            context={"operation": "create_project", "name": name},
+        )
+    if await repo.get_product_by_id(session, tenant_key, product_id) is None:
+        raise ResourceNotFoundError(message="Product not found", context={"product_id": product_id})
+    if project_type_id and not await repo.project_type_exists(session, tenant_key, project_type_id):
+        raise ResourceNotFoundError(message="Project type not found", context={"project_type_id": project_type_id})
+
+    if series_number is not None and (series_number < 1 or series_number > 9999):
+        raise ValidationError(
+            message="Series number must be between 1 and 9999.",
+            context={"series_number": series_number},
+        )
+    if subseries is not None and (len(subseries) != 1 or not subseries.isalpha()):
+        raise ValidationError(
+            message="Subseries must be a single letter (a-z).",
+            context={"subseries": subseries},
+        )
+
+    if series_number is None:
+        await repo.lock_rows_for_series_shared(session, tenant_key, product_id)
+        series_number = await repo.get_next_series_number_shared(session, tenant_key, product_id)
+
+    else:
+        is_dup = await repo.check_duplicate_taxonomy(
+            session, tenant_key, product_id, project_type_id, series_number, subseries
+        )
+        if is_dup:
+            raise AlreadyExistsError(
+                message="Taxonomy combination already in use. Please choose a different series number or suffix.",
+                context={"name": name, "tenant_key": tenant_key},
+            )
+
+    now = datetime.now(UTC)
+    project = Project(
+        name=name,
+        mission=mission,
+        description=description,
+        tenant_key=tenant_key,
+        product_id=product_id,
+        status=status,
+        project_type_id=project_type_id,
+        series_number=series_number,
+        subseries=subseries,
+        updated_at=now,
+    )
+
+    await repo.add(session, project)
+    return project
 
 
 class MutationMixin:
@@ -68,58 +143,20 @@ class MutationMixin:
                     context={"operation": "create_project", "name": name},
                 )
 
-            require_non_blank(name, field="name", operation="create_project", entity="Project", max_length=255)
-
-            if product_id is None or not str(product_id).strip():
-                raise ValidationError(
-                    message=(
-                        "A project must belong to a product. Pass the product_id of one of your "
-                        "own products (or omit it on the MCP tool to bind to the active product)."
-                    ),
-                    context={"operation": "create_project", "name": name},
-                )
-
             async with self._get_session(tenant_key) as session:
-                if series_number is not None and (series_number < 1 or series_number > 9999):
-                    raise ValidationError(
-                        message="Series number must be between 1 and 9999.",
-                        context={"series_number": series_number},
-                    )
-                if subseries is not None and (len(subseries) != 1 or not subseries.isalpha()):
-                    raise ValidationError(
-                        message="Subseries must be a single letter (a-z).",
-                        context={"subseries": subseries},
-                    )
-
-                if series_number is None:
-                    await self._repo.lock_rows_for_series_shared(session, tenant_key, product_id)
-                    series_number = await self._repo.get_next_series_number_shared(session, tenant_key, product_id)
-
-                else:
-                    is_dup = await self._repo.check_duplicate_taxonomy(
-                        session, tenant_key, product_id, project_type_id, series_number, subseries
-                    )
-                    if is_dup:
-                        raise AlreadyExistsError(
-                            message="Taxonomy combination already in use. Please choose a different series number or suffix.",
-                            context={"name": name, "tenant_key": tenant_key},
-                        )
-
-                now = datetime.now(UTC)
-                project = Project(
+                project = await insert_new_project(
+                    session,
+                    self._repo,
+                    tenant_key=tenant_key,
                     name=name,
                     mission=mission,
                     description=description,
-                    tenant_key=tenant_key,
                     product_id=product_id,
                     status=status,
                     project_type_id=project_type_id,
                     series_number=series_number,
                     subseries=subseries,
-                    updated_at=now,
                 )
-
-                await self._repo.add(session, project)
                 await session.commit()
                 await self._repo.refresh(session, project)
 
@@ -131,15 +168,12 @@ class MutationMixin:
                 )
 
                 if self._websocket_manager:
-                    try:
-                        await self._websocket_manager.broadcast_project_update(
-                            project_id=project.id,
-                            update_type="created",
-                            project_data=_build_ws_project_data(project),
-                            tenant_key=tenant_key,
-                        )
-                    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                        self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                    await self._websocket_manager.broadcast_project_update(
+                        project_id=project.id,
+                        update_type="created",
+                        project_data=_build_ws_project_data(project),
+                        tenant_key=tenant_key,
+                    )
 
                 return self._build_created_project_detail(project)
 
@@ -189,7 +223,7 @@ class MutationMixin:
                     )
 
                 project.mission = mission
-                if project.staging_status != "staging_complete":
+                if project.staging_status != STAGING_COMPLETE:
                     project.staging_status = "staging"
                 project.updated_at = datetime.now(UTC)
 
@@ -431,16 +465,6 @@ class MutationMixin:
                 if "uq_project_taxonomy" in str(e):
                     raise AlreadyExistsError(
                         message="Taxonomy combination already in use. Please choose a different series number or suffix.",
-                        context={"project_id": project_id},
-                    ) from e
-                if "idx_project_single_active_per_product" in str(e):
-                    raise AlreadyExistsError(
-                        message=(
-                            "Another project is already active for this product. "
-                            "Deactivate it first, or use the activate endpoint, "
-                            "which handles this automatically."
-                        ),
-                        error_code="ANOTHER_PROJECT_ACTIVE",
                         context={"project_id": project_id},
                     ) from e
                 raise

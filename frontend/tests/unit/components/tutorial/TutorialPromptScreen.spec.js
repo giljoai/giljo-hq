@@ -15,7 +15,6 @@ vi.mock('@/composables/useGiljoMode', () => ({
   useGiljoMode: () => ({
     isSaasMode: () => mockIsSaas,
     isCeMode: () => !mockIsSaas,
-    isNonCeMode: () => mockIsSaas,
     getMode: () => (mockIsSaas ? 'saas' : 'ce'),
   }),
 }))

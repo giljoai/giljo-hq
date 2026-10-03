@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from mcp.server.mcpserver import Context
 from pydantic import Field
 
+from api.endpoints._boundary_types import LIST_ITEMS_MAX
 from api.endpoints.mcp_tools._base import (
     MCP_ID_MAX,
     MCP_SHORT_TEXT_MAX,
@@ -34,6 +35,7 @@ async def save_roadmap(
     items: Annotated[
         list[dict[str, Any]],
         Field(
+            max_length=LIST_ITEMS_MAX,
             description=(
                 "List of roadmap items to upsert. Each: {item_type: 'project'|'task', "
                 "project_id OR task_id, sort_order (int 0..100000), risk?: 'low'|'med'|'high', "
@@ -45,7 +47,7 @@ async def save_roadmap(
                 "reference a project/task of the resolved product; invalid "
                 "enums/lengths/ids are rejected with a ValidationError (422), never a DB 500, "
                 "and a rejection names EVERY bad row at once, not just the first."
-            )
+            ),
         ),
     ],
     summary: Annotated[
@@ -56,13 +58,14 @@ async def save_roadmap(
         ),
     ] = "",
     remove: Annotated[
-        list[dict[str, Any]],
+        list[dict[str, Any]] | None,
         Field(
+            max_length=LIST_ITEMS_MAX,
             description=(
                 "Optional list of items to remove from the roadmap. Each: "
                 "{item_type: 'project'|'task', project_id|task_id}. Idempotent; "
                 "removes only the roadmap entry, never the project/task itself."
-            )
+            ),
         ),
     ] = None,
     patch_fields: Annotated[

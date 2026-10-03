@@ -32,18 +32,15 @@ class TestSpawnAgentJob:
             thin_client=True,
         )
 
-        mock_ws_dep = AsyncMock()
-
         request = SpawnAgentRequest(agent_display_name="implementer", mission="Test mission", project_id="proj-123")
 
         response = await lifecycle.spawn_job(
-            request=request, current_user=mock_user, orchestration_service=mock_service, ws_dep=mock_ws_dep
+            request=request, current_user=mock_user, orchestration_service=mock_service
         )
 
         assert response.success is True
         assert response.job_id == "job-123"
         mock_service.spawn_job.assert_called_once()
-        mock_ws_dep.broadcast_to_tenant.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_spawn_agent_non_admin_forbidden(self):
@@ -55,9 +52,7 @@ class TestSpawnAgentJob:
         request = SpawnAgentRequest(agent_display_name="implementer", mission="Test mission", project_id="proj-123")
 
         with pytest.raises(HTTPException) as exc_info:
-            await lifecycle.spawn_job(
-                request=request, current_user=mock_user, orchestration_service=AsyncMock(), ws_dep=AsyncMock()
-            )
+            await lifecycle.spawn_job(request=request, current_user=mock_user, orchestration_service=AsyncMock())
 
         assert exc_info.value.status_code == 403
 
@@ -76,6 +71,4 @@ class TestSpawnAgentJob:
         request = SpawnAgentRequest(agent_display_name="implementer", mission="Test mission", project_id="proj-123")
 
         with pytest.raises(OrchestrationError):
-            await lifecycle.spawn_job(
-                request=request, current_user=mock_user, orchestration_service=mock_service, ws_dep=AsyncMock()
-            )
+            await lifecycle.spawn_job(request=request, current_user=mock_user, orchestration_service=mock_service)

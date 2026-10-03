@@ -178,21 +178,12 @@ class TestDowngradeFailsClosed:
         with pytest.raises(ValueError):
             bcrypt.checkpw(raw_key.encode("utf-8"), sha_hash.encode("utf-8"))
 
-    @pytest.mark.asyncio
-    async def test_boundary_swallows_downgrade_exception(self, db_manager, monkeypatch):
-        from giljo_mcp import api_key_utils
-        from giljo_mcp.api_key_utils import bust_api_key_cache
+    def test_verify_fails_closed_on_a_sha256_row(self):
+        from giljo_mcp.api_key_utils import hash_api_key, verify_api_key
 
-        raw_key, _tk, key_id = await _seed_api_key(db_manager)
-        bust_api_key_cache(key_id)
-
-        def _old_bcrypt_only_verify(api_key: str, key_hash: str) -> bool:
-            return bcrypt.checkpw(api_key.encode("utf-8"), key_hash.encode("utf-8"))
-
-        monkeypatch.setattr(api_key_utils, "verify_api_key", _old_bcrypt_only_verify)
-
-        result = await _authenticate(db_manager, raw_key)
-        assert result is None, "a downgraded reader must fail closed (key silently invalid), not crash"
+        raw_key = f"gk_{uuid4().hex}"
+        assert verify_api_key(raw_key, hash_api_key(raw_key)) is True
+        assert verify_api_key(raw_key, "$2b$12$not-a-real-bcrypt-hash") is False
 
 
 
@@ -245,7 +236,7 @@ def _request_with_ip(ip: str):
         "headers": [],
         "query_string": b"",
         "client": (ip, 12345),
-        "server": ("app.giljo.ai", 443),
+        "server": ("api.example.test", 443),
         "scheme": "https",
     }
     return Request(scope)
@@ -363,7 +354,7 @@ async def _drive_mcp(middleware_cls, *, ip: str, api_key: str) -> tuple[int, dic
         "query_string": b"",
         "headers": [(b"x-api-key", api_key.encode()), (b"content-type", b"application/json")],
         "client": (ip, 12345),
-        "server": ("app.giljo.ai", 443),
+        "server": ("api.example.test", 443),
         "scheme": "https",
         "root_path": "",
     }

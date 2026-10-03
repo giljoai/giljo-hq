@@ -197,7 +197,6 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         self.settings.setdefault("api_port", DEFAULT_API_PORT)
         self.settings.setdefault("dashboard_port", DEFAULT_FRONTEND_PORT)
         self.settings.setdefault("bind", "0.0.0.0")
-        self.settings.setdefault("ssl_enabled", False)
 
         self.platform = get_platform_handler()
 
@@ -474,7 +473,6 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         self.settings.setdefault("db_name", os.environ.get("GILJO_DB_NAME") or "giljo_mcp")
 
         self.settings["register_mcp_tools"] = False
-        self.settings["enable_serena"] = False
         self.settings["create_shortcuts"] = False
 
     def _print_cleartext_lan_notice(self, host: str) -> None:
@@ -486,7 +484,7 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         print("  travel your LAN in CLEARTEXT — a rogue device on the network can")
         print("  sniff them. Acceptable on a trusted home/single-room LAN behind a")
         print("  trusted router. Do NOT port-forward this box to the internet.")
-        print("  Enable HTTPS anytime in Settings > Network (bring your own cert).")
+        print("  For HTTPS, put a reverse proxy such as Caddy in front (see the user guide).")
         print(f"{Fore.YELLOW}{'=' * 64}{Style.RESET_ALL}")
 
     def _print_cleartext_wan_notice(self, host: str) -> None:
@@ -496,14 +494,14 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         print(f"  The server will serve plain HTTP on http://{host}. On a public or")
         print("  internet-facing address this sends logins and data in cleartext.")
         print("  Before exposing it, put a TLS-terminating reverse proxy or tunnel in")
-        print("  front of it (nginx, Caddy, Cloudflare Tunnel), or add your own")
-        print("  certificate later in Settings > Network. Continuing with HTTP.")
+        print("  front of it (nginx, Caddy, Cloudflare Tunnel; see the user guide).")
+        print("  Continuing with HTTP.")
         print(f"{Fore.RED}{'=' * 64}{Style.RESET_ALL}")
 
     def ask_installation_questions(self) -> None:
         print(f"\n{Fore.CYAN}[Network Configuration]{Style.RESET_ALL}")
         print("The server runs over plain HTTP by default (localhost or LAN).")
-        print("HTTPS is an opt-in upgrade in Settings > Network (bring your own cert).")
+        print("For HTTPS, put a reverse proxy such as Caddy in front (see the user guide).")
         print("Choose your installation:\n")
 
         from installer.shared.network import get_network_adapters, is_private_lan_host
@@ -661,7 +659,6 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
 
 
         self.settings["register_mcp_tools"] = False
-        self.settings["enable_serena"] = False
 
         if platform.system() == "Windows":
             print(f"\n{Fore.CYAN}[Post-Installation Options]{Style.RESET_ALL}")
@@ -1037,7 +1034,6 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
                 "bind": self.settings.get("bind", "0.0.0.0"),
                 "external_host": self.settings.get("external_host", "localhost"),
                 "network_mode": self.settings.get("network_mode", "localhost"),
-                "ssl_enabled": self.settings.get("ssl_enabled", False),
                 "frontend_mode": self.settings.get("frontend_mode", "development"),
             }
 
@@ -1368,7 +1364,7 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         api_port = self.settings.get("api_port", DEFAULT_API_PORT)
         is_production = (self.install_dir / "frontend" / "dist").exists()
         frontend_port = api_port if is_production else self.settings.get("dashboard_port", DEFAULT_FRONTEND_PORT)
-        protocol = "https" if self.settings.get("ssl_enabled") else "http"
+        protocol = "http"
 
         print(f"{Fore.CYAN}{Style.BRIGHT}Start the application:{Style.RESET_ALL}")
         print(f"  {Fore.GREEN}python startup.py{Style.RESET_ALL}")

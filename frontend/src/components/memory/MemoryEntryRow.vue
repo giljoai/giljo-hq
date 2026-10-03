@@ -75,7 +75,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { hexToRgba, getAgentBadgeStyle } from '@/utils/colorUtils'
+import { tintedStyle, getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColor } from '@/config/agentColors'
 import { commitTitle } from '@/utils/gitCommitDisplay'
 
@@ -150,8 +150,7 @@ function tagChipStyle(tag) {
     for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0
     role = PALETTE[h % PALETTE.length]
   }
-  const hex = getAgentColor(role).hex
-  return { backgroundColor: hexToRgba(hex, 0.15), color: hex }
+  return tintedStyle(getAgentColor(role).hex)
 }
 </script>
 

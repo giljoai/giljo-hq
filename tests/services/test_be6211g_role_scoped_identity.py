@@ -17,11 +17,11 @@ from giljo_mcp.template_seeder import (
 _TOOLS = ("multi_terminal", "claude-code", "codex", "gemini", "antigravity")
 
 _SOLO_IDENTITY_SHA256 = {
-    "multi_terminal": "a2f991dbcee54c16fe339cd6b160239cee684212a332b0fb5a3e6061797d6138",
-    "claude-code": "22b38f05c2ff085d6ba25479e5c8273ee6c508dffbd4eb21b722a8b9572631b7",
-    "codex": "a2f991dbcee54c16fe339cd6b160239cee684212a332b0fb5a3e6061797d6138",
-    "gemini": "a2f991dbcee54c16fe339cd6b160239cee684212a332b0fb5a3e6061797d6138",
-    "antigravity": "a2f991dbcee54c16fe339cd6b160239cee684212a332b0fb5a3e6061797d6138",
+    "multi_terminal": "0bc366db86e22345a835c0ef603c427dbc76eb55ac4bfa67c334a07431936c02",
+    "claude-code": "c150b73889953a9e747dcd756c02d4b393ec61eaa0a99e1f70964c8db671e4cc",
+    "codex": "0bc366db86e22345a835c0ef603c427dbc76eb55ac4bfa67c334a07431936c02",
+    "gemini": "0bc366db86e22345a835c0ef603c427dbc76eb55ac4bfa67c334a07431936c02",
+    "antigravity": "0bc366db86e22345a835c0ef603c427dbc76eb55ac4bfa67c334a07431936c02",
 }
 
 _BEFORE_CLOSEOUT = "## Before Closeout"

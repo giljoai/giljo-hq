@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
@@ -59,26 +59,21 @@ class MCPSessionManager:
         self.db = db
 
     async def authenticate_api_key(self, api_key_value: str):
-        try:
-            from giljo_mcp.auth.principal import _resolve_api_key
+        from giljo_mcp.auth.principal import _resolve_api_key
 
-            resolved = await _resolve_api_key(self.db, api_key_value)
-            if resolved is None:
-                logger.warning("Invalid API key provided")
-                return None
-            key_record, user = resolved
-
-            if should_run(_NS_LAST_USED, str(key_record.id), _LAST_USED_DEBOUNCE_SECONDS):
-                key_record.last_used = datetime.now(UTC)
-                await self.db.commit()
-            self.db.info["tenant_key"] = key_record.tenant_key
-
-            logger.debug(f"API key authenticated: {key_record.name} (user: {user.username})")
-            return (key_record, user)
-
-        except Exception as e:
-            logger.error(f"API key authentication error: {e}", exc_info=True)
+        resolved = await _resolve_api_key(self.db, api_key_value)
+        if resolved is None:
+            logger.warning("Invalid API key provided")
             return None
+        key_record, user = resolved
+
+        if should_run(_NS_LAST_USED, str(key_record.id), _LAST_USED_DEBOUNCE_SECONDS):
+            key_record.last_used = datetime.now(UTC)
+            await self.db.commit()
+        self.db.info["tenant_key"] = key_record.tenant_key
+
+        logger.debug(f"API key authenticated: {key_record.name} (user: {user.username})")
+        return (key_record, user)
 
     async def log_ip(self, api_key_id: str, ip_address: str) -> None:
         if not should_run(_NS_IP_LOG, f"{api_key_id}:{ip_address}", _IP_LOG_SAMPLE_SECONDS):
@@ -106,8 +101,9 @@ class MCPSessionManager:
             )
             await self.db.execute(stmt)
             await self.db.commit()
-        except Exception as e:  # noqa: BLE001 - API boundary: non-fatal IP logging
-            logger.warning("Failed to log IP for API key: %s", e)
+        except SQLAlchemyError:
+            await self.db.rollback()
+            logger.warning("Failed to log IP for API key (non-blocking)", exc_info=True)
 
     async def create_session(
         self,

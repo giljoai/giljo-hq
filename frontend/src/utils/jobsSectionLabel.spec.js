@@ -48,20 +48,48 @@ describe('jobsSectionLabelFor', () => {
     }
   })
 
-  it('returns Needs Input when any agent is blocked, even mid-implementation', () => {
+  it('returns Needs attention when any agent is blocked, even mid-implementation', () => {
     const label = jobsSectionLabelFor(
       { implementation_launched_at: '2026-08-30T12:00:00Z' },
       [{ status: 'working' }, { status: 'blocked' }],
     )
-    expect(label).toBe(JOBS_SECTION_LABELS.NEEDS_INPUT)
+    expect(label).toBe('Needs attention')
+    expect(label).toBe(JOBS_SECTION_LABELS.NEEDS_ATTENTION)
   })
 
-  it('returns Needs Input when any agent is silent', () => {
+  it('returns Needs attention when any agent is silent', () => {
     const label = jobsSectionLabelFor(
       { implementation_launched_at: '2026-08-30T12:00:00Z' },
       [{ status: 'silent' }],
     )
-    expect(label).toBe(JOBS_SECTION_LABELS.NEEDS_INPUT)
+    expect(label).toBe('Needs attention')
+  })
+
+  it('returns Needs attention when an agent has unread action-required posts', () => {
+    const label = jobsSectionLabelFor(
+      { implementation_launched_at: '2026-08-30T12:00:00Z' },
+      [{ agent_display_name: 'orchestrator', status: 'working', action_required_unread: 1 }],
+    )
+    expect(label).toBe('Needs attention')
+  })
+
+  it('returns Needs decision when an agent awaits the user, ahead of blocked and unread', () => {
+    const label = jobsSectionLabelFor(
+      { implementation_launched_at: '2026-08-30T12:00:00Z' },
+      [
+        { agent_display_name: 'orchestrator', status: 'working', action_required_unread: 2 },
+        { agent_display_name: 'implementer', status: 'blocked' },
+        { agent_display_name: 'tester', status: 'awaiting_user' },
+      ],
+    )
+    expect(label).toBe('Needs decision')
+    expect(label).toBe(JOBS_SECTION_LABELS.NEEDS_DECISION)
+  })
+
+  it('no label in the set uses the retired wording', () => {
+    for (const label of Object.values(JOBS_SECTION_LABELS)) {
+      expect(label.toLowerCase()).not.toContain('needs input')
+    }
   })
 
   it('ignores agents entirely when none is blocked or silent', () => {

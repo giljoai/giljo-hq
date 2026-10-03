@@ -1,10 +1,10 @@
 # Giljo HQ: User Guide
 
-*Last updated: 2026-08-20*
+*Last updated: 2026-10-01*
 
 This guide covers every page and UI element in Giljo HQ, a GiljoAI product. Read from top to bottom on first use, or jump to the section you need.
 
-> **Self-hosting (Community Edition)?** The setup, optional HTTPS, and server-startup instructions are gathered at the end under **Self-Hosting & Network Setup**. Hosted (SaaS) users can skip that section entirely — your server and certificates are managed for you.
+> **Self-hosting (Community Edition)?** The setup, optional HTTPS (through a reverse proxy), and server-startup instructions are gathered at the end under **Self-Hosting & Network Setup**. Hosted (SaaS) users can skip that section entirely — your server and certificates are managed for you.
 
 ---
 
@@ -92,7 +92,7 @@ Guidance and status banners appear in a single strip at the top of the page. Eve
 
 Common banners:
 
-- **Enable Git and Serena** — turn on both integrations in your connect settings to give agents more context (retires once both are on).
+- **Enable Git** — turn on the Git integration in your connect settings to give agents more context (retires once it is on).
 - **Tune your agents** — after your first project completes, a one-time nudge to make the default agent templates and product context your own.
 - **Activate your product** — shown when you have a product but none is active.
 - **Context review** — about two weeks after a product's context was last reviewed, once at least one project has completed since, Gil suggests tuning it so agents stay current. You can suppress it in notification settings.
@@ -254,11 +254,11 @@ You can also mark a project **Superseded** with a link to the project that repla
 Activating a project puts it on the **Jobs** board, the one place a project is staged and run. The board has two sides:
 
 - **Staging**: projects getting ready to run, with the filters **Activated**, **Planning** and **Staged**.
-- **Implementation**: projects that are running, with the filters **Needs input**, **Implementing** and **Review** (covered under **Jobs** below).
+- **Implementation**: projects that are running, with the counters **Needs decision**, **Needs attention**, **Implementing** and **Review** (covered under **Jobs** below).
 
 The board opens on **Implementation** when anything is running, and on **Staging** otherwise. Opening an active project from the Projects list, or following an older link to a project, lands on its card.
 
-A card on the **Staging** side shows what you read before you launch: the execution mode, the detected tool, the crew size and the number of phases, then three panels. **Project description** has a pencil to edit it. **Mission** is empty until you stage, updates live while the orchestrator writes it, and is tagged once generated. **Crew** shows the agents the orchestrator chose: click one to see its role, or use the pencil beside a worker to edit its mission before launch. The Crew header also has the agent tips and the Git and Serena icons, which take you to your integrations.
+A card on the **Staging** side shows what you read before you launch: the execution mode, the detected tool, the crew size and the number of phases, then three panels. **Project description** has a pencil to edit it. **Mission** is empty until you stage, updates live while the orchestrator writes it, and is tagged once generated. **Crew** shows the agents the orchestrator chose: click one to see its role, or use the pencil beside a worker to edit its mission before launch. The Crew header also has the agent tips and the Git icon, which takes you to your integrations.
 
 #### Choosing an Execution Mode
 
@@ -353,8 +353,8 @@ Each agent displays one of the following statuses (this table doubles as the on-
 |---|---|---|
 | `waiting` | Waiting. | Yellow, italic |
 | `working` | Working... | White, italic, animated dots |
-| `blocked` | Needs Input | Orange, upright |
-| `awaiting_user` | Decision Required | Amber, upright (an approval is pending — see Agent Approvals) |
+| `blocked` | Blocked | Orange, upright |
+| `awaiting_user` | Needs decision | Amber, upright (an approval is pending — see Agent Approvals) |
 | `idle` | Monitoring | Steel blue, italic |
 | `sleeping` | Sleeping | Soft purple, italic |
 | `silent` | Silent | Orange, upright (agent stopped communicating) |
@@ -372,7 +372,7 @@ When you spawn more than one agent of the same type in a project (for example, t
 
 ### Agent Approvals (Human-in-the-Loop)
 
-When an agent needs a decision from you mid-work, the project's card says **Your decision needed** and its **Jobs detail** shows an amber **"Decision Required"** banner: *"Check in with the orchestrator in chat, then click here to decide."*
+When an agent needs a decision from you mid-work, the project's card says **Your decision needed** and its **Jobs detail** shows an amber **"Needs decision"** banner: *"Check in with the orchestrator in chat, then click here to decide."*
 
 1. Read the agent's full reasoning in your AI chat.
 2. Click the banner to open the **decision dialog**, which shows the request and the available options (e.g. Approve / Reject / Defer).
@@ -521,11 +521,11 @@ Navigate to **Tools** via the left navigation. Five tabs are available:
 
 | Tab | Contents |
 |---|---|
-| **Connect** | Your directory of connected AI tools, API keys, and integrations (git, Serena MCP) |
+| **Connect** | Your directory of connected AI tools, API keys, and integrations (git) |
 | **Agents** | Agent Template Manager: browse, create, edit, and activate agent templates; the **Behaviour** view holds the agent silence threshold and check-in cadence |
 | **Context** | Context configuration: choose what grounding context agents receive and how much |
 | **Notifications** | Notification position and duration |
-| **Startup** | Cards to reopen the **Setup Wizard**, open this **guide** (the "Learning" card), and — in Community Edition — the **Certificate Trust** helper |
+| **Startup** | Cards to reopen the **Setup Wizard**, open this **guide** (the "Learning" card), |
 
 ### Connecting Your AI Tools (Connect)
 
@@ -617,15 +617,15 @@ Both accept any whole number from 1 to 1440 minutes and default to 10.
 
 Navigate to **Admin** via the left navigation (admin users only). The page title is "Admin Settings."
 
-Runtime settings (git integration, Serena MCP, network mode) are stored in the database. Changes you make here take effect immediately without restarting the server.
+Runtime settings (git integration, network mode) are stored in the database. Changes you make here take effect immediately without restarting the server.
 
 | Tab | Contents |
 |---|---|
 | **Identity** | Workspace name and slug, plus user management |
-| **Network** (Community Edition) | Your server's actual live address, HTTPS on/off with bring-your-own-certificate, and the cookie domain whitelist |
+| **Network** (Community Edition) | Your server's actual live address, a pointer to the HTTPS setup guide, and the cookie domain whitelist |
 | **Database** (Community Edition) | Read-only view of PostgreSQL connection settings, with a "Test Connection" button |
 
-The **Network** tab shows the real IP address(es) and port your server is currently reachable on, and is where you turn on HTTPS by providing your own certificate (see **Self-Hosting & Network Setup**). The Network and Database tabs appear only in Community Edition.
+The **Network** tab shows the real IP address(es) and port your server is currently reachable on, and links to the HTTPS setup guide (see **Self-Hosting & Network Setup**). The Network and Database tabs appear only in Community Edition.
 
 If your session has a stale or missing organization record, the Identity tab shows a friendly empty state ("No organization found. Please contact your administrator.") rather than a raw error. Legacy URLs `/tools/identity` and `/settings/identity` redirect here automatically.
 
@@ -770,7 +770,7 @@ The numbers you are most likely to bump into. "Edition" shows where a limit appl
 |---|---|---|
 | Active agents | 15 of your own, plus 1 reserved orchestrator (16 slots) | Both |
 | Templates you can create | Unlimited (only *active* agents are capped) | Both |
-| Projects in a chain | 2 to 5 | Both |
+| Projects in a chain | 2 to 10 | Both |
 | Vision document upload | 5 MB per file | Both |
 | API keys | Unlimited; each expires after 90 days | Both |
 | Password length | 8 characters minimum | Both |
@@ -814,111 +814,33 @@ Both `install.ps1` and `install.sh` also support a **`--repair`** mode, which sa
 
 ### HTTPS and Browser Configuration
 
-Giljo HQ runs over plain HTTP by default (localhost and LAN). HTTPS is an opt-in upgrade you enable in **Settings → Network**, where you provide your own certificate (a real CA, your organisation's internal CA, or a local CA such as mkcert). The steps below apply when your certificate comes from a **local CA** (e.g. mkcert): its root certificate must be trusted on each client. Your AI coding tools trust it after following the setup instructions on the connection page. Web browsers on Linux, however, maintain their own certificate stores and require an extra step.
+Giljo HQ serves plain HTTP. HTTPS comes from a reverse proxy placed in front of it; the server has no certificate settings of its own.
 
-#### Obtaining a Certificate
+**Plain HTTP is fine on a trusted home or office LAN.** Everything works: the dashboard, live updates, banners and in-app toasts, and AI tools that use an API key.
 
-GiljoAI does not create certificates — you bring your own, then provide it in **Settings → Network** (upload the PEM files, or reference them by path on the server). Pick whichever source your browsers and AI coding agents can trust:
+**What HTTPS adds:**
 
-**Option 1 — mkcert (recommended for local / LAN).** Creates a local certificate authority trusted by your own machine; works offline, no internet required:
+- Browser sign-in (OAuth) from AI tools such as Claude Code, which refuse to send credentials to a non-HTTPS server (localhost is exempt).
+- Operating-system desktop notifications when the tab is hidden (the in-app toast works without it).
+- Safe exposure beyond your LAN. Never put plain HTTP on the internet.
 
-```
-# Install: winget install FiloSottile.mkcert  (Windows)
-#          brew install mkcert                 (macOS)
-#          sudo apt install mkcert             (Linux)
-mkcert -install
-mkcert -cert-file ssl_cert.pem -key-file ssl_key.pem localhost 127.0.0.1 ::1 your-server-ip
-```
-
-**Option 2 — Let's Encrypt (public-facing servers).** Free, globally trusted certificates; requires a public domain name and ports 80/443 reachable from the internet:
+**Example with Caddy** (free, handles certificates for you). Save this as `Caddyfile` and run `caddy run`:
 
 ```
-sudo certbot certonly --standalone -d yourdomain.com
+https://192.0.2.50:8443 {
+    tls internal
+    reverse_proxy 127.0.0.1:7272
+}
 ```
 
-**Option 3 — self-signed (quick, but every browser shows a warning until the cert is trusted).**
+Use your server's address in place of `192.0.2.50` and your Giljo HQ port in place of `7272`. `tls internal` makes Caddy sign the certificate with its own private authority; for a real domain name, drop that line and Caddy gets a public certificate automatically.
 
-```
-openssl req -x509 -newkey rsa:4096 -nodes -days 365 -keyout ssl_key.pem -out ssl_cert.pem -subj "/CN=localhost"
-```
+With `tls internal`, each client must trust Caddy's root certificate (`root.crt`, in Caddy's data folder under `pki/authorities/local`). Run `caddy trust` on the machine that runs Caddy, copy `root.crt` to your other machines, and import it into the browser or system trust store. Node-based AI tools (Claude Code, Codex, OpenCode) do not read the system store: set `NODE_EXTRA_CA_CERTS` to the path of `root.crt`.
 
-After providing the certificate, enable HTTPS from **Settings → Network** and restart the server. For mkcert and self-signed certificates, each client must then trust the root certificate — follow the steps below.
+**Also set:**
 
-#### After Enabling HTTPS — Reconnect Your AI Tools
+- `GILJO_PUBLIC_URL=https://192.0.2.50:8443` in `.env`, so links given to agents use the HTTPS address. Restart the server after changing it.
+- `FORWARDED_ALLOW_IPS=<proxy address>` for the Giljo HQ server if Caddy runs on a different machine than Giljo HQ. It defaults to `127.0.0.1`, which is right when both run together.
+- Re-add your AI tools afterwards: the server address changed, so the old connection commands no longer point at it.
 
-Switching between HTTP and HTTPS changes the server's URL (`http://…` becomes `https://…`), which invalidates your existing MCP connections. After you enable HTTPS in **Settings → Network**:
-
-1. **Re-generate your connection commands** from the in-app Configurator (**Tools → Connect**) so each AI coding agent uses the new `https://` URL, then remove and re-add the connection in your tool.
-2. **Trust the certificate in the agent's runtime** when it is self-signed or from a private CA. Node-based tools (Claude Code, Codex) keep their own trust store, so follow the Node.js trust step below.
-
-#### First Connection
-
-When you first navigate to your GiljoAI server from a workstation (e.g. `https://your-server-ip:7272`), your browser shows a "Your connection is not private" warning. This is expected. Click **Advanced** and then **Proceed**. The connection page provides a download link for the server's certificate and copy-paste commands to install it.
-
-#### Installing the Certificate (Linux)
-
-Follow the two commands provided on the connection page:
-
-1. **System trust** (for curl, Node.js, and other system tools):
-
-```
-sudo cp ~/Downloads/rootCA.pem /usr/local/share/ca-certificates/giljoai.crt && sudo update-ca-certificates
-```
-
-2. **Node.js trust** (for AI coding tools):
-
-```
-mkdir -p ~/.giljo && cp ~/Downloads/rootCA.pem ~/.giljo/rootCA.pem && echo 'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/rootCA.pem"' >> ~/.bashrc && source ~/.bashrc
-```
-
-These two commands are sufficient for MCP connections and CLI tools. Your browser will still show "not secure" until you complete the browser-specific step below.
-
-#### Chrome / Chromium (Linux)
-
-Chrome on Linux uses its own NSS database, not the system store. After installing the system certificate above, run:
-
-```
-certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "GiljoAI" -i ~/Downloads/rootCA.pem
-```
-
-If `certutil` is not installed:
-
-```
-sudo apt install libnss3-tools
-```
-
-After adding the certificate, clear Chrome's cached security state (it cached the "not trusted" result from your first visit):
-
-1. Press `Ctrl+Shift+Delete` to open the Clear Browsing Data dialog
-2. Check **Cached images and files**
-3. Click **Clear data**
-4. Navigate to your GiljoAI server again
-
-The padlock icon should now show a secure connection.
-
-#### Windows
-
-Windows users do not need the extra browser step. The `certutil -addstore "ROOT"` command provided on the connection page trusts the certificate (your local-CA root) for both system tools and all browsers.
-
-#### macOS
-
-The `security add-trusted-cert` command provided on the connection page trusts the certificate system-wide, which covers Safari and Chrome. Firefox on macOS may still require the `security.enterprise_roots.enabled` setting (see below).
-
-#### Firefox (all platforms)
-
-Firefox uses its own certificate store on all operating systems and ignores both the system store and the NSS database used by Chrome. To trust the GiljoAI certificate in Firefox, choose one of these methods:
-
-**Option A — Use the system store (recommended):**
-
-1. Open `about:config` in the Firefox address bar
-2. Search for `security.enterprise_roots.enabled`
-3. Set it to `true`
-4. Restart Firefox
-
-**Option B — Manual import:**
-
-1. Open `about:preferences#privacy`
-2. Scroll to **Certificates** and click **View Certificates**
-3. Go to the **Authorities** tab
-4. Click **Import** and select the `rootCA.pem` file from your Downloads folder
-5. Check **Trust this CA to identify websites** and click OK
+**Other options:** Cloudflare Tunnel (no open ports, public certificate) and Tailscale (private network with `tailscale serve` HTTPS) work the same way: they sit in front of Giljo HQ and pass the original scheme along. nginx and Traefik work too.

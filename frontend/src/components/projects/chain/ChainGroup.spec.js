@@ -289,22 +289,6 @@ describe('ChainGroup members (FE-9655d)', () => {
     expect(cards.every((c) => c.attributes('data-chain') === 'yes')).toBe(true)
   })
 
-  it('a finished member shows its Review link, which reviews in place without navigating', async () => {
-    seed(makeRun())
-    const w = await mountGroup()
-    const review = w.find('[data-testid="chain-member-review-p1"]')
-    expect(review.exists()).toBe(true)
-    expect(w.find('[data-testid="chain-member-review-p2"]').exists()).toBe(false)
-    await review.trigger('click')
-    const modal = w.find('.closeout-stub')
-    expect(modal.attributes('data-project')).toBe('p1')
-    await modal.find('.closeout-done').trigger('click')
-    await flushPromises()
-    expect(h.markReviewed).toHaveBeenCalledWith('run-1', 'p1')
-    expect(store.isReviewed('run-1', 'p1')).toBe(true)
-    expect(router.currentRoute.value.name).toBe('Root')
-  })
-
   it('the recycle control copies the fallback prompt for that member only', async () => {
     seed(makeRun())
     const w = await mountGroup()
@@ -340,12 +324,11 @@ describe('ChainGroup forwards every member-card event (FE-9681 B1)', () => {
       <button class="e-edit" @click="$emit('edit-description', project)">edit</button>
       <button class="e-mission" @click="$emit('agent-mission-edit', { agent_id: 'a-1' })">mission</button>
       <button class="e-steps" @click="$emit('steps', { agent_id: 'a-1' })">steps</button>
-      <button class="e-review" @click="$emit('review', project)">review</button>
       <button class="e-role" @click="$emit('agent-role', { agent_id: 'a-1' })">role</button>
     </div>`,
   }
 
-  it('re-emits edit-description, agent-mission-edit, steps and review with their payloads', async () => {
+  it('re-emits edit-description, agent-mission-edit and steps with their payloads', async () => {
     seed(makeRun({ status: 'running', current_index: 0 }))
     const wrapper = mount(ChainGroup, {
       props: { runId: 'run-1', agentsByProject: {}, now: Date.parse('2026-09-24T20:00:00Z') },
@@ -358,13 +341,11 @@ describe('ChainGroup forwards every member-card event (FE-9681 B1)', () => {
     await first.find('.e-edit').trigger('click')
     await first.find('.e-mission').trigger('click')
     await first.find('.e-steps').trigger('click')
-    await first.find('.e-review').trigger('click')
     await first.find('.e-role').trigger('click')
 
     expect(wrapper.emitted('edit-description')?.[0]?.[0]).toMatchObject({ id: first.attributes('data-project') })
     expect(wrapper.emitted('agent-mission-edit')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })
     expect(wrapper.emitted('steps')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })
-    expect(wrapper.emitted('review')?.[0]?.[0]).toMatchObject({ id: first.attributes('data-project') })
     expect(wrapper.emitted('agent-role')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })
   })
 })

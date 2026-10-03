@@ -99,6 +99,30 @@ describe('useProductVisionUpload', () => {
     expect(showToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
   })
 
+  it('a failed document upload publishes a retry-safe verdict, and a later success clears the error', async () => {
+    editingProduct.value = { id: 'prod-123' }
+    apiMock.visionDocuments.upload.mockRejectedValueOnce({ response: { status: 409 } })
+    const { uploadVisionFilesOnAttach, visionUploadError, visionUploadRetrySafe } = useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
+    const file = new File(['x'], 'vision.md', { type: 'text/markdown' })
+    await uploadVisionFilesOnAttach({ productName: 'Test', files: [file] })
+    expect(visionUploadError.value).toBeTruthy()
+    expect(visionUploadRetrySafe.value).toBe(true)
+
+    apiMock.visionDocuments.upload.mockResolvedValueOnce({ data: {} })
+    await uploadVisionFilesOnAttach({ productName: 'Test', files: [file] })
+    expect(visionUploadError.value).toBeNull()
+    expect(visionUploadRetrySafe.value).toBeNull()
+  })
+
+  it('a stale error is cleared when the next attempt fails validation', async () => {
+    const { uploadVisionFilesOnAttach, visionUploadError } = useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
+    visionUploadError.value = 'stale'
+    const bad = new File(['x'], 'bad.exe', { type: 'application/x-msdownload' })
+    bad._invalid = true
+    await uploadVisionFilesOnAttach({ productName: 'Test', files: [bad] })
+    expect(visionUploadError.value).toBeNull()
+  })
+
   it('resetUploadState clears all state', () => {
     const { uploadingVision, uploadProgress, visionUploadError, existingVisionDocuments, resetUploadState } = useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
     uploadingVision.value = true

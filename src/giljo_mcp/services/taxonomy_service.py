@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,9 +15,6 @@ from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
 from giljo_mcp.services import taxonomy_ops
-
-
-logger = logging.getLogger(__name__)
 
 
 class TaxonomyService:
@@ -31,7 +27,6 @@ class TaxonomyService:
         self._db_manager = db_manager
         self._session = session
         self._repo = TaxonomyRepository()
-        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def list_types(self, tenant_key: str) -> list[TaxonomyType]:
         if not tenant_key:

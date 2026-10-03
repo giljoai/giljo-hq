@@ -21,6 +21,7 @@ from giljo_mcp.services.sequence_run_live_filter import (
     filter_runs_by_product,
     filter_runs_with_live_members,
     filter_runs_with_reviewable_members,
+    member_product_ids,
 )
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 
@@ -34,33 +35,13 @@ class SequenceRunQueryMixin:
         tenant_key: str,
         for_update: bool = False,
     ) -> dict[str, Any] | None:
-        try:
-            active_statuses = ("pending", "running", "stalled")
-            async with self._get_session(tenant_key) as session:
-                stmt = (
-                    select(SequenceRun)
-                    .where(
-                        SequenceRun.tenant_key == tenant_key,
-                        SequenceRun.status.in_(active_statuses),
-                        SequenceRun.project_ids.contains([project_id]),
-                    )
-                    .order_by(SequenceRun.updated_at.desc())
-                    .limit(1)
-                )
-                if for_update:
-                    stmt = stmt.with_for_update()
-                result = await session.execute(stmt)
-                run = result.scalar_one_or_none()
-                if run is None:
-                    return None
-                return _serialize(run)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
-            raise
-        except Exception as exc:
-            self._logger.exception("Failed to find active sequence_run for project")
-            raise BaseGiljoError(
-                message=str(exc), context={"operation": "find_active_run_for_project", "project_id": project_id}
-            ) from exc
+        return await self._find_active_run(
+            tenant_key,
+            SequenceRun.project_ids.contains([project_id]),
+            subject="project",
+            context={"operation": "find_active_run_for_project", "project_id": project_id},
+            for_update=for_update,
+        )
 
     async def find_active_run_for_conductor(
         self,
@@ -68,30 +49,41 @@ class SequenceRunQueryMixin:
         conductor_agent_id: str,
         tenant_key: str,
     ) -> dict[str, Any] | None:
+        return await self._find_active_run(
+            tenant_key,
+            SequenceRun.conductor_agent_id == conductor_agent_id,
+            subject="conductor",
+            context={"operation": "find_active_run_for_conductor", "conductor_agent_id": conductor_agent_id},
+        )
+
+    async def _find_active_run(
+        self, tenant_key: str, match: Any, *, subject: str, context: dict[str, Any], for_update: bool = False
+    ) -> dict[str, Any] | None:
         try:
-            active_statuses = ("pending", "running", "stalled")
             async with self._get_session(tenant_key) as session:
                 stmt = (
                     select(SequenceRun)
                     .where(
                         SequenceRun.tenant_key == tenant_key,
-                        SequenceRun.status.in_(active_statuses),
-                        SequenceRun.conductor_agent_id == conductor_agent_id,
+                        SequenceRun.status.in_(("pending", "running", "stalled")),
+                        match,
                     )
                     .order_by(SequenceRun.updated_at.desc())
                     .limit(1)
                 )
-                result = await session.execute(stmt)
-                run = result.scalar_one_or_none()
+                if for_update:
+                    stmt = stmt.with_for_update()
+                run = (await session.execute(stmt)).scalar_one_or_none()
                 return _serialize(run) if run is not None else None
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
-            self._logger.exception("Failed to find active sequence_run for conductor")
-            raise BaseGiljoError(
-                message=str(exc),
-                context={"operation": "find_active_run_for_conductor", "conductor_agent_id": conductor_agent_id},
-            ) from exc
+            self._logger.exception(f"Failed to find active sequence_run for {subject}")
+            raise BaseGiljoError(message=str(exc), context=context) from exc
+
+    async def _serialize_listed(self, session, runs: list[SequenceRun], tenant_key: str) -> list[dict[str, Any]]:
+        product_of = await member_product_ids(session=session, runs=runs, tenant_key=tenant_key)
+        return [{**_serialize(r), "product_id": product_of[r.id]} for r in runs]
 
     async def _scope_runs_to_product(
         self,
@@ -166,8 +158,8 @@ class SequenceRunQueryMixin:
                     product_id=product_id,
                     operation="list_active_sequence_runs",
                 )
-                return [_serialize(r) for r in live_runs]
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+                return await self._serialize_listed(session, live_runs, effective_tenant_key)
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to list active sequence_runs")
@@ -212,8 +204,8 @@ class SequenceRunQueryMixin:
                     product_id=product_id,
                     operation="list_review_pending_sequence_runs",
                 )
-                return [_serialize(r) for r in pending]
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+                return await self._serialize_listed(session, pending, effective_tenant_key)
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to list review-pending sequence_runs")
@@ -241,7 +233,7 @@ class SequenceRunQueryMixin:
                         context={"run_id": run_id, "tenant_key": effective_tenant_key},
                     )
                 return _serialize(run)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to get sequence_run")

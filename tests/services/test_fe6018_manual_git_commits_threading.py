@@ -135,12 +135,12 @@ async def test_omitted_git_commits_still_completes_cleanly(
 @pytest.mark.parametrize(
     ("supplied", "expected_kwarg"),
     [
-        pytest.param([], None, id="empty-list-becomes-None"),
-        pytest.param(None, None, id="None-stays-None"),
+        pytest.param([], [], id="empty-list-stays-empty"),
+        pytest.param(None, [], id="None-becomes-empty-list"),
     ],
 )
 @pytest.mark.asyncio
-async def test_empty_or_none_commits_pass_none_to_closeout(
+async def test_empty_or_none_commits_pass_empty_list_to_closeout(
     monkeypatch,
     project_service_with_session,
     db_session,
@@ -166,7 +166,7 @@ async def test_empty_or_none_commits_pass_none_to_closeout(
     )
 
     spy.assert_awaited_once()
-    assert spy.await_args.kwargs["git_commits"] is expected_kwarg
+    assert spy.await_args.kwargs["git_commits"] == expected_kwarg
 
 
 @pytest.mark.asyncio

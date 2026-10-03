@@ -9,8 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from giljo_mcp.config.defaults import DEFAULT_CATEGORY_TOGGLES
-from giljo_mcp.config.defaults import DEFAULT_DEPTH_CONFIG as _DEFAULT_DEPTH_CONFIG
+from giljo_mcp.config.defaults import DEFAULT_CATEGORY_TOGGLES, DEFAULT_DEPTH_CONFIG
 from giljo_mcp.config.defaults import DEFAULT_FIELD_PRIORITY as _DEFAULT_FIELD_PRIORITY
 from giljo_mcp.repositories.user_repository import UserRepository
 
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_FIELD_PRIORITIES = _DEFAULT_FIELD_PRIORITY["priorities"]
-DEFAULT_DEPTH_CONFIG = _DEFAULT_DEPTH_CONFIG
 
 
 def _normalize_field_toggles(field_config: dict[str, Any]) -> dict[str, bool]:

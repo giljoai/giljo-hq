@@ -118,25 +118,15 @@ const panels = ref(['status'])
 const debugInfo = ref({})
 const refreshInterval = ref(null)
 
-const chipColor = computed(() => {
-  switch (wsStore.connectionStatus) {
-    case 'connected': return 'success'
-    case 'connecting':
-    case 'reconnecting': return 'warning'
-    case 'disconnected': return 'error'
-    default: return 'grey'
-  }
-})
-
-const icon = computed(() => {
-  switch (wsStore.connectionStatus) {
-    case 'connected': return 'mdi-wifi'
-    case 'connecting':
-    case 'reconnecting': return 'mdi-wifi-sync'
-    case 'disconnected': return 'mdi-wifi-off'
-    default: return 'mdi-help-circle'
-  }
-})
+const STATUS_LOOK = {
+  connected: ['success', 'mdi-wifi'],
+  connecting: ['warning', 'mdi-wifi-sync'],
+  reconnecting: ['warning', 'mdi-wifi-sync'],
+  disconnected: ['error', 'mdi-wifi-off'],
+}
+const look = computed(() => STATUS_LOOK[wsStore.connectionStatus] || ['grey', 'mdi-help-circle'])
+const chipColor = computed(() => look.value[0])
+const icon = computed(() => look.value[1])
 
 const isConnecting = computed(() => wsStore.isConnecting)
 const messageQueueSize = computed(() => wsStore.messageQueueSize)
@@ -171,7 +161,6 @@ const getEventIcon = (type) => {
   const icons = {
     connection: 'mdi-connection',
     error: 'mdi-alert-circle',
-    subscription: 'mdi-broadcast',
     log: 'mdi-text',
     test: 'mdi-test-tube',
   }
@@ -182,7 +171,6 @@ const getEventColor = (type) => {
   const colors = {
     connection: 'success',
     error: 'error',
-    subscription: 'info',
     log: 'grey',
     test: 'warning',
   }
@@ -215,6 +203,5 @@ onUnmounted(() => {
 
 .event-connection { border-left: 2px solid rgb(var(--v-theme-success)); }
 .event-error { border-left: 2px solid rgb(var(--v-theme-error)); }
-.event-subscription { border-left: 2px solid rgb(var(--v-theme-info)); }
 .event-test { border-left: 2px solid rgb(var(--v-theme-warning)); }
 </style>

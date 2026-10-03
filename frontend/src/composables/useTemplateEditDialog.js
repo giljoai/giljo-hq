@@ -24,6 +24,16 @@ export function useTemplateEditDialog(editingTemplate, resetEditingTemplate) {
     )
   })
 
+  const withDefaults = (template, customSuffix) => ({
+    ...template,
+    user_instructions: template.user_instructions || '',
+    cli_tool: template.cli_tool || 'claude',
+    custom_suffix: customSuffix,
+    background_color: template.background_color || '',
+    model: template.model || 'sonnet',
+    tools: template.tools || null,
+  })
+
   const openCreateDialog = () => {
     resetEditingTemplate()
     originalSnapshot.value = null
@@ -35,32 +45,14 @@ export function useTemplateEditDialog(editingTemplate, resetEditingTemplate) {
     const name = template.name || ''
     const extractedSuffix = name.startsWith(`${role}-`) ? name.slice(role.length + 1) : ''
 
-    const normalized = {
-      ...template,
-      user_instructions: template.user_instructions || '',
-      cli_tool: template.cli_tool || 'claude',
-      custom_suffix: extractedSuffix,
-      background_color: template.background_color || '',
-      model: template.model || 'sonnet',
-      tools: template.tools || null,
-    }
+    const normalized = withDefaults(template, extractedSuffix)
     editingTemplate.value = { ...normalized }
     originalSnapshot.value = { ...normalized }
     editDialog.value = true
   }
 
   const duplicateTemplate = (template) => {
-    editingTemplate.value = {
-      ...template,
-      id: null,
-      is_default: false,
-      user_instructions: template.user_instructions || '',
-      cli_tool: template.cli_tool || 'claude',
-      custom_suffix: 'copy',
-      background_color: template.background_color || '',
-      model: template.model || 'sonnet',
-      tools: template.tools || null,
-    }
+    editingTemplate.value = { ...withDefaults(template, 'copy'), id: null, is_default: false }
     originalSnapshot.value = null
     editDialog.value = true
   }

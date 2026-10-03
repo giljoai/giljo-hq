@@ -24,24 +24,6 @@
           v-bind="tooltipProps"
           type="button"
           class="jb-int"
-          :class="stateClass(serenaEnabled)"
-          data-testid="serena-status-icon"
-          aria-label="Serena MCP status"
-          @click="goToIntegrations"
-        >
-          <span class="jb-int-serena" aria-hidden="true">S</span>
-        </button>
-      </template>
-      <span v-if="!integrationsResolved">Checking Serena MCP status.</span>
-      <span v-else-if="serenaEnabled">Serena MCP enabled.</span>
-      <span v-else>Serena disabled. Click to enable.</span>
-    </v-tooltip>
-    <v-tooltip location="bottom" max-width="300" open-delay="150">
-      <template #activator="{ props: tooltipProps }">
-        <button
-          v-bind="tooltipProps"
-          type="button"
-          class="jb-int"
           :class="modeTool ? 'jb-int--on' : 'jb-int--off'"
           data-testid="agentic-tool-icon"
           :aria-label="modeTool ? modeTool.alt : 'No execution mode picked yet'"
@@ -63,7 +45,6 @@ import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
 
 const props = defineProps({
   gitEnabled: { type: Boolean, default: false },
-  serenaEnabled: { type: Boolean, default: false },
   integrationsResolved: { type: Boolean, default: false },
   executionMode: { type: String, default: '' },
 })
@@ -128,18 +109,5 @@ const modeTool = computed(() => {
   &--pending {
     opacity: 0.6;
   }
-}
-
-.jb-int-serena {
-  font-family: $typography-font-mono;
-  font-size: 0.6rem;
-  font-weight: 700;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-  display: grid;
-  place-items: center;
-  line-height: 1;
 }
 </style>

@@ -21,6 +21,8 @@ from giljo_mcp.platform_registry import (
     get_preset,
 )
 from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
+from giljo_mcp.services.mission_assembly import assemble_mission_context
+from giljo_mcp.services.protocol_builder import _build_orchestrator_protocol
 from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orchestrator_protocol
 from giljo_mcp.services.protocol_sections.agent_protocol import _generate_agent_protocol
 from giljo_mcp.services.protocol_sections.chapters_chain import (
@@ -28,7 +30,10 @@ from giljo_mcp.services.protocol_sections.chapters_chain import (
     _build_ch_chain_drive,
     _build_chain_drive_step_a,
 )
-from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
+from giljo_mcp.services.protocol_sections.orchestrator_body import (
+    render_capability_ladder,
+    trim_embedded_protocol_for_chain,
+)
 
 
 _FIXTURE = Path(__file__).with_name("_be8003f_render_goldens.json")
@@ -71,7 +76,7 @@ def _render_goldens_unpinned() -> dict[str, str]:
     builder = MultiTerminalPromptBuilder()
 
     for mode in (None, *EXECUTION_MODES):
-        cases[f"s1_capability::{mode}"] = _build_ch_capability(mode, True)
+        cases[f"s1_capability::{mode}"] = _build_ch_capability(mode)
     for mode in EXECUTION_MODES:
         cases[f"s1_chain_drive::{mode}"] = _build_ch_chain_drive(
             run_id=_RUN_ID,
@@ -188,7 +193,7 @@ def test_platform_has_shell_matches_workspace_model():
 @pytest.mark.parametrize("preset_name", _PRESETS)
 def test_s1_capability_preset_drops_terminal_markers(preset_name):
     preset = get_preset(preset_name)
-    out = _build_ch_capability("multi_terminal", False, preset=preset)
+    out = _build_ch_capability("multi_terminal", preset=preset)
     for marker in _S1_GATED:
         assert marker not in out, f"S1 capability[{preset_name}] leaked {marker!r}"
     assert _FLOOR in out
@@ -256,6 +261,244 @@ def test_s4_worker_shell_asides_gated_on_has_shell(preset_name):
         assert "Start-Sleep -Seconds N" not in out
         assert _FLOOR in out
         assert "NO SHELL (chat session)" in out
+
+
+_CONDUCTOR_CLI_ONLY = ("SUB-ORCH SPAWN", "sleep 1 60", "Start-Sleep", "wait_seconds=45", "CH6")
+
+
+def _conductor_runtime_render(preset_name: str | None) -> str:
+    preset = get_preset(preset_name) if preset_name else None
+    job = SimpleNamespace(project_id=None, job_type="orchestrator", job_id="JOB", mission="", created_at=None)
+    execution = SimpleNamespace(
+        agent_id="COND",
+        agent_display_name="orchestrator",
+        agent_name="orchestrator",
+        spawned_by=None,
+        status="working",
+        started_at=None,
+        project_phase=None,
+    )
+    response = assemble_mission_context(
+        mock.Mock(),
+        job=job,
+        execution=execution,
+        project=None,
+        agent_identity=None,
+        all_project_executions=[execution],
+        mission_lookup={"JOB": ""},
+        current_team_state=None,
+        tenant_key="T",
+        integrations={},
+        chain_execution_mode="multi_terminal",
+        preset=preset,
+        detected_harness="claude-code",
+        checkin_cadence_minutes=10,
+    )
+    return "\n\n".join(
+        [
+            _build_ch_capability("subagent", preset=preset),
+            _build_ch_chain_drive(
+                "RUN-X", ["P1", "P2"], 0, "subagent", "COND", "JOB", preset=preset, detected_harness="claude-code"
+            ),
+            trim_embedded_protocol_for_chain(response.full_protocol, "conductor"),
+        ]
+    )
+
+
+@pytest.mark.parametrize("preset_name", _PRESETS)
+def test_conductor_runtime_preset_render_carries_no_cli_only_instruction(preset_name):
+    out = _conductor_runtime_render(preset_name)
+    leaked = [marker for marker in _CONDUCTOR_CLI_ONLY if marker in out]
+    assert not leaked, f"conductor[{preset_name}] leaked {leaked}"
+    assert "CH_CAPABILITY: HOW TO RUN THIS CHAIN (shell-less harness)" in out
+    assert "STEP A — CONDUCT P_i INLINE" in out
+    assert "STEP B — WAIT FOR P_i's CLOSEOUT, THEN ADVANCE" in out
+    assert "ready_to_advance True" in out
+    assert "COORDINATING FROM A" in out
+
+
+def test_conductor_runtime_cli_render_keeps_its_terminal_instructions():
+    out = _conductor_runtime_render(None)
+    for marker in _CONDUCTOR_CLI_ONLY:
+        assert marker in out, f"CLI conductor lost {marker!r}"
+    assert "COORDINATING FROM A" not in out
+
+
+def test_conductor_preset_wait_step_does_not_claim_a_free_running_sub_orchestrator():
+    for preset_name in _PRESETS:
+        out = _conductor_runtime_render(preset_name)
+        assert "runs FREE (STEP A released it)" not in out, f"conductor[{preset_name}] kept the released claim"
+        assert "P_i is driven the way STEP A set it up" in out
+        assert "by you, inline, as its orchestrator" in out
+        assert "your spawn IS the release" not in out, f"conductor[{preset_name}] kept the spawn-release intro"
+        assert "You are the SOLE spawner" not in out
+        assert "You drive every project yourself" in out
+        assert "One project at a\ntime" in out or "One project at a time" in out
+    cli = _conductor_runtime_render(None)
+    assert "P_i's sub-orch runs FREE (STEP A released it)" in cli
+    assert "You are the SOLE spawner" in cli
+    assert "your spawn IS the release" in cli
+
+
+_SOLO_CLI_ONLY = (
+    "sleep-and-check",
+    "I can sleep and re-check",
+    "Then sleep for the specified interval",
+    "wake_in_minutes=15",
+    "sleep 1 ",
+    "Start-Sleep",
+    "wait_seconds=45",
+    "TIMED SLEEP",
+    "CH6",
+)
+_SOLO_WORKER_START = {
+    "multi_terminal": (
+        "The USER opens each agent's new session",
+        "User opens a new session and starts the agent",
+        "Copy agent prompts from the dashboard to start them.",
+    ),
+    "subagent": ("I will spawn each agent directly via",),
+}
+_SOLO_MODES = list(_SOLO_WORKER_START)
+
+
+def _solo_runtime_render(mode: str, preset_name: str | None) -> str:
+    preset = get_preset(preset_name) if preset_name else None
+    job = SimpleNamespace(project_id="P", job_type="orchestrator", job_id="JOB", mission="", created_at=None)
+    execution = SimpleNamespace(
+        agent_id="E",
+        agent_display_name="orchestrator",
+        agent_name="orchestrator",
+        spawned_by=None,
+        status="working",
+        started_at=None,
+        project_phase=None,
+    )
+    project = SimpleNamespace(
+        execution_mode=mode, implementation_launched_at=1, auto_checkin_enabled=False, auto_checkin_interval=10
+    )
+    return assemble_mission_context(
+        mock.Mock(),
+        job=job,
+        execution=execution,
+        project=project,
+        agent_identity=None,
+        all_project_executions=[execution],
+        mission_lookup={"JOB": ""},
+        current_team_state=None,
+        tenant_key="T",
+        integrations={},
+        preset=preset,
+        detected_harness="claude-code",
+        checkin_cadence_minutes=10,
+    ).full_protocol
+
+
+@pytest.mark.parametrize("preset_name", _PRESETS)
+@pytest.mark.parametrize("mode", _SOLO_MODES)
+def test_solo_runtime_preset_render_carries_no_cli_only_order(mode, preset_name):
+    out = _solo_runtime_render(mode, preset_name)
+    leaked = [marker for marker in _SOLO_CLI_ONLY if marker in out]
+    assert not leaked, f"solo {mode}[{preset_name}] leaked {leaked}"
+    assert "COORDINATING FROM A" in out
+    for line in _SOLO_WORKER_START[mode]:
+        assert line in out, f"solo {mode}[{preset_name}] lost the worker-start instruction {line!r}"
+    assert "### RESTING STATES (between coordination loops)" in out
+    assert "**Blocked vs Idle vs Sleeping:**" in out
+
+
+def test_solo_runtime_cli_render_keeps_its_wait_orders():
+    multi_terminal = _solo_runtime_render("multi_terminal", None)
+    for marker in _SOLO_CLI_ONLY:
+        assert marker in multi_terminal, f"CLI solo multi_terminal lost {marker!r}"
+    subagent = _solo_runtime_render("subagent", None)
+    for marker in ("I can sleep and re-check", "Then sleep for the specified interval", "wake_in_minutes=15"):
+        assert marker in subagent, f"CLI solo subagent lost {marker!r}"
+    for mode, out in (("multi_terminal", multi_terminal), ("subagent", subagent)):
+        assert "COORDINATING FROM A" not in out
+        for line in _SOLO_WORKER_START[mode]:
+            assert line in out, f"CLI solo {mode} lost {line!r}"
+
+
+_REFERENCE_SLEEP_OFFER = ("If user wants auto-monitoring", "wake_in_minutes=15", "Sleep locally")
+
+
+def _staging_refetch_render(cli_mode: bool, preset_name: str | None) -> dict:
+    return _build_orchestrator_protocol(
+        cli_mode=cli_mode,
+        project_id="P",
+        orchestrator_id="JOB",
+        tenant_key="T",
+        include_implementation_reference=True,
+        tool="claude-code" if cli_mode else "multi_terminal",
+        preset=get_preset(preset_name) if preset_name else None,
+        detected_harness="claude-code",
+    )
+
+
+@pytest.mark.parametrize("preset_name", _PRESETS)
+@pytest.mark.parametrize("cli_mode", [False, True])
+def test_staging_refetch_preset_render_carries_no_sleep_order(cli_mode, preset_name):
+    chapters = _staging_refetch_render(cli_mode, preset_name)
+    assert "ch6_auto_checkin" not in chapters
+    reference = chapters["ch5_reference"]
+    leaked = [marker for marker in _REFERENCE_SLEEP_OFFER if marker in reference]
+    assert not leaked, f"staging refetch cli_mode={cli_mode}[{preset_name}] leaked {leaked}"
+    assert "4. After dispatching agents: set_agent_status" in reference
+    assert "COORDINATION PATTERNS:" in reference
+
+
+def test_staging_refetch_cli_render_keeps_its_sleep_orders():
+    multi_terminal = _staging_refetch_render(False, None)
+    assert "CH6: CHECK-IN PROTOCOL" in multi_terminal["ch6_auto_checkin"]
+    assert "ch6_auto_checkin" not in _staging_refetch_render(True, None)
+    for cli_mode in (False, True):
+        reference = _staging_refetch_render(cli_mode, None)["ch5_reference"]
+        for marker in _REFERENCE_SLEEP_OFFER:
+            assert marker in reference, f"CLI staging refetch cli_mode={cli_mode} lost {marker!r}"
+
+
+def _drop_anchor_cases() -> list[tuple[str, str, str]]:
+    from giljo_mcp.services import protocol_builder
+    from giljo_mcp.services.protocol_sections import agent_lifecycle, chapters_coordination
+
+    cases = [
+        (
+            "loop directive aside",
+            chapters_coordination._LOOP_MECHANISM_ASIDE,
+            chapters_coordination._build_thread_loop_directive(),
+        ),
+        (
+            "loop directive shell sleep step",
+            chapters_coordination._LOOP_SHELL_SLEEP_STEP,
+            chapters_coordination._build_thread_loop_directive(),
+        ),
+    ]
+    for tool in ("multi_terminal", "claude-code", "codex"):
+        banner = agent_lifecycle._build_forbidden_banner("multi_terminal", tool)
+        cases.append((f"banner sleep order [{tool}]", agent_lifecycle._BANNER_SLEEP_ORDER, banner))
+    for cli_mode in (False, True):
+        reference = _staging_refetch_render(cli_mode, None)["ch5_reference"]
+        cases.append(
+            (f"reference sleep offer [cli_mode={cli_mode}]", protocol_builder._REFERENCE_SLEEP_OFFER, reference)
+        )
+    for mode in _SOLO_MODES:
+        body = _generate_orchestrator_protocol("J", "T", "E", execution_mode=mode, tool=mode)
+        cases.append((f"body offer start [{mode}]", agent_lifecycle._AUTO_CHECKIN_OFFER_START, body))
+        cases.append((f"body status legend [{mode}]", agent_lifecycle._STATUS_LEGEND_ANCHOR, body))
+    return cases
+
+
+def test_every_text_a_preset_render_drops_is_found_exactly_once_without_a_preset():
+    from giljo_mcp.services.protocol_sections import agent_lifecycle
+
+    drifted = [
+        f"{name}: found {text.count(anchor)}x" for name, anchor, text in _drop_anchor_cases() if text.count(anchor) != 1
+    ]
+    assert not drifted, f"drop anchors no longer match the source text: {drifted}"
+    for mode in _SOLO_MODES:
+        body = _generate_orchestrator_protocol("J", "T", "E", execution_mode=mode, tool=mode)
+        assert body.index(agent_lifecycle._AUTO_CHECKIN_OFFER_START) < body.index(agent_lifecycle._STATUS_LEGEND_ANCHOR)
 
 
 if __name__ == "__main__":  # pragma: no cover - fixture regeneration entry point

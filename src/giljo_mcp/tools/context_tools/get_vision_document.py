@@ -15,19 +15,13 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import Product
 from giljo_mcp.models.context import MCPContextIndex
 from giljo_mcp.tools.chunking import VISION_DELIVERY_BUDGET, EnhancedChunker
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 VALID_SUMMARY_DEPTHS: frozenset[str] = frozenset({"light", "medium"})
 
 
 logger = logging.getLogger(__name__)
-
-
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data) if not isinstance(data, str) else data
-    return len(text) // 4
 
 
 def get_max_tokens(chunking: str) -> int:

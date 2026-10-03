@@ -82,10 +82,11 @@ async def test_already_launched_reply_also_populates_both_fields(db_manager, db_
     assert result["launched_at"] == result["implementation_launched_at"]
 
 
-async def test_launch_still_does_not_activate_be9532_pin(db_manager, db_session, test_tenant_key):
+async def test_launch_report_on_a_project_left_inactive_be9532_pin(db_manager, db_session, test_tenant_key):
     svc = _staging_service(db_manager, test_tenant_key, db_session)
     project = await _staged_project(db_session, test_tenant_key)
     project.status = ProjectStatus.INACTIVE
+    project.implementation_launched_at = datetime.now(UTC)
     await db_session.flush()
 
     result = await svc.launch_implementation(project.id, tenant_key=test_tenant_key)

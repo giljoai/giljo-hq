@@ -5,7 +5,8 @@ import { needsInputOwner } from '@/utils/jobStatusWord'
 export const JOBS_SECTION_LABELS = Object.freeze({
   STAGED: 'Staged',
   IMPLEMENTING: 'Implementing',
-  NEEDS_INPUT: 'Needs Input',
+  NEEDS_DECISION: 'Needs decision',
+  NEEDS_ATTENTION: 'Needs attention',
   REVIEW: 'Review',
   PLANNING: 'Planning',
   ACTIVATED: 'Activated',
@@ -28,10 +29,13 @@ export function isReadyForReview(project, agents = []) {
 }
 
 export function jobsSectionLabelFor(project, agents = []) {
-  if (project?.status === 'completed') return JOBS_SECTION_LABELS.COMPLETE
+  if (project?.status === 'completed') {
+    return project.review_pending ? JOBS_SECTION_LABELS.REVIEW : JOBS_SECTION_LABELS.COMPLETE
+  }
   if (STOPPED_PROJECT_STATUSES.has(project?.status)) return JOBS_SECTION_LABELS.STOPPED
-  if (needsInputOwner(agents)) {
-    return JOBS_SECTION_LABELS.NEEDS_INPUT
+  const owner = needsInputOwner(agents)
+  if (owner) {
+    return owner.kind === 'decision' ? JOBS_SECTION_LABELS.NEEDS_DECISION : JOBS_SECTION_LABELS.NEEDS_ATTENTION
   }
   if (isReadyForReview(project, agents)) {
     return JOBS_SECTION_LABELS.REVIEW
@@ -46,4 +50,8 @@ export function jobsSectionLabelFor(project, agents = []) {
     return JOBS_SECTION_LABELS.PLANNING
   }
   return JOBS_SECTION_LABELS.ACTIVATED
+}
+
+export function withChainReview(project, needsReview) {
+  return needsReview ? { ...project, status: 'completed', review_pending: true } : { ...project, review_pending: false }
 }

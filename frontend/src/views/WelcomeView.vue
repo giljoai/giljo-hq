@@ -32,7 +32,7 @@
       />
 
       <div v-if="!setupComplete && onboardingComplete" class="setup-cta-section">
-        <div class="setup-cta smooth-border" @click="openSetupWithCertGate">
+        <div class="setup-cta smooth-border" @click="openSetup">
           <v-icon size="24" color="var(--color-accent-primary)">mdi-rocket-launch</v-icon>
           <div class="setup-cta-text">
             <div class="setup-cta-title">{{ setupCtaLabel }}</div>
@@ -58,11 +58,6 @@
         <span class="footer-item mono">{{ appVersion }}</span>
       </div>
     </div>
-
-    <CertTrustModal
-      v-model="showCertModal"
-      @continue="handleCertContinue"
-    />
 
     <ProjectReviewModal
       :show="showReviewModal"
@@ -103,11 +98,9 @@ import { PRODUCT_NAME } from '@/branding'
 import GilMascot from '@/components/GilMascot.vue'
 import SetupWizardOverlay from '@/components/setup/SetupWizardOverlay.vue'
 import TutorialOverlay from '@/components/tutorial/TutorialOverlay.vue'
-import CertTrustModal from '@/components/setup/CertTrustModal.vue'
 import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import configService from '@/services/configService'
-import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 import { PROJECT_TEMPLATES } from '@/composables/projectTemplates'
 import { useToast } from '@/composables/useToast'
 import { useDeferredHomeData } from '@/composables/useDeferredHomeData'
@@ -123,10 +116,6 @@ const projectStore = useProjectStore()
 const { showToast } = useToast()
 
 const busyTemplateId = ref(null)
-
-const showCertModal = ref(false)
-const certModalDismissed = ref(false)
-const pendingSetupOpen = ref(false)
 
 const showSetupOverlay = ref(false)
 const setupStep = ref(0)
@@ -201,34 +190,9 @@ async function handleDismiss() {
   }
 }
 
-function handleCertContinue(dontShowAgain = false) {
-  certModalDismissed.value = true
-  recordCertTrustDismissal(dontShowAgain)
-  if (pendingSetupOpen.value) {
-    pendingSetupOpen.value = false
-    showSetupOverlay.value = true
-  }
+function openSetup() {
+  showSetupOverlay.value = true
 }
-
-function openSetupWithCertGate() {
-  if (shouldShowCertModal()) {
-    pendingSetupOpen.value = true
-    showCertModal.value = true
-  } else {
-    showSetupOverlay.value = true
-  }
-}
-
-function shouldShowCertModal() {
-  if (localStorage.getItem('cert_modal_never') === '1') return false
-  if (sessionStorage.getItem('cert_modal_dismissed') === '1') return false
-  if (certModalDismissed.value) return false
-  const config = configService.getRawConfig()
-  if (!config) return false
-  return config.api?.ssl_enabled === true && config.api?.is_remote_client === true
-}
-
-defineExpose({ shouldShowCertModal, handleCertContinue })
 
 const templates = ref([])
 const totalSlots = ref(16)
@@ -262,7 +226,7 @@ const setupCard = {
   iconBg: 'rgba(255,195,0,0.1)',
   iconColor: 'var(--color-accent-primary)',
   accent: 'var(--color-accent-primary)',
-  action: openSetupWithCertGate,
+  action: openSetup,
 }
 
 const learnCard = {
@@ -477,12 +441,7 @@ onMounted(async () => {
     forceSetupMode.value = route.query.openSetup === 'true'
     setupStep.value = Math.min(setupStepCompleted.value, 3)
 
-    if (shouldShowCertModal()) {
-      pendingSetupOpen.value = true
-      showCertModal.value = true
-    } else {
-      showSetupOverlay.value = true
-    }
+    showSetupOverlay.value = true
 
     if (route.query.openSetup) {
       router.replace({ path: '/home' })

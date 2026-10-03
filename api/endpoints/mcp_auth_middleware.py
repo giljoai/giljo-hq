@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -37,7 +38,6 @@ from api.endpoints.mcp_transport import (
     _wrap_send_with_session_id,
     announces_client,
 )
-from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager
 from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scope
 from giljo_mcp.signals import SIGNAL_POST_AUTH_GATE_FAILED, publish_signal
 
@@ -76,24 +76,21 @@ class MCPAuthMiddleware:
     async def _announce_client_connected(
         tenant_key: str | None, user_id: str | None, client_info: dict | None = None
     ) -> None:
-        try:
-            from api.app_state import state as app_state
+        from api.app_state import state as app_state
 
-            ws_manager = getattr(app_state, "websocket_manager", None)
-            if ws_manager and tenant_key:
-                from giljo_mcp.events.schemas import EventFactory
+        ws_manager = getattr(app_state, "websocket_manager", None)
+        if ws_manager and tenant_key:
+            from giljo_mcp.events.schemas import EventFactory
 
-                from giljo_mcp.harness_resolver import harness_from_client_info
+            from giljo_mcp.harness_resolver import harness_from_client_info
 
-                harness = harness_from_client_info((client_info or {}).get("name"), (client_info or {}).get("version"))
-                event = EventFactory.setup_tool_connected(
-                    tenant_key=tenant_key,
-                    user_id=str(user_id) if user_id else "unknown",
-                    tool_name=harness,
-                )
-                await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-        except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError):
-            pass
+            harness = harness_from_client_info((client_info or {}).get("name"), (client_info or {}).get("version"))
+            event = EventFactory.setup_tool_connected(
+                tenant_key=tenant_key,
+                user_id=str(user_id) if user_id else "unknown",
+                tool_name=harness,
+            )
+            await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
     @staticmethod
     def _stamp_auth_state(
@@ -169,24 +166,10 @@ class MCPAuthMiddleware:
                         await resp(scope, receive, send)
                         return
             else:
-                try:
-                    payload = JWTManager.verify_token(bearer_token, expected_audience=expected_audience)
-                    tenant_key = payload["tenant_key"]
-                    user_id = payload["sub"]
-                    auth_method = "jwt"
-                    raw_scope = payload.get("scope")
-                    token_scopes = (
-                        ["mcp:read", "mcp:write"] if raw_scope is None else [s for s in str(raw_scope).split() if s]
-                    )
-                except JWTAudienceMismatchError as exc:
-                    logger.warning("Rejecting JWT on /mcp (audience): %s", exc)
-                    resp = _unauthenticated_response(scope, "Invalid token audience")
-                    await resp(scope, receive, send)
-                    return
-                except (ValueError, KeyError, RuntimeError, HTTPException):
-                    api_key_value = bearer_token
-                    auth_method = None
-                    token_scopes = None
+                logger.error("db_manager not available for MCP JWT auth")
+                resp = JSONResponse({"error": "Database not initialized"}, status_code=503)
+                await resp(scope, receive, send)
+                return
 
         if not tenant_key and api_key_value:
             try:
@@ -226,8 +209,11 @@ class MCPAuthMiddleware:
                                 await session_mgr.log_ip(api_key_id, client_ip)
                             except (OSError, ValueError, KeyError):
                                 logger.debug("IP logging failed (non-blocking)")
-            except (OSError, ValueError, KeyError, RuntimeError):
-                logger.exception("API key authentication failed")
+            except SQLAlchemyError:
+                logger.exception("API key authentication: database unavailable")
+                resp = JSONResponse({"error": "Authentication service unavailable"}, status_code=503)
+                await resp(scope, receive, send)
+                return
 
         if not tenant_key:
             if api_key_value:
@@ -389,7 +375,7 @@ class MCPAuthMiddleware:
 
         if not state.db_manager:
             logger.error("db_manager not available for MCP session validation")
-            await _not_found_response("Not Found: Invalid or expired session ID")(scope, request.receive, send)
+            await JSONResponse({"error": "Database not initialized"}, status_code=503)(scope, request.receive, send)
             return None
 
         async with state.db_manager.get_session_async() as db:
@@ -456,7 +442,7 @@ class MCPAuthMiddleware:
                     protocol_version=protocol_version,
                     capabilities=capabilities,
                 )
-        except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        except SQLAlchemyError:
             logger.warning("BE-9586d: could not record announced client (non-fatal)", exc_info=True)
 
     async def _ensure_jwt_initialize_session(

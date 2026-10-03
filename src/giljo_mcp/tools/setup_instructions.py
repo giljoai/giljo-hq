@@ -132,11 +132,9 @@ def _primer_persist_step(home_dir: str, config_filename: str) -> str:
         "<!-- GILJOAI_MCP_PRIMER_START -->\n"
         f"{GILJOAI_MCP_PRIMER}"
         "<!-- GILJOAI_MCP_PRIMER_END -->\n"
-        "If you also have a code-memory system (e.g. Serena's write_memory, or a "
-        "native memory tool), save the same primer there too so it surfaces on "
-        "recall. If you have neither a startup context file nor a memory system, "
-        "suggest the user install a code-memory layer such as Serena (only if it "
-        "can persist notes like this) and otherwise keep the primer in-context for "
+        "If you also have a code-memory system (e.g. a native memory tool), save "
+        "the same primer there too so it surfaces on recall. If you have neither a "
+        "startup context file nor a memory system, keep the primer in-context for "
         "this session.\n\n"
     )
 
@@ -153,11 +151,9 @@ def _primer_persist_step_generic() -> str:
         "<!-- GILJOAI_MCP_PRIMER_START -->\n"
         f"{GILJOAI_MCP_PRIMER}"
         "<!-- GILJOAI_MCP_PRIMER_END -->\n"
-        "If you also have a code-memory system (e.g. Serena's write_memory, or a "
-        "native memory tool), save the same primer there too so it surfaces on "
-        "recall. If you have neither a startup context file nor a memory system, "
-        "suggest the user install a code-memory layer such as Serena (only if it "
-        "can persist notes like this) and otherwise keep the primer in-context for "
+        "If you also have a code-memory system (e.g. a native memory tool), save "
+        "the same primer there too so it surfaces on recall. If you have neither a "
+        "startup context file nor a memory system, keep the primer in-context for "
         "this session.\n\n"
     )
 
@@ -167,9 +163,9 @@ def build_inline_primer_note() -> str:
         f"{branding.PRODUCT_NAME} primer for your own context (this session has no startup "
         "file to write):\n"
         f"{GILJOAI_MCP_PRIMER}"
-        "If you have a code-memory system (e.g. Serena's write_memory, or a "
-        "native memory tool), save this primer there so it surfaces on recall in "
-        "future sessions. Otherwise, keep it in context for this session."
+        "If you have a code-memory system (e.g. a native memory tool), save this "
+        "primer there so it surfaces on recall in future sessions. Otherwise, keep "
+        "it in context for this session."
     )
 
 

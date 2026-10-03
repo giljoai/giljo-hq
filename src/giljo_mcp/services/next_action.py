@@ -10,6 +10,7 @@ from typing import Any
 
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.schemas.responses.orchestration import build_next_action
+from giljo_mcp.services.handover_validation import HANDOVER_TYPE_ABBR
 
 
 _TERMINAL_STATUSES: frozenset[str] = frozenset(
@@ -39,6 +40,10 @@ PROJECT_PARKED_HINT = "Parked by the user. Do not start work; ask before un-park
 TASK_OPEN_HINT = (
     "Tasks are single-step. Do the work, then update_task(task_id, status='completed'). "
     "If it grows into multi-step work, create_project instead."
+)
+TASK_HANDOVER_HINT = (
+    "A handover (HND) on this page is addressed to you: verify its claims first, then close it with "
+    "update_task(task_id, status='completed', completion_notes=<what you verified>)."
 )
 
 
@@ -72,15 +77,22 @@ def project_next_action_for(project: Any, *, awaiting_user: bool = False) -> dic
     )
 
 
-def task_list_next_action_field(*, mode: str, statuses: Any) -> dict[str, Any]:
+def task_list_next_action_field(*, mode: str, statuses: Any, open_handover: bool = False) -> dict[str, Any]:
     if mode == "index":
         return {}
-    hint = task_list_next_action(statuses)
+    hint = task_list_next_action(statuses, open_handover=open_handover)
     return {"next_action": hint} if hint is not None else {}
 
 
-def task_list_next_action(statuses: Any) -> dict[str, Any] | None:
+def has_open_handover(rows: Any) -> bool:
+    return any(
+        str(status or "") in _OPEN_TASK_STATUSES and type_abbr == HANDOVER_TYPE_ABBR for status, type_abbr in rows
+    )
+
+
+def task_list_next_action(statuses: Any, *, open_handover: bool = False) -> dict[str, Any] | None:
     for status in statuses:
         if str(status or "") in _OPEN_TASK_STATUSES:
-            return build_next_action(tool="update_task", why=TASK_OPEN_HINT)
+            why = f"{TASK_HANDOVER_HINT} {TASK_OPEN_HINT}" if open_handover else TASK_OPEN_HINT
+            return build_next_action(tool="update_task", why=why)
     return None

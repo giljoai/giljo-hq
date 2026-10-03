@@ -5,6 +5,7 @@
 
 
 import logging
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -372,18 +373,9 @@ class ProductMemoryService:
         include_deleted: bool = False,
         session: AsyncSession | None = None,
     ) -> tuple[list, int]:
-        if session is not None:
+        async with nullcontext(session) if session is not None else self._get_session() as active:
             return await self._repo.get_entries_by_last_n_projects(
-                session=session,
-                product_id=product_id,
-                tenant_key=self.tenant_key,
-                last_n_projects=last_n_projects,
-                offset=offset,
-                include_deleted=include_deleted,
-            )
-        async with self._get_session() as new_session:
-            return await self._repo.get_entries_by_last_n_projects(
-                session=new_session,
+                session=active,
                 product_id=product_id,
                 tenant_key=self.tenant_key,
                 last_n_projects=last_n_projects,
@@ -398,16 +390,9 @@ class ProductMemoryService:
         limit: int = 25,
         session: AsyncSession | None = None,
     ) -> list:
-        if session is not None:
+        async with nullcontext(session) if session is not None else self._get_session() as active:
             return await self._repo.get_git_history(
-                session=session,
-                product_id=product_id,
-                tenant_key=self.tenant_key,
-                limit=limit,
-            )
-        async with self._get_session() as new_session:
-            return await self._repo.get_git_history(
-                session=new_session,
+                session=active,
                 product_id=product_id,
                 tenant_key=self.tenant_key,
                 limit=limit,
@@ -429,27 +414,18 @@ class ProductMemoryService:
             .order_by(ProductMemoryEntry.sequence.asc())
             .limit(1)
         )
-        if session is not None:
-            with tenant_session_context(session, self.tenant_key):
-                return (await session.execute(stmt)).scalar_one_or_none()
-        async with self._get_session() as new_session:
-            with tenant_session_context(new_session, self.tenant_key):
-                return (await new_session.execute(stmt)).scalar_one_or_none()
+        async with nullcontext(session) if session is not None else self._get_session() as active:
+            with tenant_session_context(active, self.tenant_key):
+                return (await active.execute(stmt)).scalar_one_or_none()
 
     async def get_next_sequence(
         self,
         product_id: str | Any,
         session: AsyncSession | None = None,
     ) -> int:
-        if session is not None:
+        async with nullcontext(session) if session is not None else self._get_session() as active:
             return await self._repo.get_next_sequence(
-                session=session,
-                product_id=product_id,
-                tenant_key=self.tenant_key,
-            )
-        async with self._get_session() as new_session:
-            return await self._repo.get_next_sequence(
-                session=new_session,
+                session=active,
                 product_id=product_id,
                 tenant_key=self.tenant_key,
             )
@@ -459,10 +435,8 @@ class ProductMemoryService:
         params: MemoryEntryCreateParams,
         session: AsyncSession | None = None,
     ) -> ProductMemoryEntry:
-        if session is not None:
-            return await self._create_entry_verified(session, params)
-        async with self._get_session() as new_session:
-            return await self._create_entry_verified(new_session, params)
+        async with nullcontext(session) if session is not None else self._get_session() as active:
+            return await self._create_entry_verified(active, params)
 
     async def _create_entry_verified(
         self, session: AsyncSession, params: MemoryEntryCreateParams

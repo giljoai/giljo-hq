@@ -203,8 +203,8 @@ describe('JobsBoardCardFooter: implementing and review', () => {
     }
   })
 
-  it('a Needs Input card that has launched keeps the implementing row', async () => {
-    const wrapper = mountFooter(IMPLEMENTING, JOBS_SECTION_LABELS.NEEDS_INPUT)
+  it('a Needs attention card that has launched keeps the implementing row', async () => {
+    const wrapper = mountFooter(IMPLEMENTING, 'Needs attention')
     await flushPromises()
     expect(wrapper.attributes('data-footer-state')).toBe('implementing')
   })

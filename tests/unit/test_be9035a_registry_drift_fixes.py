@@ -128,11 +128,13 @@ class TestImplementationPromptTypeMapCoverage:
 class TestGiljoSetupPlatformLiteral:
 
     def test_literal_matches_export_platforms(self):
-        from typing import get_args
+        from typing import Annotated, get_args, get_origin
 
         from api.endpoints.mcp_tools._setup_tools import giljo_setup
         from giljo_mcp.platform_registry import EXPORT_PLATFORMS
 
         sig = inspect.signature(giljo_setup)
         annotation = sig.parameters["platform"].annotation
+        if get_origin(annotation) is Annotated:
+            annotation = get_args(annotation)[0]
         assert get_args(annotation) == EXPORT_PLATFORMS

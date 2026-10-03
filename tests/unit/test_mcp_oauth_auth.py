@@ -9,6 +9,15 @@ from uuid import uuid4
 
 import pytest
 
+from api import app_state
+
+
+def _session_db_manager() -> MagicMock:
+    manager = MagicMock()
+    manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+    manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
+    return manager
+
 
 def _mock_db() -> AsyncMock:
     mock_db = AsyncMock()
@@ -150,18 +159,20 @@ class TestMCPAuthMiddleware:
 
     @pytest.mark.asyncio
     async def test_jwt_audience_mismatch_returns_401(self):
-        from api.endpoints import mcp_sdk_server
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
+        from giljo_mcp.auth import principal as principal_mod
 
         app = AsyncMock()
         middleware = MCPAuthMiddleware(app=app)
         messages = []
         scope = self._http_scope([(b"authorization", b"Bearer some.jwt.token")])
+        refusal = principal_mod.PrincipalValidationError(
+            principal_mod.AuthErrorReason.INVALID_AUDIENCE, "wrong audience"
+        )
 
-        with patch.object(
-            mcp_sdk_server.JWTManager,
-            "verify_token",
-            side_effect=mcp_sdk_server.JWTAudienceMismatchError("wrong audience"),
+        with (
+            patch.object(app_state.state, "db_manager", _session_db_manager()),
+            patch.object(principal_mod, "validate_principal", AsyncMock(side_effect=refusal)),
         ):
             await middleware(scope, self._empty_receive, self._capture_send(messages))
 
@@ -171,7 +182,6 @@ class TestMCPAuthMiddleware:
 
     @pytest.mark.asyncio
     async def test_valid_jwt_injects_tenant_into_scope_state(self, test_tenant_key):
-        from api.endpoints import mcp_sdk_server
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
         user_id = str(uuid4())
@@ -188,18 +198,25 @@ class TestMCPAuthMiddleware:
         scope = self._http_scope([(b"authorization", b"Bearer valid.jwt.token")])
         messages = []
 
-        from api.app_state import state as _app_state
+        from giljo_mcp.auth import principal as principal_mod
 
-        prior_db = _app_state.db_manager
-        _app_state.db_manager = None
-        try:
-            with patch.object(mcp_sdk_server.JWTManager, "verify_token", return_value=payload):
-                await middleware(scope, self._empty_receive, self._capture_send(messages))
-        finally:
-            _app_state.db_manager = prior_db
+        principal = principal_mod.Principal(
+            user_id=user_id,
+            tenant_key=tenant_key,
+            auth_method="jwt",
+            user=MagicMock(must_change_password=False),
+            username=payload["username"],
+            role=payload["role"],
+        )
+        with (
+            patch.object(app_state.state, "db_manager", _session_db_manager()),
+            patch.object(principal_mod, "validate_principal", AsyncMock(return_value=principal)),
+        ):
+            await middleware(scope, self._empty_receive, self._capture_send(messages))
 
         app.assert_awaited_once()
         assert scope["state"]["tenant_key"] == tenant_key
         assert scope["state"]["user_id"] == user_id
         assert scope["state"]["auth_method"] == "jwt"
         assert scope["state"]["scopes"] == ["mcp:read", "mcp:write"]
+        assert scope["state"]["must_change_password"] is False

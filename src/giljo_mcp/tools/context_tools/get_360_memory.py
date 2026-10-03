@@ -13,20 +13,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import Product
 from giljo_mcp.services.product_memory_service import ProductMemoryService
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 logger = logging.getLogger(__name__)
 
 
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data) if not isinstance(data, str) else data
-    return len(text) // 4
-
-
 DEPTH_HEADLINES = "headlines"
 DEPTH_FULL = "full"
+
+
+def parse_memory_360_depth(depth: Any) -> dict[str, Any]:
+    accepted = f"an int, {DEPTH_FULL!r}, {DEPTH_HEADLINES!r} or {{'last_n_projects': int, 'shape': ...}}"
+    if isinstance(depth, dict):
+        count, shape = depth.get("last_n_projects"), depth.get("shape")
+        if set(depth) - {"last_n_projects", "shape"} or shape not in (None, DEPTH_FULL, DEPTH_HEADLINES):
+            raise ValueError(f"memory_360 takes {accepted}, got {depth!r}")
+        if count is not None and type(count) is not int:
+            raise ValueError(f"memory_360 last_n_projects must be an int, got {count!r}")
+        return {k: v for k, v in (("last_n_projects", count), ("depth", shape)) if v is not None}
+    if depth in (DEPTH_FULL, DEPTH_HEADLINES):
+        return {"depth": depth}
+    if type(depth) is int:
+        return {"last_n_projects": depth}
+    raise ValueError(f"memory_360 takes {accepted}, got {depth!r}")
+
 
 LEGACY_TAG_MAPPING: dict[str, str | None] = {
     "frontend": "frontend",
@@ -146,7 +157,7 @@ async def get_360_memory(
         raise ValueError("db_manager or session parameter is required")
 
     if depth not in (DEPTH_HEADLINES, DEPTH_FULL):
-        depth = DEPTH_HEADLINES
+        raise ValueError(f"depth must be {DEPTH_HEADLINES!r} or {DEPTH_FULL!r}, got {depth!r}")
 
     if session is not None:
         return await _get_360_memory_impl(session, product_id, tenant_key, last_n_projects, offset, limit, depth)

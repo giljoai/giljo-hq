@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from api.dependencies.websocket import WebSocketDependency, get_websocket_dependency
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.models import Project, User
@@ -75,8 +76,6 @@ async def launch_project(
 
     Called when user clicks "Launch Jobs" button after staging completes.
     Validates project has mission and agents, then transitions to 'launching' status.
-
-    Handover 0109 Agent 1 - Project Launch Endpoint
 
     Args:
         request: LaunchProjectRequest with project_id
@@ -160,21 +159,18 @@ async def launch_project(
         for agent in agents
     ]
 
-    try:
-        await ws_dep.broadcast_to_tenant(
-            tenant_key=current_user.tenant_key,
-            event_type="project:launched",
-            data={
-                "project_id": project_id_str,
-                "staging_status": project.staging_status,
-                "agent_count": len(agents),
-                "timestamp": datetime.now(UTC).isoformat(),
-                "launched_by": current_user.username,
-            },
-        )
-        logger.info("WebSocket event 'project:launched' broadcasted for %s", sanitize(project_id_str))
-    except Exception as _exc:
-        logger.exception("Failed to broadcast WebSocket event")
+    await ws_dep.broadcast_to_tenant(
+        tenant_key=current_user.tenant_key,
+        event_type="project:launched",
+        data={
+            "project_id": project_id_str,
+            "staging_status": project.staging_status,
+            "agent_count": len(agents),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "launched_by": current_user.username,
+        },
+    )
+    logger.info("WebSocket event 'project:launched' broadcasted for %s", sanitize(project_id_str))
 
     return LaunchProjectResponse(
         success=True,
@@ -197,11 +193,13 @@ class LaunchImplementationResponse(BaseModel):
     launched_at: str | None = None
     thread_id: str | None = Field(None, description="The project's coordination thread id")
     chat_id: str | None = Field(None, description="The coordination thread's short handle, for example CHT-0042")
+    project_active: bool | None = Field(None, description="Whether the project is active after this launch")
+    next_action: str | None = Field(None, description="What to do next when the project is not active")
 
 
 @router.patch("/projects/{project_id}/launch-implementation", response_model=LaunchImplementationResponse)
 async def launch_implementation(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db_manager=Depends(get_db_manager),
     tenant_manager=Depends(get_tenant_manager),
@@ -213,14 +211,12 @@ async def launch_implementation(
     Called when the user clicks 'Implement' in the dashboard. Allows agents to
     receive their missions via get_job_mission().
 
-    BE-6115a: this is the UI half of the two-door implement gate. It no longer
+    This is the UI half of the two-door implement gate. It no longer
     raw-writes implementation_launched_at inline — both doors (this button and
     the launch_implementation MCP/CLI tool) flip the flag through the ONE shared
     single-writer ``ProjectStagingService.launch_implementation`` (no parallel
     write path). The human gate stays sacred; this endpoint IS the human
     authorization for the UI door.
-
-    Handover 0709: Implementation phase gate.
 
     Args:
         project_id: Project ID to launch implementation for.
@@ -260,6 +256,8 @@ async def launch_implementation(
             implementation_launched_at=result["implementation_launched_at"],
             thread_id=result.get("thread_id"),
             chat_id=result.get("chat_id"),
+            project_active=result.get("project_active"),
+            next_action=result.get("next_action"),
         )
 
     logger.info(
@@ -271,4 +269,6 @@ async def launch_implementation(
         launched_at=result["launched_at"],
         thread_id=result.get("thread_id"),
         chat_id=result.get("chat_id"),
+        project_active=result.get("project_active"),
+        next_action=result.get("next_action"),
     )

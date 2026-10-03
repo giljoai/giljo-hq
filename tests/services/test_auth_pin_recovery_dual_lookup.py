@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -53,6 +54,12 @@ async def pin_user(db_session, auth_test_org):
     await db_session.commit()
     await db_session.refresh(user)
     return user, password, pin
+
+
+_ce_only = pytest.mark.skipif(
+    os.environ.get("GILJO_MODE") == "saas",
+    reason="PIN recovery is CE-only; its SaaS 404 is covered by tests/api/test_inf3000e_pin_recovery_mode_gate.py",
+)
 
 
 def _fake_request():
@@ -143,6 +150,7 @@ class TestRepoDualLookupHelper:
 
 
 
+@_ce_only
 class TestVerifyPinDualLookup:
     @pytest.mark.asyncio
     async def test_by_username(self, db_session, pin_user):
@@ -174,6 +182,7 @@ class TestVerifyPinDualLookup:
 
 
 
+@_ce_only
 class TestVerifyPinAndResetDualLookup:
     @pytest.mark.asyncio
     async def test_by_username(self, db_session, pin_user):

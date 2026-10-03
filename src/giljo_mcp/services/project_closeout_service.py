@@ -22,7 +22,6 @@ from giljo_mcp.schemas.service_responses import (
     AgentStatusChangeEvent,
     CanCloseResult,
     CloseoutData,
-    CloseoutPromptResult,
     ProjectCloseOutResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
@@ -113,20 +112,17 @@ class ProjectCloseoutService:
                 )
 
                 if self._websocket_manager:
-                    try:
-                        await self._websocket_manager.broadcast_project_update(
-                            project_id=project_id,
-                            update_type="closed",
-                            project_data={
-                                "name": project.name,
-                                "status": ProjectStatus.COMPLETED.value,
-                                "mission": project.mission,
-                                "product_id": project.product_id,
-                            },
-                            tenant_key=tenant_key,
-                        )
-                    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                        self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                    await self._websocket_manager.broadcast_project_update(
+                        project_id=project_id,
+                        update_type="closed",
+                        project_data={
+                            "name": project.name,
+                            "status": ProjectStatus.COMPLETED.value,
+                            "mission": project.mission,
+                            "product_id": project.product_id,
+                        },
+                        tenant_key=tenant_key,
+                    )
 
                 return ProjectCloseOutResult(
                     message="Project closed out successfully",
@@ -260,20 +256,6 @@ class ProjectCloseoutService:
         async with self._get_session(tenant_key) as session:
             return await self._build_can_close_response(project_id, tenant_key, session)
 
-    async def generate_closeout_prompt(
-        self, project_id: str, tenant_key: str | None = None, db_session: Any | None = None
-    ) -> CloseoutPromptResult:
-        tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
-
-        if not tenant_key:
-            raise ValidationError(message="Tenant context missing", context={"project_id": project_id})
-
-        if db_session:
-            return await self._build_closeout_prompt(project_id, tenant_key, db_session)
-
-        async with self._get_session(tenant_key) as session:
-            return await self._build_closeout_prompt(project_id, tenant_key, session)
-
     async def _build_closeout_data(self, project_id: str, tenant_key: str, session: Any) -> CloseoutData:
         project = await self._get_project_for_tenant(project_id, tenant_key, session)
 
@@ -334,63 +316,6 @@ class ProjectCloseoutService:
                 "silent": status_counts.get("silent", 0),
                 "active": status_counts["active"],
             },
-        )
-
-    async def _build_closeout_prompt(self, project_id: str, tenant_key: str, session: Any) -> CloseoutPromptResult:
-        project = await self._get_project_for_tenant(project_id, tenant_key, session)
-
-        if not project:
-            raise ResourceNotFoundError(
-                message="Project not found or access denied",
-                context={"project_id": project_id, "tenant_key": tenant_key},
-            )
-
-        status_counts = await self._aggregate_agent_statuses(project_id, tenant_key, session)
-        agent_summary = (
-            f"{status_counts['completed']} completed, "
-            f"{status_counts['blocked']} blocked, "
-            f"{status_counts.get('silent', 0)} silent, "
-            f"{status_counts['active']} active"
-        )
-
-        repo_path = "."
-        branch = "main"
-
-        prompt = (
-            "#!/bin/bash\n"
-            "set -euo pipefail\n\n"
-            f"cd {repo_path}\n"
-            "git status\n"
-            "git add .\n"
-            f'git commit -m "Project complete: {project.name}"\n'
-            f"git push origin {branch}\n\n"
-            "cat > PROJECT_SUMMARY.md <<'EOF'\n"
-            f"Project: {project.name}\n"
-            f"Mission: {project.mission or ''}\n"
-            f"Agent Summary: {agent_summary}\n"
-            "Key Outcomes:\n"
-            "- Fill in final deliverables here\n"
-            "Decisions Made:\n"
-            "- Record architecture or workflow decisions here\n"
-            "EOF\n"
-        )
-
-        checklist = [
-            "Review all agent outputs and ensure artifacts are saved.",
-            "Commit final changes to the repository.",
-            f"Push branch {branch} to remote.",
-            "Update PROJECT_SUMMARY.md with outcomes and decisions.",
-            "Run write_project_closeout() to refresh 360 Memory.",
-        ]
-
-        project.closeout_prompt = prompt
-        await session.commit()
-
-        return CloseoutPromptResult(
-            prompt=prompt,
-            checklist=checklist,
-            project_name=project.name,
-            agent_summary=agent_summary,
         )
 
     async def _aggregate_agent_statuses(self, project_id: str, tenant_key: str, session: Any) -> dict[str, Any]:

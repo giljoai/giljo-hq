@@ -97,6 +97,31 @@ async def _drive_middleware(middleware, headers: list[tuple[bytes, bytes]]) -> t
     return captured_status["code"], captured_headers, bytes(captured_body)
 
 
+async def _seed_active_user(db_manager, tenant_key: str) -> str:
+    from giljo_mcp.models.auth import User
+    from giljo_mcp.models.organizations import Organization
+
+    unique = uuid4().hex[:8]
+    async with db_manager.get_session_async() as session:
+        org = Organization(
+            name=f"Scope Org {unique}", slug=f"scope-org-{unique}", tenant_key=tenant_key, is_active=True
+        )
+        session.add(org)
+        await session.flush()
+        user = User(
+            username=f"scope_user_{unique}",
+            email=f"scope_{unique}@example.com",
+            password_hash=bcrypt.hashpw(b"pw", bcrypt.gensalt()).decode("utf-8"),
+            tenant_key=tenant_key,
+            role="developer",
+            org_id=org.id,
+            is_active=True,
+        )
+        session.add(user)
+        await session.commit()
+        return user.id
+
+
 
 
 @pytest_asyncio.fixture
@@ -170,15 +195,16 @@ async def scope_mcp_client(db_manager, monkeypatch):
 class TestS1JwtWithScopeClaimStampsScopes:
     @pytest.mark.asyncio
     async def test_aud_bound_jwt_with_scope_claim_propagates_scopes_to_state(
-        self, jwt_env, mcp_canonical_uri_env, monkeypatch
+        self, db_manager, jwt_env, mcp_canonical_uri_env, monkeypatch
     ):
         from api import app_state as _app_state_mod
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
 
-        monkeypatch.setattr(_app_state_mod.state, "db_manager", None)
+        monkeypatch.setattr(_app_state_mod.state, "db_manager", db_manager)
         tenant_key = TenantManager.generate_tenant_key()
-        token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, scope="mcp:read mcp:write")
+        user_id = await _seed_active_user(db_manager, tenant_key)
+        token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, sub=user_id, scope="mcp:read mcp:write")
 
         inner = _CapturingInnerApp()
         mw = MCPAuthMiddleware(app=inner)
@@ -192,14 +218,17 @@ class TestS1JwtWithScopeClaimStampsScopes:
 
 class TestS2JwtMissingScopeClaimDefaultsToReadWrite:
     @pytest.mark.asyncio
-    async def test_jwt_without_scope_claim_defaults_to_read_write(self, jwt_env, mcp_canonical_uri_env, monkeypatch):
+    async def test_jwt_without_scope_claim_defaults_to_read_write(
+        self, db_manager, jwt_env, mcp_canonical_uri_env, monkeypatch
+    ):
         from api import app_state as _app_state_mod
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
 
-        monkeypatch.setattr(_app_state_mod.state, "db_manager", None)
+        monkeypatch.setattr(_app_state_mod.state, "db_manager", db_manager)
         tenant_key = TenantManager.generate_tenant_key()
-        token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, scope=None)
+        user_id = await _seed_active_user(db_manager, tenant_key)
+        token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, sub=user_id, scope=None)
 
         inner = _CapturingInnerApp()
         mw = MCPAuthMiddleware(app=inner)
@@ -639,4 +668,6 @@ class TestS15StateMutatingToolsAreAgentScoped:
             for name in self.STATE_MUTATING_ORCHESTRATION_TOOLS
             if TOOL_SCOPES.get(name) != SCOPE_AGENT
         }
-        assert not mismapped, f"state-mutating orchestration tools NOT mapped to mcp:agent (fails OPEN): {mismapped}"
+        assert not mismapped, (
+            f"state-mutating orchestration tools NOT mapped to mcp:agent (would widen access): {mismapped}"
+        )

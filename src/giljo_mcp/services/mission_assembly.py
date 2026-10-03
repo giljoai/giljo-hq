@@ -102,24 +102,6 @@ def compose_unresolved_identity(job: AgentJob, execution: AgentExecution) -> tup
     return _UNRESOLVED_IDENTITY_BLOCK.format(cause=cause, display_name=display_name, remedy=remedy), status
 
 
-def should_serve_identity(identity_status: str, execution_mode: Any) -> bool:
-    del identity_status, execution_mode
-    return True
-
-
-def _apply_identity_serve_gate(
-    logger,
-    job_id: str,
-    agent_identity: str | None,
-    identity_status: str,
-    protocol_exec_mode: Any,
-) -> str | None:
-    del logger, job_id
-    if should_serve_identity(identity_status, protocol_exec_mode):
-        return agent_identity
-    return None  # pragma: no cover - unreachable while should_serve_identity is constant
-
-
 def gate_identity_source(served_identity: str | None, identity_source: str | None) -> str | None:
     return identity_source if served_identity else None
 
@@ -135,8 +117,9 @@ def _maybe_inject_ch6(
     protocol_exec_mode: str,
     project: Any,
     checkin_cadence_minutes: int | None,
+    preset: Platform | None = None,
 ) -> str:
-    if execution.agent_display_name != "orchestrator" or protocol_exec_mode != "multi_terminal":
+    if execution.agent_display_name != "orchestrator" or protocol_exec_mode != "multi_terminal" or preset is not None:
         return full_protocol
     from giljo_mcp.services.protocol_sections.chapters_reference import _build_ch6_auto_checkin
 
@@ -189,22 +172,6 @@ def assemble_mission_context(
     full_mission = mission_framing + team_context_header + raw_mission
 
     integrations = integrations or {}
-    include_serena = integrations.get("serena_mcp", {}).get("use_in_prompts", False)
-
-    if include_serena:
-        try:
-            from giljo_mcp.prompt_generation.serena_instructions import for_role
-
-            role = job.job_type
-            serena_instructions = for_role(role, enabled=True)
-            full_mission = serena_instructions + "\n\n---\n\n" + full_mission
-            logger.info(
-                "[SERENA] Injected role-specific Serena guidance into agent mission",
-                extra={"job_id": job_id, "agent_id": execution.agent_id, "role": role},
-            )
-        except (ImportError, AttributeError) as e:
-            logger.warning(f"[SERENA] Failed to inject Serena guidance: {e}")
-
     git_enabled = integrations.get("git_integration", {}).get("enabled", False)
     protocol_exec_mode = effective_execution_mode(project_exec_mode, chain_execution_mode)
     agent_tool = _EXECUTION_MODE_TO_TOOL.get(protocol_exec_mode, "multi_terminal")
@@ -226,8 +193,9 @@ def assemble_mission_context(
         preset=preset,
         comm_thread_id=comm_thread_id,
     )
-
-    full_protocol = _maybe_inject_ch6(full_protocol, execution, protocol_exec_mode, project, checkin_cadence_minutes)
+    full_protocol = _maybe_inject_ch6(
+        full_protocol, execution, protocol_exec_mode, project, checkin_cadence_minutes, preset
+    )
 
     if is_multi_terminal_specialist:
         from giljo_mcp.services.protocol_sections.chapters_coordination import (
@@ -250,7 +218,7 @@ def assemble_mission_context(
         is_chain_member=bool(chain_execution_mode) and bool(job.project_id),
         is_chain_conductor=is_chain_conductor,
     )
-    served_identity = _apply_identity_serve_gate(logger, job_id, agent_identity, identity_status, protocol_exec_mode)
+    served_identity = agent_identity
     return MissionResponse(
         job_id=job.job_id,
         agent_id=execution.agent_id,

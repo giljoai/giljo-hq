@@ -20,7 +20,6 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import App from '@/App.vue'
 import api from '@/services/api'
-import setupService from '@/services/setupService'
 
 // Mock the API and setup service modules
 vi.mock('@/services/api', () => ({
@@ -31,11 +30,7 @@ vi.mock('@/services/api', () => ({
   }
 }))
 
-vi.mock('@/services/setupService', () => ({
-  default: {
-    checkStatus: vi.fn()
-  }
-}))
+vi.mock('@/services/setupService', () => ({ default: {} }))
 
 describe('Two-Layout Authentication Pattern - Integration Tests', () => {
   let vuetify
@@ -145,12 +140,6 @@ describe('Two-Layout Authentication Pattern - Integration Tests', () => {
       }
 
       return true
-    })
-
-    // Default mock responses
-    setupService.checkStatus.mockResolvedValue({
-      database_initialized: true,
-      default_password_active: false
     })
 
     api.auth.me.mockResolvedValue({
@@ -504,12 +493,6 @@ describe('Two-Layout Authentication Pattern - Integration Tests', () => {
 
   describe('Setup Flow Integration with Two-Layout Pattern', () => {
     it('should allow access to /welcome during setup', async () => {
-      // Mock fresh install state
-      setupService.checkStatus.mockResolvedValue({
-        database_initialized: false,
-        default_password_active: true
-      })
-
       // Navigate to welcome page during setup
       await router.push('/welcome')
       await router.isReady()
@@ -532,12 +515,6 @@ describe('Two-Layout Authentication Pattern - Integration Tests', () => {
     })
 
     it('should use AuthLayout for setup flow pages', async () => {
-      // Mock setup in progress
-      setupService.checkStatus.mockResolvedValue({
-        database_initialized: false,
-        default_password_active: true
-      })
-
       await router.push('/welcome')
       await router.isReady()
 

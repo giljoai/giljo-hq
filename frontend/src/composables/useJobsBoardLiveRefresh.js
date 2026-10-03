@@ -27,7 +27,7 @@ export const BOARD_REFRESH_EVENTS = Object.freeze([
 ])
 
 function projectIdOf(payload) {
-  return payload?.project_id || payload?.data?.project_id || null
+  return payload?.project_id || null
 }
 
 export function useJobsBoardLiveRefresh({ wsStore, isOnBoard, refreshAgents, refreshBoard, delay = 300 }) {

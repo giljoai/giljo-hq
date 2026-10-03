@@ -70,7 +70,7 @@ async def revoke(
     request: Request,
     db=Depends(get_db_session),
 ):
-    """RFC 7009 OAuth 2.0 Token Revocation (API-0022).
+    """RFC 7009 OAuth 2.0 Token Revocation.
 
     Body (form or JSON): ``token`` (required), ``token_type_hint`` (optional;
     ``access_token`` or ``refresh_token``). The hint is advisory -- on first-

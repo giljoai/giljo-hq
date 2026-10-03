@@ -42,8 +42,8 @@ def _generate(tmp_path: Path, extra: dict) -> dict[str, str]:
     return _parse_env(tmp_path / ".env")
 
 
-class TestLanHttpsEnvUrls:
-    def test_lan_https_does_not_write_localhost_http_urls(self, tmp_path):
+class TestLanEnvUrls:
+    def test_lan_install_does_not_write_localhost_urls_and_ignores_stale_ssl(self, tmp_path):
         env = _generate(
             tmp_path,
             {
@@ -59,9 +59,8 @@ class TestLanHttpsEnvUrls:
         assert env["VITE_API_URL"] == ""
         assert env["VITE_WS_URL"] == ""
         assert "localhost" not in env["VITE_API_URL"]
-        assert "http://" not in env["VITE_API_URL"]
 
-        assert env["GILJO_PUBLIC_URL"] == "https://192.0.2.163:7272"
+        assert env["GILJO_PUBLIC_URL"] == "http://192.0.2.163:7272"
 
         assert env["VITE_APP_MODE"] == "auto"
         assert env["DEPLOYMENT_CONTEXT"] == "auto"
@@ -69,14 +68,13 @@ class TestLanHttpsEnvUrls:
         assert env["SERVICE_BIND"] == "0.0.0.0"
         assert env["GILJO_API_HOST"] == "0.0.0.0"
 
-    def test_lan_http_no_ssl_still_avoids_localhost(self, tmp_path):
+    def test_lan_install_without_ssl_keys_still_avoids_localhost(self, tmp_path):
         env = _generate(
             tmp_path,
             {
                 "bind": "0.0.0.0",
                 "external_host": "192.0.2.163",
                 "network_mode": "static",
-                "ssl_enabled": False,
             },
         )
         assert env["VITE_API_URL"] == ""
@@ -91,7 +89,6 @@ class TestLanHttpsEnvUrls:
                 "bind": "127.0.0.1",
                 "external_host": "localhost",
                 "network_mode": "localhost",
-                "ssl_enabled": False,
             },
         )
         assert env["VITE_API_URL"] == "http://localhost:7272"

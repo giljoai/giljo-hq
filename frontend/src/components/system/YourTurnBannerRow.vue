@@ -52,15 +52,13 @@ const props = defineProps({
 })
 defineEmits(['open', 'dismiss'])
 
-const threadLabel = (thread) => threadDisplayName(thread)
-
 const message = computed(() => {
   if (props.threads.length > 1) return 'Multiple chat threads are waiting for you'
   const thread = props.threads[0]
   const author = thread?.last_message?.author
   return author
-    ? `${author} is waiting on you in "${threadLabel(thread)}"`
-    : `Waiting on you in "${threadLabel(thread)}"`
+    ? `${author} is waiting on you in "${threadDisplayName(thread)}"`
+    : `Waiting on you in "${threadDisplayName(thread)}"`
 })
 
 const cta = computed(() => (props.threads.length > 1 ? 'Open Message Hub' : 'Open thread'))

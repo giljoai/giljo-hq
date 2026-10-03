@@ -137,6 +137,7 @@ async def sync_ws_metrics_to_db(state: APIState):
         try:
             count = int(ws_manager.get_connection_count())
         except (AttributeError, TypeError, ValueError):
+            logger.warning("ws connection count unavailable; skipping this sync", exc_info=True)
             continue
         try:
             now = datetime.now(UTC)

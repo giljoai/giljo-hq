@@ -5,14 +5,19 @@
 
 
 import logging
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
+from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
+
+_DEFERRED_EVENTS = "deferred_tenant_events"
 
 
 def compute_completion_percent(completed: int, total: int, decommissioned: int = 0) -> float:
@@ -32,6 +37,34 @@ def _build_ws_project_data(project) -> dict:
     }
 
 
+def stamp_launch(project) -> datetime:
+    now = datetime.now(UTC)
+    if project.implementation_launched_at is None:
+        project.implementation_launched_at = now
+        if project.status == ProjectStatus.INACTIVE:
+            project.status = ProjectStatus.ACTIVE
+    if project.ever_launched_at is None:
+        project.ever_launched_at = project.implementation_launched_at
+    project.updated_at = now
+    return project.implementation_launched_at
+
+
+def defer_tenant_event(session, websocket_manager: Any | None, tenant_key: str, event_type: str, data: dict) -> None:
+    if websocket_manager is not None:
+        session.info.setdefault(_DEFERRED_EVENTS, []).append((websocket_manager, tenant_key, event_type, data))
+
+
+async def broadcast_deferred_events(session) -> None:
+    from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
+
+    await broadcast_deferred_sequence_updates(session)
+    for websocket_manager, tenant_key, event_type, data in session.info.pop(_DEFERRED_EVENTS, []):
+        try:
+            await websocket_manager.broadcast_to_tenant(tenant_key=tenant_key, event_type=event_type, data=data)
+        except Exception as ws_error:  # noqa: BLE001 - WS resilience
+            logger.warning("[DEFERRED_EVENT] %s broadcast failed: %s", event_type, ws_error)
+
+
 async def mark_staging_complete(
     session,
     project,
@@ -40,7 +73,7 @@ async def mark_staging_complete(
     websocket_manager: Any | None = None,
     agent_count: int | None = None,
 ) -> bool:
-    if project.staging_status == "staging_complete":
+    if project.staging_status == STAGING_COMPLETE:
         logger.debug(
             "[STAGING_COMPLETE:%s] project=%s already complete — no-op",
             source,
@@ -48,7 +81,7 @@ async def mark_staging_complete(
         )
         return False
 
-    project.staging_status = "staging_complete"
+    project.staging_status = STAGING_COMPLETE
     project.updated_at = datetime.now(UTC)
     await session.flush()
 
@@ -58,26 +91,10 @@ async def mark_staging_complete(
         project.id,
     )
 
-    if websocket_manager is not None:
-        payload = {
-            "project_id": str(project.id),
-            "product_id": project.product_id,
-            "staging_status": "staging_complete",
-        }
-        if agent_count is not None:
-            payload["agent_count"] = agent_count
-        try:
-            await websocket_manager.broadcast_to_tenant(
-                tenant_key=project.tenant_key,
-                event_type="project:staging_complete",
-                data=payload,
-            )
-        except Exception as ws_error:  # noqa: BLE001 - WS resilience
-            logger.warning(
-                "[STAGING_COMPLETE:%s] WS broadcast failed: %s",
-                source,
-                ws_error,
-            )
+    payload = {"project_id": str(project.id), "product_id": project.product_id, "staging_status": STAGING_COMPLETE}
+    if agent_count is not None:
+        payload["agent_count"] = agent_count
+    defer_tenant_event(session, websocket_manager, project.tenant_key, "project:staging_complete", payload)
 
     return True
 
@@ -97,11 +114,12 @@ async def _wake_conductor_on_member_closeout(
 
     try:
         repo = AgentJobRepository(db_manager)
-        if test_session is not None:
-            execution = await repo.get_execution_by_agent_id(test_session, tenant_key, conductor_agent_id)
-        else:
-            async with db_manager.get_session_async(tenant_key=tenant_key) as session:
-                execution = await repo.get_execution_by_agent_id(session, tenant_key, conductor_agent_id)
+        async with (
+            nullcontext(test_session)
+            if test_session is not None
+            else db_manager.get_session_async(tenant_key=tenant_key) as session
+        ):
+            execution = await repo.get_execution_by_agent_id(session, tenant_key, conductor_agent_id)
         if execution is None or not execution.job_id:
             return False
 
@@ -367,15 +385,14 @@ async def complete_chain_run_if_finished(
         if not resolved_order:
             return False
         if any(statuses.get(pid) not in CHAIN_TERMINAL_PROJECT_STATUSES for pid in resolved_order):
-            if test_session is not None:
+            async with (
+                nullcontext(test_session)
+                if test_session is not None
+                else db_manager.get_session_async(tenant_key=tenant_key) as heal_session
+            ):
                 statuses = await heal_chain_member_statuses(
-                    session=test_session, sequence_run_service=svc, run=run, tenant_key=tenant_key
+                    session=heal_session, sequence_run_service=svc, run=run, tenant_key=tenant_key
                 )
-            else:
-                async with db_manager.get_session_async(tenant_key=tenant_key) as heal_session:
-                    statuses = await heal_chain_member_statuses(
-                        session=heal_session, sequence_run_service=svc, run=run, tenant_key=tenant_key
-                    )
             if any(statuses.get(pid) not in CHAIN_TERMINAL_PROJECT_STATUSES for pid in resolved_order):
                 return False
         if run.get("status") == "completed":
@@ -383,11 +400,12 @@ async def complete_chain_run_if_finished(
 
         from giljo_mcp.services.job_completion_closeout_gate import has_pending_chain_settlement
 
-        if test_session is not None:
-            settlement_pending = await has_pending_chain_settlement(test_session, run["id"], tenant_key)
-        else:
-            async with db_manager.get_session_async(tenant_key=tenant_key) as settle_session:
-                settlement_pending = await has_pending_chain_settlement(settle_session, run["id"], tenant_key)
+        async with (
+            nullcontext(test_session)
+            if test_session is not None
+            else db_manager.get_session_async(tenant_key=tenant_key) as settle_session
+        ):
+            settlement_pending = await has_pending_chain_settlement(settle_session, run["id"], tenant_key)
         if settlement_pending:
             logger.info(
                 "[CHAIN_RUN_COMPLETE] run=%s held: settlement approval(s) still pending (tenant=%s)",

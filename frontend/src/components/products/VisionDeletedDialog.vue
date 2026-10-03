@@ -16,7 +16,7 @@
           </template>
 
           <div class="flex-grow-1">
-            <div class="font-weight-bold">{{ doc.filename || doc.document_name }}</div>
+            <div class="font-weight-bold">{{ doc.document_name }}</div>
             <div class="text-body-small text-muted-a11y">
               {{ doc.id }}
             </div>

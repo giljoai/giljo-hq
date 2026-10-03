@@ -39,11 +39,6 @@ class TestGiljoModeDetection:
         mod = _reload_app_state_module(monkeypatch, "SAAS")
         assert mod.GILJO_MODE == "saas"
 
-    def test_legacy_demo_no_longer_special_cased(self, monkeypatch):
-        mod = _reload_app_state_module(monkeypatch, "demo")
-        assert mod.GILJO_MODE == "demo"
-        assert mod.GILJO_MODE not in ("ce", "saas")
-
     def test_ce_mode_explicit(self, monkeypatch):
         mod = _reload_app_state_module(monkeypatch, "ce")
         assert mod.GILJO_MODE == "ce"

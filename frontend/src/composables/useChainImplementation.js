@@ -12,7 +12,7 @@ export function useChainImplementation() {
       return true
     } catch (err) {
       const msg = parseErrorResponse(err).message || 'Could not start the first project in this chain.'
-      showToast({ message: msg, type: 'error', timeout: 6000 })
+      showToast({ message: msg, type: 'error' })
       return false
     }
   }

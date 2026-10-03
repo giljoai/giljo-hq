@@ -59,8 +59,8 @@ so every future session in that repo passes `product_id` automatically and never
   `valid_types`). Numbering is automatic -- omit `series_number`; the serial
   auto-assigns continue-upward on ONE global (tenant+product) line shared by every
   project type AND tasks. Unknown `project_type` is rejected with the list of valid
-  types in the error -- re-map and retry. Projects are created **inactive**; starting one
-  is a separate, explicit step through either door (see section 6).
+  types in the error -- re-map and retry. Projects are created **inactive**; launching one
+  through either door makes it active (see section 6).
 - **Update**: to change an existing project, `list_projects` to find it, then
   `update_project` with the new values.
 - **A task turned out to be a project? PROMOTE it -- never rebuild it.**
@@ -227,8 +227,10 @@ Drive it with these tools:
   stage_project first, or ask the user to press Implement in the dashboard. There is
   no bypass -- the human gate is intentional.
 - `launch_implementation(project_id, mission)` -- records the user's goal and their
-  explicit authorization in one call, then opens the implementation gate. Requires human
-  authorization at call time. Idempotent. Gated by the account's Headless setting, OFF
+  explicit authorization in one call, then opens the implementation gate and makes an
+  inactive project active, so it shows in the dashboard Jobs view (`project_active` in the
+  reply confirms it). Requires human authorization at call time. Idempotent. Gated by the
+  account's Headless setting, OFF
   by default: a human presses Implement in the dashboard unless an admin turns Headless
   on, which declares the harness's own permission prompt for this call to BE that human's
   approval -- running that harness with a bypass/skip-permissions flag removes the ask.
@@ -337,7 +339,7 @@ Nine tools:
 the calling agent to `status='awaiting_user'`. Use it at a gate that genuinely needs a human
 choice (closeout with deferred findings, an ambiguous decision) -- `options` is a list of
 `{id, label}` dicts presented to the user.
-- **UI surface:** the dashboard shows a passive "needs input" pill (informational, NOT a
+- **UI surface:** the dashboard shows a passive "Needs decision" pill (informational, NOT a
   clickable global banner). The decide buttons render inside the project's CloseoutModal via
   the ApprovalCard component -- users frequently miss this and respond verbally instead.
 - **Clearing the gate -- two doors, one write.** `POST /api/approvals/{id}/decide` (the

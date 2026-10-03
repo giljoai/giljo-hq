@@ -21,7 +21,7 @@ export function useJobActions(getJob) {
     const bound = projectId ? await resolveExistingProjectThread(projectId) : null
     if (!bound) {
       router.push({ name: 'Hub', query: { tab: 'project' } })
-      showToast({ message: 'No project thread yet for this agent.', type: 'info', timeout: 4000 })
+      showToast({ message: 'No project thread yet for this agent.', type: 'info' })
       return
     }
     router.push({ name: 'Hub', query: { thread: bound.thread_id, tab: 'project' } })

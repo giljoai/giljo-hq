@@ -187,7 +187,9 @@ async function handleFiles(files) {
   const productName = files[0].name.replace(/\.[^/.]+$/, '')
   await uploadVisionFilesOnAttach({ productName, files })
   const productId = editingProduct.value?.id
-  if (!productId) {
+  const documentFailed = Boolean(productId) && Boolean(visionUploadError.value)
+  if (documentFailed && !hadProduct) emit('product-created', productId)
+  if (!productId || documentFailed) {
     uploadFailure.value =
       visionUploadError.value ||
       'That upload could not be attached to a product. Check Products before trying again.'

@@ -1,35 +1,5 @@
 <template>
   <v-container>
-    <AppAlert
-      v-if="showLanWelcome"
-      type="success"
-      prominent
-      closable
-      class="mb-4"
-      @click:close="dismissLanWelcome"
-    >
-      <template #title>
-        <v-icon left>mdi-check-circle</v-icon>
-        Application Now Configured for LAN Access
-      </template>
-      <div class="mb-3">
-        <p class="mb-2">
-          <strong>Congratulations!</strong> {{ PRODUCT_NAME }} is now accessible over your local network.
-        </p>
-        <p class="mb-2">
-          <strong>Server URL:</strong> <code>{{ serverProtocol }}://{{ serverIp }}:{{ serverPort }}</code>
-        </p>
-        <p class="text-body-medium">
-          Download the comprehensive setup and testing guide to verify network connectivity and
-          troubleshoot any issues.
-        </p>
-      </div>
-      <v-btn color="white" variant="outlined" @click="downloadLanGuide">
-        <v-icon left>mdi-download</v-icon>
-        Download LAN Setup & Testing Guide
-      </v-btn>
-    </AppAlert>
-
     <div class="dash-header main-window-reveal main-window-reveal--hero main-window-delay-1">
       <h1 class="text-headline-large">Dashboard</h1>
     </div>
@@ -72,57 +42,23 @@
     </div>
 
     <div class="stat-pills">
-      <div class="stat-pill smooth-border main-window-reveal main-window-delay-3">
-        <div class="stat-pill-label">Status Distribution</div>
-        <div class="stat-pill-value">{{ statusPill.total }}<small>projects</small></div>
+      <div
+        v-for="pill in statPills"
+        :key="pill.label"
+        :class="['stat-pill smooth-border main-window-reveal', `main-window-delay-${pill.delay}`]"
+      >
+        <div class="stat-pill-label">{{ pill.label }}</div>
+        <div class="stat-pill-value">{{ pill.data.total }}<small>{{ pill.unit }}</small></div>
         <div class="micro-bar">
           <div
-            v-for="seg in statusPill.segments"
+            v-for="seg in pill.data.segments"
             :key="seg.label"
             class="micro-seg"
             :style="{ width: seg.pct + '%', background: seg.color }"
           />
         </div>
         <div class="micro-legend">
-          <div v-for="seg in statusPill.segments" :key="seg.label" class="micro-legend-item">
-            <div class="micro-legend-dot" :style="{ background: seg.color }" />
-            {{ seg.label }} {{ seg.count }}
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-pill smooth-border main-window-reveal main-window-delay-4">
-        <div class="stat-pill-label">Project Types</div>
-        <div class="stat-pill-value">{{ taxonomyPill.total }}<small>types</small></div>
-        <div class="micro-bar">
-          <div
-            v-for="seg in taxonomyPill.segments"
-            :key="seg.label"
-            class="micro-seg"
-            :style="{ width: seg.pct + '%', background: seg.color }"
-          />
-        </div>
-        <div class="micro-legend">
-          <div v-for="seg in taxonomyPill.segments" :key="seg.label" class="micro-legend-item">
-            <div class="micro-legend-dot" :style="{ background: seg.color }" />
-            {{ seg.label }} {{ seg.count }}
-          </div>
-        </div>
-      </div>
-
-      <div class="stat-pill smooth-border main-window-reveal main-window-delay-5">
-        <div class="stat-pill-label">Agent Roles</div>
-        <div class="stat-pill-value">{{ agentRolePill.total }}<small>spawned</small></div>
-        <div class="micro-bar">
-          <div
-            v-for="seg in agentRolePill.segments"
-            :key="seg.label"
-            class="micro-seg"
-            :style="{ width: seg.pct + '%', background: seg.color }"
-          />
-        </div>
-        <div class="micro-legend">
-          <div v-for="seg in agentRolePill.segments" :key="seg.label" class="micro-legend-item">
+          <div v-for="seg in pill.data.segments" :key="seg.label" class="micro-legend-item">
             <div class="micro-legend-dot" :style="{ background: seg.color }" />
             {{ seg.label }} {{ seg.count }}
           </div>
@@ -209,12 +145,10 @@
 
 <script setup>
 // eslint-allow giljo-internal/no-manual-api-url-composition (sanctioned: server-URL string is rendered for the user in a setup guide / inline UI, not used as the frontend HTTP client base — see ADR-001)
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { TEXT_MUTED_MATERIAL as COLOR_MUTED, COLOR_COMPLETE, COLOR_BRAND, COLOR_FAILED, COLOR_STAGED } from '@/config/colorTokens'
 import { getAgentColor } from '@/config/agentColors'
 import { commitTitle } from '@/utils/gitCommitDisplay'
-import { PRODUCT_NAME } from '@/branding'
-import AppAlert from '@/components/ui/AppAlert.vue'
 import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import RecentMemoriesList from '@/components/dashboard/RecentMemoriesList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
@@ -223,7 +157,6 @@ import { useNotificationStore } from '@/stores/notifications'
 import { notifyFailure } from '@/utils/notifyFailure'
 import { useDashboardRealtime } from '@/composables/useDashboardRealtime'
 import api from '@/services/api'
-import setupService from '@/services/setupService'
 import { useToast } from '@/composables/useToast'
 
 const productStore = useProductStore()
@@ -244,6 +177,8 @@ function updateScrollState() {
   canScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
 }
 
+watch(products, () => nextTick(updateScrollState), { immediate: true })
+
 function scrollFilterLeft() {
   filterScrollContainer.value?.scrollBy({ left: -200, behavior: 'smooth' })
 }
@@ -251,11 +186,6 @@ function scrollFilterLeft() {
 function scrollFilterRight() {
   filterScrollContainer.value?.scrollBy({ left: 200, behavior: 'smooth' })
 }
-
-const showLanWelcome = ref(false)
-const serverIp = ref('localhost')
-const serverPort = ref(parseInt(window.location.port) || 7272)
-const serverProtocol = computed(() => window.location.protocol === 'https:' ? 'https' : 'http')
 
 const currentTime = ref('')
 let clockInterval = null
@@ -312,6 +242,11 @@ function buildSegments(entries, total) {
     }))
 }
 
+const toPill = (entries) => {
+  const total = entries.reduce((a, e) => a + e.count, 0)
+  return { total, segments: buildSegments(entries, total) }
+}
+
 const statusPill = computed(() => {
   const dist = dashboardData.value.project_status_dist || {}
   const entries = []
@@ -323,31 +258,34 @@ const statusPill = computed(() => {
       color: statusColors[status] || COLOR_MUTED,
     })
   }
-  const total = entries.reduce((a, e) => a + e.count, 0)
-  return { total, segments: buildSegments(entries, total) }
+  return toPill(entries)
 })
 
-const taxonomyPill = computed(() => {
-  const dist = dashboardData.value.taxonomy_dist || []
-  const entries = dist.map(item => ({
-    label: item.label || 'Untyped',
-    count: item.count || 0,
-    color: item.color || COLOR_MUTED,
-  }))
-  const total = entries.reduce((a, e) => a + e.count, 0)
-  return { total, segments: buildSegments(entries, total) }
-})
+const taxonomyPill = computed(() =>
+  toPill(
+    (dashboardData.value.taxonomy_dist || []).map((item) => ({
+      label: item.label || 'Untyped',
+      count: item.count || 0,
+      color: item.color || COLOR_MUTED,
+    })),
+  ),
+)
 
-const agentRolePill = computed(() => {
-  const dist = dashboardData.value.agent_role_dist || []
-  const entries = dist.map(item => ({
-    label: item.label || 'Unknown',
-    count: item.count || 0,
-    color: getAgentColor(item.label).hex,
-  }))
-  const total = entries.reduce((a, e) => a + e.count, 0)
-  return { total, segments: buildSegments(entries, total) }
-})
+const agentRolePill = computed(() =>
+  toPill(
+    (dashboardData.value.agent_role_dist || []).map((item) => ({
+      label: item.label || 'Unknown',
+      count: item.count || 0,
+      color: getAgentColor(item.label).hex,
+    })),
+  ),
+)
+
+const statPills = computed(() => [
+  { label: 'Status Distribution', unit: 'projects', delay: 3, data: statusPill.value },
+  { label: 'Project Types', unit: 'types', delay: 4, data: taxonomyPill.value },
+  { label: 'Agent Roles', unit: 'spawned', delay: 5, data: agentRolePill.value },
+])
 
 const miniStats = computed(() => {
   const dist = dashboardData.value.project_status_dist || {}
@@ -438,104 +376,9 @@ function handleVisibilityChange() {
   }
 }
 
-const dismissLanWelcome = () => {
-  showLanWelcome.value = false
-  localStorage.removeItem('giljo_lan_setup_complete')
-}
-
-const downloadLanGuide = () => {
-  const guideContent = generateLanGuide()
-  const blob = new Blob([guideContent], { type: 'text/markdown' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'LAN_SETUP_GUIDE.md'
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-const generateLanGuide = () => {
-  return `# ${PRODUCT_NAME} - LAN/Server Mode Setup Guide
-
-**Network Configuration Complete**
-
-This guide helps you verify and troubleshoot network connectivity for ${PRODUCT_NAME} in Server/LAN mode.
-
----
-
-## Your Configuration
-
-**Server URL:** ${serverProtocol.value}://${serverIp.value}:${serverPort.value}
-**Mode:** Server/LAN
-**Status:** Services restarted and ready
-
----
-
-## Quick Network Tests
-
-### From Another Device on Your Network:
-
-**1. Ping Test (Basic Connectivity)**
-\`\`\`bash
-ping ${serverIp.value}
-\`\`\`
-Expected: Reply from ${serverIp.value}
-
-**2. API Health Check**
-\`\`\`bash
-curl ${serverProtocol.value}://${serverIp.value}:${serverPort.value}/health
-\`\`\`
-Expected: {"status": "ok"}
-
-**3. Browser Access**
-Open: ${serverProtocol.value}://${serverIp.value}:${serverPort.value}
-
----
-
-## Troubleshooting
-
-**If ping works but API doesn't:**
-- Verify firewall allows port ${serverPort.value}
-- Check API server is running
-- Confirm services restarted after configuration
-
-**If nothing works:**
-- Both devices must be on same network
-- Check router's AP Isolation is disabled
-- Verify firewall on both server and client
-
----
-
-For complete troubleshooting guide, see: docs/LAN_SETUP_GUIDE.md
-
-**Generated:** ${new Date().toLocaleString()}
-`
-}
-
 onMounted(async () => {
   updateClock()
   clockInterval = setInterval(updateClock, 60000)
-  setTimeout(updateScrollState, 100)
-
-  const lanSetupComplete = localStorage.getItem('giljo_lan_setup_complete')
-  if (lanSetupComplete === 'true') {
-    showLanWelcome.value = true
-
-    try {
-      const response = await fetch(`${setupService.baseURL}/api/v1/config`)
-      if (response.ok) {
-        const config = await response.json()
-        if (config.server?.ip) {
-          serverIp.value = config.server.ip
-        }
-        if (config.services?.api?.port) {
-          serverPort.value = config.services.api.port
-        }
-      }
-    } catch (error) {
-      console.warn('[DASHBOARD] Could not fetch server config:', error)
-    }
-  }
 
   await Promise.all([
     fetchDashboardData(),

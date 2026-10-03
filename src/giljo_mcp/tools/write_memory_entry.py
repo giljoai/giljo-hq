@@ -27,16 +27,17 @@ from giljo_mcp.services.product_memory_service import (
     ProductMemoryService,
     validate_memory_entry_write,
 )
+from giljo_mcp.services.project_closeout_readiness import shape_agent_blocker
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._memory_helpers import _fetch_project_and_product as _resolve_project_and_product
 from giljo_mcp.tools._memory_helpers import (
     build_git_commit_title_required_rejection,
     emit_websocket_event,
-    git_commits_required_rejection,
     normalize_no_code_changes,
     provided_session,
     refuse_if_superseded,
+    resolve_git_closeout_rule,
 )
 from giljo_mcp.tools._prelaunch_workproduct_detector import check_and_emit_prelaunch_workproduct
 
@@ -204,6 +205,7 @@ async def _check_closeout_readiness(
     summary = {
         "agents_checked": report.agents_checked,
         "still_working": 0,
+        "awaiting_user_approval": 0,
         "agents_with_unread": 0,
         "agents_with_incomplete_todos": 0,
         "orchestrator_incomplete_todos": 0,
@@ -214,21 +216,8 @@ async def _check_closeout_readiness(
             summary["agents_with_unread"] += 1
 
         if finding.status != "complete":
-            summary["still_working"] += 1
-            blockers.append(
-                {
-                    "job_id": finding.job_id,
-                    "agent_id": finding.agent_id,
-                    "agent_name": finding.agent_name,
-                    "issue_type": "still_working",
-                    "status": finding.status,
-                    "suggested_action": (
-                        f"Post to the agent's coordination thread asking for status, or drain "
-                        f"messages via get_thread_history(as_participant='{finding.agent_id}') "
-                        f"and force-complete via complete_job(job_id='{finding.job_id}')"
-                    ),
-                }
-            )
+            summary["awaiting_user_approval" if finding.awaiting_user else "still_working"] += 1
+            blockers.append(shape_agent_blocker(finding))
             continue
 
         if finding.messages_waiting > 0:
@@ -310,7 +299,7 @@ def _derive_verified(verification_result: dict[str, Any]) -> dict[str, Any]:
         return verification_result["verified"]
     check_summary = verification_result.get("summary", {})
     return {
-        "all_complete": check_summary.get("still_working", 0) == 0,
+        "all_complete": check_summary.get("still_working", 0) + check_summary.get("awaiting_user_approval", 0) == 0,
         "all_messages_read": check_summary.get("agents_with_unread", 0) == 0,
         "all_todos_done": (
             check_summary.get("agents_with_incomplete_todos", 0) == 0
@@ -383,7 +372,7 @@ async def write_360_memory(
                 return rejection
 
             is_conductor_author = False
-            if author_job_id and entry_type in ORCHESTRATOR_ONLY_ENTRY_TYPES:
+            if entry_type in ORCHESTRATOR_ONLY_ENTRY_TYPES:
                 completion_repo = AgentCompletionRepository()
                 caller_job = await completion_repo.get_agent_job_by_job_id(active_session, tenant_key, author_job_id)
                 caller_role = caller_job.job_type if caller_job else "unknown"
@@ -442,18 +431,16 @@ async def write_360_memory(
                         **verification_result,
                     }
 
-            git_integration_enabled = False
-            try:
-                from giljo_mcp.services.settings_service import SettingsService
-
-                settings_svc = SettingsService(active_session, tenant_key)
-                git_settings = await settings_svc.get_setting_value("integrations", "git_integration", {})
-                git_integration_enabled = git_settings.get("enabled", False)
-            except Exception as _exc:  # noqa: BLE001
-                logger.debug("Settings read skipped: %s", _exc)
-
-            if git_integration_enabled and not (git_commits or no_code_changes) and entry_type == "project_completion":
-                return git_commits_required_rejection(project_id)
+            rejection, git_warning = await resolve_git_closeout_rule(
+                active_session,
+                tenant_key,
+                project_id=project_id,
+                git_commits=git_commits,
+                no_code_changes=no_code_changes,
+                enforce=entry_type == "project_completion",
+            )
+            if rejection is not None:
+                return rejection
 
             if git_commits is not None:
                 try:
@@ -546,6 +533,8 @@ async def write_360_memory(
                 "entry_type": entry_type,
                 "message": "360 Memory entry written successfully",
             }
+            if git_warning:
+                result["git_warning"] = git_warning
 
             if author_job_id:
                 _, verification_result = await _check_closeout_readiness(

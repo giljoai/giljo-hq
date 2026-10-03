@@ -18,7 +18,6 @@ from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.models import Product, Task, User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.services.handover_validation import (
-    HANDOVER_CONTENT_CONSTRAINT,
     REQUIRED_HANDOVER_HEADINGS,
 )
 from giljo_mcp.tenant import TenantManager
@@ -121,7 +120,28 @@ async def test_rest_create_with_handover_type_lands_as_a_handover(
 
 
 @pytest.mark.asyncio
-async def test_rest_create_refuses_a_handover_with_an_empty_section(
+async def test_rest_create_accepts_a_human_handover_with_only_prior_work(
+    api_client: AsyncClient, seeded_product: dict
+) -> None:
+    description = "## Where I left off\nStopped at the rebase; the branch is green."
+    resp = await api_client.post(
+        "/api/v1/tasks/",
+        headers=seeded_product["headers"],
+        json={
+            "title": "one-field handover",
+            "description": description,
+            "product_id": seeded_product["product_id"],
+            "task_type": "HND",
+        },
+    )
+    assert resp.status_code in (200, 201), resp.text
+    body = resp.json()
+    assert body["task_type"] == "HND"
+    assert body["description"] == description
+
+
+@pytest.mark.asyncio
+async def test_rest_create_accepts_a_handover_with_no_description_at_all(
     api_client: AsyncClient, seeded_product: dict
 ) -> None:
     resp = await api_client.post(
@@ -129,18 +149,13 @@ async def test_rest_create_refuses_a_handover_with_an_empty_section(
         headers=seeded_product["headers"],
         json={
             "title": "empty handover",
-            "description": SKELETON,
+            "description": "",
             "product_id": seeded_product["product_id"],
             "task_type": "HND",
         },
     )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error_code"] == "VALIDATION_ERROR", body
-    assert body["context"]["field"] == "description", body
-    assert body["context"]["constraint"] == HANDOVER_CONTENT_CONSTRAINT, body
-    for heading in REQUIRED_HANDOVER_HEADINGS:
-        assert heading in body["message"], f"{heading} not named in: {body['message']}"
+    assert resp.status_code in (200, 201), resp.text
+    assert resp.json()["task_type"] == "HND"
 
 
 @pytest.mark.asyncio
@@ -182,7 +197,9 @@ async def test_rest_create_without_a_task_type_is_still_tsk(api_client: AsyncCli
 
 
 @pytest.mark.asyncio
-async def test_rest_update_refuses_emptying_a_handover_section(api_client: AsyncClient, seeded_product: dict) -> None:
+async def test_rest_update_lets_a_person_clear_a_handover_section(
+    api_client: AsyncClient, seeded_product: dict
+) -> None:
     created = await api_client.post(
         "/api/v1/tasks/",
         headers=seeded_product["headers"],
@@ -199,13 +216,10 @@ async def test_rest_update_refuses_emptying_a_handover_section(api_client: Async
     resp = await api_client.patch(
         f"/api/v1/tasks/{task_id}",
         headers=seeded_product["headers"],
-        json={"description": EMPTIED_LAST_SECTION},
+        json={"description": "## Where I left off\nonly this"},
     )
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["error_code"] == "VALIDATION_ERROR", body
-    assert body["context"]["constraint"] == HANDOVER_CONTENT_CONSTRAINT, body
-    assert REQUIRED_HANDOVER_HEADINGS[2] in body["message"], body["message"]
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["description"] == "## Where I left off\nonly this"
 
 
 @pytest.mark.asyncio
@@ -269,4 +283,4 @@ async def test_rest_update_of_a_legacy_handover_can_still_change_its_status(
         headers=seeded_product["headers"],
         json={"description": SKELETON + "\n## Cannot testify\n"},
     )
-    assert changed.status_code == 422, changed.text
+    assert changed.status_code == 200, changed.text

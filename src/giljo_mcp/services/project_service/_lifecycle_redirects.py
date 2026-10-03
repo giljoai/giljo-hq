@@ -67,15 +67,12 @@ async def _broadcast_revival(service: Any, tenant_key: str, project_id: str) -> 
         project = await service._repo.get_by_id(session, tenant_key, project_id)
     if project is None:
         return
-    try:
-        await ws.broadcast_project_update(
-            project_id=project_id,
-            update_type="status_changed",
-            project_data=_build_ws_project_data(project),
-            tenant_key=tenant_key,
-        )
-    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-        logger.warning(f"WebSocket broadcast failed: {ws_error}")
+    await ws.broadcast_project_update(
+        project_id=project_id,
+        update_type="status_changed",
+        project_data=_build_ws_project_data(project),
+        tenant_key=tenant_key,
+    )
 
 
 async def _revive_deleted(

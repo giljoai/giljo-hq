@@ -7,7 +7,8 @@ export function jobsBoardLifecycleColor(sectionLabel) {
   switch (sectionLabel) {
     case JOBS_SECTION_LABELS.IMPLEMENTING:
       return getAgentColor('implementer').hex
-    case JOBS_SECTION_LABELS.NEEDS_INPUT:
+    case JOBS_SECTION_LABELS.NEEDS_DECISION:
+    case JOBS_SECTION_LABELS.NEEDS_ATTENTION:
       return getStatusColor('blocked')
     case JOBS_SECTION_LABELS.REVIEW:
     case JOBS_SECTION_LABELS.COMPLETE:

@@ -61,7 +61,7 @@ describe('agentPillTitle', () => {
 
   it('explains what the state means, not just what the enum calls it', () => {
     const title = agentPillTitle({ participant_id: 'a', status: 'blocked', last_seen_at: 'x' }, 'Codex')
-    expect(title).toContain('Needs Input: stuck on something it cannot decide')
+    expect(title).toContain('Blocked: stuck on something it cannot decide')
   })
 
   it('explains a terse Jobs-board label — "Monitoring" alone does not tell an operator anything', () => {

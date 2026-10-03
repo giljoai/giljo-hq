@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from giljo_mcp.branding import MCP_ALIAS, PRODUCT_NAME
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
 
@@ -97,7 +98,7 @@ or has no clear default:
   decides.
 
 Do NOT use `set_agent_status("blocked")` to request user input — that shows
-as a small "Needs Input" pill, not the orange approval banner. Reserve
+as a small "Blocked" pill, not the orange approval banner. Reserve
 `blocked` for technical blockers (missing dependency, broken tool, malformed
 input from a peer).
 
@@ -509,7 +510,7 @@ def _get_check_in_protocol_section(tool: str = "multi_terminal") -> str:
 Report progress at natural workflow breaks (after todos, after phases, before long tasks).
 NOT timer-based. Full protocol in `full_protocol` from `get_job_mission()`.
 """
-    if tool == "claude-code":
+    if tool == HARNESS_CLAUDE_CODE:
         base += """
 **HARNESS REMINDER OVERRIDE (Claude Code only — load-bearing):** Claude Code
 periodically injects a `<system-reminder>` nudging `TaskCreate`/`TaskUpdate` for

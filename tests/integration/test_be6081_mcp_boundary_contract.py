@@ -10,6 +10,7 @@ import json
 import random
 from typing import Any
 from unittest.mock import create_autospec
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -17,6 +18,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from api.endpoints.mcp_sdk_server import mcp
 from api.endpoints.mcp_tools._base import _SANITIZED_TOOL_ERROR
+from giljo_mcp.models.agent_identity import AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
@@ -164,6 +166,20 @@ async def _enable_git_integration(db_session, tenant_key: str) -> None:
     await db_session.commit()
 
 
+async def _seed_orchestrator_job(db_session, tenant_key: str, project_id: str) -> str:
+    job = AgentJob(
+        job_id=str(uuid4()),
+        project_id=project_id,
+        mission="orchestrator",
+        job_type="orchestrator",
+        status="active",
+        tenant_key=tenant_key,
+    )
+    db_session.add(job)
+    await db_session.flush()
+    return job.job_id
+
+
 
 
 @pytest.mark.asyncio
@@ -182,7 +198,7 @@ async def test_tier2_git_commits_required_is_content_not_error(memory_tool_clien
                 "key_outcomes": ["Gate verified end-to-end"],
                 "decisions_made": ["Boundary contract is two-tier"],
                 "entry_type": "project_completion",
-                "author_job_id": "",
+                "author_job_id": await _seed_orchestrator_job(session, tenant_key, project.id),
             },
         )
 
@@ -246,7 +262,7 @@ async def test_bare_sha_git_commits_rejected_at_boundary(memory_tool_client):
                 "key_outcomes": ["Bare-SHA git_commits rejected at the boundary"],
                 "decisions_made": ["Boundary type stays list[dict | str]; service fails closed"],
                 "entry_type": "project_completion",
-                "author_job_id": "",
+                "author_job_id": await _seed_orchestrator_job(session, tenant_key, project.id),
                 "git_commits": ["6c59b7e", "a775e8e4"],
             },
         )
@@ -279,7 +295,7 @@ async def test_titled_git_commits_accepted_at_boundary(memory_tool_client):
                 "key_outcomes": ["Titled git_commits accepted at the boundary"],
                 "decisions_made": ["Titled dict shape is the primary contract"],
                 "entry_type": "project_completion",
-                "author_job_id": "",
+                "author_job_id": await _seed_orchestrator_job(session, tenant_key, project.id),
                 "git_commits": [{"sha": "6c59b7e", "message": "Fix the widget", "author": "Alice"}],
             },
         )
@@ -305,7 +321,7 @@ async def test_porcelain_git_commits_accepted_at_boundary(memory_tool_client):
                 "key_outcomes": ["Porcelain git_commits accepted at the boundary"],
                 "decisions_made": ["Porcelain string is parsed server-side"],
                 "entry_type": "project_completion",
-                "author_job_id": "",
+                "author_job_id": await _seed_orchestrator_job(session, tenant_key, project.id),
                 "git_commits": ["6c59b7e\tFix the widget\tAlice"],
             },
         )

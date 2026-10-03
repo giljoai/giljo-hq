@@ -1,6 +1,7 @@
 
 import { API_CONFIG } from '@/config/api'
 import configService from '@/services/configService'
+import { isCeModeValue } from '@/composables/useGiljoMode'
 
 class SetupService {
   constructor() {
@@ -79,8 +80,7 @@ class SetupService {
   _fallbackStatus() {
     let mode = 'ce'
     try { mode = configService.getGiljoMode() } catch { /* config not loaded */ }
-    // eslint-disable-next-line giljo-internal/no-scattered-mode-checks -- service class fallback; non-component context cannot use Vue composable; intentional raw mode check
-    const isPublicLandingMode = mode !== 'ce'
+    const isPublicLandingMode = !isCeModeValue(mode)
     return {
       is_fresh_install: !isPublicLandingMode,
       total_users_count: 0,
@@ -94,46 +94,9 @@ class SetupService {
     this._statusCacheTime = 0
   }
 
-  async checkStatus() {
-    try {
-      const status = await this.checkEnhancedStatus()
-      return {
-        requires_setup: false,
-        is_fresh_install: status.is_fresh_install,
-      }
-    } catch (error) {
-      console.warn('[SETUP_SERVICE] Status check failed:', error)
-      return { requires_setup: false, is_fresh_install: false }
-    }
-  }
 
 
 
-
-
-  async toggleSerena(enabled) {
-    const { default: api } = await import('@/services/api')
-
-    try {
-      const response = await api.serena.toggle(enabled)
-      return response.data
-    } catch (error) {
-      console.error('[SETUP_SERVICE] Serena toggle failed:', error)
-      throw error
-    }
-  }
-
-  async getSerenaStatus() {
-    const { default: api } = await import('@/services/api')
-
-    try {
-      const response = await api.serena.getStatus()
-      return response.data
-    } catch (error) {
-      console.error('[SETUP_SERVICE] Serena status check failed:', error)
-      throw error
-    }
-  }
 
 
   async toggleGit(enabled) {

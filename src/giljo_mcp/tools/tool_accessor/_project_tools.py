@@ -8,14 +8,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.platform_registry import RETIRED_HARNESS_TOKENS
 from giljo_mcp.schemas.service_responses import build_next_action
 
 
 _STAGE_MODE_MAP: dict[str, tuple[str, str]] = {
-    "multi_terminal": ("claude-code", "multi_terminal"),
-    "subagent": ("claude-code", "subagent"),
-    "claude": ("claude-code", "subagent"),
+    "multi_terminal": (HARNESS_CLAUDE_CODE, "multi_terminal"),
+    "subagent": (HARNESS_CLAUDE_CODE, "subagent"),
+    "claude": (HARNESS_CLAUDE_CODE, "subagent"),
     "codex": ("codex", "subagent"),
 }
 _STAGE_MODE_MAP.update(dict.fromkeys(RETIRED_HARNESS_TOKENS, _STAGE_MODE_MAP["subagent"]))

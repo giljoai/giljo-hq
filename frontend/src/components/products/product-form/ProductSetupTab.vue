@@ -95,7 +95,7 @@
             </v-icon>
           </template>
 
-          <v-list-item-title>{{ doc.filename || doc.document_name }}</v-list-item-title>
+          <v-list-item-title>{{ doc.document_name }}</v-list-item-title>
           <v-list-item-subtitle>
             {{ doc.is_summarized ? 'Analyzed' : 'Pending analysis' }}
             <span v-if="doc.chunked"> • {{ doc.chunk_count }} chunks</span>

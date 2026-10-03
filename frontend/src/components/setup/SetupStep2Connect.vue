@@ -14,6 +14,7 @@
       @toggle-key-mode="toggleKeyMode"
       @mark-configured="markActiveConfigured"
     />
+    <ConnectAgentLink />
   </div>
 </template>
 
@@ -23,6 +24,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 import api from '@/services/api'
 import { toolName, toolIdForHarness } from '@/config/setupTools'
 import ConnectToolCard from './ConnectToolCard.vue'
+import ConnectAgentLink from './ConnectAgentLink.vue'
 
 const props = defineProps({
   selectedTools: {
@@ -82,7 +84,7 @@ let wsUnsub = null
 function handleToolConnected(payload) {
   const name = payload?.tool_name
   if (!name) return
-  const mapped = name === 'mcp_connected' ? null : toolIdForHarness(name)
+  const mapped = toolIdForHarness(name)
   const target = mapped && mapped !== 'generic' ? mapped : activeToolId.value
   if (target) connectionStatus[target] = 'connected'
 }

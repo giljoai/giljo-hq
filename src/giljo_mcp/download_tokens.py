@@ -62,27 +62,6 @@ class TokenManager:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate download token"
             ) from e
 
-    async def validate_token(self, token: str, tenant_key: str) -> bool:
-        try:
-            stmt = select(DownloadToken).where(DownloadToken.token == token, DownloadToken.tenant_key == tenant_key)
-            result = await self.db_session.execute(stmt)
-            token_record = result.scalar_one_or_none()
-
-            if not token_record:
-                logger.debug("Token not found or tenant mismatch: %s", mask_token(token))
-                return False
-
-            if token_record.is_expired:
-                logger.debug("Token expired: %s", mask_token(token))
-                return False
-
-            logger.debug("Token validated successfully: %s", mask_token(token))
-            return True
-
-        except SQLAlchemyError:
-            logger.exception("Error validating token")
-            return False
-
     async def cleanup_expired_tokens(self) -> dict:
         try:
             now = datetime.now(UTC)
@@ -140,9 +119,9 @@ class TokenManager:
 
             return self._serialize_token_info(token_record)
 
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
             logger.exception("Error retrieving token info")
-            return None
+            raise DatabaseError(message="Failed to read download token", context={"token": mask_token(token)}) from e
 
     async def get_token_info_by_token(self, token: str) -> dict | None:
         try:
@@ -160,15 +139,15 @@ class TokenManager:
 
             return self._serialize_token_info(token_record)
 
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
             logger.exception("Error retrieving token info")
-            return None
+            raise DatabaseError(message="Failed to read download token", context={"token": mask_token(token)}) from e
 
-    async def mark_failed(self, token: str, error_message: str) -> bool:
+    async def mark_failed(self, token: str, error_message: str, *, tenant_key: str) -> bool:
         try:
-            stmt = select(DownloadToken).where(DownloadToken.token == token)
-            result = await self.db_session.execute(stmt)
-            token_record = result.scalar_one_or_none()
+            stmt = select(DownloadToken).where(DownloadToken.token == token, DownloadToken.tenant_key == tenant_key)
+            with tenant_session_context(self.db_session, tenant_key):
+                token_record = (await self.db_session.execute(stmt)).scalar_one_or_none()
 
             if not token_record:
                 logger.warning("Cannot mark non-existent token as failed: %s", mask_token(token))
@@ -189,11 +168,11 @@ class TokenManager:
                 message="Failed to mark download token as failed", context={"token": mask_token(token)}
             ) from e
 
-    async def mark_ready(self, token: str) -> bool:
+    async def mark_ready(self, token: str, *, tenant_key: str) -> bool:
         try:
-            stmt = select(DownloadToken).where(DownloadToken.token == token)
-            result = await self.db_session.execute(stmt)
-            token_record = result.scalar_one_or_none()
+            stmt = select(DownloadToken).where(DownloadToken.token == token, DownloadToken.tenant_key == tenant_key)
+            with tenant_session_context(self.db_session, tenant_key):
+                token_record = (await self.db_session.execute(stmt)).scalar_one_or_none()
 
             if not token_record:
                 logger.warning("Cannot mark non-existent token as ready: %s", mask_token(token))

@@ -140,7 +140,7 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
 
       await store.fetchActiveProject()
 
-      expect(mockGetActive).toHaveBeenCalledWith('product-b')
+      expect(mockGetActive).toHaveBeenCalledWith('product-b', true)
     })
 
     it('consumes the list response shape, taking the first entry', async () => {
@@ -149,16 +149,31 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
 
       await store.fetchActiveProject()
 
-      expect(store.activeProjectMeta).toEqual({ id: 'p1', status: 'active' })
+      expect(store.activeProjectsMeta).toEqual([{ id: 'p1', status: 'active' }])
     })
 
-    it('clears activeProjectMeta when the list is empty (no active project in scope)', async () => {
+    it('splits completed-unreviewed projects out of the in-flight list', async () => {
+      const store = useProjectStore()
+      mockGetActive.mockResolvedValue({
+        data: [
+          { id: 'live', status: 'active' },
+          { id: 'done', status: 'completed', review_pending: true },
+        ],
+      })
+
+      await store.fetchActiveProject()
+
+      expect(store.activeProjectsMeta.map((p) => p.id)).toEqual(['live'])
+      expect(store.unreviewedProjectsMeta.map((p) => p.id)).toEqual(['done'])
+    })
+
+    it('clears activeProjectsMeta when the list is empty (no active project in scope)', async () => {
       const store = useProjectStore()
       mockGetActive.mockResolvedValue({ data: [] })
 
       await store.fetchActiveProject()
 
-      expect(store.activeProjectMeta).toBeNull()
+      expect(store.activeProjectsMeta).toEqual([])
     })
   })
 })

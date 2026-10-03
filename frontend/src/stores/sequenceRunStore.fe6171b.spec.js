@@ -27,21 +27,21 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
 
 
   it('normalises locked=true from raw run', () => {
-    store.setActiveRun(run('r1', ['pA'], 'pending', { locked: true }))
-    expect(store.activeRun.locked).toBe(true)
+    store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: true })])
+    expect(store.runsById.get('r1').locked).toBe(true)
   })
 
   it('normalises locked=false from raw run', () => {
-    store.setActiveRun(run('r1', ['pA'], 'pending', { locked: false }))
-    expect(store.activeRun.locked).toBe(false)
+    store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: false })])
+    expect(store.runsById.get('r1').locked).toBe(false)
   })
 
   it('defaults locked to false when absent from raw run (pre-migration rows)', () => {
     const rawWithoutLocked = { id: 'r2', project_ids: ['pB'], resolved_order: ['pB'],
       current_index: 0, status: 'pending', execution_mode: 'multi_terminal',
       project_statuses: { pB: 'pending' } }
-    store.setActiveRun(rawWithoutLocked)
-    expect(store.activeRun.locked).toBe(false)
+    store._testSeedRuns([rawWithoutLocked])
+    expect(store.runsById.get('r2').locked).toBe(false)
   })
 
 
@@ -72,32 +72,29 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
 
   it('lockRun PATCHes locked=true and updates the store', async () => {
     store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: false })])
-    store._testSetActiveRun(run('r1', ['pA'], 'pending', { locked: false }))
     api.sequenceRuns.update.mockResolvedValueOnce({ data: run('r1', ['pA'], 'pending', { locked: true }) })
 
     const updated = await store.lockRun('r1')
 
     expect(api.sequenceRuns.update).toHaveBeenCalledWith('r1', { locked: true })
     expect(updated.locked).toBe(true)
-    expect(store.activeRun.locked).toBe(true)
+    expect(store.runsById.get('r1').locked).toBe(true)
   })
 
 
   it('unlockRun PATCHes locked=false and updates the store', async () => {
     store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: true })])
-    store._testSetActiveRun(run('r1', ['pA'], 'pending', { locked: true }))
     api.sequenceRuns.update.mockResolvedValueOnce({ data: run('r1', ['pA'], 'pending', { locked: false }) })
 
     const updated = await store.unlockRun('r1')
 
     expect(api.sequenceRuns.update).toHaveBeenCalledWith('r1', { locked: false })
     expect(updated.locked).toBe(false)
-    expect(store.activeRun.locked).toBe(false)
+    expect(store.runsById.get('r1').locked).toBe(false)
   })
 
   it('unlockRun does NOT dissolve the run (chain stays intact)', async () => {
     store._testSeedRuns([run('r1', ['pA', 'pB'], 'pending', { locked: true })])
-    store._testSetActiveRun(run('r1', ['pA', 'pB'], 'pending', { locked: true }))
     api.sequenceRuns.update.mockResolvedValueOnce({
       data: run('r1', ['pA', 'pB'], 'pending', { locked: false }),
     })

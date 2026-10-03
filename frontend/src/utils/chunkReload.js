@@ -28,18 +28,18 @@ export function isChunkLoadError(error) {
 
 function notifyStale(toast) {
   if (typeof toast === 'function') {
-    toast(STALE_MESSAGE, { timeout: 0 })
+    toast(STALE_MESSAGE)
     return
   }
   if (typeof window === 'undefined') return
   if (window.$toast && typeof window.$toast.warning === 'function') {
-    window.$toast.warning(STALE_MESSAGE, { timeout: 0 })
+    window.$toast.warning(STALE_MESSAGE)
     return
   }
   if (typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(
       new CustomEvent('show-toast', {
-        detail: { message: STALE_MESSAGE, type: 'warning', timeout: 0 },
+        detail: { message: STALE_MESSAGE, type: 'warning' },
       })
     )
   }

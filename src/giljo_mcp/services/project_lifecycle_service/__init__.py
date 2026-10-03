@@ -8,13 +8,11 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
-    AlreadyExistsError,
     BaseGiljoError,
     ProjectStateError,
     ResourceNotFoundError,
@@ -98,15 +96,12 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
                 ws_mgr = websocket_manager or self._websocket_manager
                 if ws_mgr:
-                    try:
-                        await ws_mgr.broadcast_project_update(
-                            project_id=project.id,
-                            update_type="status_changed",
-                            project_data=_build_ws_project_data(project),
-                            tenant_key=project.tenant_key,
-                        )
-                    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                        self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                    await ws_mgr.broadcast_project_update(
+                        project_id=project.id,
+                        update_type="status_changed",
+                        project_data=_build_ws_project_data(project),
+                        tenant_key=project.tenant_key,
+                    )
 
                 await self._ensure_orchestrator_fixture(
                     session=session,
@@ -118,21 +113,6 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
         except (ResourceNotFoundError, ProjectStateError):
             raise
-        except IntegrityError as e:
-            if "idx_project_single_active_per_product" in str(e):
-                raise AlreadyExistsError(
-                    message=(
-                        "Another project is already active for this product. "
-                        "Deactivate it first, or use the activate endpoint, "
-                        "which handles this automatically."
-                    ),
-                    error_code="ANOTHER_PROJECT_ACTIVE",
-                    context={"project_id": project_id},
-                ) from e
-            self._logger.exception("Failed to activate project")
-            raise BaseGiljoError(
-                message=f"Failed to activate project: {e!s}", context={"project_id": project_id}
-            ) from e
         except Exception as e:
             self._logger.exception("Failed to activate project")
             raise BaseGiljoError(
@@ -177,15 +157,12 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
             ws_mgr = websocket_manager or self._websocket_manager
             if ws_mgr:
-                try:
-                    await ws_mgr.broadcast_project_update(
-                        project_id=project.id,
-                        update_type="status_changed",
-                        project_data=_build_ws_project_data(project),
-                        tenant_key=project.tenant_key,
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                await ws_mgr.broadcast_project_update(
+                    project_id=project.id,
+                    update_type="status_changed",
+                    project_data=_build_ws_project_data(project),
+                    tenant_key=project.tenant_key,
+                )
 
             await self._broadcast_agents_removed(
                 ws_mgr, resolved_tenant, project_id, removed, product_id=project.product_id
@@ -229,15 +206,12 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
             ws_mgr = websocket_manager or self._websocket_manager
             if ws_mgr:
-                try:
-                    await ws_mgr.broadcast_project_update(
-                        project_id=project.id,
-                        update_type="status_changed",
-                        project_data=_build_ws_project_data(project),
-                        tenant_key=project.tenant_key,
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                await ws_mgr.broadcast_project_update(
+                    project_id=project.id,
+                    update_type="status_changed",
+                    project_data=_build_ws_project_data(project),
+                    tenant_key=project.tenant_key,
+                )
 
             return project
 
@@ -318,6 +292,15 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 context={"project_id": project_id, "tenant_key": tenant_key},
             ) from e
 
+    @staticmethod
+    def stamp_completed(project: Project, summary: str) -> None:
+        now = datetime.now(UTC)
+        project.status = ProjectStatus.COMPLETED
+        project.completed_at = now
+        project.updated_at = now
+        project.closeout_executed_at = now
+        project.orchestrator_summary = summary
+
     async def _complete_project_transaction(
         self,
         session: AsyncSession,
@@ -330,8 +313,6 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         git_commits: list[dict] | None = None,
         decommission_events_out: list[AgentStatusChangeEvent] | None = None,
     ) -> ProjectCompleteResult:
-        now = datetime.now(UTC)
-
         project = await self._repo.get_by_id(session, tenant_key, project_id)
 
         if not project:
@@ -340,11 +321,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 context={"project_id": project_id, "tenant_key": tenant_key},
             )
 
-        project.status = ProjectStatus.COMPLETED
-        project.completed_at = now
-        project.updated_at = now
-        project.closeout_executed_at = now
-        project.orchestrator_summary = summary
+        self.stamp_completed(project, summary)
 
         await mark_chain_member_status(
             db_manager=self.db_manager,
@@ -370,7 +347,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 db_manager=self.db_manager,
                 session=session,
                 force=True,
-                git_commits=git_commits or None,
+                git_commits=git_commits or [],
                 decommission_events_out=decommission_events,
             )
         except (ResourceNotFoundError, ValidationError, ProjectStateError, OSError):
@@ -406,20 +383,17 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
         ws_mgr = self._websocket_manager
         if ws_mgr:
-            try:
-                await ws_mgr.broadcast_project_update(
-                    project_id=project_id,
-                    update_type="status_changed",
-                    project_data={
-                        "name": project.name,
-                        "status": "completed",
-                        "mission": project.mission,
-                        "product_id": project.product_id,
-                    },
-                    tenant_key=tenant_key,
-                )
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+            await ws_mgr.broadcast_project_update(
+                project_id=project_id,
+                update_type="status_changed",
+                project_data={
+                    "name": project.name,
+                    "status": "completed",
+                    "mission": project.mission,
+                    "product_id": project.product_id,
+                },
+                tenant_key=tenant_key,
+            )
 
         await self._broadcast_memory_update(
             project_id=project_id,
@@ -492,20 +466,17 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
                 ws_mgr = self._websocket_manager
                 if ws_mgr:
-                    try:
-                        await ws_mgr.broadcast_project_update(
-                            project_id=project_id,
-                            update_type="status_changed",
-                            project_data={
-                                "name": project.name,
-                                "status": ProjectStatus.INACTIVE.value,
-                                "mission": project.mission,
-                                "product_id": project.product_id,
-                            },
-                            tenant_key=tenant_key,
-                        )
-                    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                        self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                    await ws_mgr.broadcast_project_update(
+                        project_id=project_id,
+                        update_type="status_changed",
+                        project_data={
+                            "name": project.name,
+                            "status": ProjectStatus.INACTIVE.value,
+                            "mission": project.mission,
+                            "product_id": project.product_id,
+                        },
+                        tenant_key=tenant_key,
+                    )
 
                 return ProjectResumeResult(
                     message="Project resumed successfully",
@@ -540,20 +511,14 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
         summary_preview = (summary[:200] + "...") if len(summary) > 200 else summary
 
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="project:memory_updated",
-                data={
-                    "project_id": project_id,
-                    "project_name": project_name,
-                    "sequence_number": sequence_number,
-                    "summary_preview": summary_preview,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-            )
-        except Exception as ws_error:
-            self._logger.error(
-                f"[WEBSOCKET ERROR] Failed to broadcast project:memory_updated: {ws_error}",
-                exc_info=True,
-            )
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="project:memory_updated",
+            data={
+                "project_id": project_id,
+                "project_name": project_name,
+                "sequence_number": sequence_number,
+                "summary_preview": summary_preview,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )

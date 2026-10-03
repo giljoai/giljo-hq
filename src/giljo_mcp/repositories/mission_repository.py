@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
+from giljo_mcp.repositories.agent_job_repository import latest_execution_for_job
 from giljo_mcp.repositories.product_agent_selection import template_ids_for_product
 from giljo_mcp.template_renderer import MAX_PACKAGED_TEMPLATES
 
@@ -50,19 +51,9 @@ class MissionRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        result = await session.execute(
-            select(AgentExecution)
-            .where(
-                and_(
-                    AgentExecution.job_id == job_id,
-                    AgentExecution.tenant_key == tenant_key,
-                    AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
-                )
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
+        return await latest_execution_for_job(
+            session, tenant_key, job_id, AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES)
         )
-        return result.scalar_one_or_none()
 
     async def get_project_by_id(
         self,

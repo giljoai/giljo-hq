@@ -133,6 +133,11 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a human reviewed the finished project (NULL = finished but not yet reviewed)",
+    )
     implementation_launched_at = Column(
         DateTime(timezone=True),
         nullable=True,

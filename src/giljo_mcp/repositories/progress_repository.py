@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob, AgentTodoItem
+from giljo_mcp.repositories.agent_job_repository import latest_execution_for_job
 
 
 logger = logging.getLogger(__name__)
@@ -31,18 +32,9 @@ class ProgressRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
+        return await latest_execution_for_job(
+            session, tenant_key, job_id, AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES)
         )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
 
     async def get_decommissioned_execution(
         self,
@@ -50,18 +42,7 @@ class ProgressRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status == "decommissioned",
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await latest_execution_for_job(session, tenant_key, job_id, AgentExecution.status == "decommissioned")
 
     async def get_completed_execution(
         self,
@@ -69,18 +50,9 @@ class ProgressRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution | None:
-        stmt = (
-            select(AgentExecution)
-            .where(
-                AgentExecution.job_id == job_id,
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.in_(["complete", "closed"]),
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
+        return await latest_execution_for_job(
+            session, tenant_key, job_id, AgentExecution.status.in_(["complete", "closed"])
         )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
 
     async def get_job(
         self,

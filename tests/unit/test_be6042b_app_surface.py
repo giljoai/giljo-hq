@@ -34,7 +34,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 261
+EXPECTED_ROUTE_COUNT = 254
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -43,6 +43,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/.well-known/openai-apps-challenge", frozenset({"GET"})),
         ("/.well-known/oauth-authorization-server", frozenset({"GET"})),
         ("/.well-known/oauth-protected-resource", frozenset({"GET"})),
+        ("/connect.md", frozenset({"GET"})),
         ("/.well-known/oauth-protected-resource/{resource_path:path}", frozenset({"GET"})),
         ("/.well-known/openid-configuration", frozenset({"GET"})),
         ("/api/agent-jobs/", frozenset({"GET"})),
@@ -102,9 +103,6 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/organizations/{org_id}/members/{user_id}", frozenset({"DELETE"})),
         ("/api/organizations/{org_id}/members/{user_id}", frozenset({"PUT"})),
         ("/api/organizations/{org_id}/transfer", frozenset({"POST"})),
-        ("/api/serena/settings", frozenset({"GET"})),
-        ("/api/serena/status", frozenset({"GET"})),
-        ("/api/serena/toggle", frozenset({"POST"})),
         ("/api/setup/status", frozenset({"GET"})),
         ("/api/slash/execute", frozenset({"POST"})),
         ("/api/system/status", frozenset({"GET"})),
@@ -114,11 +112,6 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/config/frontend", frozenset({"GET"})),
         ("/api/v1/config/health/database", frozenset({"GET"})),
         ("/api/v1/config/network-info", frozenset({"GET"})),
-        ("/api/v1/config/root-ca", frozenset({"GET"})),
-        ("/api/v1/config/ssl", frozenset({"GET"})),
-        ("/api/v1/config/ssl", frozenset({"POST"})),
-        ("/api/v1/config/ssl/cert/reference", frozenset({"POST"})),
-        ("/api/v1/config/ssl/cert/upload", frozenset({"POST"})),
         ("/api/v1/products/", frozenset({"GET"})),
         ("/api/v1/products/", frozenset({"POST"})),
         ("/api/v1/products/active/vision-stats", frozenset({"GET"})),
@@ -171,6 +164,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/projects/{project_id}/restage", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/restore", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/review", frozenset({"GET"})),
+        ("/api/v1/projects/{project_id}/reviewed", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/summary", frozenset({"GET"})),
         ("/api/v1/projects/{project_id}/unstage", frozenset({"POST"})),
         ("/api/v1/prompts/agent/{agent_id}", frozenset({"GET"})),
@@ -208,7 +202,6 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/stats/call-counts", frozenset({"GET"})),
         ("/api/v1/stats/dashboard", frozenset({"GET"})),
         ("/api/v1/stats/mcp-tool-calls", frozenset({"GET"})),
-        ("/api/v1/stats/system", frozenset({"GET"})),
         ("/api/v1/system/orchestrator-prompt", frozenset({"GET"})),
         ("/api/v1/system/orchestrator-prompt", frozenset({"PUT"})),
         ("/api/v1/system/orchestrator-prompt/reset", frozenset({"POST"})),
@@ -441,10 +434,7 @@ def test_route_surface_hermetic_against_polluted_state_config(monkeypatch):
 
     monkeypatch.setattr(app_module.state, "config", MagicMock())
     polluted = _route_signatures(app_module.create_app())
-    assert spa_mount not in polluted, (
-        "expected a polluted state.config to drop the SPA mount — if this "
-        "assertion fails the flake mechanism changed and this guard is stale."
-    )
+    assert spa_mount in polluted, "a polluted state.config must not drop the SPA mount"
 
     monkeypatch.setattr(app_module.state, "config", None)
     pinned = _route_signatures(app_module.create_app())

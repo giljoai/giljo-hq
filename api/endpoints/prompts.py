@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from api.dependencies.websocket import WebSocketDependency, get_websocket_dependency
+from api.endpoints._boundary_types import IdPath
 from api.endpoints.chain_prompt_bootstrap import (
     CHAIN_MEMBER_FALLBACK_PREAMBLE,
     _build_conductor_bootstrap,
@@ -70,13 +71,13 @@ async def generate_orchestrator_prompt_thin(
     """
     Generate a thin orchestrator prompt for GiljoMCP Agent Orchestration.
 
-    Handover 0088: Thin Client Architecture
+    Thin Client Architecture
     - Prompt is only ~300 tokens (down from ~3500)
     - Mission fetched via get_staging_instructions() MCP tool
     - Field priorities applied at MCP tool call time, not prompt generation
     - Context size tracking built into thin client flow
 
-    Handover 0246a (Nov 2025): Further optimizations
+    Further optimizations
     - Staging prompt reduced from ~1600 to 931 tokens (42% reduction)
     - 7-task standardized workflow
     - Clean separation between staging/execution
@@ -138,7 +139,7 @@ async def generate_orchestrator_prompt_thin(
 
 @router.get("/agent/{agent_id}", response_model=AgentPromptResponse)
 async def generate_agent_prompt(
-    agent_id: str,
+    agent_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -228,8 +229,8 @@ async def generate_agent_prompt(
 
 @router.get("/staging/{project_id}", response_model=StagingPromptResponse)
 async def generate_staging_prompt(
-    project_id: str,
-    tool: str = Query("claude-code", pattern=_TOOL_TYPE_PATTERN),
+    project_id: IdPath,
+    tool: str = Query(HARNESS_CLAUDE_CODE, pattern=_TOOL_TYPE_PATTERN),
     execution_mode: str | None = Query(
         None,
         pattern=_EXECUTION_MODE_PATTERN,
@@ -244,11 +245,11 @@ async def generate_staging_prompt(
     project_service: ProjectService = Depends(get_project_service),
 ):
     """
-    Generate thin client orchestrator staging prompt (Handover 0088).
+    Generate thin client orchestrator staging prompt.
 
     UPDATED FOR THIN CLIENT ARCHITECTURE:
-    - OLD (Handover 0079): Returns 2000-3000 line fat prompt with embedded mission
-    - NEW (Handover 0088): Returns ~10 line thin prompt with MCP tool reference
+    - OLD: Returns 2000-3000 line fat prompt with embedded mission
+    - NEW: Returns ~10 line thin prompt with MCP tool reference
 
     THE HEART OF GILJOAI - Generates intelligent, token-efficient orchestrator
     prompts that enable AI agents to discover context via MCP, create condensed
@@ -380,12 +381,12 @@ async def generate_staging_prompt(
 
 @router.get("/implementation/{project_id}", response_model=ImplementationPromptResponse)
 async def get_implementation_prompt(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     """
-    Generate implementation prompt for CLI mode projects (Handover 0337 - Task 1).
+    Generate implementation prompt for CLI mode projects.
 
     This endpoint generates the implementation phase prompt for Claude Code CLI mode.
     After staging (where orchestrator plans and spawns agent jobs), the user pastes
@@ -441,18 +442,18 @@ async def get_implementation_prompt(
 
 @router.get("/chain-staging/{run_id}", response_model=ChainPromptResponse)
 async def get_chain_staging_prompt(
-    run_id: str,
+    run_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ChainPromptResponse:
     """Return the chain STAGING prompt for the dedicated, project-less conductor.
 
-    BE-6191: Resolves the run's DEDICATED, project-less conductor (minted at
+    Resolves the run's DEDICATED, project-less conductor (minted at
     run-create; run['conductor_agent_id']), NOT the head project's orchestrator, and
     returns a THIN bootstrap. The conductor's full chain protocol (CH_CAPABILITY +
     CH_CHAIN_STAGING) is fetched by the conductor itself via get_staging_instructions
-    on its OWN project-less job (which resolves the conductor branch, BE-6186); the
+    on its OWN project-less job (which resolves the conductor branch); the
     endpoint no longer fat-pastes the chapter bodies or a dangling agent_templates
     appendix.
 
@@ -460,7 +461,7 @@ async def get_chain_staging_prompt(
     per-project boundary gates don't 409.
 
     Raises 404 when the run is not found; 409 when the run has no resolved_order or no
-    dedicated conductor (legacy pre-BE-6184 run).
+    dedicated conductor (a run created by an older version).
     """
     svc_run = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db)
     try:
@@ -523,13 +524,13 @@ async def get_chain_staging_prompt(
 
 @router.get("/chain-implementation/{run_id}", response_model=ChainPromptResponse)
 async def get_chain_implementation_prompt(
-    run_id: str,
+    run_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ChainPromptResponse:
     """Return the chain IMPLEMENTATION prompt for the dedicated, project-less conductor.
 
-    BE-6191: Resolves the run's DEDICATED, project-less conductor (minted at
+    Resolves the run's DEDICATED, project-less conductor (minted at
     run-create; run['conductor_agent_id']), NOT the head project's orchestrator, and
     returns a THIN drive bootstrap. The conductor's full chain-drive protocol
     (CH_CHAIN_DRIVE) is fetched by the conductor itself via get_job_mission on its
@@ -539,7 +540,7 @@ async def get_chain_implementation_prompt(
     one paste, one conductor, drives all N projects sequentially.
 
     Raises 404 when the run is not found; 409 when the run has no resolved_order or no
-    dedicated conductor (legacy pre-BE-6184 run).
+    dedicated conductor (a run created by an older version).
     """
     tenant_key = current_user.tenant_key
     svc_run = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db)
@@ -594,7 +595,7 @@ async def get_chain_implementation_prompt(
 
 @router.get("/chain-member/{project_id}", response_model=ChainMemberPromptResponse)
 async def get_chain_member_prompt(
-    project_id: str,
+    project_id: IdPath,
     fallback: bool = Query(
         default=False,
         description=(

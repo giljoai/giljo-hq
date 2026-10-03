@@ -98,3 +98,23 @@ async def filter_runs_by_product(
     in_product: set[str] = {str(pid) for (pid,) in rows.all()}
 
     return [run for run in runs if any(pid in in_product for pid in _run_member_ids(run))]
+
+
+async def member_product_ids(
+    *,
+    session: AsyncSession,
+    runs: list[SequenceRun],
+    tenant_key: str,
+) -> dict[str, str | None]:
+    member_ids = {pid for run in runs for pid in _run_member_ids(run)}
+    product_of: dict[str, str] = {}
+    if member_ids:
+        rows = await session.execute(
+            select(Project.id, Project.product_id).where(
+                Project.tenant_key == tenant_key,
+                Project.id.in_(member_ids),
+                project_not_trashed(),
+            )
+        )
+        product_of = {str(pid): str(product) for pid, product in rows.all() if product}
+    return {run.id: next((product_of[pid] for pid in _run_member_ids(run) if pid in product_of), None) for run in runs}

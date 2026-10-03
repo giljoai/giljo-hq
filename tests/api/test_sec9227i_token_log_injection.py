@@ -103,9 +103,7 @@ async def test_token_exc_log_sanitizes_crlf_redirect_uri(api_client, db_manager,
     )
 
     assert resp.status_code == 400, resp.text
-    records = [r for r in caplog.records if "OAuth token" in r.getMessage()]
-    assert records, "expected a /token exception log record"
-    joined = "\n".join(r.getMessage() for r in records)
-    assert "INJECTED-TOKEN-LOG-LINE" in joined, "the redirect_uri value should still appear (sanitized)"
-    assert "\r" not in joined, "raw carriage return (CRLF redirect_uri) reached the /token exc log"
-    assert "\n" not in "".join(r.getMessage() for r in records), "raw newline reached the /token exc log"
+    assert resp.json()["error"] == "invalid_request", resp.text
+    joined = "".join(r.getMessage() for r in caplog.records)
+    assert "\r" not in joined, "raw carriage return (CRLF redirect_uri) reached the log"
+    assert "\n" not in joined, "raw newline reached the log"

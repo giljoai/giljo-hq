@@ -279,6 +279,7 @@ async def test_set_agent_status_same_tenant_succeeds(db_session, two_tenant_orch
     )
 
     assert result.job_id == job_a.job_id
+    assert result.message == "Status set to Blocked"
 
 
 

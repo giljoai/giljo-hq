@@ -19,7 +19,8 @@ logger = logging.getLogger("api.app")
 
 
 async def install_saas_cache_backends(state: APIState, *, giljo_mode: str) -> None:
-    if giljo_mode != "saas":
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
         return
 
     redis_url = os.environ.get("REDIS_URL")

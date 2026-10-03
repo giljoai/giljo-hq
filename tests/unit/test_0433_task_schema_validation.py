@@ -90,7 +90,8 @@ def test_task_create_model_fields_metadata():
 
     description = product_id_field.description
     assert description is not None, "product_id should have description"
-    assert "0433" in description, "Description should reference Handover 0433"
+    assert "Product ID" in description, "Description should say what the field is"
+    assert "0433" not in description, "Description must not carry an internal id"
 
 
 

@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints._boundary_types import ID_MAX, IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import BaseGiljoError
 from giljo_mcp.models import User
@@ -30,7 +31,7 @@ router = APIRouter()
 
 @router.get("/{template_id}/history", response_model=list[TemplateHistoryResponse])
 async def get_template_history(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -38,7 +39,6 @@ async def get_template_history(
     """
     Get template version history.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.info("User %s requesting history for template %s", sanitize(current_user.username), sanitize(template_id))
 
@@ -70,8 +70,8 @@ async def get_template_history(
 
 @router.post("/{template_id}/restore/{archive_id}", response_model=TemplateResponse)
 async def restore_template(
-    template_id: str,
-    archive_id: str,
+    template_id: IdPath,
+    archive_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -79,7 +79,6 @@ async def restore_template(
     """
     Restore template from archive.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.info(
         "User %s restoring template %s from archive %s",
@@ -115,7 +114,7 @@ async def restore_template(
 
 @router.post("/{template_id}/reset", response_model=TemplateResponse)
 async def reset_template(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -123,7 +122,6 @@ async def reset_template(
     """
     Reset template to default state.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.info("User %s resetting template %s", sanitize(current_user.username), sanitize(template_id))
 
@@ -147,7 +145,7 @@ async def reset_template(
 
 @router.post("/reset-all", response_model=TemplateResetAllResponse)
 async def reset_all_templates(
-    product_id: str = Query(..., description="Product whose agents are being reset"),
+    product_id: str = Query(..., max_length=ID_MAX, description="Product whose agents are being reset"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -203,7 +201,7 @@ async def reset_all_templates(
 
 @router.post("/{template_id}/reset-system", response_model=TemplateResponse)
 async def reset_system_instructions(
-    template_id: str,
+    template_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
@@ -211,7 +209,6 @@ async def reset_system_instructions(
     """
     Reset system instructions to default.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.info(
         "User %s resetting system instructions for template %s", sanitize(current_user.username), sanitize(template_id)

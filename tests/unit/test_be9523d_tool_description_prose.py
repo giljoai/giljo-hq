@@ -68,10 +68,16 @@ class TestLaunchImplementationDropsCliFraming:
         description = _tool_description("launch_implementation")
         assert "Headless setting" in description
 
-    def test_states_launch_does_not_activate(self):
+    def test_states_launch_also_activates(self):
         description = _tool_description("launch_implementation")
-        assert "does NOT activate" in description
+        assert "also makes an inactive project active" in description
+        assert "does NOT activate" not in description
         assert "project_active" in description
+
+    def test_stage_project_no_longer_calls_activation_a_separate_step(self):
+        description = _tool_description("stage_project")
+        assert "separate step" not in description
+        assert "makes an inactive project active" in description
 
 
 class TestStageAndImplementProjectDescribeBothDoors:
@@ -106,6 +112,6 @@ class TestGiljoSetupStatesNotifyNeverAutoInstall:
         description = _tool_description("giljo_setup")
         assert "skills_version" in description
 
-    def test_states_never_without_explicit_ask(self):
+    def test_states_files_change_only_after_the_user_agrees(self):
         description = _tool_description("giljo_setup")
-        assert "NEVER" in description
+        assert "only rewritten after the user agrees" in description

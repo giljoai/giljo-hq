@@ -13,17 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import AgentTemplate
-from giljo_mcp.tenant_guard import TenantIsolationError
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 logger = logging.getLogger(__name__)
-
-
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data) if not isinstance(data, str) else data
-    return len(text) // 4
 
 
 @asynccontextmanager
@@ -64,23 +57,14 @@ async def get_agent_templates(
         templates = list(result.scalars().all())
 
         if product_id and templates:
-            try:
-                from giljo_mcp.repositories.product_agent_selection import (
-                    filter_templates_by_ids,
-                    template_ids_for_product,
-                )
+            from giljo_mcp.repositories.product_agent_selection import (
+                filter_templates_by_ids,
+                template_ids_for_product,
+            )
 
-                templates = filter_templates_by_ids(
-                    templates, await template_ids_for_product(session, product_id, tenant_key)
-                )
-            except TenantIsolationError:
-                raise
-            except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
-                logger.warning(
-                    "Failed to filter templates by product assignments (product_id=%s): %s",
-                    product_id,
-                    exc,
-                )
+            templates = filter_templates_by_ids(
+                templates, await template_ids_for_product(session, product_id, tenant_key)
+            )
 
         if not templates:
             logger.debug("no_agent_templates tenant_key=%s operation=get_agent_templates", tenant_key)

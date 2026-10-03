@@ -1,19 +1,13 @@
 <template>
   <BaseDialog
     :model-value="modelValue"
-    :icon="dialogIcon"
+    hide-icon
     :title="dialogTitle"
     :size="600"
     scrollable
     @update:model-value="$emit('update:modelValue', $event)"
     @cancel="$emit('cancel')"
   >
-    <template #titleAppend>
-      <span v-if="isHandover" class="hnd-pill" :style="hndPillStyle" data-test="handover-pill">
-        {{ RESERVED_HANDOVER_TYPE_ABBR }}
-      </span>
-    </template>
-
     <template #default>
       <v-alert
         v-if="saveError"
@@ -25,10 +19,6 @@
       >
         {{ saveError }}
       </v-alert>
-
-      <p v-if="isHandover" class="text-body-medium text-muted-a11y mb-3" data-test="handover-subtitle">
-        Starts from your handover template. Shape it once in Tools › Agents › Handover template.
-      </p>
 
       <v-form ref="taskFormRef">
         <v-row>
@@ -67,40 +57,38 @@
           @update:model-value="updateField('title', $event)"
         />
 
+        <template v-if="isHandover">
+          <div v-for="field in HANDOVER_FIELDS" :key="field.key" class="mb-2">
+            <v-textarea
+              :model-value="handoverValues[field.key]"
+              :label="field.label"
+              :hint="field.hint"
+              persistent-hint
+              variant="outlined"
+              rows="2"
+              auto-grow
+              :data-test="`handover-field-${field.key}`"
+              @update:model-value="updateHandoverField(field.key, $event)"
+            />
+            <p
+              v-if="field.key === 'links'"
+              class="text-body-small text-muted-a11y mt-1"
+              data-test="handover-tip"
+            >
+              Tip: to copy a file path, Windows: Shift + right-click, then Copy as path. Mac: Option +
+              right-click, then Copy as pathname.
+            </p>
+          </div>
+        </template>
         <v-textarea
+          v-else
           :model-value="currentTask.description"
           label="Description"
           variant="outlined"
-          :rows="isHandover ? 10 : 3"
+          :rows="3"
           data-test="edit-task-description"
           @update:model-value="updateField('description', $event)"
         />
-
-        <div v-if="isHandover" class="handover-checklist" data-test="handover-checklist">
-          <p class="text-body-small text-muted-a11y mb-1" data-test="handover-tip">
-            Windows: Shift + right-click, then Copy as path. Mac: Option + right-click,
-            then Copy as pathname.
-          </p>
-          <div
-            v-for="item in handoverChecklistItems"
-            :key="item.heading"
-            class="handover-checklist-item"
-            :class="`handover-checklist-item--${item.status}`"
-          >
-            <v-icon
-              :icon="item.status === 'done' ? 'mdi-check-circle' : 'mdi-alert-circle-outline'"
-              size="16"
-            />
-            <span>{{ item.heading.replace('## ', '') }}</span>
-          </div>
-          <p
-            v-if="!handoverComplete"
-            class="text-body-small handover-gap-message mt-1"
-            data-test="handover-gap-message"
-          >
-            Still needs: {{ handoverGapNames }}
-          </p>
-        </div>
 
         <v-row>
           <v-col cols="6">
@@ -134,20 +122,24 @@
         color="primary"
         variant="flat"
         :loading="saving"
-        :disabled="!canSaveHandover"
+        data-test="edit-task-save"
         @click="$emit('save', taskFormRef)"
       >
-        {{ editingTask ? 'Update' : 'Create' }}
+        Save
       </v-btn>
     </template>
   </BaseDialog>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { RESERVED_TASK_TYPE_ABBR, RESERVED_HANDOVER_TYPE_ABBR } from '@/utils/constants'
-import { resolveTaxonomyColor, taxonomyBadgeStyle } from '@/utils/taxonomyBadge'
-import { useHandoverChecklist, vanishPlaceholdersOnType } from '@/composables/useHandoverChecklist'
+import {
+  HANDOVER_FIELDS,
+  emptyHandoverValues,
+  joinHandoverFields,
+  splitHandoverDescription,
+} from '@/composables/useHandoverFields'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 
 const props = defineProps({
@@ -184,81 +176,34 @@ const taskFormRef = ref(null)
 const priorityOptions = ['low', 'medium', 'high', 'critical']
 
 function updateField(field, value) {
-  if (field === 'description' && isHandover.value) {
-    value = vanishPlaceholdersOnType(props.currentTask.description || '', value)
-  }
   emit('update:currentTask', { ...props.currentTask, [field]: value })
 }
 
 const isHandover = computed(() => props.currentTask?.task_type === RESERVED_HANDOVER_TYPE_ABBR)
 
 const dialogTitle = computed(() => {
-  if (isHandover.value) return props.editingTask ? 'Edit Agent Handover' : 'New Agent Handover'
-  return props.editingTask ? 'Edit Task' : 'Create Task'
+  if (isHandover.value) return props.editingTask ? 'Edit Agent Handover' : 'Create new Handover'
+  return props.editingTask ? 'Edit Task' : 'Create new Task'
 })
 
-const dialogIcon = computed(() => {
-  if (isHandover.value) return 'mdi-account-arrow-right'
-  return props.editingTask ? 'mdi-pencil' : 'mdi-plus'
-})
+const handoverValues = ref(emptyHandoverValues())
+let lastJoined = null
 
-const hndPillStyle = computed(() =>
-  taxonomyBadgeStyle(resolveTaxonomyColor({ abbreviation: RESERVED_HANDOVER_TYPE_ABBR })),
+watch(
+  () => props.currentTask?.description,
+  (description) => {
+    if (!isHandover.value || description === lastJoined) return
+    handoverValues.value = splitHandoverDescription(description)
+    lastJoined = description || ''
+  },
+  { immediate: true },
 )
 
-const handoverDescription = computed(() => props.currentTask?.description || '')
-const {
-  items: handoverChecklistItems,
-  incomplete: handoverIncomplete,
-  isComplete: handoverComplete,
-} = useHandoverChecklist(handoverDescription)
-
-const handoverGapNames = computed(() =>
-  handoverIncomplete.value.map((item) => item.heading.replace('## ', '')).join(', '),
-)
-
-const canSaveHandover = computed(() => !isHandover.value || handoverComplete.value)
+function updateHandoverField(key, value) {
+  handoverValues.value = { ...handoverValues.value, [key]: value || '' }
+  lastJoined = joinHandoverFields(handoverValues.value)
+  updateField('description', lastJoined)
+}
 
 defineExpose({ taskFormRef })
 </script>
-
-<style lang="scss" scoped>
-@use '../../styles/design-tokens' as *;
-
-// Mirrors TasksTable.vue's `.taxonomy-badge` anatomy (BE-9637): same tinted
-// background + full-brightness text via taxonomyBadgeStyle, a pill radius
-// here since it sits beside a dialog title rather than in a table cell.
-.hnd-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  margin-left: 8px;
-  border-radius: $border-radius-pill;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.62rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.handover-checklist {
-  margin-top: 4px;
-  margin-bottom: 16px;
-}
-
-.handover-checklist-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  color: $color-text-secondary;
-  padding: 2px 0;
-}
-
-.handover-checklist-item--done {
-  color: $color-accent-success;
-}
-
-.handover-gap-message {
-  color: $color-text-secondary;
-}
-</style>

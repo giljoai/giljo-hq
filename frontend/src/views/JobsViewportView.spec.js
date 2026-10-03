@@ -136,7 +136,7 @@ describe('JobsViewportView', () => {
     expect(wrapper.text()).toContain('Gamma')
   })
 
-  it('the filter toolbar narrows the grid without changing the underlying project set', async () => {
+  it('the status line is plain counters: no buttons, no All entry, and the board never changes with them', async () => {
     h.getActive.mockResolvedValue({
       data: [
         NEEDS_INPUT_PROJECT,
@@ -146,51 +146,74 @@ describe('JobsViewportView', () => {
     h.listAgentJobs.mockImplementation((projectId) =>
       Promise.resolve(envelope(projectId === 'proj-1' ? NEEDS_INPUT_AGENTS : [{ agent_display_name: 'orchestrator', status: 'working' }])),
     )
-
     const wrapper = mountView()
     await flushPromises()
     await flushPromises()
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(2)
 
-    await wrapper.find('[data-testid="jobs-filter-needs-input"]').trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Flip the headless launch fence')
+    const line = wrapper.find('[data-testid="jobs-status-counters"]')
+    expect(line.exists()).toBe(true)
+    expect(line.findAll('button, [role="button"]')).toHaveLength(0)
+    expect(line.find('[aria-pressed]').exists()).toBe(false)
+    expect(line.text()).toContain('Needs decision')
+    expect(line.text()).toContain('Needs attention')
+    expect(line.text()).toContain('Implementing')
+    expect(line.text()).toContain('Review')
+    expect(line.text()).not.toMatch(/needs input/i)
+    expect(line.text()).not.toContain('All')
 
-    await wrapper.find('[data-testid="jobs-filter-all"]').trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(2)
+    const before = wrapper.findAll('[data-testid="jobs-board-card-wrap"]').map((n) => n.text())
+    expect(before).toHaveLength(2)
+    await line.find('[data-testid="jobs-status-needs-attention"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]').map((n) => n.text())).toEqual(before)
   })
 
-  it('the filter toolbar covers Activated and Planning, each with a live count', async () => {
+  it('counts 1 decision and 2 attention cards as 1 and 2, and only the decision counter is hot', async () => {
+    const launched = '2026-08-30T22:14:00Z'
+    const mk = (id, alias) => ({ id, taxonomy_alias: alias, name: alias, status: 'active', implementation_launched_at: launched })
+    const agentsBy = {
+      'p-d': [{ agent_display_name: 'tester', status: 'awaiting_user' }],
+      'p-b': [{ agent_display_name: 'implementer', status: 'blocked' }],
+      'p-s': [{ agent_display_name: 'implementer', status: 'silent' }],
+    }
+    h.getActive.mockResolvedValue({ data: [mk('p-d', 'FE-1'), mk('p-b', 'FE-2'), mk('p-s', 'FE-3')] })
+    h.listAgentJobs.mockImplementation((projectId) => Promise.resolve(envelope(agentsBy[projectId] || [])))
+    const wrapper = mountView()
+    await flushPromises()
+    await flushPromises()
+
+    const decision = wrapper.find('[data-testid="jobs-status-needs-decision"]')
+    const attention = wrapper.find('[data-testid="jobs-status-needs-attention"]')
+    expect(decision.find('.jb-filter-n').text()).toBe('1')
+    expect(attention.find('.jb-filter-n').text()).toBe('2')
+    expect(decision.find('.jb-filter-n').classes()).toContain('jb-filter-n--hot')
+    expect(attention.find('.jb-filter-n').classes()).not.toContain('jb-filter-n--hot')
+  })
+
+  it('a zero decision count is not hot', async () => {
+    h.getActive.mockResolvedValue({ data: [NEEDS_INPUT_PROJECT] })
+    h.listAgentJobs.mockResolvedValue(envelope(NEEDS_INPUT_AGENTS))
+    const wrapper = mountView()
+    await flushPromises()
+    await flushPromises()
+    const decision = wrapper.find('[data-testid="jobs-status-needs-decision"]')
+    expect(decision.find('.jb-filter-n').text()).toBe('0')
+    expect(decision.find('.jb-filter-n').classes()).not.toContain('jb-filter-n--hot')
+  })
+
+  it('the staging status line counts Activated and Planning, each with a live count', async () => {
     h.getActive.mockResolvedValue({
       data: [
         { id: 'proj-1', taxonomy_alias: 'BE-1', name: 'Never staged', status: 'active', staging_status: null, implementation_launched_at: null },
         { id: 'proj-2', taxonomy_alias: 'BE-2', name: 'Mid staging', status: 'active', staging_status: 'staging', implementation_launched_at: null },
       ],
     })
-
     const wrapper = mountView()
     await flushPromises()
     await flushPromises()
 
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(2)
-    expect(wrapper.text()).toContain('Activated')
-    expect(wrapper.text()).toContain('Planning')
-
-    const activatedFilter = wrapper.find('[data-testid="jobs-filter-activated"]')
-    expect(activatedFilter.exists()).toBe(true)
-    expect(activatedFilter.text()).toContain('1')
-
-    const planningFilter = wrapper.find('[data-testid="jobs-filter-planning"]')
-    expect(planningFilter.exists()).toBe(true)
-    expect(planningFilter.text()).toContain('1')
-
-    await activatedFilter.trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Never staged')
-
-    await planningFilter.trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Mid staging')
+    expect(wrapper.find('[data-testid="jobs-status-activated"]').text()).toContain('1')
+    expect(wrapper.find('[data-testid="jobs-status-planning"]').text()).toContain('1')
   })
 
   it('opening a card\'s "Jobs detail" opens the ONE shared detail modal with that project\'s agents', async () => {
@@ -304,15 +327,13 @@ describe('JobsViewportView sides (FE-9679)', () => {
     expect(impl.attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Running')
-    expect(wrapper.find('[data-testid="jobs-filter-needs-input"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="jobs-filter-staged"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="jobs-status-needs-decision"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="jobs-status-staged"]').exists()).toBe(false)
 
     await staging.trigger('click')
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(2)
-    expect(wrapper.find('[data-testid="jobs-filter-staged"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="jobs-filter-needs-input"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="jobs-filter-staged"]').trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="jobs-status-staged"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="jobs-status-needs-decision"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Waiting for the go')
   })
 

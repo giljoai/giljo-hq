@@ -76,15 +76,15 @@ The installer presents these options:
    binding. Plain HTTP, no certificates.
 4. **Custom address**: Enter an IP or domain name manually. A private-LAN IP serves
    plain HTTP; a public domain/IP (a WAN posture) installs over plain HTTP with a
-   strong cleartext warning — front it with a TLS-terminating reverse proxy/tunnel,
-   or add your own certificate afterward in Settings → Network.
+   strong cleartext warning — front it with a TLS-terminating reverse proxy or tunnel
+   (see the User Guide, "HTTPS and Browser Configuration").
 
 The server runs over plain **HTTP by default** for both localhost and LAN — no
-certificate step. HTTPS is an opt-in upgrade you enable later in **Settings →
-Network** (bring your own certificate). On a LAN, traffic is unencrypted: this is
-appropriate for a trusted home/single-room network behind a trusted router, and you
-should not port-forward the server to the internet. For an untrusted/shared network
-or any internet exposure, enable HTTPS.
+certificate step, and the server has no built-in HTTPS. On a LAN, traffic is
+unencrypted: this is appropriate for a trusted home/single-room network behind a
+trusted router, and you should not port-forward the server to the internet. For an
+untrusted/shared network or any internet exposure, put a reverse proxy such as Caddy
+in front (see step 13).
 
 Press Enter to accept the default (localhost only).
 
@@ -155,19 +155,16 @@ skipped and the frontend is unavailable.
 After npm install completes, you are prompted to choose production or development
 mode for the frontend build.
 
-### 13. Configure HTTPS (optional, after install)
+### 13. Add HTTPS (optional, after install)
 
-The installer no longer sets up certificates. To encrypt traffic, enable HTTPS in
-**Settings → Network** after the server is running. GiljoAI is bring-your-own-cert:
-supply a certificate trusted by your browsers and AI coding agents — a real CA, your
-organisation's internal CA, or a local CA (such as mkcert) whose root certificate you
-trust on each client. You can **upload** the PEM certificate + key, or **reference**
-them by path on the server (for IT-managed/rotated certificates). Then flip the HTTPS
-toggle and restart.
+The installer does not set up certificates and the server does not terminate TLS. To
+encrypt traffic, or to sign in to AI tools with OAuth, put a reverse proxy such as
+Caddy in front of the server. The User Guide section "HTTPS and Browser
+Configuration" has a working Caddy example and notes for Cloudflare Tunnel and
+Tailscale.
 
-Changing the protocol (HTTP↔HTTPS) changes the server URL, so you must re-attach and
-re-authenticate your AI coding tools afterwards. Node.js-based tools (Codex CLI) also need the certificate trusted in the system CA store; the Network
-settings page shows the exact commands.
+Switching from HTTP to an HTTPS address changes the server URL, so re-attach and
+re-authenticate your AI coding tools afterwards.
 
 ### 14. Open the dashboard
 
@@ -218,20 +215,6 @@ $env:GILJO_API_KEY="<api-key>"
 Then register the server:
 ```bash
 codex mcp add giljo_hq --url <server-url>/mcp --bearer-token-env-var GILJO_API_KEY
-```
-
-**If you enabled HTTPS: trust the certificate (one-time, Node.js tools only)**
-
-If your server uses HTTPS, Codex CLI needs to trust the system CA store.
-Run this before starting the tool:
-
-```bash
-# Linux/macOS
-export NODE_OPTIONS="--use-system-ca"
-
-# Windows PowerShell
-$env:NODE_OPTIONS = "--use-system-ca"
-[System.Environment]::SetEnvironmentVariable('NODE_OPTIONS', '--use-system-ca', 'User')
 ```
 
 After running the configuration command, start or restart your AI coding tool. The
@@ -333,14 +316,13 @@ process occupies these ports:
 1. Stop the conflicting process, or
 2. Edit `config.yaml` to change `api_port` and `dashboard_port` before starting.
 
-### HTTPS certificate not trusted (HTTPS mode)
+### HTTPS certificate not trusted (reverse proxy)
 
-If you enabled HTTPS in Settings → Network: Node.js-based tools (Codex CLI)
-reject self-signed or private certificates unless the system CA store is trusted.
-Set `NODE_OPTIONS="--use-system-ca"` in your shell environment before starting the
-tool. The setup wizard shows the exact command for your platform.
-
-Claude Code does not require this step because it has its own certificate handling.
+If you put a reverse proxy in front with a private certificate (for example Caddy
+`tls internal`), Node.js-based tools (Claude Code, Codex CLI, OpenCode) reject it
+unless they trust the proxy's root certificate. Set `NODE_EXTRA_CA_CERTS` to the path
+of the proxy's `root.crt` before starting the tool. See the User Guide, "HTTPS and
+Browser Configuration".
 
 ### Connection refused after installation
 

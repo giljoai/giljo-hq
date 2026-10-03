@@ -70,13 +70,14 @@ _EntryType = Literal[
     title="Write Project Closeout",
     description=(
         "Close a project and write the 360 Memory closeout entry. Orchestrator-only, at project "
-        "completion. All agents MUST be complete/closed/decommissioned first (resolve via "
-        "report_progress + complete_job)."
+        "completion. All agents must be complete, closed or decommissioned first (resolve via "
+        "report_progress + complete_job). With git integration on it needs git_commits, "
+        "no_code_changes, or git_commits=[]."
     ),
     annotations=_tool_hints("write_project_closeout", destructive=True),
 )
 async def write_project_closeout(
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
     summary: Annotated[
         str,
         Field(description=f"Brief 2-3 sentence headline of project outcome. {_SUMMARY_CAP_TEXT} {_SUMMARY_ORDER_TEXT}"),
@@ -97,7 +98,7 @@ async def write_project_closeout(
         list[str] | None,
         Field(
             description=(
-                "REQUIRED-IN-SPIRIT: 1-5 tags from the 16-entry controlled "
+                "Send 1-5 tags from the 16-entry controlled "
                 "vocabulary. Change-type axis: feature, bug-fix, refactor, perf, "
                 "security, docs, test, chore. Domain axis: frontend, backend, "
                 "database, api, infrastructure, ui-ux, integration. Operational: "
@@ -156,13 +157,13 @@ async def write_project_closeout(
     title="Write Memory Entry",
     description=(
         "Write a 360 memory entry for project completion or handover (orchestrator on completion, "
-        "or any agent on handover). With git integration on, project_completion needs git_commits "
-        "or no_code_changes."
+        "or any agent on handover). With git integration on, project_completion needs git_commits, "
+        "no_code_changes, or git_commits=[]."
     ),
     annotations=_tool_hints("write_memory_entry"),
 )
 async def write_memory_entry(
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
     summary: Annotated[
         str,
         Field(
@@ -193,7 +194,8 @@ async def write_memory_entry(
         ),
     ] = "project_completion",
     author_job_id: Annotated[
-        str, Field(description="Job ID of the authoring agent (usually the orchestrator's job_id).")
+        str,
+        Field(max_length=MCP_ID_MAX, description="The orchestrator's job ID; required for project_completion."),
     ] = "",
     git_commits: Annotated[
         list[dict | str] | None,

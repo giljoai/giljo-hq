@@ -80,7 +80,7 @@ def test_step_a_fails_loud_on_headless() -> None:
 
 
 def test_ch_capability_subagent_spawns_suborch_in_fresh_terminal() -> None:
-    cap = _build_ch_capability(execution_mode="claude_code_cli", can_spawn_terminals=True)
+    cap = _build_ch_capability(execution_mode="claude_code_cli")
     low = cap.lower()
     assert "fresh" in low and "terminal" in low, "sub-orch spawn is always a fresh terminal"
     assert "run each p_i as a real task()" not in low, "the old Task()-spawns-the-sub-orch language must be gone"
@@ -89,7 +89,7 @@ def test_ch_capability_subagent_spawns_suborch_in_fresh_terminal() -> None:
 
 
 def test_ch_capability_multi_terminal_spawns_suborch_in_fresh_terminal() -> None:
-    cap = _build_ch_capability(execution_mode="multi_terminal", can_spawn_terminals=True)
+    cap = _build_ch_capability(execution_mode="multi_terminal")
     low = cap.lower()
     assert "fresh" in low and "terminal" in low
     assert "worker" in low

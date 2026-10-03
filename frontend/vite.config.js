@@ -37,17 +37,11 @@ const HOST = dashboardHost
 // For production, external_host is used by clients to reach the server
 let apiHost = '127.0.0.1'
 let apiPort = 7272
-let sslEnabled = false
-let sslCertPath = null
-let sslKeyPath = null
 try {
   const configPath = resolve(__dirname, '../config.yaml')
   if (fs.existsSync(configPath)) {
     const configData = yaml.load(fs.readFileSync(configPath, 'utf8'))
     apiPort = parseInt(configData?.server?.api_port || 7272, 10)
-    sslEnabled = configData?.features?.ssl_enabled === true
-    sslCertPath = configData?.paths?.ssl_cert || null
-    sslKeyPath = configData?.paths?.ssl_key || null
     // ALWAYS use localhost for Vite dev proxy (same machine as backend)
     // external_host is for client-to-server connections, not dev proxy
     apiHost = '127.0.0.1'
@@ -55,8 +49,7 @@ try {
 } catch (err) {
   console.warn('[Vite] Could not determine API proxy target, defaulting to 127.0.0.1:7272:', err.message)
 }
-const apiProtocol = sslEnabled ? 'https' : 'http'
-const API_TARGET = `${apiProtocol}://${apiHost}:${apiPort}`
+const API_TARGET = `http://${apiHost}:${apiPort}`
 
 // Build Sentry vite plugin config — only active in production SaaS/Demo builds
 // when SENTRY_AUTH_TOKEN is present. No-ops silently otherwise.
@@ -124,13 +117,6 @@ export default defineConfig(({ mode }) => ({
     host: HOST,
     strictPort: false, // Allow fallback to alternative port if occupied
     cors: true,
-    // Serve HTTPS when SSL is enabled in config.yaml (uses same certs as backend)
-    ...(sslEnabled && sslCertPath && sslKeyPath && fs.existsSync(sslCertPath) && fs.existsSync(sslKeyPath) ? {
-      https: {
-        cert: fs.readFileSync(sslCertPath),
-        key: fs.readFileSync(sslKeyPath),
-      }
-    } : {}),
     proxy: {
       // Proxy API to backend to avoid CORS in development
       '/api': {
@@ -166,6 +152,12 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
         ws: true,
+      },
+      // Agent-readable connect page (BE-9726): served by the backend, not the SPA.
+      '/connect.md': {
+        target: API_TARGET,
+        changeOrigin: true,
+        secure: false,
       },
       // MCP endpoints if used
       '/mcp': {

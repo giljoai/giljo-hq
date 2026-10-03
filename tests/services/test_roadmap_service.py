@@ -171,10 +171,25 @@ async def test_get_roadmap_does_not_emit_agent_active_by_default(db_manager, db_
     ws.broadcast_to_tenant.assert_not_awaited()
 
 
+def _dead_socket_manager(tenant_key: str):
+    from unittest.mock import AsyncMock as _AsyncMock
+    from unittest.mock import MagicMock as _MagicMock
+
+    from fastapi import WebSocketDisconnect
+
+    from api.websocket import WebSocketManager
+
+    manager = WebSocketManager()
+    socket = _MagicMock()
+    socket.send_text = _AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+    manager.active_connections["dead-client"] = socket
+    manager.tenant_connections[tenant_key] = {"dead-client"}
+    return manager
+
+
 async def test_get_roadmap_agent_active_broadcast_failure_never_blocks_read(db_manager, db_session):
     seed = await _seed(db_session)
-    ws = AsyncMock()
-    ws.broadcast_to_tenant.side_effect = RuntimeError("ws down")
+    ws = _dead_socket_manager(seed["tenant_key"])
     svc = RoadmapService(
         db_manager=db_manager,
         tenant_manager=TenantManager(),
@@ -184,7 +199,7 @@ async def test_get_roadmap_agent_active_broadcast_failure_never_blocks_read(db_m
 
     read = await svc.get_roadmap(tenant_key=seed["tenant_key"], emit_agent_active=True)
     assert read["product_id"] == seed["product_id"]
-    ws.broadcast_to_tenant.assert_awaited_once()
+    assert "dead-client" not in ws.active_connections, "the dead client was attempted and evicted"
 
 
 

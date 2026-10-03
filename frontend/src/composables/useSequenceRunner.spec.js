@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-const { createMock, getMock, updateMock, roadmapGetMock, pushMock } = vi.hoisted(() => ({
+const { createMock, getMock, updateMock, roadmapGetMock, pushMock, showToastMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
+  showToastMock: vi.fn(),
   getMock: vi.fn(),
   updateMock: vi.fn(),
   roadmapGetMock: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('@/services/api', () => {
 })
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: pushMock }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: showToastMock }) }))
 
 import { useSequenceRunner } from '@/composables/useSequenceRunner'
 
@@ -90,12 +92,23 @@ describe('useSequenceRunner — resolveRunOrder', () => {
 })
 
 describe('useSequenceRunner — startSequence (cap + payload + nav)', () => {
-  it('refuses to start with more than 5 projects (cap=5 enforcement)', async () => {
+  it('refuses to start with more than 10 projects, and says the cap is 10', async () => {
     const seq = useSequenceRunner()
-    const six = ['1', '2', '3', '4', '5', '6']
-    const run = await seq.startSequence({ projectIds: six, resolvedOrder: six, executionMode: 'multi_terminal' })
+    const eleven = Array.from({ length: 11 }, (_, i) => String(i + 1))
+    const run = await seq.startSequence({ projectIds: eleven, resolvedOrder: eleven, executionMode: 'multi_terminal' })
     expect(run).toBeNull()
     expect(createMock).not.toHaveBeenCalled()
+    expect(showToastMock).toHaveBeenCalledWith(expect.objectContaining({ message: 'Select 1–10 projects to run sequentially.' }))
+  })
+
+  it('starts a ten-project chain', async () => {
+    const seq = useSequenceRunner()
+    const ten = Array.from({ length: 10 }, (_, i) => String(i + 1))
+    createMock.mockClear()
+    const run = await seq.startSequence({ projectIds: ten, resolvedOrder: ten, executionMode: 'multi_terminal' })
+    expect(run).toEqual({ id: 'run-123' })
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(createMock.mock.calls[0][0].resolved_order).toEqual(ten)
   })
 
   it('POSTs a per_card run with all projects pending, then navigates to the scoped cockpit', async () => {
