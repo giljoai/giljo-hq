@@ -91,15 +91,23 @@ describe('useProjectBulkActions', () => {
     expect(api.showChainDialog.value).toBe(false)
   })
 
-  it('a chain takes at most 5 projects', () => {
-    const rows = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((id) => inactive(id))
+  it('a chain takes at most 10 projects', () => {
+    const rows = Array.from({ length: 11 }, (_, i) => inactive(`p${i + 1}`))
     const { api } = setup()
     api.onSelectedIds(rows.map((r) => r.id), rows)
     expect(api.chainReady.value).toBe(false)
-    expect(api.chainNote.value).toBe('A chain takes at most 5; untick 1.')
+    expect(api.chainNote.value).toBe('A chain takes at most 10; untick 1.')
   })
 
-  it('five eligible projects are allowed (the cap boundary)', () => {
+  it('ten eligible projects are allowed (the cap boundary)', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => inactive(`p${i + 1}`))
+    const { api } = setup()
+    api.onSelectedIds(rows.map((r) => r.id), rows)
+    expect(api.chainReady.value).toBe(true)
+    expect(api.chainNote.value).toBe('')
+  })
+
+  it('five eligible projects are allowed', () => {
     const rows = ['p1', 'p2', 'p3', 'p4', 'p5'].map((id) => inactive(id))
     const { api } = setup()
     api.onSelectedIds(rows.map((r) => r.id), rows)

@@ -93,14 +93,12 @@ class SecurityHeadersMiddleware:
 
         self.external_host = None
         self.api_port = None
-        self.ssl_enabled = False
         try:
             from giljo_mcp.config_manager import get_config
 
             config = get_config()
             self.external_host = config.get_nested("services.external_host", default=None)
             self.api_port = config.get_nested("services.api.port", default=config.server.api_port)
-            self.ssl_enabled = config.get_nested("features.ssl_enabled", default=False)
         except (ImportError, AttributeError, KeyError, TypeError):
             logger.debug("Config not available for CSP — using defaults")
 
@@ -119,7 +117,8 @@ class SecurityHeadersMiddleware:
     def _compute_sentry_origins() -> list[str]:
         from api.app_state import GILJO_MODE
 
-        if GILJO_MODE != "saas":
+        is_saas = GILJO_MODE == "saas"
+        if not is_saas:
             return []
         from urllib.parse import urlparse
 

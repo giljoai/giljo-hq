@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 VISION_MAX_INGEST_TOKENS = 25000
 VISION_DELIVERY_BUDGET = 24000
-VISION_DEFAULT_CHUNK_SIZE = 24000
 TOKEN_CHAR_RATIO = 4
 
 
@@ -120,6 +119,29 @@ class EnhancedChunker:
 
         return headers
 
+    def _chunk_entry(
+        self,
+        content: str,
+        number: int,
+        total: int,
+        char_start: int,
+        char_end: int,
+        boundary_type: str,
+        document_name: str,
+    ) -> dict[str, Any]:
+        return {
+            "chunk_number": number,
+            "total_chunks": total,
+            "content": content,
+            "tokens": self.estimate_tokens(content),
+            "char_start": char_start,
+            "char_end": char_end,
+            "boundary_type": boundary_type,
+            "keywords": self.extract_keywords(content),
+            "headers": self.extract_headers(content),
+            "document_name": document_name,
+        }
+
     def chunk_content(self, content: str, document_name: str = "document") -> list[dict[str, Any]]:
         if not content:
             return []
@@ -128,20 +150,7 @@ class EnhancedChunker:
         estimated_tokens = self.estimate_tokens(content)
 
         if estimated_tokens <= self.max_tokens:
-            return [
-                {
-                    "chunk_number": 1,
-                    "total_chunks": 1,
-                    "content": content,
-                    "tokens": estimated_tokens,
-                    "char_start": 0,
-                    "char_end": total_chars,
-                    "boundary_type": "complete",
-                    "keywords": self.extract_keywords(content),
-                    "headers": self.extract_headers(content),
-                    "document_name": document_name,
-                }
-            ]
+            return [self._chunk_entry(content, 1, 1, 0, total_chars, "complete", document_name)]
 
         num_chunks = (estimated_tokens + self.max_tokens - 1) // self.max_tokens
 
@@ -161,20 +170,9 @@ class EnhancedChunker:
             if not chunk_content.strip():
                 continue
 
-            chunk_tokens = self.estimate_tokens(chunk_content)
-
-            chunk = {
-                "chunk_number": len(chunks) + 1,
-                "total_chunks": num_chunks,
-                "content": chunk_content,
-                "tokens": chunk_tokens,
-                "char_start": current_pos,
-                "char_end": actual_end,
-                "boundary_type": boundary_type,
-                "keywords": self.extract_keywords(chunk_content),
-                "headers": self.extract_headers(chunk_content),
-                "document_name": document_name,
-            }
+            chunk = self._chunk_entry(
+                chunk_content, len(chunks) + 1, num_chunks, current_pos, actual_end, boundary_type, document_name
+            )
 
             chunks.append(chunk)
             current_pos = actual_end

@@ -5,11 +5,13 @@
     "claude_desktop": "{\n  \"mcpServers\": {\n    \"giljo_hq\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"mcp-remote\",\n        \"https://app.giljo.ai/mcp\",\n        \"--header\",\n        \"Authorization:${AUTH_HEADER}\"\n      ],\n      \"env\": {\n        \"AUTH_HEADER\": \"Bearer tk_test_api_key_0000000000000000\"\n      }\n    }\n  }\n}",
     "claude_desktop_oauth": "Add the GiljoAI connector in Claude Desktop or claude.ai settings; it runs OAuth in the browser.",
     "codex_cli": "codex mcp add giljo_hq --url https://app.giljo.ai/mcp --bearer-token-env-var GILJO_API_KEY",
-    "codex_oauth": "codex mcp add giljo_hq --url https://app.giljo.ai/mcp"
+    "codex_oauth": "codex mcp add giljo_hq --url https://app.giljo.ai/mcp",
+    "generic_mcp": "{\n  \"giljo_hq\": {\n    \"transport\": \"streamable-http\",\n    \"url\": \"https://app.giljo.ai/mcp\",\n    \"headers\": {\n      \"Authorization\": \"Bearer tk_test_api_key_0000000000000000\"\n    }\n  }\n}",
+    "opencode": "opencode mcp add giljo_hq --url https://app.giljo.ai/mcp --header \"Authorization=Bearer tk_test_api_key_0000000000000000\"",
+    "opencode_oauth": "opencode mcp add giljo_hq --url https://app.giljo.ai/mcp\nopencode mcp auth giljo_hq"
   },
   "inputs": {
     "api_key": "tk_test_api_key_0000000000000000",
-    "self_signed_https": false,
     "server_url": "https://app.giljo.ai"
   }
 }

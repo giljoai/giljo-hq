@@ -10,6 +10,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.services.template_service import TemplateService
@@ -26,7 +27,7 @@ router = APIRouter()
 
 @router.post("/{template_id}/preview/", response_model=TemplatePreviewResponse)
 async def preview_template(
-    template_id: str,
+    template_id: IdPath,
     request: TemplatePreviewRequest,
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
@@ -38,7 +39,6 @@ async def preview_template(
     For Claude (cli_tool='claude'): returns YAML-style preview with frontmatter.
     For Codex/generic: returns plaintext/markdown preview.
 
-    Migrated to TemplateService - Handover 1011 Phase 2.
     """
     logger.info("User %s previewing template %s", sanitize(current_user.username), sanitize(template_id))
 

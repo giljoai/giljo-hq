@@ -10,7 +10,11 @@ from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.platform_registry import Platform, is_subagent_render
 from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 
-from giljo_mcp.services.protocol_sections.closing_jobs import _CLOSING_JOBS_REFERENCE
+from giljo_mcp.services.protocol_sections.closing_jobs import (
+    _CLOSING_JOBS_REFERENCE,
+    _NOT_A_GIT_REPO_ATTENDED,
+    _NOT_A_GIT_REPO_UNATTENDED,
+)
 
 from giljo_mcp.services.protocol_sections.orchestrator_body import (
     _CH3_GENERIC_MCP_FLOOR_LINE,
@@ -319,7 +323,11 @@ def _build_reactivation_spawn_block(tool: str) -> str:
 
 
 def _build_ch5_reference(
-    project_id: str, orchestrator_id: str, tool: str = "multi_terminal", git_integration_enabled: bool = False
+    project_id: str,
+    orchestrator_id: str,
+    tool: str = "multi_terminal",
+    git_integration_enabled: bool = False,
+    headless_launch: bool = False,
 ) -> str:
     return f"""════════════════════════════════════════════════════════════════════════════
                 CH5: REFERENCE (Implementation Phase Only)
@@ -449,7 +457,7 @@ COMPLETION PROTOCOL (After ALL agents finish their work):
 {
         ""
         if not git_integration_enabled
-        else '''
+        else f'''
 ── STEP 0: Git Commit (Git Integration Enabled) ───────────────────────────
 Before calling write_project_closeout: verify the project_path is a git
 repository AND all changes are committed.
@@ -463,21 +471,7 @@ If the command succeeds (prints "true"), proceed:
   3. Commit with a descriptive message: `git commit -m "<summary of project work>"`
   4. Record a TITLED git_commits entry (SHA alone is rejected): `git log --format='%H%x09%s%x09%an' -1`
 
-If the command FAILS (project_path is not a git repo), STOP and ASK the user:
-  "Git integration is enabled in your settings, but this project path
-  (<project_path>) is not a git repository. Would you like me to run
-  `git init` here so future closeouts can capture commit history, OR
-  proceed without git for this project?"
-
-  - User says "init it": run `git init && git add . && git commit -m "<msg>"`,
-    then proceed with the SHA in git_commits.
-  - User says "skip git for this project" (or similar): pass an empty list
-    `git_commits=[]` to write_project_closeout. The server will
-    accept it with a git_warning in the response (logged for visibility);
-    the closeout succeeds.
-
-Do NOT silently skip git on your own — ask the user. It is their machine,
-their folder, their decision.
+{_NOT_A_GIT_REPO_UNATTENDED if headless_launch else _NOT_A_GIT_REPO_ATTENDED}
 ────────────────────────────────────────────────────────────────────────────
 '''
     }

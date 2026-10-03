@@ -343,7 +343,7 @@ async function handleSubmit() {
 
     router.push('/')
   } catch (err) {
-    console.error('[FirstLogin] Failed to complete setup:', err)
+    console.error('[FirstLogin] Failed to complete setup:', err?.response?.status ?? err?.code)
 
     if (err.response?.data?.detail) {
       error.value = err.response.data.detail

@@ -14,7 +14,7 @@ export function useDashboardRealtime(refetch, { debounceMs = 600 } = {}) {
   })
 
   onUnmounted(() => {
-    unsubscribers.forEach((unsub) => unsub?.())
+    unsubscribers.forEach((unsub) => unsub())
     unsubscribers = []
   })
 }

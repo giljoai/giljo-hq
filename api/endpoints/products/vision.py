@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_tenant_key
+from api.endpoints._boundary_types import IdPath
 from api.schemas.vision_document import VisionDocumentResponse
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.config_manager import get_config
@@ -67,7 +68,7 @@ async def _read_upload_capped(upload: UploadFile, max_bytes: int) -> bytes:
 
 @router.post("/{product_id}/vision", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def upload_vision_document(
-    product_id: str,
+    product_id: IdPath,
     request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
@@ -79,13 +80,13 @@ async def upload_vision_document(
     Upload vision document for product with automatic chunking.
 
     Accepts .txt/.md/.markdown files up to the configured upload cap
-    (``UploadConfig.max_upload_bytes`` -- 5 MB default, SEC-0001). Documents
+    (``UploadConfig.max_upload_bytes`` -- 5 MB default). Documents
     are automatically chunked at 25K tokens using semantic boundaries
     (headers, paragraphs).
 
-    Handover 0503: Updated path from /upload-vision to /vision (canonical endpoint).
-    Handover 0500: Implemented vision upload with intelligent chunking.
-    SEC-0001 Phase 2: Extension allowlist + filename sanitization + byte-sniff
+    Updated path from /upload-vision to /vision (canonical endpoint).
+    Implemented vision upload with intelligent chunking.
+    Extension allowlist + filename sanitization + byte-sniff
         + strict UTF-8 + two-layer size cap + structured error codes.
     """
     upload_cfg = get_config().upload
@@ -171,15 +172,6 @@ async def upload_vision_document(
             result.total_tokens,
         )
 
-        try:
-            await vision_service.evaluate_vision_analysis_complete(db, product_id)
-            await db.commit()
-        except Exception:
-            logger.exception(
-                "Failed to re-evaluate vision_analysis_complete after upload for product %s",
-                sanitize(product_id),
-            )
-
         return {
             "success": True,
             "message": "Vision document uploaded and chunked successfully",
@@ -216,7 +208,7 @@ async def upload_vision_document(
 
 @router.get("/{product_id}/vision", response_model=List[VisionDocumentResponse])
 async def list_vision_documents(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
     tenant_key: str = Depends(get_tenant_key),
@@ -226,7 +218,7 @@ async def list_vision_documents(
 
     Returns complete vision document records with metadata.
 
-    Handover 0503: Added GET endpoint for listing vision documents.
+    Added GET endpoint for listing vision documents.
     """
     from sqlalchemy import and_, select
 
@@ -292,8 +284,8 @@ async def list_vision_documents(
 
 @router.delete("/{product_id}/vision/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_vision_document(
-    product_id: str,
-    doc_id: str,
+    product_id: IdPath,
+    doc_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
     tenant_key: str = Depends(get_tenant_key),
@@ -304,59 +296,23 @@ async def delete_vision_document(
 
     Removes the vision document and its associated chunks (CASCADE).
 
-    Handover 0503: Added DELETE endpoint for vision documents.
+    Added DELETE endpoint for vision documents.
     """
-    from sqlalchemy import and_, delete, select
-
-    from giljo_mcp.models import MCPContextIndex, VisionDocument
-
     logger.info(
         "User %s deleting vision document %s for product %s",
         sanitize(current_user.username),
         sanitize(doc_id),
         sanitize(product_id),
     )
-
-    stmt = select(VisionDocument).where(
-        and_(
-            VisionDocument.id == doc_id,
-            VisionDocument.product_id == product_id,
-            VisionDocument.tenant_key == tenant_key,
-        )
-    )
-
-    result = await db.execute(stmt)
-    doc = result.scalar_one_or_none()
-
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vision document not found")
-
-    delete_chunks_stmt = delete(MCPContextIndex).where(
-        and_(
-            MCPContextIndex.vision_document_id == doc_id,
-            MCPContextIndex.tenant_key == tenant_key,
-        )
-    )
-    await db.execute(delete_chunks_stmt)
-
-    await db.delete(doc)
+    await vision_service.delete_product_document(db, product_id, doc_id)
     await db.commit()
-
-    try:
-        await vision_service.evaluate_vision_analysis_complete(db, product_id)
-        await db.commit()
-    except Exception:
-        logger.exception(
-            "Failed to re-evaluate vision_analysis_complete after delete for product %s",
-            sanitize(product_id),
-        )
 
     logger.info("Successfully deleted vision document %s", sanitize(doc_id))
 
 
 @router.get("/{product_id}/vision-chunks", response_model=List[VisionChunk])
 async def get_vision_chunks(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
     tenant_key: str = Depends(get_tenant_key),
@@ -369,7 +325,7 @@ async def get_vision_chunks(
 
     Note: Consider using GET /{product_id}/vision instead for full document metadata.
 
-    Handover 0500: Implemented vision chunks retrieval.
+    Implemented vision chunks retrieval.
     """
     from sqlalchemy import and_, select
 

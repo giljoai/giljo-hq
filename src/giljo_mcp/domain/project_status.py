@@ -141,3 +141,7 @@ VALID_UPDATE_STATUSES: frozenset[ProjectStatus] = frozenset(
     s for s, m in PROJECT_STATUS_META.items() if m.is_user_mutable_via_mcp
 )
 VALID_PROJECT_STATUSES: frozenset[ProjectStatus] = frozenset(ProjectStatus)
+
+
+def is_review_pending(status: str, reviewed_at: object | None) -> bool:
+    return status == ProjectStatus.COMPLETED and reviewed_at is None

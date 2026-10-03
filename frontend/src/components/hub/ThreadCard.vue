@@ -156,8 +156,9 @@
 <script setup>
 import { ref, computed, nextTick } from 'vue'
 import { getAgentColor } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { tintedStyle } from '@/utils/colorUtils'
 import { useProductStore } from '@/stores/products'
+import { BOUND_THREAD_MARKER_SUBJECT } from '@/composables/useProjectBoundThread'
 import AgentPill from '@/components/hub/AgentPill.vue'
 import ThreadDates from '@/components/hub/ThreadDates.vue'
 
@@ -182,14 +183,13 @@ const productChipTitle = computed(() =>
 const projectTagCount = computed(() => (props.thread.project_ids || []).length)
 const projectTagTitle = computed(() => `Tagged to ${projectTagCount.value} project(s)`)
 
-const MARKERS = new Set(['(project comms)'])
 const displayTitle = computed(() => {
   const t = props.thread.title || props.thread.subject
   return isUnnamed.value ? 'Untitled thread' : t
 })
 const isUnnamed = computed(() => {
   const t = props.thread.title || props.thread.subject
-  return !t || MARKERS.has(t) || /^chain run\s/i.test(t)
+  return !t || t === BOUND_THREAD_MARKER_SUBJECT
 })
 
 const agents = computed(() => (props.thread.participants || []).filter((p) => p.participant_type !== 'user'))
@@ -221,10 +221,7 @@ const excerpt = computed(() => {
 const serial = computed(() => props.thread.chat_id || '')
 const TERMINAL = new Set(['resolved', 'closed'])
 const isTerminal = computed(() => TERMINAL.has(String(props.thread.status || '').toLowerCase()))
-const statusStyle = computed(() => {
-  const hex = getAgentColor('reviewer')?.hex
-  return { backgroundColor: hexToRgba(hex, 0.15), color: hex }
-})
+const statusStyle = computed(() => tintedStyle(getAgentColor('reviewer')?.hex))
 
 const STATUS_MEANINGS = {
   resolved: "resolved: the agents agreed it's done; still readable",

@@ -70,6 +70,23 @@ describe('groupBoardByProduct', () => {
     expect(other.runIds).toEqual(['run-x'])
   })
 
+  it('a run lands in the product its payload names, even when none of its members is known', () => {
+    const reviewRun = {
+      id: 'run-review',
+      status: 'completed',
+      project_ids: ['a9'],
+      resolved_order: ['a9'],
+      project_statuses: { a9: 'completed' },
+      reviewed_project_ids: [],
+      product_id: 'prod-a',
+    }
+    const groups = group('staging', { runs: [runB, reviewRun] })
+    const alpha = groups.find((g) => g.id === 'prod-a')
+    expect(alpha.runIds).toEqual(['run-review'])
+    expect(alpha.counts).toEqual({ staging: 2, implementation: 1 })
+    expect(groups.find((g) => g.id === OTHER_PRODUCT_ID).runIds).toEqual([])
+  })
+
   it('is empty when nothing is in flight anywhere', () => {
     expect(groupBoardByProduct({ projects: [], chainMembers: [], runs: [], membersOf, productsById, sideOf, sideOfRun, side: 'staging' })).toEqual([])
   })

@@ -261,9 +261,6 @@ def seed_default_settings() -> bool:
                 "enabled": features.get("git_integration", {}).get("enabled", False),
                 "use_in_prompts": features.get("git_integration", {}).get("use_in_prompts", False),
             },
-            "serena_mcp": {
-                "use_in_prompts": features.get("serena_mcp", {}).get("use_in_prompts", False),
-            },
         }
 
         security_data = {

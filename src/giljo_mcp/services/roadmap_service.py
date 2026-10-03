@@ -17,7 +17,6 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
 from giljo_mcp.domain.task_status import TASK_LIFECYCLE_FINISHED_STATUSES
 from giljo_mcp.exceptions import (
-    AuthorizationError,
     BaseGiljoError,
     ResourceNotFoundError,
     ValidationError,
@@ -185,19 +184,16 @@ class RoadmapService:
 
             ws = self._websocket_manager
             if ws:
-                try:
-                    await ws.broadcast_to_tenant(
-                        tenant_key=effective_tenant_key,
-                        event_type="roadmap:updated",
-                        data={
-                            "product_id": product_id,
-                            "roadmap_id": roadmap_id,
-                            "items_upserted": len(validated),
-                            "items_removed": items_removed,
-                        },
-                    )
-                except (RuntimeError, ValueError, OSError) as ws_error:
-                    self._logger.warning("Failed to broadcast roadmap:updated event: %s", ws_error)
+                await ws.broadcast_to_tenant(
+                    tenant_key=effective_tenant_key,
+                    event_type="roadmap:updated",
+                    data={
+                        "product_id": product_id,
+                        "roadmap_id": roadmap_id,
+                        "items_upserted": len(validated),
+                        "items_removed": items_removed,
+                    },
+                )
 
             return {
                 "roadmap_id": roadmap_id,
@@ -206,7 +202,7 @@ class RoadmapService:
                 "items_removed": items_removed,
                 "summary": summary,
             }
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to upsert roadmap metadata")
@@ -300,7 +296,7 @@ class RoadmapService:
                 effective_tenant_key,
             )
             return {"roadmap_id": roadmap_id, "product_id": product_id, "items_reordered": updated}
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to reorder roadmap")
@@ -403,7 +399,7 @@ class RoadmapService:
                 effective_tenant_key,
             )
             return {"product_id": product_id, "roadmap_id": roadmap_id, "removed": 1}
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to remove roadmap item")
@@ -413,14 +409,11 @@ class RoadmapService:
         ws = self._websocket_manager
         if not ws:
             return
-        try:
-            await ws.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="roadmap:agent_active",
-                data={"product_id": product_id},
-            )
-        except (RuntimeError, ValueError, OSError) as ws_error:
-            self._logger.warning("Failed to broadcast roadmap:agent_active event: %s", ws_error)
+        await ws.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="roadmap:agent_active",
+            data={"product_id": product_id},
+        )
 
 
     async def get_roadmap(
@@ -471,7 +464,7 @@ class RoadmapService:
                     },
                     "items": rows,
                 }
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to read roadmap")

@@ -32,11 +32,8 @@ export const SYSTEM_EVENT_ROUTES = {
 
   'product:memory:updated': {
     handler: async (payload, { storeRegistry } = {}) => {
-      const productStore = storeRegistry?.products?.() ?? useProductStore()
-      productStore.handleProductMemoryUpdated?.(payload)
-
       const memoryStore = storeRegistry?.memory?.() ?? useMemoryStore()
-      memoryStore.handleMemoryEntryWritten?.(payload?.product_id, payload?.entry)
+      memoryStore.handleMemoryEntryWritten(payload?.product_id, payload?.entry)
     },
   },
   'product:status:changed': { store: 'products', action: 'handleProductStatusChanged' },

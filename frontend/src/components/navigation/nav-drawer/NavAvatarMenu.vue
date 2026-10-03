@@ -113,7 +113,7 @@
         <v-list-item-title>User Guide</v-list-item-title>
       </v-list-item>
 
-      <v-list-item v-if="isNonCeEdition" @click="showResetPasswordConfirm = true">
+      <v-list-item v-if="isSaasEdition" @click="showResetPasswordConfirm = true">
         <template #prepend>
           <v-icon>mdi-lock-reset</v-icon>
         </template>
@@ -198,7 +198,7 @@ import { ref, computed } from 'vue'
 import RoleBadge from '@/components/common/RoleBadge.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { getLicenseCopy } from '@/i18n/licenseCopy'
-import { isCeModeValue, isNonCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
+import { isCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
 
 const props = defineProps({
@@ -262,10 +262,6 @@ const props = defineProps({
     type: String,
     default: 'Licensed',
   },
-  serverVersion: {
-    type: String,
-    default: '',
-  },
   resetPasswordLoading: {
     type: Boolean,
     default: false,
@@ -284,7 +280,7 @@ const productName = PRODUCT_NAME
 const showResetPasswordConfirm = ref(false)
 
 const isCeEdition = computed(() => isCeModeValue(props.giljoMode))
-const isNonCeEdition = computed(() => isNonCeModeValue(props.giljoMode))
+const isSaasEdition = computed(() => isSaasModeValue(props.giljoMode))
 
 const aboutEditionLabel = computed(() => getLicenseCopy(props.giljoMode).editionLabel)
 const aboutLongDescription = computed(() => getLicenseCopy(props.giljoMode).longDescription)

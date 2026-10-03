@@ -11,36 +11,25 @@ describe('sequenceRunStore — BE-9098 durable review persistence', () => {
     store = useSequenceRunStore()
   })
 
-  it('REFRESH SIMULATION: a fresh store hydrates isReviewed from reviewed_project_ids with NO local mark', () => {
+  it('REFRESH SIMULATION: a fresh store hydrates isReviewed from reviewed_project_ids with NO local mark', async () => {
     expect(store.isReviewed('run-1', 'p1')).toBe(false)
 
-    store.setActiveRun({
-      id: 'run-1',
-      project_ids: ['p1', 'p2'],
-      resolved_order: ['p1', 'p2'],
-      project_statuses: { p1: 'completed', p2: 'completed' },
-      reviewed_project_ids: ['p1'],
+    api.sequenceRuns.list.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'run-1',
+          project_ids: ['p1', 'p2'],
+          resolved_order: ['p1', 'p2'],
+          status: 'completed',
+          project_statuses: { p1: 'completed', p2: 'completed' },
+          reviewed_project_ids: ['p1'],
+        },
+      ],
     })
+    await store.hydrate()
 
     expect(store.isReviewed('run-1', 'p1')).toBe(true)
     expect(store.isReviewed('run-1', 'p2')).toBe(false)
-  })
-
-  it('fetchRun hydrates the review Map from the server payload (end-to-end path)', async () => {
-    api.sequenceRuns.get.mockResolvedValueOnce({
-      data: {
-        id: 'run-9',
-        project_ids: ['pA', 'pB'],
-        resolved_order: ['pA', 'pB'],
-        project_statuses: { pA: 'completed', pB: 'completed' },
-        reviewed_project_ids: ['pB'],
-      },
-    })
-
-    await store.fetchRun('run-9')
-
-    expect(store.isReviewed('run-9', 'pB')).toBe(true)
-    expect(store.isReviewed('run-9', 'pA')).toBe(false)
   })
 
   it('hydrate() seeds review acks for every run in the active list', async () => {
@@ -62,16 +51,16 @@ describe('sequenceRunStore — BE-9098 durable review persistence', () => {
     expect(store.isReviewed('run-1', 'p1')).toBe(true)
   })
 
-  it('server hydrate UNIONS with an optimistic local mark (never clobbers in-flight state)', () => {
+  it('server hydrate UNIONS with an optimistic local mark (never clobbers in-flight state)', async () => {
     store.markReviewed('run-1', 'p2')
     expect(store.isReviewed('run-1', 'p2')).toBe(true)
 
-    store.setActiveRun({
-      id: 'run-1',
-      project_ids: ['p1', 'p2'],
-      resolved_order: ['p1', 'p2'],
-      reviewed_project_ids: ['p1'],
+    api.sequenceRuns.list.mockResolvedValueOnce({
+      data: [
+        { id: 'run-1', project_ids: ['p1', 'p2'], resolved_order: ['p1', 'p2'], status: 'running', reviewed_project_ids: ['p1'] },
+      ],
     })
+    await store.hydrate()
 
     expect(store.isReviewed('run-1', 'p1')).toBe(true)
     expect(store.isReviewed('run-1', 'p2')).toBe(true)
@@ -94,8 +83,11 @@ describe('sequenceRunStore — BE-9098 durable review persistence', () => {
     await expect(store.markReviewedRemote('run-1', 'p1')).rejects.toThrow('network down')
   })
 
-  it('$reset clears server-hydrated acks too', () => {
-    store.setActiveRun({ id: 'run-1', project_ids: ['p1'], reviewed_project_ids: ['p1'] })
+  it('$reset clears server-hydrated acks too', async () => {
+    api.sequenceRuns.list.mockResolvedValueOnce({
+      data: [{ id: 'run-1', project_ids: ['p1'], status: 'running', reviewed_project_ids: ['p1'] }],
+    })
+    await store.hydrate()
     expect(store.isReviewed('run-1', 'p1')).toBe(true)
 
     store.$reset()

@@ -44,13 +44,8 @@ async def broadcast_orchestrator_prompt_generated(
     }
     data.update({key: value for key, value in optional.items() if value is not None})
 
-    try:
-        await websocket_manager.broadcast_to_tenant(
-            tenant_key=tenant_key,
-            event_type=EVENT_TYPE,
-            data=data,
-        )
-    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-        _module_logger.warning(
-            "[WEBSOCKET] Failed to broadcast %s for orchestrator %s: %s", EVENT_TYPE, orchestrator_id, ws_error
-        )
+    await websocket_manager.broadcast_to_tenant(
+        tenant_key=tenant_key,
+        event_type=EVENT_TYPE,
+        data=data,
+    )

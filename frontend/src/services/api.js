@@ -311,8 +311,14 @@ export const api = {
     get: (id) => apiClient.get(`/api/v1/projects/${id}`),
     review: (id) => apiClient.get(`/api/v1/projects/${id}/review`),
     getOrchestrator: (id) => apiClient.get(`/api/v1/projects/${id}/orchestrator`),
-    getActive: (productId) =>
-      apiClient.get('/api/v1/projects/active', { params: productId ? { product_id: productId } : {} }),
+    getActive: (productId, includeUnreviewed = false) =>
+      apiClient.get('/api/v1/projects/active', {
+        params: {
+          ...(productId ? { product_id: productId } : {}),
+          ...(includeUnreviewed ? { include_unreviewed: true } : {}),
+        },
+      }),
+    markReviewed: (id) => apiClient.post(`/api/v1/projects/${id}/reviewed`),
     create: (data) => apiClient.post('/api/v1/projects/', data),
     update: (id, data) => apiClient.patch(`/api/v1/projects/${id}`, data),
     delete: (id) => apiClient.delete(`/api/v1/projects/${id}`),
@@ -367,8 +373,6 @@ export const api = {
   users: {
     update: (userId, updates) => apiClient.patch(`/api/v1/users/${userId}`, updates),
     getFieldToggleConfig: () => apiClient.get('/api/v1/users/me/field-priority'),
-    updateFieldToggleConfig: (config) => apiClient.put('/api/v1/users/me/field-priority', config),
-    resetFieldToggleConfig: () => apiClient.post('/api/v1/users/me/field-priority/reset'),
   },
 
   account: {
@@ -395,7 +399,7 @@ export const api = {
   settings: {
     get: () => apiClient.get('/api/v1/config/'),
 
-    getDatabase: () => apiClient.get('/api/v1/settings/database'),
+    getDatabase: () => apiClient.get('/api/v1/config/database'),
     testDatabase: () => apiClient.get('/api/v1/config/health/database'),
 
     getGeneral: () => apiClient.get('/api/v1/settings/general'),
@@ -465,11 +469,6 @@ export const api = {
   connect: {
     credentialStatus: () => apiClient.get('/api/connect/credential-status'),
     removeConnection: (harness) => apiClient.delete(`/api/connect/connections/${harness}`),
-  },
-
-  serena: {
-    getStatus: () => apiClient.get('/api/serena/status'),
-    toggle: (enabled) => apiClient.post('/api/serena/toggle', { use_in_prompts: enabled }),
   },
 
   git: {
@@ -555,7 +554,6 @@ export const api = {
   },
 
   stats: {
-    getSystem: () => apiClient.get('/api/v1/stats/system'),
     getCallCounts: () => apiClient.get('/api/v1/stats/call-counts'),
     getDashboard: (productId) =>
       apiClient.get('/api/v1/stats/dashboard', { params: { product_id: productId } }),

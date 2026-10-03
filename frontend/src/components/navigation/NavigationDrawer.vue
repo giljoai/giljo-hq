@@ -206,6 +206,7 @@ import configService from '@/services/configService'
 import setupService from '@/services/setupService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 import { getApiBaseUrl } from '@/composables/useApiUrl'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { resolveJobsNavPath, resolveJobsNavIcon, isJobsRouteActive, hubUnreadBadgeStyle } from '@/utils/jobsNavTarget'
 import NotificationDropdown from '@/components/navigation/NotificationDropdown.vue'
 const ConnectionDebugDialog = defineAsyncComponent(
@@ -304,17 +305,14 @@ const {
   loadAccountStateUI,
 } = useNavDrawerAccount({ giljoMode })
 
-const edition = ref('')
 const serverVersion = ref('')
 
 async function checkEdition() {
   try {
     await configService.fetchConfig()
-    edition.value = configService.getEdition()
     giljoMode.value = configService.getGiljoMode()
     serverVersion.value = configService.getVersion()
   } catch {
-    edition.value = 'community'
     giljoMode.value = 'unknown'
     serverVersion.value = ''
   }
@@ -359,9 +357,8 @@ async function confirmResetPassword(email) {
     await mod.requestPasswordReset(axios, baseUrl, email)
     showToast({ message: 'Password reset email sent. Check your inbox.', type: 'success' })
   } catch (err) {
-    const detail = err?.response?.data?.detail
     showToast({
-      message: detail || 'Unable to send reset email. Please try again later.',
+      message: parseErrorResponse(err).message || 'Unable to send reset email. Please try again later.',
       type: 'error',
     })
   } finally {
@@ -476,8 +473,8 @@ onMounted(async () => {
         licenseStatus.value = 'Unlicensed'
       }
     }
-  } catch {
-    // Silently fail
+  } catch (error) {
+    console.warn('[NavigationDrawer] license status check failed:', error)
   }
 })
 

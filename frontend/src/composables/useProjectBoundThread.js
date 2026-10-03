@@ -1,6 +1,6 @@
 import { useCommHubStore } from '@/stores/commHubStore'
 
-const BOUND_THREAD_MARKER_SUBJECT = '(project comms)'
+export const BOUND_THREAD_MARKER_SUBJECT = '(project comms)'
 
 function _pickBoundThread(candidates) {
   if (candidates.length === 0) return null

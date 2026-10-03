@@ -108,7 +108,8 @@ def init_sentry(mode: str | None = None) -> bool:
         resolved_mode = os.environ.get("GILJO_MODE", "ce").lower()
     else:
         resolved_mode = mode
-    if resolved_mode != "saas":
+    is_saas = resolved_mode == "saas"
+    if not is_saas:
         return False
 
     dsn = os.environ.get("SENTRY_DSN_BACKEND")

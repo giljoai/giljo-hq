@@ -99,8 +99,7 @@
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel, getAgentRoleLabel, isOrchestrator } from '@/utils/agentDisplay'
-import { getStatusLabel } from '@/utils/statusConfig'
-import { jobStatusWord, isLiveStatusWord } from '@/utils/jobStatusWord'
+import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
 import LiveDots from './LiveDots.vue'
 
 const props = defineProps({
@@ -119,7 +118,7 @@ function isLive(agent) {
 }
 
 function subLabel(agent) {
-  if (props.launched) return getStatusLabel(jobStatusWord(agent), agent.block_reason)
+  if (props.launched) return jobStatusLabel(agent)
   if (isOrchestrator(agent)) return 'coordinates, mission not editable'
   return getAgentRoleLabel(agent) || 'agent'
 }

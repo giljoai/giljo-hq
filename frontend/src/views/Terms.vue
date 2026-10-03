@@ -153,7 +153,7 @@
 import { onMounted, shallowRef } from 'vue'
 import { LICENSE_NAME_FULL } from '@/i18n/licenseCopy'
 import configService from '@/services/configService'
-import { isNonCeModeValue } from '@/composables/useGiljoMode'
+import { isSaasModeValue } from '@/composables/useGiljoMode'
 
 const licenseName = LICENSE_NAME_FULL
 
@@ -168,7 +168,7 @@ onMounted(async () => {
   } catch {
     // Config unavailable: keep the CE fallback copy.
   }
-  if (!isNonCeModeValue(mode)) return
+  if (!isSaasModeValue(mode)) return
   const sections = [
     [import.meta.glob('@/saas/components/policy/SaasSubprocessorSummary.vue'), saasSubprocessorSummary],
     [import.meta.glob('@/saas/components/policy/SaasBillingTerms.vue'), saasBillingTerms],

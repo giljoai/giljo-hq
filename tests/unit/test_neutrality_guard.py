@@ -22,7 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SCAN_FILES = [
     "src/giljo_mcp/template_seeder.py",
-    "src/giljo_mcp/prompt_generation/serena_instructions.py",
     "src/giljo_mcp/services/product_tuning_service.py",
     "src/giljo_mcp/config/defaults.py",
     "src/giljo_mcp/tools/giljo_guide.py",
@@ -229,13 +228,6 @@ PATTERNS: tuple[GuardPattern, ...] = (
         "('your task-list tool').",
         keep=(_p(r"(?i)claude code"),),
         keep_nearby=(_p(r"(?i)claude code"),),
-    ),
-    GuardPattern(
-        "serena_python_only_claim",
-        _p(r"(?i)python-only in this project"),
-        "Asserts the Serena LSP is Python-only — true for THIS repo, false "
-        "for customer products in other languages. Derive from the "
-        "product's tech stack.",
     ),
 )
 
@@ -485,7 +477,6 @@ TRIP_CASES = [
         "os_shell_literal",
     ),
     ("Create your TodoWrite task list before implementation.", "harness_tool_names"),
-    ("Serena's LSP is Python-only in this project.", "serena_python_only_claim"),
 ]
 
 

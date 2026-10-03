@@ -70,18 +70,9 @@ class ContextRepository:
     async def delete_chunks_by_vision_document(
         self, session: AsyncSession, tenant_key: str, vision_document_id: str
     ) -> int:
-        from sqlalchemy import delete, select
-
-        stmt = select(MCPContextIndex).where(
-            MCPContextIndex.tenant_key == tenant_key, MCPContextIndex.vision_document_id == vision_document_id
-        )
-        result = await session.execute(stmt)
-        chunks = result.scalars().all()
-        count = len(chunks)
+        from sqlalchemy import delete
 
         delete_stmt = delete(MCPContextIndex).where(
             MCPContextIndex.tenant_key == tenant_key, MCPContextIndex.vision_document_id == vision_document_id
         )
-        await session.execute(delete_stmt)
-
-        return count
+        return (await session.execute(delete_stmt)).rowcount

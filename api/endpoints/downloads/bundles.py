@@ -34,6 +34,7 @@ from giljo_mcp.utils.log_sanitizer import mask_token, sanitize
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/download", tags=["downloads"])
+INSTALL_SCRIPT_TEMPLATES_DIR = Path(__file__).parents[3] / "installer" / "templates"
 
 
 
@@ -97,18 +98,18 @@ async def download_slash_commands(
 
     server_url = get_public_base_url(request)
 
-    sh_script_path = Path(__file__).parents[3] / "installer" / "templates" / "install_slash_commands.sh"
-    ps1_script_path = Path(__file__).parents[3] / "installer" / "templates" / "install_slash_commands.ps1"
-
-    if sh_script_path.exists():
-        with open(sh_script_path) as f:
-            sh_content = render_install_script(f.read(), server_url)
-            templates["install.sh"] = sh_content
-
-    if ps1_script_path.exists():
-        with open(ps1_script_path) as f:
-            ps1_content = render_install_script(f.read(), server_url)
-            templates["install.ps1"] = ps1_content
+    for name, template_file in (
+        ("install.sh", "install_slash_commands.sh"),
+        ("install.ps1", "install_slash_commands.ps1"),
+    ):
+        script_path = INSTALL_SCRIPT_TEMPLATES_DIR / template_file
+        if not script_path.exists():
+            logger.error("install script template missing: %s", script_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Install script {name} is missing from this installation",
+            )
+        templates[name] = render_install_script(script_path.read_text(encoding="utf-8"), server_url)
 
     zip_bytes = create_zip_archive(templates)
 
@@ -117,7 +118,7 @@ async def download_slash_commands(
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=slash-commands.zip"},
+        headers={"Content-Disposition": "attachment; filename=slash-commands.zip", "Cache-Control": "no-store"},
     )
 
 
@@ -175,9 +176,8 @@ async def download_install_script(
 
     server_url = get_public_base_url(request)
 
-    template_dir = Path(__file__).parents[3] / "installer" / "templates"
     template_filename = f"install_{script_type.replace('-', '_')}.{extension}"
-    template_path = template_dir / template_filename
+    template_path = INSTALL_SCRIPT_TEMPLATES_DIR / template_filename
 
     if not template_path.exists():
         logger.error(f"Install script template not found: {template_path}")
@@ -196,7 +196,7 @@ async def download_install_script(
     return Response(
         content=script_content,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename=install.{extension}"},
+        headers={"Content-Disposition": f"attachment; filename=install.{extension}", "Cache-Control": "no-store"},
     )
 
 
@@ -282,13 +282,13 @@ async def get_bootstrap_prompt(
     zip_path, message = await staging.stage_slash_commands(staging_path, platform=platform)
 
     if not zip_path:
-        await token_manager.mark_failed(token, message)
+        await token_manager.mark_failed(token, message, tenant_key=tenant_key)
         logger.error("Failed to stage slash commands for bootstrap prompt: %s", sanitize(str(message)))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to stage download content"
         )
 
-    await token_manager.mark_ready(token)
+    await token_manager.mark_ready(token, tenant_key=tenant_key)
 
     server_url = get_public_base_url(request)
     download_url = f"{server_url}/api/download/temp/{token}/{filename}"

@@ -5,9 +5,12 @@
 
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.endpoints._boundary_types import ID_MAX
+from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.schemas.responses.project import ProjectBase
 
 
@@ -22,9 +25,14 @@ class ProjectCreate(BaseModel):
         default="", description="AI-generated mission statement (initially empty, filled by orchestrator)"
     )
     product_id: str = Field(
-        ..., min_length=1, description="Product ID to associate with (required; projects must belong to a product)"
+        ...,
+        min_length=1,
+        max_length=ID_MAX,
+        description="Product ID to associate with (required; projects must belong to a product)",
     )
-    status: str = Field(default="inactive", description="Project status (Handover 0050b: defaults to inactive)")
+    status: Literal[ProjectStatus.INACTIVE.value] = Field(
+        default="inactive", description="Projects are created inactive"
+    )
     execution_mode: str | None = Field(
         default=None,
         description=(
@@ -32,9 +40,13 @@ class ProjectCreate(BaseModel):
             "'claude_code_cli' | 'codex_cli' are tolerated); None = not yet selected"
         ),
     )
-    project_type_id: str | None = Field(None, description="Project type ID for taxonomy classification")
+    project_type_id: str | None = Field(
+        None, max_length=ID_MAX, description="Project type ID for taxonomy classification"
+    )
     series_number: int | None = Field(None, description="Sequential number within a project type (e.g., 1 in BE-0001)")
-    subseries: str | None = Field(None, description="Single-letter subseries suffix (e.g., 'a' in BE-0001a)")
+    subseries: str | None = Field(
+        None, max_length=1, description="Single-letter subseries suffix (e.g., 'a' in BE-0001a)"
+    )
     bootstrap_template_vars: dict | None = Field(
         None,
         description=(
@@ -61,11 +73,11 @@ class ProjectUpdate(BaseModel):
             "selected. Validated against the supported modes by the service layer."
         ),
     )
-    project_type_id: str | None = None
+    project_type_id: str | None = Field(None, max_length=ID_MAX)
     series_number: int | None = None
-    subseries: str | None = None
+    subseries: str | None = Field(None, max_length=1)
     hidden: bool | None = None
-    successor_project_id: str | None = None
+    successor_project_id: str | None = Field(None, max_length=ID_MAX)
     auto_checkin_enabled: bool | None = None
     auto_checkin_interval: int | None = Field(
         None,
@@ -85,7 +97,7 @@ class AgentSimple(BaseModel):
 
 
 class ProjectTypeInfo(BaseModel):
-    """Nested project type info for project responses (Handover 0440c)."""
+    """Nested project type info for project responses."""
 
     id: str
     abbreviation: str
@@ -124,6 +136,9 @@ class ProjectResponse(ProjectBase):
     staging_status: str | None = None
     implementation_launched_at: datetime | None = None
 
+    reviewed_at: datetime | None = None
+    review_pending: bool = False
+
     agent_count: int
     message_count: int
     agents: list[AgentSimple] = Field(default_factory=list)
@@ -132,7 +147,7 @@ class ProjectResponse(ProjectBase):
 
 
 class ProjectListResponse(BaseModel):
-    """Thin wire shape for the dashboard project LIST endpoints (IMP-1002).
+    """Thin wire shape for the dashboard project LIST endpoints.
 
     ``GET /api/v1/projects/`` and ``/deleted`` return one row per project for
     every dashboard reload. The list UI renders only name + status + taxonomy
@@ -182,6 +197,13 @@ class ProjectListResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProjectReviewedResponse(BaseModel):
+    """Result of recording a human review of a finished project."""
+
+    id: str
+    reviewed_at: datetime
+
+
 class ProjectDeleteResponse(BaseModel):
     """Response model for project soft delete."""
 
@@ -214,7 +236,7 @@ class ProjectPurgeResponse(BaseModel):
 
 
 class AgentSummary(BaseModel):
-    """Summary of an agent used in the project (Handover 0062)."""
+    """Summary of an agent used in the project."""
 
     id: str
     name: str
@@ -225,7 +247,7 @@ class AgentSummary(BaseModel):
 
 
 class MessageSummary(BaseModel):
-    """Summary of a message in the project (Handover 0062)."""
+    """Summary of a message in the project."""
 
     id: str
     from_agent: str
@@ -235,7 +257,7 @@ class MessageSummary(BaseModel):
 
 
 class ProjectSummaryResponse(BaseModel):
-    """Comprehensive project summary for after-action review (Handover 0062)."""
+    """Comprehensive project summary for after-action review."""
 
     project_id: str
     project_name: str
@@ -253,7 +275,7 @@ class ProjectSummaryResponse(BaseModel):
 
 
 class ProjectCloseOutResponse(BaseModel):
-    """Response for project close-out operation (Handover 0113)."""
+    """Response for project close-out operation."""
 
     success: bool
     message: str
@@ -263,7 +285,7 @@ class ProjectCloseOutResponse(BaseModel):
 
 
 class CloseoutWithoutSummaryRequest(BaseModel):
-    """Close out a project whose agents stopped without writing a closeout (FE-9651)."""
+    """Close out a project whose agents stopped without writing a closeout."""
 
     reason: str = Field(
         ...,
@@ -274,7 +296,7 @@ class CloseoutWithoutSummaryRequest(BaseModel):
 
 
 class CloseoutWithoutSummaryResponse(BaseModel):
-    """Result of closing out a project without an agent summary (FE-9651)."""
+    """Result of closing out a project without an agent summary."""
 
     success: bool
     sequence_number: int | None = None
@@ -282,7 +304,7 @@ class CloseoutWithoutSummaryResponse(BaseModel):
 
 
 class ContinueWorkingResponse(BaseModel):
-    """Response for continue working operation (Handover 0113)."""
+    """Response for continue working operation."""
 
     success: bool
     message: str

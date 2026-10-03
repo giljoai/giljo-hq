@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class NotificationPreferencesUpdate(BaseModel):
     """A partial update to the current user's notification preferences.
 
-    FE-9553: the PUT used to take a bare ``dict[str, Any]``, so every field
+    The PUT used to take a bare ``dict[str, Any]``, so every field
     reached the service unvalidated and a bad value surfaced as a 500 out of the
     JSONB validator rather than a 422 at the door. The house rule is explicit
     that a database constraint is not an input gate -- "constraints produce

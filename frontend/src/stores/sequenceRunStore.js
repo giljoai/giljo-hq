@@ -5,6 +5,7 @@ import { immutableMapSet, immutableMapDelete } from './immutableHelpers'
 import { useProductStore } from '@/stores/products'
 import { useNotificationStore } from '@/stores/notifications'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const ACTIVE_RUN_STATUSES = ['pending', 'running', 'stalled']
 const CHAIN_FINISHED_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled'])
@@ -13,7 +14,7 @@ const CHAIN_RUNNING_STATUSES = new Set(['running', 'stalled'])
 
 function normalizeRun(raw) {
   if (!raw) return null
-  const id = raw.id || raw.run_id
+  const id = raw.id
   if (!id) return null
   return {
     id,
@@ -29,6 +30,7 @@ function normalizeRun(raw) {
     conductor_agent_id: raw.conductor_agent_id ?? null,
     conductor_project_id: raw.conductor_project_id ?? null,
     conductor_label: raw.conductor_label ?? null,
+    product_id: raw.product_id ?? null,
     created_at: raw.created_at ?? null,
     updated_at: raw.updated_at ?? null,
     locked: typeof raw.locked === 'boolean' ? raw.locked : false,
@@ -39,14 +41,10 @@ function normalizeRun(raw) {
 
 export const useSequenceRunStore = defineStore('sequenceRun', () => {
   const runsById = ref(new Map())
-  const activeRun = ref(null)
   const reviewedProjects = ref(new Map())
   const reviewPendingById = ref(new Map())
   const loading = ref(false)
   const error = ref(null)
-  const retiredRunNotice = ref(null)
-  const scopedProductId = ref(null)
-
 
   const activeRuns = computed(() => Array.from(runsById.value.values()))
 
@@ -98,7 +96,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
 
   function isRunning(runId) {
     if (!runId) return false
-    const run = runsById.value.get(runId) || (activeRun.value?.id === runId ? activeRun.value : null)
+    const run = runsById.value.get(runId)
     if (!run) return false
     if (CHAIN_RUNNING_STATUSES.has(run.status)) return true
     if (CHAIN_FINISHED_STATUSES.has(run.status)) return false
@@ -121,14 +119,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     )
   }
 
-  function isOutOfViewedScope(runId) {
-    if (!runId || !scopedProductId.value) return false
-    return !runsById.value.has(runId) && !reviewPendingById.value.has(runId)
-  }
-
   const reviewPendingRun = computed(() => {
-    const open = activeRun.value
-    if (open && !isOutOfViewedScope(open.id) && hasUnreviewedCompletedMember(open)) return open
     for (const r of reviewPendingById.value.values()) {
       if (hasUnreviewedCompletedMember(r)) return r
     }
@@ -173,7 +164,8 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
         include_review_pending: true,
         ...(viewedProductId ? { product_id: viewedProductId } : {}),
       })
-      const runs = Array.isArray(res.data) ? res.data : res.data?.sequence_runs || []
+      if (!Array.isArray(res.data)) throw new Error('Chain run list reply is not a list')
+      const runs = res.data
       const next = new Map()
       const nextPending = new Map()
       for (const raw of runs) {
@@ -189,43 +181,24 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
       }
       runsById.value = next
       reviewPendingById.value = nextPending
-      scopedProductId.value = viewedProductId || null
-      if (activeRun.value && next.has(activeRun.value.id)) {
-        activeRun.value = next.get(activeRun.value.id)
-      } else if (activeRun.value && isOutOfViewedScope(activeRun.value.id)) {
-        activeRun.value = null
-      }
       return activeRuns.value
     } catch (err) {
-      error.value = err?.message || 'Failed to load chain runs'
+      error.value = parseErrorResponse(err).message
       return []
     } finally {
       loading.value = false
     }
   }
 
-  function setActiveRun(run) {
-    const normalized = normalizeRun(run)
-    activeRun.value = normalized
-    if (normalized) {
-      mergeReviewedFromRun(normalized)
-      if (ACTIVE_RUN_STATUSES.includes(normalized.status) && !isOutOfViewedScope(normalized.id)) {
-        runsById.value = immutableMapSet(runsById.value, normalized.id, normalized)
-      }
-    }
-    return normalized
-  }
-
-  async function fetchRun(runId) {
-    if (!runId) return null
-    const res = await api.sequenceRuns.get(runId)
-    return setActiveRun(res.data)
+  function withListedProduct(run) {
+    const listed = run && !run.product_id && (runsById.value.get(run.id) || reviewPendingById.value.get(run.id))
+    return listed ? { ...run, product_id: listed.product_id } : run
   }
 
   async function patchRun(runId, patch) {
     if (!runId) return null
     const res = await api.sequenceRuns.update(runId, patch)
-    const run = normalizeRun(res.data) || normalizeRun({ id: runId, ...patch })
+    const run = withListedProduct(normalizeRun(res.data) || normalizeRun({ id: runId, ...patch }))
     if (run) {
       mergeReviewedFromRun(run)
       if (ACTIVE_RUN_STATUSES.includes(run.status)) {
@@ -233,7 +206,6 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
       } else {
         runsById.value = immutableMapDelete(runsById.value, run.id)
       }
-      if (activeRun.value && activeRun.value.id === run.id) activeRun.value = run
     }
     return run
   }
@@ -257,35 +229,28 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
   }
 
   async function handleSequenceUpdated(payload) {
-    const runId = payload?.run_id || payload?.id
-    const openRunId = activeRun.value?.id ?? null
+    const runId = payload?.run_id
     const wasKnownToBoard = !!runId && (runsById.value.has(runId) || reviewPendingById.value.has(runId))
     await hydrate()
     if (!runId) return
     const stillKnown = runsById.value.has(runId) || reviewPendingById.value.has(runId)
-    if (openRunId === runId) {
-      if (!stillKnown) {
-        try {
-          await fetchRun(runId)
-        } catch {
-          activeRun.value = null
-          retiredRunNotice.value = { runId }
-          notifyChainRetired(runId)
-        }
-      } else {
-        activeRun.value = runsById.value.get(runId)
-      }
-    } else if (wasKnownToBoard && !stillKnown) {
+    if (wasKnownToBoard && !stillKnown) {
       try {
         await api.sequenceRuns.get(runId)
-      } catch {
-        notifyChainRetired(runId)
+      } catch (error) {
+        if (error?.response?.status === 404) {
+          notifyChainRetired(runId)
+        } else {
+          useNotificationStore().addNotification({
+            id: `chain-check-failed:${runId}`,
+            type: 'lifecycle',
+            severity: 'warning',
+            title: 'Chain state unknown',
+            message: `Could not confirm this chain's state: ${parseErrorResponse(error).message}`,
+          })
+        }
       }
     }
-  }
-
-  function clearRetiredRunNotice() {
-    retiredRunNotice.value = null
   }
 
   async function lockRun(runId) {
@@ -308,16 +273,10 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     await hydrate()
   }
 
-  function clearActiveRun() {
-    activeRun.value = null
-  }
-
   function $reset() {
     runsById.value = new Map()
-    activeRun.value = null
     reviewedProjects.value = new Map()
     reviewPendingById.value = new Map()
-    scopedProductId.value = null
     loading.value = false
     error.value = null
   }
@@ -331,10 +290,6 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     runsById.value = next
   }
 
-  function _testSetActiveRun(raw) {
-    activeRun.value = normalizeRun(raw)
-  }
-
   function _testSeedReviewPending(rawRuns) {
     const next = new Map()
     for (const raw of rawRuns || []) {
@@ -346,9 +301,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
 
   return {
     runsById,
-    activeRun,
     reviewPendingById,
-    retiredRunNotice,
     loading,
     error,
     activeRuns,
@@ -362,21 +315,16 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     isReviewed,
     reviewPendingRun,
     hydrate,
-    setActiveRun,
-    fetchRun,
     patchRun,
     lockRun,
     unlockRun,
     stopChain,
     deactivateChain,
     handleSequenceUpdated,
-    clearRetiredRunNotice,
-    clearActiveRun,
     markReviewed,
     markReviewedRemote,
     $reset,
     _testSeedRuns,
-    _testSetActiveRun,
     _testSeedReviewPending,
   }
 })

@@ -17,7 +17,6 @@ from giljo_mcp.schemas.jsonb_validators import (
     IntegrationsSettingsData,
     ProductMemoryConfig,
     SecuritySettingsData,
-    SerenaMcpSettings,
     validate_agent_execution_result,
     validate_behavioral_rules,
     validate_git_commits,
@@ -357,37 +356,18 @@ class TestGitIntegrationSettings:
 
 
 
-class TestSerenaMcpSettings:
-    def test_defaults_to_disabled(self):
-        s = SerenaMcpSettings()
-        assert s.use_in_prompts is False
-
-    def test_enabled_state(self):
-        s = SerenaMcpSettings(use_in_prompts=True)
-        assert s.use_in_prompts is True
-
-    def test_non_bool_string_for_use_in_prompts_raises(self):
-        with pytest.raises(ValidationError):
-            SerenaMcpSettings(use_in_prompts="not_a_boolean_xyz")
-
-
-
-
 class TestIntegrationsSettingsData:
     def test_defaults_produce_valid_structure(self):
         data = IntegrationsSettingsData()
         assert isinstance(data.git_integration, GitIntegrationSettings)
-        assert isinstance(data.serena_mcp, SerenaMcpSettings)
         assert data.git_integration.enabled is False
 
     def test_accepts_nested_git_settings(self):
         data = IntegrationsSettingsData(
             git_integration={"enabled": True, "use_in_prompts": True},
-            serena_mcp={"use_in_prompts": True},
         )
         assert data.git_integration.enabled is True
         assert data.git_integration.use_in_prompts is True
-        assert data.serena_mcp.use_in_prompts is True
 
     def test_rejects_invalid_git_integration_type(self):
         with pytest.raises(ValidationError):
@@ -406,7 +386,6 @@ class TestIntegrationsSettingsData:
         data = IntegrationsSettingsData()
         dumped = data.model_dump()
         assert "git_integration" in dumped
-        assert "serena_mcp" in dumped
         assert dumped["git_integration"]["enabled"] is False
 
 
@@ -477,6 +456,7 @@ class TestValidateSettingsByCategory:
         )
         assert result["git_integration"]["enabled"] is True
         assert result["git_integration"]["use_in_prompts"] is True
+        assert "serena_mcp" not in result
 
     def test_security_category_validates_fields(self):
         result = validate_settings_by_category(

@@ -25,7 +25,7 @@ const archiveMock = vi.fn().mockResolvedValue({ data: { id: 'proj-1' } })
 const getMemoryEntriesMock = vi.fn().mockResolvedValue({ data: { entries: [] } })
 vi.mock('@/services/api', () => ({
   default: {
-    projects: { archive: (...args) => archiveMock(...args) },
+    projects: { archive: (...args) => archiveMock(...args), markReviewed: () => Promise.resolve({ data: {} }) },
     products: { getMemoryEntries: (...args) => getMemoryEntriesMock(...args) },
   },
 }))

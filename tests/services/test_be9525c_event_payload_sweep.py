@@ -20,7 +20,7 @@ from giljo_mcp.services.agent_health_ws_broadcast import broadcast_agent_auto_fa
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.notification_service import NotificationService
 from giljo_mcp.services.progress_service import ProgressService
-from giljo_mcp.services.project_helpers import mark_staging_complete
+from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_staging_complete
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 from giljo_mcp.tenant import TenantManager
@@ -34,6 +34,7 @@ pytestmark = pytest.mark.asyncio
 async def test_spawn_job_agent_created_carries_product_id(db_session, db_manager, tenant_key, project):
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     service = JobLifecycleService(
         db_manager=db_manager,
         tenant_manager=TenantManager(),
@@ -60,10 +61,13 @@ async def test_spawn_job_agent_created_carries_product_id(db_session, db_manager
 async def test_mark_staging_complete_carries_product_id(db_session, tenant_key, project):
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
 
     flipped = await mark_staging_complete(db_session, project, source="test", websocket_manager=mock_ws)
 
     assert flipped is True
+    mock_ws.broadcast_to_tenant.assert_not_called()
+    await broadcast_deferred_events(db_session)
     mock_ws.broadcast_to_tenant.assert_called_once()
     call = mock_ws.broadcast_to_tenant.call_args
     assert call.kwargs["event_type"] == "project:staging_complete"
@@ -79,6 +83,7 @@ async def test_launch_implementation_carries_product_id(db_session, db_manager, 
 
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     mock_tm = MagicMock()
     mock_tm.get_current_tenant.return_value = tenant_key
     service = ProjectStagingService(
@@ -119,6 +124,7 @@ async def test_report_progress_carries_product_id(db_session, db_manager, tenant
 
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     mock_tm = MagicMock()
     mock_tm.get_current_tenant.return_value = tenant_key
     service = ProgressService(db_manager=db_manager, tenant_manager=mock_tm, test_session=db_session)
@@ -221,6 +227,7 @@ async def test_approval_read_carries_product_id(db_session, db_manager, tenant_k
 
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     service = UserApprovalService(
         db_manager=db_manager, tenant_manager=TenantManager(), websocket_manager=mock_ws, test_session=db_session
     )
@@ -265,6 +272,7 @@ async def test_deactivate_never_run_orchestrator_agent_removed_carries_product_i
 
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     service = ProjectLifecycleService(
         db_manager=db_manager, tenant_manager=TenantManager(), test_session=db_session, websocket_manager=mock_ws
     )
@@ -286,6 +294,7 @@ async def test_deactivate_never_run_orchestrator_agent_removed_carries_product_i
 async def test_notification_new_envelope_carries_top_level_ids(db_session, db_manager, tenant_key):
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
+    mock_ws.broadcast_project_update = AsyncMock()
     service = NotificationService(db_manager=db_manager, websocket_manager=mock_ws, session=db_session)
 
     await service.create(

@@ -74,7 +74,7 @@ class SkillsDriftPayload(BaseModel):
 class ToolRenameNoticePayload(BaseModel):
     """Validates payload for Notification.type == "system.tool_rename_notice".
 
-    INF-6049a one-time CE migration prompt (get_orchestrator_instructions ->
+    One-time CE migration prompt (get_orchestrator_instructions ->
     get_staging_instructions), shown for the first few process boots after the rename.
     The notice carries no structured payload; everything the user needs is in the
     title/body, so the payload is an empty (extra-forbidding) object.
@@ -86,7 +86,7 @@ class ToolRenameNoticePayload(BaseModel):
 class ContextTuningDuePayload(BaseModel):
     """Validates payload for Notification.type == "system.context_tuning_due".
 
-    FE-9202: emitted by the periodic system-banner refresh when the active
+    Emitted by the periodic system-banner refresh when the active
     product has not had its context tuned in 14+ days AND at least one project
     has completed since the last tune (the activity gate). Carries the product
     identity the banner renders and links back to. ``projects_since_tune`` is the
@@ -103,14 +103,14 @@ class ContextTuningDuePayload(BaseModel):
 class ProjectPrelaunchWorkproductPayload(BaseModel):
     """Validates payload for Notification.type == "project.pre_launch_workproduct".
 
-    BE-9085: emitted by the closeout-hook detector in write_memory_entry.py
+    Emitted by the closeout-hook detector in write_memory_entry.py
     when a project_completion closeout carries git commits while the
     project's Implement-gate (``implementation_launched_at``) was never
     approved this cycle. Alarm-only -- carries enough for the bell/banner
     to render and link back to the project; the closeout itself is never
     blocked or altered by this detector (fail-open).
 
-    FE-9222: ``taxonomy_alias`` (the project's human tag, e.g. "PRJ-0042")
+    ``taxonomy_alias`` (the project's human tag, e.g. "PRJ-0042")
     enriches the row so the notification names the project unambiguously.
     Optional -- a project without a resolvable alias still emits.
     """
@@ -126,12 +126,12 @@ class ProjectPrelaunchWorkproductPayload(BaseModel):
 class CloseoutApprovalRequiredPayload(BaseModel):
     """Validates payload for Notification.type == "closeout.approval_required".
 
-    BE-9153: emitted (surface="both") when the signal-gated closeout_mode gate
+    Emitted (surface="both") when the signal-gated closeout_mode gate
     auto-creates a user_approval — either a solo closeout block or a chain-link
     settlement approval. Carries enough for the bell/banner to render and link back
     to the project's approval card; the approval itself is the load-bearing record.
 
-    BE-9436b: ``project_name`` names the project the closeout belongs to, so the
+    ``project_name`` names the project the closeout belongs to, so the
     row obeys the affiliated-name rule (names, never UUIDs) the way
     ``ProjectPrelaunchWorkproductPayload`` already does. OPTIONAL, unlike that
     sibling: the emitter is deliberately fail-open (a notification failure must
@@ -152,7 +152,7 @@ class CloseoutApprovalRequiredPayload(BaseModel):
 class HubBatonHandoverPayload(BaseModel):
     """Validates payload for Notification.type == "hub.baton_handover".
 
-    BE-9296a: emitted when a Hub baton is handed to the OPERATOR. FE-9289c already
+    Emitted when a Hub baton is handed to the OPERATOR. The dashboard already
     drops a bell entry from the live WebSocket event, but that entry is client-local
     (localStorage), so a hand-off that arrives while the dashboard is closed — or on
     a different device — was simply never seen. This is the durable server row that

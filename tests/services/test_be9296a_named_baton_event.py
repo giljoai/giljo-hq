@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from giljo_mcp.database import tenant_session_context
+from giljo_mcp.services.comm_baton_targets import HubTargetRefusedError
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
@@ -108,9 +109,11 @@ async def test_a_refused_handover_still_carries_no_identity(db_manager, db_sessi
     svc = _service(db_manager, db_session)
     thread_id = await _thread(svc, tenant)
 
-    result = await svc.pass_baton(thread_id=thread_id, to="nobody-here", from_agent="em", tenant_key=tenant)
+    with pytest.raises(HubTargetRefusedError) as caught:
+        await svc.pass_baton(thread_id=thread_id, to="nobody-here", from_agent="em", tenant_key=tenant)
+    result = caught.value.as_refusal()
 
-    assert result.get("success") is False
+    assert result["success"] is False
     assert "from_display_name" not in result
 
 

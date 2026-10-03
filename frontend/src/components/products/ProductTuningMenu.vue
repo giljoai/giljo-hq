@@ -269,7 +269,7 @@ async function generatePrompt() {
     )
 
     const data = response.data
-    generatedPrompt.value = data.prompt || data.generated_prompt || ''
+    generatedPrompt.value = data.prompt
 
     if (!generatedPrompt.value) {
       showToast({ message: 'No prompt was generated. Check that selected sections have data.', type: 'warning' })

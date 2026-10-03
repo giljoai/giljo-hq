@@ -216,9 +216,10 @@ describe('ProjectsView.vue', () => {
       expect(button.exists()).toBe(true)
     })
 
-    it('renders New Project button text', async () => {
+    it('labels the New Project button with a "New project" title', async () => {
       const wrapper = await createWrapper()
-      expect(wrapper.text()).toContain('New Project')
+      const button = wrapper.find('button[aria-label="Create new project"]')
+      expect(button.attributes('title')).toBe('New project')
     })
 
     it('renders search input field', async () => {

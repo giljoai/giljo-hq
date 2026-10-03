@@ -5,6 +5,7 @@
 
 
 import contextlib
+import sys
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -22,6 +23,35 @@ from tests.helpers.test_db_helper import (
 
 
 _worker_schema_ready: set[str] = set()
+
+
+@contextlib.contextmanager
+def restored_app_state():
+    from api.app_state import state
+    from giljo_mcp.app_registry import service_registry
+
+    registered_ws_manager = service_registry.get_websocket_manager()
+    original = dict(vars(state))
+    contents = {name: value.copy() for name, value in original.items() if isinstance(value, (dict, list))}
+    app_module = sys.modules.get("api.app")
+    fastapi_state = dict(app_module.app.state._state) if app_module is not None else None
+    try:
+        yield state
+    finally:
+        for name in set(vars(state)) - set(original):
+            delattr(state, name)
+        for name, value in original.items():
+            if name in contents:
+                value.clear()
+                if isinstance(value, dict):
+                    value.update(contents[name])
+                else:
+                    value.extend(contents[name])
+            setattr(state, name, value)
+        if fastapi_state is not None:
+            app_module.app.state._state.clear()
+            app_module.app.state._state.update(fastapi_state)
+        service_registry.set_websocket_manager(registered_ws_manager)
 
 
 @contextlib.contextmanager

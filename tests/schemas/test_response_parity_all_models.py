@@ -106,6 +106,7 @@ PROJECT_MCP_DATA_ALLOWLIST: dict[str, str] = {
         "ProjectDetail or REST ProjectResponse, not from compact update results"
     ),
     "tenant_key": "Multi-tenant isolation",
+    "reviewed_at": "Human-review stamp: REST-only, read by the Jobs board via /active",
     "deleted_at": "Soft-delete timestamp not relevant to compact shape",
     "ever_launched_at": "BE-9085b internal durable launch signal — detector-only, not exposed via API",
     "orchestrator_summary": "Internal closeout workflow state",

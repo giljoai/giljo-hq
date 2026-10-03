@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 
 from giljo_mcp.models import Project
+from giljo_mcp.models.agent_identity import AgentJob
 from giljo_mcp.models.notifications import Notification
 from giljo_mcp.tools.write_memory_entry import write_360_memory
 
@@ -72,6 +73,20 @@ async def _make_project(
     return project
 
 
+async def _orchestrator_job_id(db_session, tenant_key, project_id) -> str:
+    job = AgentJob(
+        job_id=str(uuid.uuid4()),
+        project_id=project_id,
+        mission="orchestrator",
+        job_type="orchestrator",
+        status="active",
+        tenant_key=tenant_key,
+    )
+    db_session.add(job)
+    await db_session.commit()
+    return job.job_id
+
+
 async def _open_notification(db_session, tenant_key, project_id):
     stmt = select(Notification).where(
         Notification.tenant_key == tenant_key,
@@ -94,6 +109,7 @@ async def test_never_launched_closeout_with_commits_fires_notification(db_sessio
         key_outcomes=["shipped anyway"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[{"sha": "a" * 40, "message": "fix", "author": "agent"}],
         db_manager=db_manager,
         session=db_session,
@@ -121,6 +137,7 @@ async def test_notification_is_emitted_to_the_bell_surface(db_session, test_tena
         key_outcomes=["shipped anyway"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[{"sha": "b" * 40, "message": "fix", "author": "agent"}],
         db_manager=db_manager,
         session=db_session,
@@ -143,6 +160,7 @@ async def test_enriched_notification_carries_taxonomy_alias_and_name(db_session,
         key_outcomes=["shipped anyway"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[{"sha": "e" * 40, "message": "fix", "author": "agent"}],
         db_manager=db_manager,
         session=db_session,
@@ -174,6 +192,7 @@ async def test_launched_project_with_commits_no_notification(db_session, test_te
         key_outcomes=["shipped"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[{"sha": "b" * 40, "message": "fix", "author": "agent"}],
         db_manager=db_manager,
         session=db_session,
@@ -196,6 +215,7 @@ async def test_prelaunch_closeout_with_no_commits_no_notification(db_session, te
         key_outcomes=["nothing shipped"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[],
         db_manager=db_manager,
         session=db_session,
@@ -222,6 +242,7 @@ async def test_fail_open_closeout_still_succeeds_when_emit_raises(db_session, te
             key_outcomes=["shipped anyway"],
             decisions_made=["decision"],
             entry_type="project_completion",
+            author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
             git_commits=[{"sha": "c" * 40, "message": "fix", "author": "agent"}],
             db_manager=db_manager,
             session=db_session,
@@ -249,6 +270,7 @@ async def test_restage_survivor_suppresses_alarm(db_session, test_tenant_key, te
         key_outcomes=["restaged then closed without relaunching"],
         decisions_made=["decision"],
         entry_type="project_completion",
+        author_job_id=await _orchestrator_job_id(db_session, test_tenant_key, project.id),
         git_commits=[{"sha": "d" * 40, "message": "pre-restage work", "author": "agent"}],
         db_manager=db_manager,
         session=db_session,

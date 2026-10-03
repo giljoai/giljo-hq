@@ -95,7 +95,7 @@ async function resolveProjectThread() {
 
 async function sendMessage() {
   if (!messageText.value.trim()) {
-    showToast({ message: 'Message cannot be empty', type: 'warning', timeout: 3000 })
+    showToast({ message: 'Message cannot be empty', type: 'warning' })
     return
   }
 
@@ -109,7 +109,6 @@ async function sendMessage() {
         showToast({
           message: "The conductor hasn't set up its coordination thread yet — try again shortly.",
           type: 'warning',
-          timeout: 5000,
         })
         return
       }
@@ -123,7 +122,7 @@ async function sendMessage() {
       const body = { content, requires_action: false }
       if (selectedRecipient.value === 'orchestrator') {
         if (!props.orchestratorAgentId) {
-          showToast({ message: 'No orchestrator found for this project.', type: 'error', timeout: 5000 })
+          showToast({ message: 'No orchestrator found for this project.', type: 'error' })
           return
         }
         body.to_participant = props.orchestratorAgentId
@@ -132,13 +131,13 @@ async function sendMessage() {
       await commHub.postMessage(thread.thread_id, body)
     }
 
-    showToast({ message: 'Message sent successfully', type: 'success', timeout: 3000 })
+    showToast({ message: 'Message sent successfully', type: 'success' })
     messageText.value = ''
     emit('message-sent')
   } catch (error) {
     console.error('[MessageComposer] Send message failed:', error)
     const msg = parseErrorResponse(error).message || 'Failed to send message'
-    showToast({ message: `Failed to send message: ${msg}`, type: 'error', timeout: 5000 })
+    showToast({ message: `Failed to send message: ${msg}`, type: 'error' })
   } finally {
     sending.value = false
   }

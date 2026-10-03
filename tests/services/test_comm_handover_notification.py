@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.notifications import Notification
 from giljo_mcp.schemas.jsonb_notification_payloads import NOTIFICATION_PAYLOAD_VALIDATORS
+from giljo_mcp.services.comm_baton_targets import HubTargetRefusedError
 from giljo_mcp.services.comm_handover_notification import NOTIFICATION_TYPE, handover_dedupe_key
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
@@ -189,9 +191,11 @@ async def test_a_refused_handover_writes_no_row(db_manager, db_session):
     svc = _service(db_manager, db_session)
     thread_id = await _thread(svc, tenant)
 
-    result = await svc.pass_baton(thread_id=thread_id, to="nobody-here", from_agent="em", tenant_key=tenant)
+    with pytest.raises(HubTargetRefusedError) as caught:
+        await svc.pass_baton(thread_id=thread_id, to="nobody-here", from_agent="em", tenant_key=tenant)
+    result = caught.value.as_refusal()
 
-    assert result.get("success") is False
+    assert result["success"] is False
     assert await _rows(db_session, tenant) == []
 
 

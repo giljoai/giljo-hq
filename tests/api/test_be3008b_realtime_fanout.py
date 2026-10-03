@@ -230,18 +230,23 @@ async def test_setup_context_socket_is_not_indexed():
 
 
 @pytest.mark.asyncio
-async def test_reconnect_under_new_tenant_deindexes_old_tenant():
+async def test_reconnect_under_new_tenant_is_refused_and_leaves_the_owner_indexed():
+    from fastapi.exceptions import WebSocketException
+
     mgr = WebSocketManager()
     ws_a, ws_b = _FakeWS(), _FakeWS()
 
     await mgr.connect(ws_a, "shared-id", {"tenant_key": "tk_a"})
-    await mgr.connect(ws_b, "shared-id", {"tenant_key": "tk_b"})
+    with pytest.raises(WebSocketException):
+        await mgr.connect(ws_b, "shared-id", {"tenant_key": "tk_b"})
 
-    assert "shared-id" not in mgr.tenant_connections.get("tk_a", set())
-    assert mgr.tenant_connections["tk_b"] == {"shared-id"}
+    assert mgr.tenant_connections["tk_a"] == {"shared-id"}
+    assert "tk_b" not in mgr.tenant_connections
+    assert mgr.active_connections["shared-id"] is ws_a
+    assert not ws_a.closed
 
     sent = await mgr.broadcast_event_to_tenant(tenant_key="tk_a", event=_event("tk_a"))
-    assert sent == 0
+    assert sent == 1
     assert ws_b.sent == []
 
 

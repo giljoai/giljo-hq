@@ -14,7 +14,7 @@ export function useBannerFold({
     const keys = []
     if (yourTurnCount.value > 0) keys.push('your-turn')
     if (approvalCount.value > 0) keys.push('approval')
-    if ((threadPostCount?.value || 0) > 0) keys.push('thread-post')
+    if (threadPostCount.value > 0) keys.push('thread-post')
     for (const row of lifecycleRows.value) keys.push(`lifecycle:${row.id}`)
     for (const n of systemBanners.value) keys.push(`system:${n.id}`)
     if (showTutorial.value) keys.push('tutorial')

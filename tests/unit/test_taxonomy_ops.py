@@ -119,24 +119,3 @@ class TestListTaxonomyTypes:
 
         assert len(result) == 1
         assert result[0].project_count == 7
-
-
-class TestReExportCompatibility:
-
-    def test_crud_ops_reexports_ensure_default(self):
-        from api.endpoints.taxonomy_types.crud_ops import ensure_default_types_seeded as reexported
-        from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded as canonical
-
-        assert reexported is canonical
-
-    def test_crud_ops_reexports_list(self):
-        from api.endpoints.taxonomy_types.crud_ops import list_taxonomy_types as reexported
-        from giljo_mcp.services.taxonomy_ops import list_taxonomy_types as canonical
-
-        assert reexported is canonical
-
-    def test_crud_ops_reexports_defaults(self):
-        from api.endpoints.taxonomy_types.crud_ops import DEFAULT_TAXONOMY_TYPES as REEXPORTED
-        from giljo_mcp.services.taxonomy_ops import DEFAULT_TAXONOMY_TYPES as CANONICAL
-
-        assert REEXPORTED is CANONICAL

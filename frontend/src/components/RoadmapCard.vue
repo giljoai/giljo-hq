@@ -128,7 +128,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { hexToRgba } from '@/utils/colorUtils'
+import { tintedStyle } from '@/utils/colorUtils'
 import { getAgentColor } from '@/config/agentColors'
 import { COLOR_BRAND, COLOR_COMPLETE, TEXT_MUTED } from '@/config/colorTokens'
 import { taxonomyBadgeStyle, DEFAULT_PROJECT_TYPE_COLOR } from '@/utils/taxonomyBadge'
@@ -160,12 +160,6 @@ const aliasStyle = computed(() =>
   taxonomyBadgeStyle(props.item.taxonomy_color || DEFAULT_PROJECT_TYPE_COLOR),
 )
 
-function tintedStyle(hex) {
-  return {
-    backgroundColor: hexToRgba(hex, 0.15),
-    color: hex,
-  }
-}
 
 const typeLabel = computed(() => (isProject.value ? 'PROJECT' : 'TASK'))
 const typeBadgeStyle = computed(() =>
@@ -234,7 +228,7 @@ defineExpose({ isProject, aliasShown, aliasStyle, typeLabel, riskBadge, complexi
   transform: translateY(-2px);
 }
 
-/* Rank rail: dotted grip + sort_order number */
+/* Rank rail: dotted grip + rank number */
 .rm-rank {
   flex-shrink: 0;
   display: flex;

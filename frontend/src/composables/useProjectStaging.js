@@ -70,7 +70,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       if (copied) {
         showToast({ message: _pasteLabels[currentMode] || _pasteLabels.multi_terminal, type: 'success' })
       } else {
-        showToast({ message: 'Copy failed. Check your browser\'s clipboard permissions and try again.', type: 'warning', timeout: 6000 })
+        showToast({ message: 'Copy failed. Check your browser\'s clipboard permissions and try again.', type: 'warning' })
       }
     } catch (error) {
       console.error('Stage project failed:', error)
@@ -80,7 +80,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       if (errorMsg.toLowerCase().includes('orchestrator already exists')) {
         showToast({ message: 'An orchestrator is already active for this project. The existing orchestrator will be reused.', type: 'info' })
       } else if (error.response?.status === 409 && errorMsg.toLowerCase().includes('execution mode')) {
-        showToast({ message: 'Please select an execution mode before staging.', type: 'warning', timeout: 5000 })
+        showToast({ message: 'Please select an execution mode before staging.', type: 'warning' })
       } else {
         showError(errorMsg)
       }

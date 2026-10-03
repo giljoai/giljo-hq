@@ -161,6 +161,7 @@
     "ce_0104_be9610a_product_owned_agent_copies",
     "ce_0105_db9607_drop_template_export_columns",
     "ce_0106_be9637_mcp_tool_call_metrics",
-    "ce_0107_db9639_drop_tasks_due_date"
+    "ce_0107_db9639_drop_tasks_due_date",
+    "ce_0108_fe9708_project_reviewed_at"
   ]
 }

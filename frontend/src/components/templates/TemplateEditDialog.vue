@@ -2,7 +2,7 @@
   <v-dialog :model-value="modelValue" max-width="900px" persistent retain-focus scrollable @update:model-value="$emit('update:modelValue', $event)">
     <v-card v-draggable class="smooth-border">
       <div class="dlg-header">
-        <span class="dlg-title">{{ template.id ? 'Edit' : 'Create' }} Template</span>
+        <span class="dlg-title">{{ template.id ? 'Edit Template' : 'Create new Template' }}</span>
         <v-btn icon variant="text" class="dlg-close" aria-label="Close" @click="$emit('close')">
           <v-icon>mdi-close</v-icon>
         </v-btn>

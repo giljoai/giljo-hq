@@ -66,6 +66,14 @@ EXPECTED_DESTRUCTIVE_TOOLS = frozenset(
         "update_project",
         "update_task",
         "write_project_closeout",
+        "update_thread",
+        "post_to_thread",
+        "update_product_context",
+        "update_job_mission",
+        "update_project_mission",
+        "apply_context_tuning",
+        "decide_approval",
+        "giljo_setup",
     }
 )
 
@@ -84,6 +92,21 @@ def test_every_tool_declares_open_world_false():
         t.name for t in _live_tools() if t.annotations is None or t.annotations.open_world_hint is not False
     )
     assert not not_closed_world, f"tools not declaring openWorldHint=False: {not_closed_world}"
+
+
+def test_update_thread_description_states_private_workspace_and_closed_world():
+    tool = next(t for t in _live_tools() if t.name == "update_thread")
+    assert tool.annotations.open_world_hint is False
+    description = tool.description.lower()
+    assert "private giljo hq workspace" in description
+    assert "no outside service" in description
+
+
+def test_giljo_setup_description_states_it_replaces_installed_files():
+    tool = next(t for t in _live_tools() if t.name == "giljo_setup")
+    description = tool.description.lower()
+    assert "replaces" in description
+    assert "managed block" in description
 
 
 def test_tool_hints_helper_derives_read_only_from_tool_scopes():

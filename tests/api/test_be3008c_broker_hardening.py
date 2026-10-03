@@ -381,6 +381,7 @@ class _StubState:
         self.db_manager = _StubDBManager()
         self.websocket_manager = WebSocketManager()
         self.websocket_broker = None
+        self.degraded_services: list[str] = []
 
 
 def _force_worker_count(monkeypatch, count: int) -> None:
@@ -424,6 +425,7 @@ async def test_startup_single_worker_degrades_gracefully_on_broker_failure(monke
     state = _StubState()
     await init_websocket_broker(state)
     assert state.websocket_broker is None
+    assert state.degraded_services == ["websocket_broker"], "the degraded broker is named on /health"
 
 
 async def test_startup_attaches_postgres_broker_multiworker(fake_pg, monkeypatch):

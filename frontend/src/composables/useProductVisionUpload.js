@@ -52,7 +52,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
     showToast({
       message: `${firstFailure.file?.name || 'File'}: ${firstFailure.message}`,
       type: 'error',
-      timeout: 7000,
     })
     visionFiles.value = []
     return false
@@ -60,6 +59,8 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
 
   async function uploadVisionFilesOnAttach({ productName, files }) {
     if (!files || files.length === 0) return
+    visionUploadError.value = null
+    visionUploadRetrySafe.value = null
     if (!validateFiles(files)) return
 
     try {
@@ -84,8 +85,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
 
       uploadingVision.value = true
       uploadProgress.value = 0
-      visionUploadError.value = null
-      visionUploadRetrySafe.value = null
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
@@ -109,7 +108,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
           showToast({
             message: `${file.name} uploaded${statusParts.length ? ` (${statusParts.join(', ')})` : ''}`,
             type: 'success',
-            timeout: 3000,
           })
         } catch (uploadError) {
           console.error(`[useProductVisionUpload] Failed to upload ${file.name}:`, uploadError)
@@ -125,7 +123,8 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
           }
 
           visionUploadError.value = errorMessage
-          showToast({ message: errorMessage, type: 'error', timeout: 7000 })
+          visionUploadRetrySafe.value = true
+          showToast({ message: errorMessage, type: 'error' })
         }
       }
 
@@ -140,7 +139,7 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
       visionUploadError.value = created
         ? 'A product was created but the file could not be attached to it. Open Products to see it, or try again from there.'
         : describeCreateFailure(error)
-      showToast({ message: visionUploadError.value, type: 'error', timeout: 5000 })
+      showToast({ message: visionUploadError.value, type: 'error' })
     }
   }
 

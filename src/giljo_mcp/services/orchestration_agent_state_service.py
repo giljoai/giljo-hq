@@ -32,6 +32,7 @@ from giljo_mcp.schemas.service_responses import (
 from giljo_mcp.services._error_helpers import M_CLOSE, M_DISMISS, M_REACTIVATE, not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.orchestrator_caller_guard import require_project_orchestrator
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -93,33 +94,28 @@ class OrchestrationAgentStateService:
         duration_seconds: float | None,
         product_id: str | None = None,
     ) -> None:
-        try:
-            if self._websocket_manager:
-                await self._websocket_manager.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="agent:status_changed",
-                    data={
-                        "job_id": job_id,
-                        "project_id": str(job.project_id) if job.project_id else None,
-                        "product_id": product_id,
-                        "chain_conductor": bool(
-                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                        ),
-                        "agent_display_name": execution.agent_display_name,
-                        "agent_name": execution.agent_name,
-                        "old_status": old_status,
-                        "status": execution.status,
-                        "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
-                        "duration_seconds": execution.duration_seconds,
-                        "working_started_at": execution.working_started_at.isoformat()
-                        if execution.working_started_at
-                        else None,
-                        "has_result": True,
-                    },
-                )
-                self._logger.info(f"[WEBSOCKET] Broadcasted complete_job status change for {job_id}")
-        except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-            self._logger.warning(f"[WEBSOCKET] Failed to broadcast complete_job: {ws_error}")
+        if self._websocket_manager:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="agent:status_changed",
+                data={
+                    "job_id": job_id,
+                    "project_id": str(job.project_id) if job.project_id else None,
+                    "product_id": product_id,
+                    "chain_conductor": bool((getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)),
+                    "agent_display_name": execution.agent_display_name,
+                    "agent_name": execution.agent_name,
+                    "old_status": old_status,
+                    "status": execution.status,
+                    "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+                    "duration_seconds": execution.duration_seconds,
+                    "working_started_at": execution.working_started_at.isoformat()
+                    if execution.working_started_at
+                    else None,
+                    "has_result": True,
+                },
+            )
+            self._logger.info(f"[WEBSOCKET] Broadcasted complete_job status change for {job_id}")
 
     _COMPLETION_SUMMARY_MAX_LEN: ClassVar[int] = 200
 
@@ -148,7 +144,7 @@ class OrchestrationAgentStateService:
         if execution.agent_display_name == "orchestrator":
             project = await self._job_repo.get_project_by_id(session, tenant_key, str(job.project_id))
 
-            skip_staging = project and project.staging_status in ("staging", "staged", "staging_complete")
+            skip_staging = project and project.staging_status in ("staging", "staged", STAGING_COMPLETE)
             has_product = project and project.product_id
 
             if not skip_staging and has_product:
@@ -266,31 +262,28 @@ class OrchestrationAgentStateService:
 
                 self._logger.info("Job %s reactivated (#%d): %s", job_id, reactivation_count, sanitize(reason))
 
-            try:
-                if self._websocket_manager:
-                    await self._websocket_manager.broadcast_to_tenant(
-                        tenant_key=tenant_key,
-                        event_type="agent:status_changed",
-                        data={
-                            "job_id": job_id,
-                            "project_id": project_id,
-                            "product_id": product_id,
-                            "chain_conductor": bool(
-                                (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                            ),
-                            "agent_display_name": execution.agent_display_name,
-                            "agent_name": execution.agent_name,
-                            "old_status": old_status,
-                            "status": "working",
-                            "reactivation_count": reactivation_count,
-                            "duration_seconds": execution.duration_seconds,
-                            "working_started_at": execution.working_started_at.isoformat()
-                            if execution.working_started_at
-                            else None,
-                        },
-                    )
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning("[WEBSOCKET] Failed to broadcast reactivation: %s", ws_error)
+            if self._websocket_manager:
+                await self._websocket_manager.broadcast_to_tenant(
+                    tenant_key=tenant_key,
+                    event_type="agent:status_changed",
+                    data={
+                        "job_id": job_id,
+                        "project_id": project_id,
+                        "product_id": product_id,
+                        "chain_conductor": bool(
+                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
+                        ),
+                        "agent_display_name": execution.agent_display_name,
+                        "agent_name": execution.agent_name,
+                        "old_status": old_status,
+                        "status": "working",
+                        "reactivation_count": reactivation_count,
+                        "duration_seconds": execution.duration_seconds,
+                        "working_started_at": execution.working_started_at.isoformat()
+                        if execution.working_started_at
+                        else None,
+                    },
+                )
 
             return ReactivationResult(
                 status="reactivated",
@@ -350,32 +343,29 @@ class OrchestrationAgentStateService:
 
                 self._logger.info("Job %s reactivation dismissed: %s", job_id, reason)
 
-            try:
-                if self._websocket_manager:
-                    await self._websocket_manager.broadcast_to_tenant(
-                        tenant_key=tenant_key,
-                        event_type="agent:status_changed",
-                        data={
-                            "job_id": job_id,
-                            "project_id": project_id,
-                            "product_id": product_id,
-                            "chain_conductor": bool(
-                                (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                            )
-                            if job
-                            else False,
-                            "agent_display_name": execution.agent_display_name,
-                            "agent_name": execution.agent_name,
-                            "old_status": old_status,
-                            "status": "complete",
-                            "duration_seconds": execution.duration_seconds,
-                            "working_started_at": execution.working_started_at.isoformat()
-                            if execution.working_started_at
-                            else None,
-                        },
-                    )
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning("[WEBSOCKET] Failed to broadcast dismiss: %s", ws_error)
+            if self._websocket_manager:
+                await self._websocket_manager.broadcast_to_tenant(
+                    tenant_key=tenant_key,
+                    event_type="agent:status_changed",
+                    data={
+                        "job_id": job_id,
+                        "project_id": project_id,
+                        "product_id": product_id,
+                        "chain_conductor": bool(
+                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
+                        )
+                        if job
+                        else False,
+                        "agent_display_name": execution.agent_display_name,
+                        "agent_name": execution.agent_name,
+                        "old_status": old_status,
+                        "status": "complete",
+                        "duration_seconds": execution.duration_seconds,
+                        "working_started_at": execution.working_started_at.isoformat()
+                        if execution.working_started_at
+                        else None,
+                    },
+                )
 
             return DismissResult(
                 status="dismissed",
@@ -431,31 +421,28 @@ class OrchestrationAgentStateService:
                 self._logger.info("Job %s closed (final acceptance)", job_id)
 
             if self._websocket_manager:
-                try:
-                    await self._websocket_manager.broadcast_to_tenant(
-                        tenant_key=tenant_key,
-                        event_type="agent:status_changed",
-                        data={
-                            "job_id": job_id,
-                            "project_id": project_id,
-                            "product_id": product_id,
-                            "chain_conductor": bool(
-                                (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                            )
-                            if job
-                            else False,
-                            "agent_display_name": execution.agent_display_name,
-                            "agent_name": execution.agent_name,
-                            "old_status": "complete",
-                            "status": "closed",
-                            "duration_seconds": execution.duration_seconds,
-                            "working_started_at": execution.working_started_at.isoformat()
-                            if execution.working_started_at
-                            else None,
-                        },
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience
-                    self._logger.warning("[WEBSOCKET] Failed to broadcast close: %s", ws_error)
+                await self._websocket_manager.broadcast_to_tenant(
+                    tenant_key=tenant_key,
+                    event_type="agent:status_changed",
+                    data={
+                        "job_id": job_id,
+                        "project_id": project_id,
+                        "product_id": product_id,
+                        "chain_conductor": bool(
+                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
+                        )
+                        if job
+                        else False,
+                        "agent_display_name": execution.agent_display_name,
+                        "agent_name": execution.agent_name,
+                        "old_status": "complete",
+                        "status": "closed",
+                        "duration_seconds": execution.duration_seconds,
+                        "working_started_at": execution.working_started_at.isoformat()
+                        if execution.working_started_at
+                        else None,
+                    },
+                )
 
             return {
                 "job_id": job_id,
@@ -525,7 +512,7 @@ class OrchestrationAgentStateService:
 
                 if execution.agent_display_name == "orchestrator" and job and job.project_id:
                     project = await self._job_repo.get_project_by_id(session, tenant_key, str(job.project_id))
-                    if project is not None and project.staging_status != "staging_complete":
+                    if project is not None and project.staging_status != STAGING_COMPLETE:
                         raise AuthorizationError(
                             message=(
                                 "Status changes are server-locked during staging. "
@@ -548,37 +535,32 @@ class OrchestrationAgentStateService:
                 await self._job_repo.flush(session)
                 product_id = await self._resolve_product_id(session, tenant_key, job)
 
-            try:
-                if self._websocket_manager:
-                    ws_data = {
-                        "job_id": job_id,
-                        "project_id": str(job.project_id) if job and job.project_id else None,
-                        "product_id": product_id,
-                        "chain_conductor": bool(
-                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                        )
-                        if job
-                        else False,
-                        "agent_display_name": execution.agent_display_name,
-                        "agent_name": execution.agent_name,
-                        "old_status": old_status,
-                        "status": status,
-                        "block_reason": block_reason,
-                        "duration_seconds": execution.duration_seconds,
-                        "working_started_at": execution.working_started_at.isoformat()
-                        if execution.working_started_at
-                        else None,
-                    }
-                    await self._websocket_manager.broadcast_to_tenant(
-                        tenant_key=tenant_key,
-                        event_type="agent:status_changed",
-                        data=ws_data,
-                    )
-                    self._logger.info(f"[WEBSOCKET] Broadcasted set_agent_status ({status}) for {job_id}")
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning(f"[WEBSOCKET] Failed to broadcast set_agent_status: {ws_error}")
+            if self._websocket_manager:
+                ws_data = {
+                    "job_id": job_id,
+                    "project_id": str(job.project_id) if job and job.project_id else None,
+                    "product_id": product_id,
+                    "chain_conductor": bool((getattr(job, "job_metadata", None) or {}).get("chain_conductor", False))
+                    if job
+                    else False,
+                    "agent_display_name": execution.agent_display_name,
+                    "agent_name": execution.agent_name,
+                    "old_status": old_status,
+                    "status": status,
+                    "block_reason": block_reason,
+                    "duration_seconds": execution.duration_seconds,
+                    "working_started_at": execution.working_started_at.isoformat()
+                    if execution.working_started_at
+                    else None,
+                }
+                await self._websocket_manager.broadcast_to_tenant(
+                    tenant_key=tenant_key,
+                    event_type="agent:status_changed",
+                    data=ws_data,
+                )
+                self._logger.info(f"[WEBSOCKET] Broadcasted set_agent_status ({status}) for {job_id}")
 
-            status_labels = {"blocked": "Needs Input", "idle": "Monitoring", "sleeping": "Sleeping"}
+            status_labels = {"blocked": "Blocked", "idle": "Monitoring", "sleeping": "Sleeping"}
             return ErrorReportResult(
                 job_id=job_id,
                 message=f"Status set to {status_labels.get(status, status)}",

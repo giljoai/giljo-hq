@@ -18,7 +18,7 @@ export function detectPlatform() {
   return 'unix'
 }
 
-export function buildServerUrl(hostnameOrConfig, port) {
+export function buildServerUrl(hostnameOrConfig) {
   if (hostnameOrConfig && typeof hostnameOrConfig === 'object') {
     const cfg = hostnameOrConfig
     const protocol = cfg.protocol || (window.location.protocol === 'https:' ? 'https' : 'http')
@@ -37,14 +37,7 @@ export function buildServerUrl(hostnameOrConfig, port) {
     return `${protocol}://${host}:${cfgPort}`
   }
 
-  const h = hostnameOrConfig || window.location.hostname
-  const p = port || window.location.port || '7272'
-  const protocol = window.location.protocol === 'https:' ? 'https' : 'http'
-  return `${protocol}://${h}:${p}`
-}
-
-export function isBackendHttps(backendConfig) {
-  return backendConfig?.ssl_enabled === true
+  throw new Error('buildServerUrl needs the backend config object')
 }
 
 
@@ -53,12 +46,8 @@ export function generateClaudeConfig(serverUrl, apiKey) {
 }
 
 // eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported by src/composables/__tests__/useMcpConfig.spec.js, which the rule's __tests__/ exclusion skips
-export function generateClaudeDesktopConfig(serverUrl, apiKey, options = {}) {
-  const selfSigned = options.selfSigned === true
+export function generateClaudeDesktopConfig(serverUrl, apiKey) {
   const env = { AUTH_HEADER: `Bearer ${apiKey}` }
-  if (selfSigned) {
-    env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-  }
   const config = {
     mcpServers: {
       [MCP_ALIAS]: {
@@ -130,7 +119,7 @@ export function generateConfigForTool(toolId, serverUrl, apiKey, options = {}) {
     case 'claude':
       return generateClaudeConfig(serverUrl, apiKey)
     case 'claude_desktop':
-      return generateClaudeDesktopConfig(serverUrl, apiKey, options)
+      return generateClaudeDesktopConfig(serverUrl, apiKey)
     case 'codex':
       return generateCodexConfig(serverUrl)
     case 'opencode':
@@ -149,17 +138,6 @@ export function generateCodexEnvVar(apiKey, platform) {
     return `setx GILJO_API_KEY "${key}"\n$env:GILJO_API_KEY="${key}"`
   }
   return `echo 'export GILJO_API_KEY="${key}"' >> ~/.bashrc\nexport GILJO_API_KEY="${key}"`
-}
-
-
-export const CERT_TRUST_WINDOWS = '$env:NODE_OPTIONS = "--use-system-ca"; [System.Environment]::SetEnvironmentVariable(\'NODE_OPTIONS\', \'--use-system-ca\', \'User\')'
-export const CERT_TRUST_UNIX =
-  'mkdir -p ~/.giljo\n' +
-  'cp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem\n' +
-  'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"'
-
-export function getCertTrustCommand(platform) {
-  return platform === 'windows' ? CERT_TRUST_WINDOWS : CERT_TRUST_UNIX
 }
 
 

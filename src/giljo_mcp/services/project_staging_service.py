@@ -24,7 +24,12 @@ from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import ProjectData
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.comm_thread_enrolment import project_thread_ref
-from giljo_mcp.services.project_helpers import _build_ws_project_data, advance_chain_member_to_implementing
+from giljo_mcp.services.next_action import STAGING_COMPLETE
+from giljo_mcp.services.project_helpers import (
+    _build_ws_project_data,
+    advance_chain_member_to_implementing,
+    stamp_launch,
+)
 from giljo_mcp.services.sequence_chain_context import chain_predecessor_open_error, resolve_chain_launch_gate
 from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
@@ -67,7 +72,7 @@ class ProjectStagingService:
 
     @staticmethod
     def check_implementation_allowed(project: Project) -> None:
-        if project.staging_status != "staging_complete":
+        if project.staging_status != STAGING_COMPLETE:
             raise ImplementationNotReadyError(
                 reason="staging_incomplete",
                 message="No orchestrator found for this project. Please ensure staging has been completed.",
@@ -92,7 +97,7 @@ class ProjectStagingService:
                     context={"project_id": project_id},
                 )
 
-            if project.staging_status not in ("staging", "staging_complete"):
+            if project.staging_status not in ("staging", STAGING_COMPLETE):
                 raise ProjectStateError(
                     message="Project is not currently staged",
                     context={
@@ -101,7 +106,7 @@ class ProjectStagingService:
                     },
                 )
 
-            if project.staging_status == "staging_complete" and project.implementation_launched_at is not None:
+            if project.staging_status == STAGING_COMPLETE and project.implementation_launched_at is not None:
                 raise ProjectStateError(
                     message="Cannot recover mode: implementation already launched",
                     context={
@@ -274,7 +279,7 @@ class ProjectStagingService:
                 if blocking_predecessor is not None:
                     raise chain_predecessor_open_error(project, blocking_predecessor)
 
-                if not is_chain_member and project.staging_status != "staging_complete":
+                if not is_chain_member and project.staging_status != STAGING_COMPLETE:
                     raise ImplementationNotReadyError(
                         reason="staging_incomplete",
                         message=(
@@ -285,10 +290,7 @@ class ProjectStagingService:
                         context={"project_id": project.id, "staging_status": project.staging_status},
                     )
 
-                project.implementation_launched_at = datetime.now(UTC)
-                if project.ever_launched_at is None:
-                    project.ever_launched_at = project.implementation_launched_at
-                project.updated_at = datetime.now(UTC)
+                stamp_launch(project)
 
                 await self._advance_chain_on_launch(session, project_id, effective_tenant, websocket_manager=ws)
                 await session.commit()
@@ -326,11 +328,11 @@ class ProjectStagingService:
         }
         if not project_active:
             result["next_action"] = (
-                "The implementation gate is open, but this project is NOT ACTIVE, so the "
-                "dashboard Jobs view will show 'No Active Project' and no work will surface "
-                "there. Activate it to make the run visible: update_project(project_id, "
-                "status='active') from the harness, or the Activate control on the project "
-                "in the dashboard. Activation is a separate step by design."
+                "The implementation gate is open, but this project is not active, so the "
+                "dashboard Jobs view does not show it. Launching activates an inactive project "
+                "when the gate is first crossed; this one was launched earlier or holds another "
+                "status. To show the run: update_project(project_id, status='active') from the "
+                "harness, or the Activate control on the project in the dashboard."
             )
         return result
 
@@ -353,14 +355,11 @@ class ProjectStagingService:
         }
         if origin is not None:
             payload["source"] = origin
-        try:
-            await ws.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="project:implementation_launched",
-                data=payload,
-            )
-        except Exception as ws_error:  # noqa: BLE001 — WS resilience
-            self._logger.warning("[LAUNCH_IMPL] WS broadcast failed: %s", ws_error)
+        await ws.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="project:implementation_launched",
+            data=payload,
+        )
 
     async def _advance_chain_on_launch(
         self,
@@ -408,15 +407,12 @@ class ProjectStagingService:
             self._logger.info(f"Cancelled staging for project {project_id}")
 
             if websocket_manager:
-                try:
-                    await websocket_manager.broadcast_project_update(
-                        project_id=project.id,
-                        update_type="cancelled",
-                        project_data=_build_ws_project_data(project),
-                        tenant_key=project.tenant_key,
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience
-                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                await websocket_manager.broadcast_project_update(
+                    project_id=project.id,
+                    update_type="cancelled",
+                    project_data=_build_ws_project_data(project),
+                    tenant_key=project.tenant_key,
+                )
 
             return ProjectData(
                 id=project.id,

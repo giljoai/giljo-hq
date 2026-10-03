@@ -27,36 +27,18 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 from giljo_mcp.schemas.user_approval import UserApprovalRead
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.comm_baton_targets import HubTargetRefusedError
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.tenant import TenantManager
 
 
 logger = logging.getLogger(__name__)
 
 
-async def build_awaiting_user_blocker(
-    session: AsyncSession, execution: AgentExecution, tenant_key: str
-) -> dict[str, Any]:
-    stmt = select(UserApproval.id).where(
-        UserApproval.tenant_key == tenant_key,
-        UserApproval.agent_execution_id == execution.id,
-        UserApproval.status == "pending",
-    )
-    approval_id = (await session.execute(stmt)).scalar_one_or_none()
-    return {
-        "agent_id": execution.agent_id,
-        "agent_name": getattr(execution, "agent_name", None) or execution.agent_display_name,
-        "status": "awaiting_user",
-        "job_id": execution.job_id,
-        "issue_type": "awaiting_user_approval",
-        "approval_id": approval_id,
-        "suggested_action": f"Resolve approval {approval_id} via POST /api/approvals/{approval_id}/decide.",
-    }
-
-
 def _compute_approval_banner_state(*, project: Project | None, execution: AgentExecution | None) -> str:
     if (
         project is not None
-        and project.staging_status == "staging_complete"
+        and project.staging_status == STAGING_COMPLETE
         and project.implementation_launched_at is None
     ):
         return "waiting_at_staging"
@@ -425,7 +407,7 @@ class UserApprovalService:
             thread = await self._comm_thread_service.resolve_or_create_bound_thread(
                 project_id=decided.project_id, tenant_key=tenant_key
             )
-            posted = await self._comm_thread_service.post_to_thread(
+            await self._comm_thread_service.post_to_thread(
                 thread_id=thread["thread_id"],
                 content=content,
                 from_agent="user",
@@ -435,14 +417,14 @@ class UserApprovalService:
                 requires_action=True,
                 tenant_key=tenant_key,
             )
-            if isinstance(posted, dict) and posted.get("success") is False:
-                logger.warning(
-                    "[USER_APPROVAL] Hub declined the decision notice approval=%s job=%s to=%s: %s",
-                    decided.id,
-                    decided.job_id,
-                    agent_id,
-                    posted.get("error"),
-                )
+        except HubTargetRefusedError as exc:
+            logger.warning(
+                "[USER_APPROVAL] Hub declined the decision notice approval=%s job=%s to=%s: %s",
+                decided.id,
+                decided.job_id,
+                agent_id,
+                exc.code,
+            )
         except Exception as exc:  # noqa: BLE001 - Hub delivery is non-critical
             logger.warning(
                 "[USER_APPROVAL] Failed to notify orchestrator of decision approval=%s job=%s: %s",
@@ -464,31 +446,24 @@ class UserApprovalService:
     ) -> None:
         if not self._websocket_manager:
             return
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="agent:status_changed",
-                data={
-                    "job_id": job_id,
-                    "project_id": project_id,
-                    "tenant_key": tenant_key,
-                    "agent_display_name": execution.agent_display_name,
-                    "old_status": old_status,
-                    "status": execution.status,
-                    "user_approval_id": approval_id,
-                    "decided_option_id": decided_option_id,
-                    "duration_seconds": execution.duration_seconds,
-                    "working_started_at": execution.working_started_at.isoformat()
-                    if execution.working_started_at
-                    else None,
-                },
-            )
-        except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-            logger.warning(
-                "[WEBSOCKET] Failed to broadcast user_approval resume for job=%s: %s",
-                job_id,
-                ws_error,
-            )
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="agent:status_changed",
+            data={
+                "job_id": job_id,
+                "project_id": project_id,
+                "tenant_key": tenant_key,
+                "agent_display_name": execution.agent_display_name,
+                "old_status": old_status,
+                "status": execution.status,
+                "user_approval_id": approval_id,
+                "decided_option_id": decided_option_id,
+                "duration_seconds": execution.duration_seconds,
+                "working_started_at": execution.working_started_at.isoformat()
+                if execution.working_started_at
+                else None,
+            },
+        )
 
     async def _broadcast_status_change(
         self,
@@ -502,27 +477,20 @@ class UserApprovalService:
     ) -> None:
         if not self._websocket_manager:
             return
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="agent:status_changed",
-                data={
-                    "job_id": job_id,
-                    "project_id": project_id,
-                    "tenant_key": tenant_key,
-                    "agent_display_name": execution.agent_display_name,
-                    "old_status": old_status,
-                    "status": "awaiting_user",
-                    "user_approval_id": approval_id,
-                    "duration_seconds": execution.duration_seconds,
-                    "working_started_at": execution.working_started_at.isoformat()
-                    if execution.working_started_at
-                    else None,
-                },
-            )
-        except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-            logger.warning(
-                "[WEBSOCKET] Failed to broadcast user_approval status change for job=%s: %s",
-                job_id,
-                ws_error,
-            )
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="agent:status_changed",
+            data={
+                "job_id": job_id,
+                "project_id": project_id,
+                "tenant_key": tenant_key,
+                "agent_display_name": execution.agent_display_name,
+                "old_status": old_status,
+                "status": "awaiting_user",
+                "user_approval_id": approval_id,
+                "duration_seconds": execution.duration_seconds,
+                "working_started_at": execution.working_started_at.isoformat()
+                if execution.working_started_at
+                else None,
+            },
+        )

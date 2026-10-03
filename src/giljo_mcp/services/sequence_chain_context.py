@@ -17,6 +17,7 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ImplementationNotReadyError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.sequence_run_service import SequenceRunService, active_chain_run
 from giljo_mcp.tenant import TenantManager
 
@@ -175,11 +176,8 @@ class SequenceChainContextResolver:
     async def _broadcast_sequence_updated(self, run_id: str, tenant_key: str) -> None:
         if self._websocket_manager is None:
             return
-        try:
-            event = {"type": "sequence:updated", "data": {"run_id": run_id}}
-            await self._websocket_manager.broadcast_event_to_tenant(tenant_key, event)
-        except Exception as exc:  # noqa: BLE001 — WS broadcast is a best-effort side-effect
-            logger.warning("sequence:updated broadcast failed for run %s: %s", run_id, exc)
+        event = {"type": "sequence:updated", "data": {"run_id": run_id}}
+        await self._websocket_manager.broadcast_event_to_tenant(tenant_key, event)
 
     async def advance_index_if_committed(
         self,
@@ -238,7 +236,7 @@ class SequenceChainContextResolver:
 
 def chain_member_phase(project: Any) -> str:
     launched = getattr(project, "implementation_launched_at", None) is not None
-    staging_finished = getattr(project, "staging_status", None) == "staging_complete"
+    staging_finished = getattr(project, "staging_status", None) == STAGING_COMPLETE
     return "implementation" if (launched and staging_finished) else "staging"
 
 

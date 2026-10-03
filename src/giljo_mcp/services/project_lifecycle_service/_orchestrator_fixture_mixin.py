@@ -45,26 +45,23 @@ class OrchestratorFixtureMixin:
         )
 
         if websocket_manager:
-            try:
-                await websocket_manager.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="agent:created",
-                    data={
-                        "project_id": project.id,
-                        "product_id": project.product_id,
-                        "execution_id": execution_id,
-                        "agent_id": agent_id,
-                        "job_id": job_id,
-                        "agent_display_name": "orchestrator",
-                        "agent_name": "orchestrator",
-                        "status": "waiting",
-                        "fixture": True,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    },
-                )
-                self._logger.info(f"[ORCHESTRATOR FIXTURE] Broadcast agent:created for {job_id}")
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning(f"[ORCHESTRATOR FIXTURE] WebSocket broadcast failed: {ws_error}")
+            await websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="agent:created",
+                data={
+                    "project_id": project.id,
+                    "product_id": project.product_id,
+                    "execution_id": execution_id,
+                    "agent_id": agent_id,
+                    "job_id": job_id,
+                    "agent_display_name": "orchestrator",
+                    "agent_name": "orchestrator",
+                    "status": "waiting",
+                    "fixture": True,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
+            self._logger.info(f"[ORCHESTRATOR FIXTURE] Broadcast agent:created for {job_id}")
 
         return {
             "job_id": job_id,
@@ -113,18 +110,15 @@ class OrchestratorFixtureMixin:
         if not ws_mgr or not removed:
             return
         for row in removed:
-            try:
-                await ws_mgr.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="agent:removed",
-                    data={
-                        "project_id": project_id,
-                        "product_id": product_id,
-                        "agent_id": row["agent_id"],
-                        "execution_id": row["execution_id"],
-                        "job_id": row["job_id"],
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    },
-                )
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                self._logger.warning(f"[BE-6123] agent:removed broadcast failed: {ws_error}")
+            await ws_mgr.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="agent:removed",
+                data={
+                    "project_id": project_id,
+                    "product_id": product_id,
+                    "agent_id": row["agent_id"],
+                    "execution_id": row["execution_id"],
+                    "job_id": row["job_id"],
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )

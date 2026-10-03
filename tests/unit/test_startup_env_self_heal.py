@@ -65,7 +65,7 @@ def _own_patched_env(monkeypatch):
 
 
 class TestStartupEnvSelfHeal:
-    def test_lan_https_reconciles_stale_urls(self, tmp_path, monkeypatch):
+    def test_lan_reconciles_stale_urls_to_http_even_with_stale_ssl_key(self, tmp_path, monkeypatch):
         (tmp_path / "config.yaml").write_text(_LAN_CONFIG, encoding="utf-8")
         env_file = tmp_path / ".env"
         env_file.write_text(_STALE_ENV, encoding="utf-8")
@@ -74,12 +74,26 @@ class TestStartupEnvSelfHeal:
 
         startup._patch_env_from_config()
         env = _parse_env(env_file)
-        assert env["GILJO_PUBLIC_URL"] == "https://192.0.2.50:7272"
+        assert env["GILJO_PUBLIC_URL"] == "http://192.0.2.50:7272"
         assert env["VITE_API_URL"] == ""
         assert env["VITE_WS_URL"] == ""
         assert env["DEFAULT_TENANT_KEY"] == "tk_keepme"
         assert os.environ["VITE_API_URL"] == ""
-        assert os.environ["GILJO_PUBLIC_URL"] == "https://192.0.2.50:7272"
+        assert os.environ["GILJO_PUBLIC_URL"] == "http://192.0.2.50:7272"
+
+    def test_operator_set_https_public_url_is_left_alone(self, tmp_path, monkeypatch):
+        (tmp_path / "config.yaml").write_text(_LAN_CONFIG, encoding="utf-8")
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "GILJO_PUBLIC_URL=https://giljo.example.com\nVITE_API_URL=http://localhost:7272\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        _own_patched_env(monkeypatch)
+
+        startup._patch_env_from_config()
+        env = _parse_env(env_file)
+        assert env["GILJO_PUBLIC_URL"] == "https://giljo.example.com"
+        assert env["VITE_API_URL"] == ""
 
     def test_localhost_install_is_untouched(self, tmp_path, monkeypatch):
         (tmp_path / "config.yaml").write_text(_LOCALHOST_CONFIG, encoding="utf-8")

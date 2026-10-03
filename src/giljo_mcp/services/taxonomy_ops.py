@@ -68,7 +68,7 @@ DEFAULT_TAXONOMY_TYPES: list[dict[str, Any]] = [
 
 async def ensure_default_types_seeded(session: AsyncSession, tenant_key: str) -> None:
     count = await _repo.count_for_tenant(session, tenant_key)
-    if count and count > 0:
+    if count:
         return
 
     logger.info("Seeding %d default taxonomy types for tenant %s", len(DEFAULT_TAXONOMY_TYPES), sanitize(tenant_key))

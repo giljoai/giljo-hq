@@ -71,37 +71,14 @@ describe('sequenceRunStore — reviewPendingRun getter', () => {
     store = useSequenceRunStore()
   })
 
-  it('returns the run when finished (not in activeRuns) but has unreviewed completed members (RED→GREEN)', () => {
-    store._testSetActiveRun({
-      id: 'run-1',
-      resolved_order: ['p1', 'p2'],
-      project_statuses: { p1: 'completed', p2: 'completed' },
-    })
-    expect(store.activeRuns).toHaveLength(0)
-    expect(store.reviewPendingRun).not.toBeNull()
-    expect(store.reviewPendingRun.id).toBe('run-1')
-  })
-
-  it('returns null after all completed members are reviewed — release-on-all-reviewed, no bounce', () => {
-    store._testSetActiveRun({
-      id: 'run-1',
-      resolved_order: ['p1', 'p2'],
-      project_statuses: { p1: 'completed', p2: 'completed' },
-    })
-    expect(store.reviewPendingRun).not.toBeNull()
-
-    store.markReviewed('run-1', 'p1')
-    store.markReviewed('run-1', 'p2')
-
-    expect(store.reviewPendingRun).toBeNull()
-  })
-
   it('board integration — a finished+unreviewed run is still the run the board reads, then releases', () => {
-    store._testSetActiveRun({
-      id: 'run-1',
-      resolved_order: ['p1', 'p2'],
-      project_statuses: { p1: 'completed', p2: 'completed' },
-    })
+    store._testSeedReviewPending([
+      {
+        id: 'run-1',
+        resolved_order: ['p1', 'p2'],
+        project_statuses: { p1: 'completed', p2: 'completed' },
+      },
+    ])
 
     expect(store.activeRuns[0] ?? store.reviewPendingRun ?? null).toMatchObject({ id: 'run-1' })
     expect(resolveJobsNavPath()).toBe('/jobs-overview')
@@ -121,11 +98,13 @@ describe('sequenceRunStore — reviewPendingRun getter', () => {
         status: 'running',
       },
     ])
-    store._testSetActiveRun({
-      id: 'run-finished',
-      resolved_order: ['p1', 'p2'],
-      project_statuses: { p1: 'completed', p2: 'completed' },
-    })
+    store._testSeedReviewPending([
+      {
+        id: 'run-finished',
+        resolved_order: ['p1', 'p2'],
+        project_statuses: { p1: 'completed', p2: 'completed' },
+      },
+    ])
 
     expect(store.activeRuns[0]).toBeDefined()
     expect(store.activeRuns[0].id).toBe('run-active')
@@ -135,7 +114,7 @@ describe('sequenceRunStore — reviewPendingRun getter', () => {
     })
   })
 
-  it('returns null when activeRun is null (no solo or chain run open)', () => {
+  it('returns null on a fresh store (no chain run to review)', () => {
     expect(store.reviewPendingRun).toBeNull()
   })
 })
@@ -158,9 +137,8 @@ describe('sequenceRunStore — FE-9104 cold-refresh review reachability', () => 
     store = useSequenceRunStore()
   })
 
-  it('cold refresh: terminal run in reviewPendingById (activeRun null) → reviewPendingRun resolves + nav → ?run (RED→GREEN)', () => {
+  it('cold refresh: terminal run in reviewPendingById → reviewPendingRun resolves', () => {
     store._testSeedReviewPending([termRun()])
-    expect(store.activeRun).toBeNull()
     expect(store.activeRuns).toHaveLength(0)
     expect(store.reviewPendingRun).not.toBeNull()
     expect(store.reviewPendingRun.id).toBe('run-term')

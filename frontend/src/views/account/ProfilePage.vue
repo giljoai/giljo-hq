@@ -247,6 +247,7 @@ import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import api from '@/services/api'
 import setupService from '@/services/setupService'
+import { isCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import RoleBadge from '@/components/common/RoleBadge.vue'
 
@@ -319,8 +320,8 @@ watch(() => userStore.currentUser, loadFromUser, { immediate: true })
 onMounted(async () => {
   try {
     const status = await setupService.checkEnhancedStatus()
-    const isSaas = (status?.mode ?? 'ce') !== 'ce'
-    isCe.value = !isSaas
+    const isSaas = isSaasModeValue(status?.mode)
+    isCe.value = isCeModeValue(status?.mode ?? 'ce')
     if (isSaas) {
       const loaders = import.meta.glob('@/saas/services/emailChange.js')
       const [loader] = Object.values(loaders)

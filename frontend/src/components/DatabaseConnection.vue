@@ -82,13 +82,17 @@
         </v-col>
       </v-row>
 
+      <v-alert v-if="loadError" type="error" variant="tonal" class="mt-4" role="alert" data-test="db-load-error">
+        Could not load the database settings: {{ loadError }}
+      </v-alert>
+
       <div v-if="showTestButton" class="mt-4 mb-4">
         <v-btn
           variant="flat"
           color="primary"
           size="large"
           :loading="testing"
-          :disabled="testing"
+          :disabled="testing || Boolean(loadError)"
           aria-label="Test database connection"
           data-test="test-connection-btn"
           @click="testConnection"
@@ -127,6 +131,7 @@ import { ref, onMounted } from 'vue'
 import api from '@/services/api'
 import { sanitizeHtml } from '@/composables/useSanitizeMarkdown'
 import { escapeHtml } from '@/utils/escapeHtml'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 
 const props = defineProps({
@@ -144,7 +149,7 @@ const props = defineProps({
   },
   title: {
     type: String,
-    default: 'PostgreSQL Database Configuration',
+    default: 'PostgreSQL Database Connection',
   },
   showInfoBanner: {
     type: Boolean,
@@ -152,7 +157,7 @@ const props = defineProps({
   },
   infoBannerText: {
     type: String,
-    default: 'Database settings are configured during installation',
+    default: 'The database this server is connected to right now. It is set at installation and is read only here.',
   },
   testButtonText: {
     type: String,
@@ -163,13 +168,13 @@ const props = defineProps({
 const emit = defineEmits(['connection-success', 'connection-error'])
 
 const dbConfig = ref({
-  type: 'postgresql',
-  host: 'localhost',
-  port: 5432,
-  name: 'giljo_mcp',
-  user: 'postgres',
+  host: '',
+  port: null,
+  name: '',
+  user: '',
   password: '********',
 })
+const loadError = ref('')
 
 const testing = ref(false)
 const connectionTestResult = ref(null)
@@ -217,15 +222,19 @@ const testConnection = async () => {
 }
 
 const loadSettings = async () => {
-  const { data: config } = await api.settings.getDatabase()
-
-  dbConfig.value = {
-    type: 'postgresql',
-    host: config.host || 'localhost',
-    port: config.port || 5432,
-    name: config.name || 'giljo_mcp',
-    user: config.user || 'postgres',
-    password: '********',
+  loadError.value = ''
+  try {
+    const { data: config } = await api.settings.getDatabase()
+    dbConfig.value = {
+      host: config.host,
+      port: config.port,
+      name: config.name,
+      user: config.user,
+      password: '********',
+    }
+  } catch (error) {
+    loadError.value = parseErrorResponse(error).message
+    throw error
   }
 }
 
@@ -286,13 +295,7 @@ const generateSuggestions = (error) => {
   return suggestions
 }
 
-onMounted(async () => {
-  try {
-    await loadSettings()
-  } catch {
-    // Settings fetch failed -- fields keep their defaults
-  }
-})
+onMounted(() => loadSettings().catch(() => {}))
 
 defineExpose({
   testConnection,

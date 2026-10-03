@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.platform_registry import SUBAGENT_TOOL_TYPES
 
 
@@ -156,7 +157,7 @@ class OrchestratorPromptRequest(BaseModel):
     """
 
     project_id: str = Field(..., min_length=1, description="Project UUID")
-    tool: Literal[SUBAGENT_TOOL_TYPES] = Field("claude-code", description="Target AI tool")
+    tool: Literal[SUBAGENT_TOOL_TYPES] = Field(HARNESS_CLAUDE_CODE, description="Target AI tool")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -199,7 +200,7 @@ class ThinOrchestratorPromptResponse(BaseModel):
 
 class ImplementationPromptResponse(BaseModel):
     """
-    Schema for implementation prompt response (Handover 0337).
+    Schema for implementation prompt response.
     GET /api/prompts/implementation/{project_id}
     """
 
@@ -218,7 +219,7 @@ class ImplementationPromptResponse(BaseModel):
 
 class ChainPromptResponse(BaseModel):
     """
-    Schema for chain conductor prompt responses (BE-6165d).
+    Schema for chain conductor prompt responses.
     GET /api/v1/prompts/chain-staging/{run_id}
     GET /api/v1/prompts/chain-implementation/{run_id}
 
@@ -226,7 +227,7 @@ class ChainPromptResponse(BaseModel):
     conductor — the single prompt the user pastes to stage or drive the whole
     chain. The bootstrap carries the conductor's identity and tells it to fetch
     its own full chain protocol over MCP (get_staging_instructions for staging,
-    get_job_mission for implementation); since BE-6191 the protocol chapters are
+    get_job_mission for implementation); the protocol chapters are
     named here, never pasted in. The conductor owns no project of its own, so
     this response is about the chain, not about the head project.
     """
@@ -244,7 +245,7 @@ class ChainPromptResponse(BaseModel):
 
 class ChainMemberPromptResponse(BaseModel):
     """
-    Schema for a single chain MEMBER's orchestrator prompt (FE-9629).
+    Schema for a single chain MEMBER's orchestrator prompt.
     GET /api/v1/prompts/chain-member/{project_id}
 
     A chain runs one project at a time, and each member starts from its own play

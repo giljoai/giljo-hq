@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
+from api.endpoints._boundary_types import IdQuery
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
 from giljo_mcp.services.project_service import ProjectService
@@ -27,18 +28,18 @@ router = APIRouter()
 
 @router.get("/next-series", response_model=NextSeriesResponse)
 async def next_series_number(
-    type_id: str,
-    product_id: str | None = None,
+    type_id: IdQuery,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ):
     """Get the next available series number for a project type.
 
-    Scoped to ``product_id`` when given (FE-9502c), else falls back to the
+    Scoped to ``product_id`` when given, else falls back to the
     default product.
     """
-    from api.endpoints.taxonomy_types.crud_ops import get_next_series_number
     from giljo_mcp.services.product_service import ProductService
+    from giljo_mcp.services.taxonomy_ops import get_next_series_number
 
     if product_id is None:
         product_service = ProductService(
@@ -55,19 +56,19 @@ async def next_series_number(
 
 @router.get("/available-series", response_model=AvailableSeriesResponse)
 async def available_series_numbers(
-    type_id: str,
+    type_id: IdQuery,
     limit: int = Query(5, ge=1, le=50),
-    product_id: str | None = None,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ):
     """Get available series numbers (gaps + next) for a project type.
 
-    Scoped to ``product_id`` when given (FE-9502c), else falls back to the
+    Scoped to ``product_id`` when given, else falls back to the
     default product.
     """
-    from api.endpoints.taxonomy_types.crud_ops import get_available_series_numbers
     from giljo_mcp.services.product_service import ProductService
+    from giljo_mcp.services.taxonomy_ops import get_available_series_numbers
 
     if product_id is None:
         product_service = ProductService(
@@ -84,21 +85,21 @@ async def available_series_numbers(
 
 @router.get("/check-series", response_model=SeriesCheckResponse)
 async def check_series_number(
-    type_id: str | None = None,
+    type_id: IdQuery = None,
     series_number: int = Query(ge=1, le=999999),
     subseries: str | None = Query(default=None, pattern=r"^[a-z]$"),
-    exclude_project_id: str | None = None,
-    product_id: str | None = None,
+    exclude_project_id: IdQuery = None,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ):
     """Check if a specific series number is available.
 
-    Scoped to ``product_id`` when given (FE-9502c), else falls back to the
+    Scoped to ``product_id`` when given, else falls back to the
     default product.
     """
-    from api.endpoints.taxonomy_types.crud_ops import check_series_available
     from giljo_mcp.services.product_service import ProductService
+    from giljo_mcp.services.taxonomy_ops import check_series_available
 
     if product_id is None:
         product_service = ProductService(
@@ -122,20 +123,20 @@ async def check_series_number(
 
 @router.get("/used-subseries", response_model=UsedSubseriesResponse)
 async def used_subseries(
-    type_id: str | None = None,
+    type_id: IdQuery = None,
     series_number: int = Query(ge=1, le=999999),
-    exclude_project_id: str | None = None,
-    product_id: str | None = None,
+    exclude_project_id: IdQuery = None,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ):
     """Get subseries letters already used for a type + series_number.
 
-    Scoped to ``product_id`` when given (FE-9502c), else falls back to the
+    Scoped to ``product_id`` when given, else falls back to the
     default product.
     """
-    from api.endpoints.taxonomy_types.crud_ops import get_used_subseries
     from giljo_mcp.services.product_service import ProductService
+    from giljo_mcp.services.taxonomy_ops import get_used_subseries
 
     if product_id is None:
         product_service = ProductService(

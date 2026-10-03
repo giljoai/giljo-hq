@@ -210,7 +210,7 @@ const promptMetadata = ref({
   updatedAt: null,
   updatedBy: null,
   scope: 'default',
-  tenantOverrideExists: undefined,
+  tenantOverrideExists: false,
   tenantOverrideUpdatedAt: null,
 })
 const defaultContent = ref(null)
@@ -298,15 +298,10 @@ const savingIsNoOp = computed(
   () => typeof defaultContent.value === 'string' && prompt.value === defaultContent.value
 )
 
-const tenantOverrideKnown = computed(
-  () => typeof promptMetadata.value.tenantOverrideExists === 'boolean'
-)
 const productOverrideKnown = computed(
   () => hasActiveProduct.value && productOverrideMeasuredFor.value === activeProductId.value
 )
-const showServingIndicator = computed(
-  () => hasActiveProduct.value && tenantOverrideKnown.value && productOverrideKnown.value
-)
+const showServingIndicator = computed(() => hasActiveProduct.value && productOverrideKnown.value)
 const servingRung = computed(() => {
   if (productOverrideExists.value) return 'product'
   return tenantOverrideExists.value ? 'tenant' : 'default'
@@ -314,9 +309,7 @@ const servingRung = computed(() => {
 const servingLabel = computed(() => SERVING_LABELS[servingRung.value])
 const servingIcon = computed(() => SERVING_ICONS[servingRung.value])
 
-const showFallbackHint = computed(
-  () => editingProductScope.value && canRestore.value && tenantOverrideKnown.value
-)
+const showFallbackHint = computed(() => editingProductScope.value && canRestore.value)
 const fallbackHint = computed(
   () =>
     `${restoreLabel.value} switches ${activeProductName.value} to ${

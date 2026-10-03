@@ -45,9 +45,6 @@ vi.mock('@/components/setup/SetupWizardOverlay.vue', () => ({
 vi.mock('@/components/tutorial/TutorialOverlay.vue', () => ({
   default: { name: 'TutorialOverlay', template: '<div />' },
 }))
-vi.mock('@/components/setup/CertTrustModal.vue', () => ({
-  default: { name: 'CertTrustModal', template: '<div />' },
-}))
 vi.mock('@/components/dashboard/RecentProjectsList.vue', () => ({
   default: { name: 'RecentProjectsList', template: '<div />' },
 }))
@@ -115,7 +112,7 @@ describe('WelcomeView — footer version label', () => {
     vi.clearAllMocks()
   })
 
-  it('reads the footer version from configService.getVersion(), not api.stats.getSystem()', async () => {
+  it('reads the footer version from configService.getVersion()', async () => {
     const configService = (await import('@/services/configService')).default
     configService.getVersion.mockReturnValue('1.3.0')
 
@@ -123,101 +120,6 @@ describe('WelcomeView — footer version label', () => {
     await flushPromises()
 
     expect(wrapper.find('.footer-item.mono').text()).toBe('1.3.0')
-  })
-})
-
-
-describe('WelcomeView — cert modal "don\'t show again" localStorage gate', () => {
-
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    localStorage.getItem.mockReturnValue(null)
-    localStorage.setItem.mockReset()
-    sessionStorage.clear()
-  })
-
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('(a) shouldShowCertModal returns false when localStorage cert_modal_never is set', async () => {
-    const configService = (await import('@/services/configService')).default
-    configService.getRawConfig.mockReturnValue({
-      api: { ssl_enabled: true, is_remote_client: true },
-    })
-    localStorage.getItem.mockImplementation((key) => {
-      if (key === 'cert_modal_never') return '1'
-      return null
-    })
-
-    const WelcomeView = (await import('@/views/WelcomeView.vue')).default
-    const wrapper = mount(WelcomeView, { global: { stubs: globalStubs } })
-    await flushPromises()
-
-    expect(wrapper.vm.shouldShowCertModal()).toBe(false)
-  })
-
-  it('(b) handleCertContinue with dontShowAgain=true persists cert_modal_never to localStorage', async () => {
-    const configService = (await import('@/services/configService')).default
-    configService.getRawConfig.mockReturnValue({
-      api: { ssl_enabled: true, is_remote_client: true },
-    })
-    localStorage.getItem.mockReturnValue(null)
-
-    const WelcomeView = (await import('@/views/WelcomeView.vue')).default
-    const wrapper = mount(WelcomeView, { global: { stubs: globalStubs } })
-    await flushPromises()
-
-    wrapper.vm.handleCertContinue(true)
-
-    expect(localStorage.setItem).toHaveBeenCalledWith('cert_modal_never', '1')
-    expect(sessionStorage.getItem('cert_modal_dismissed')).toBe('1')
-  })
-
-  it('(c) handleCertContinue with dontShowAgain=false does NOT set cert_modal_never', async () => {
-    const configService = (await import('@/services/configService')).default
-    configService.getRawConfig.mockReturnValue({
-      api: { ssl_enabled: true, is_remote_client: true },
-    })
-    localStorage.getItem.mockReturnValue(null)
-
-    const WelcomeView = (await import('@/views/WelcomeView.vue')).default
-    const wrapper = mount(WelcomeView, { global: { stubs: globalStubs } })
-    await flushPromises()
-
-    wrapper.vm.handleCertContinue(false)
-
-    expect(localStorage.setItem).not.toHaveBeenCalledWith('cert_modal_never', '1')
-    expect(sessionStorage.getItem('cert_modal_dismissed')).toBe('1')
-  })
-
-  it('(c2) shouldShowCertModal respects ssl_enabled && is_remote_client gate without never-flag', async () => {
-    const configService = (await import('@/services/configService')).default
-    configService.getRawConfig.mockReturnValue({
-      api: { ssl_enabled: true, is_remote_client: true },
-    })
-    localStorage.getItem.mockReturnValue(null)
-
-    const WelcomeView = (await import('@/views/WelcomeView.vue')).default
-    const wrapper = mount(WelcomeView, { global: { stubs: globalStubs } })
-    await flushPromises()
-
-    expect(wrapper.vm.shouldShowCertModal()).toBe(true)
-  })
-
-  it('(c3) shouldShowCertModal returns false when session is dismissed (existing behavior unchanged)', async () => {
-    const configService = (await import('@/services/configService')).default
-    configService.getRawConfig.mockReturnValue({
-      api: { ssl_enabled: true, is_remote_client: true },
-    })
-    localStorage.getItem.mockReturnValue(null)
-    sessionStorage.setItem('cert_modal_dismissed', '1')
-
-    const WelcomeView = (await import('@/views/WelcomeView.vue')).default
-    const wrapper = mount(WelcomeView, { global: { stubs: globalStubs } })
-    await flushPromises()
-
-    expect(wrapper.vm.shouldShowCertModal()).toBe(false)
   })
 })
 

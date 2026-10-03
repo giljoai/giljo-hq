@@ -6,7 +6,7 @@
       v-model="toast.show"
       :color="toast.color"
       :location="vuetifyLocation"
-      :timeout="toast.timeout !== undefined ? toast.timeout : storeDuration"
+      :timeout="storeDuration"
       :min-height="toast.multiLine ? 68 : undefined"
       :style="{ marginBottom: `${index * 60}px` }"
       @update:model-value="(val) => !val && removeToast(index)"
@@ -68,7 +68,6 @@ const toastTypes = {
   error: {
     color: 'error',
     icon: 'mdi-alert-circle',
-    timeout: 0,
   },
   warning: {
     color: 'warning',
@@ -91,7 +90,6 @@ function showToast(options) {
     type: options.type || 'info',
     color: options.color || typeConfig.color || 'grey',
     icon: options.icon !== false ? options.icon || typeConfig.icon : null,
-    timeout: options.timeout !== undefined ? options.timeout : typeConfig.timeout,
     multiLine: options.multiLine || false,
     action: options.action,
   }
@@ -101,15 +99,6 @@ function showToast(options) {
   }
 
   toasts.value.push(toast)
-
-  if (toast.timeout > 0) {
-    setTimeout(() => {
-      const index = toasts.value.findIndex((t) => t.id === toast.id)
-      if (index !== -1) {
-        toasts.value[index].show = false
-      }
-    }, toast.timeout)
-  }
 
   return toast.id
 }

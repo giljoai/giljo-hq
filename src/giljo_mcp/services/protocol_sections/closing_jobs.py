@@ -41,3 +41,28 @@ Do NOT use write_project_closeout(force=true) to get past a stalled agent. It
 does not refuse on a specialist's account — it DECOMMISSIONS it, permanently
 recording accepted work under the failed/replaced/abandoned label. force is for
 agents you are genuinely abandoning."""
+
+
+_NOT_A_GIT_REPO_ATTENDED = """If the command FAILS (project_path is not a git repo), STOP and ASK the user:
+  "Git integration is enabled in your settings, but this project path
+  (<project_path>) is not a git repository. Would you like me to run
+  `git init` here so future closeouts can capture commit history, OR
+  proceed without git for this project?"
+
+  - User says "init it": run `git init && git add . && git commit -m "<msg>"`,
+    then proceed with the SHA in git_commits.
+  - User says "skip git for this project" (or similar): pass an explicit empty
+    list `git_commits=[]` (checked, none to report). Both closeout tools accept
+    it with a git_warning; OMITTING git_commits is refused by both, and
+    no_code_changes='<why>' is for a project that changed no code.
+
+Do NOT silently skip git on your own -- ask the user. It is their machine,
+their folder, their decision."""
+
+_NOT_A_GIT_REPO_UNATTENDED = """If the command FAILS (project_path is not a git repo): Headless launch is on,
+so nobody is here to ask. Carry on without git: pass an explicit empty list
+`git_commits=[]` to write_project_closeout (checked, none to report; accepted
+with a git_warning) and say "not a git repository, no commits recorded" in the
+closeout summary. OMITTING git_commits is refused by both closeout tools, and
+no_code_changes='<why>' is only for a project that changed no code.
+Never run `git init` on your own: that needs the user's yes."""

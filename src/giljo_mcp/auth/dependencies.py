@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy import update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.principal import PrincipalValidationError, validate_principal
@@ -58,8 +59,9 @@ async def _record_api_key_usage(db: AsyncSession, request: Request, api_key_id: 
 
         client_ip = request.client.host if request.client else "unknown"
         await log_api_key_ip(db, str(api_key_id), client_ip)
-    except Exception:  # noqa: BLE001 — audit bookkeeping must never fail auth
-        logger.debug("API-key usage bookkeeping failed (non-blocking)", exc_info=True)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("API-key usage bookkeeping failed (non-blocking)", exc_info=True)
 
 
 async def get_current_user(

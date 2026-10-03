@@ -141,6 +141,9 @@ const {
   isExecutionModeLocked,
   modeRefused,
   handleExecutionModeChange,
+  isProjectStaging,
+  isProjectStaged,
+  canRestage,
   loadingStageProject,
   handleStageOrRestage,
   handleLaunchJobs,
@@ -172,16 +175,14 @@ const modeLabel = computed(() => {
   return isSubagentExecutionMode(mode) ? 'Subagent' : 'Multi-Terminal'
 })
 
-const stageButtonClass = computed(() => {
-  if (stageButtonText.value === 'Stage') return 'jb-btn-primary'
-  if (stageButtonText.value === 'Re-Stage') return 'jb-btn-secondary'
-  return 'jb-btn-ghost'
+const stageLook = computed(() => {
+  if (isProjectStaging.value || isProjectStaged.value) return 'ghost'
+  return canRestage.value ? 'secondary' : 'primary'
 })
-const stageButtonVariant = computed(() => {
-  if (stageButtonText.value === 'Stage') return 'flat'
-  if (stageButtonText.value === 'Re-Stage') return 'outlined'
-  return 'text'
-})
+const stageButtonClass = computed(() => `jb-btn-${stageLook.value}`)
+const stageButtonVariant = computed(
+  () => ({ primary: 'flat', secondary: 'outlined', ghost: 'text' })[stageLook.value],
+)
 
 const launching = ref(false)
 

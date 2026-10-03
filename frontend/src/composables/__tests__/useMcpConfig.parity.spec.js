@@ -7,6 +7,9 @@ import {
   generateClaudeOAuthConfig,
   generateCodexConfig,
   generateCodexOAuthConfig,
+  generateGenericMcpConfig,
+  generateOpenCodeConfig,
+  generateOpenCodeOAuthConfig,
 } from '../useMcpConfig'
 
 const { server_url: SERVER_URL, api_key: API_KEY } = fixture.inputs
@@ -40,15 +43,30 @@ describe('useMcpConfig — byte-mirror parity with backend fixture (BE-9281)', (
       expect(normalizeCommand(actual)).toBe(normalizeCommand(fixture.commands.codex_oauth))
     })
 
+
+    it('opencode matches backend command', () => {
+      const actual = generateOpenCodeConfig(SERVER_URL, API_KEY)
+      expect(normalizeCommand(actual)).toBe(normalizeCommand(fixture.commands.opencode))
+    })
+
+    it('opencode_oauth matches backend commands (BE-9726: connect.md serves these)', () => {
+      const actual = generateOpenCodeOAuthConfig(SERVER_URL)
+      expect(normalizeCommand(actual)).toBe(normalizeCommand(fixture.commands.opencode_oauth))
+    })
   })
 
   describe('JSON-config tools (structural equality)', () => {
     it('claude_desktop JSON structure matches backend fixture', () => {
       const actual = JSON.parse(
-        generateClaudeDesktopConfig(SERVER_URL, API_KEY, { selfSigned: fixture.inputs.self_signed_https }),
+        generateClaudeDesktopConfig(SERVER_URL, API_KEY),
       )
       const expected = JSON.parse(fixture.commands.claude_desktop)
       expect(actual).toEqual(expected)
+    })
+
+    it('generic_mcp JSON structure matches backend fixture (BE-9726)', () => {
+      const actual = JSON.parse(generateGenericMcpConfig(SERVER_URL, API_KEY))
+      expect(actual).toEqual(JSON.parse(fixture.commands.generic_mcp))
     })
   })
 

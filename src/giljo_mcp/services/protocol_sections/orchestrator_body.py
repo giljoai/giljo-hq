@@ -83,7 +83,7 @@ _SUBORCH_PHASE1_END = "### PHASE 2 — ACTIVE COORDINATION"
 _SUBORCH_PHASE1_NOTE = (
     "### PHASE 1 — STARTUP (chain sub-orchestrator)\n\n"
     "CH_SUB_ORCHESTRATOR step 5 above is your AUTHORITATIVE implementation entry: after\n"
-    "staging-end you call `get_job_mission` ONCE (passing your `protocol_etag`) and it flips\n"
+    "staging-end you call `get_job_mission` ONCE (without your boot `protocol_etag`) and it flips\n"
     "you waiting→working and returns this implementation protocol. There is NO human Implement\n"
     "click, you do NOT wait for the user to start agents, and you do NOT return to the\n"
     "dashboard — the solo multi_terminal startup that says otherwise does NOT apply to a chain\n"
@@ -99,7 +99,7 @@ _SUBORCH_STAGING_IMPL_NOTE = (
     "This is a STAGING-phase fetch: the implementation coordination loop (PHASE 2), the\n"
     "resting states, and the closeout procedure (PHASE 3) are deliberately omitted to keep\n"
     "this payload small. They arrive with your implementation protocol: after complete_job\n"
-    "(staging-end), call get_job_mission ONCE, passing your protocol_etag — no gate, no\n"
+    "(staging-end), call get_job_mission ONCE, without your boot protocol_etag — no gate, no\n"
     "human Implement click, do NOT wait — exactly as CH_SUB_ORCHESTRATOR step 5 instructs.\n"
     "Until then, stage per CH_SUB_ORCHESTRATOR steps 2-4 above.\n\n"
 )
@@ -219,7 +219,7 @@ def _build_orchestrator_protocol_body(
         )
         resting_wait_block = f"""**If your spawned subagents are running (nothing actionable right now):**
   → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — agents running")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens"""
+  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on"""
         unblock_relay_line = (
             f"  → The subagent reads your reply on its next get_thread_history poll — relaunch it via "
             f"{spawn_syntax} if it already exited (its first `get_job_mission` rebinds it to the job)"
@@ -233,7 +233,7 @@ def _build_orchestrator_protocol_body(
         )
         resting_wait_block = f"""**If waiting for user to start agents (multi-terminal):**
   → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — waiting for agents to start")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens"""
+  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on"""
         unblock_relay_line = '  → Tell user: "Go to that agent\'s terminal and say: the orchestrator responded"'
         verification_launch_block = """    - Subagent mode: launch the subagent, and its VERY FIRST call MUST be
       `get_job_mission(job_id=<the job_id from step 1>)` so it binds to the record you just created.
@@ -374,10 +374,10 @@ After completing a coordination loop with no actionable work remaining:
   → Ask the user: "Would you like me to periodically check on agents? I can sleep and re-check every N minutes. Note: this increases token consumption."
   → If yes: `set_agent_status(job_id="{job_id}", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`
   → Then sleep for the specified interval, wake, run the coordination loop, repeat
-  → Any MCP call after waking auto-transitions you back to "working"
+  → report_progress after waking transitions you back to "working"
 
 **Blocked vs Idle vs Sleeping:**
-  - `blocked` = I need human help to continue (shows "Needs Input")
+  - `blocked` = I need human help to continue (shows "Blocked")
   - `idle` = I'm done dispatching, nothing to do right now (shows "Monitoring")
   - `sleeping` = I'll check back in N minutes automatically (shows "Sleeping")
 
@@ -411,7 +411,7 @@ re-verify before closeout.
 2. `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "needs input" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{{id}}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{{id}}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
 4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
 5. Tell user: "Project complete. Use `{giljo_cmd}` to create follow-ups or look up existing project/task state."

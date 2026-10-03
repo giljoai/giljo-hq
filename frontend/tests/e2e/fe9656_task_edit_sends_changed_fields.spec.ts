@@ -31,7 +31,7 @@ async function createTask(
   if (options.description) {
     await dialog.locator('[data-test="edit-task-description"] textarea').fill(options.description)
   }
-  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.locator('.v-dialog')).not.toBeVisible()
 
   // TasksTable tags the clickable title cell `task-row-{id}` -- read the id
@@ -50,7 +50,7 @@ async function openEditDialog(page: Page, title: string) {
   await row.locator('.task-row-content').click()
   const dialog = page.locator('.v-dialog').filter({ has: page.locator('[data-test="edit-task-title"]') })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Update', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
   return dialog
 }
 
@@ -86,7 +86,7 @@ test.describe('Task edit dialog sends only changed fields (FE-9656)', () => {
       waitForTaskUpdateRequest(page, taskId),
       (async () => {
         await page.getByRole('option', { name: 'In Progress', exact: true }).click()
-        await dialog.getByRole('button', { name: 'Update', exact: true }).click()
+        await dialog.getByRole('button', { name: 'Save', exact: true }).click()
       })(),
     ])
 
@@ -116,7 +116,7 @@ test.describe('Task edit dialog sends only changed fields (FE-9656)', () => {
       ),
       (async () => {
         await page.getByRole('option', { name: 'On hold', exact: true }).click()
-        await dialog.getByRole('button', { name: 'Update', exact: true }).click()
+        await dialog.getByRole('button', { name: 'Save', exact: true }).click()
       })(),
     ])
 
@@ -144,7 +144,7 @@ test.describe('Task edit dialog sends only changed fields (FE-9656)', () => {
       waitForTaskUpdateRequest(page, taskId),
       (async () => {
         await page.getByRole('option', { name: 'high', exact: true }).click()
-        await dialog.getByRole('button', { name: 'Update', exact: true }).click()
+        await dialog.getByRole('button', { name: 'Save', exact: true }).click()
       })(),
     ])
 
@@ -173,7 +173,7 @@ test.describe('Task edit dialog sends only changed fields (FE-9656)', () => {
 
     const [request] = await Promise.all([
       waitForTaskUpdateRequest(page, taskId),
-      dialog.getByRole('button', { name: 'Update', exact: true }).click(),
+      dialog.getByRole('button', { name: 'Save', exact: true }).click(),
     ])
 
     expect(request.method()).toBe('PUT')
@@ -198,7 +198,7 @@ test.describe('Task edit dialog sends only changed fields (FE-9656)', () => {
     // change cannot quietly flip it without a red test.
     const [request] = await Promise.all([
       waitForTaskUpdateRequest(page, taskId),
-      dialog.getByRole('button', { name: 'Update', exact: true }).click(),
+      dialog.getByRole('button', { name: 'Save', exact: true }).click(),
     ])
 
     expect(request.method()).toBe('PUT')

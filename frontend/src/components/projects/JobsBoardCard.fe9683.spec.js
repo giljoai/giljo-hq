@@ -45,7 +45,7 @@ describe('JobsBoardCard header rows (FE-9683)', () => {
 
     const row = wrapper.find('[data-testid="jb-pill-row"]')
     expect(row.exists()).toBe(true)
-    expect(row.find('[data-testid="jb-lifecycle-pill"]').text()).toBe('Needs Input')
+    expect(row.find('[data-testid="jb-lifecycle-pill"]').text()).toBe('Needs decision')
     expect(row.find('[data-testid="jb-status-pill"]').text()).toBe('Your decision needed')
     const source = (await import('./JobsBoardCard.vue?raw')).default
     expect(source).toMatch(/\.jb-pills\s*\{[^}]*justify-content:\s*center/)

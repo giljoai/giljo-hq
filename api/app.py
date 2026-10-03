@@ -146,14 +146,11 @@ async def lifespan(app: FastAPI):
 
     await init_database(state)
 
-    try:
-        from api.startup.migration_check import check_pending_migrations
+    from api.startup.migration_check import check_pending_migrations
 
-        state.pending_migration = await check_pending_migrations(state)
-        if state.pending_migration:
-            logger.warning("Database has pending migrations. Run: python update.py")
-    except Exception as e:
-        logger.warning("Could not check migration status: %s", e)
+    state.pending_migration = await check_pending_migrations(state)
+    if state.pending_migration:
+        logger.warning("Database has pending migrations. Run: python update.py")
 
     await init_core_services(state)
 
@@ -408,8 +405,10 @@ def create_app() -> FastAPI:
     _register_routers(app)
     _register_event_handlers(app)
 
-    dist_dir = Path(state.config.get_nested("paths.static", "frontend/dist")) if state.config else Path("frontend/dist")
-    if dist_dir.exists() and (dist_dir / "index.html").exists():
+    from api.wiring.events import resolve_static_dir
+
+    dist_dir = resolve_static_dir()
+    if (dist_dir / "index.html").exists():
         _install_spa_fallback(app, dist_dir)
 
     return app

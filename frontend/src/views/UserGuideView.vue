@@ -225,11 +225,7 @@ function setupObserver() {
 
 function handleUrlAnchor() {
   const hash = route.hash?.replace('#', '')
-  if (hash) {
-    nextTick(() => {
-      setTimeout(() => scrollToAnchor(hash), 100)
-    })
-  }
+  if (hash) scrollToAnchor(hash)
 }
 
 onMounted(async () => {

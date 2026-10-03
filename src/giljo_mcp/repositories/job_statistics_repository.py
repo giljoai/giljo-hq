@@ -50,41 +50,6 @@ class JobStatisticsRepository:
         return [(name, int(count or 0)) for name, count in result.all()]
 
 
-    async def count_total_agents(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(AgentExecution.agent_id)).where(AgentExecution.tenant_key == tenant_key)
-        )
-        return result or 0
-
-    async def count_active_agents(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(AgentExecution.agent_id)).where(
-                AgentExecution.tenant_key == tenant_key, AgentExecution.status.in_(["waiting", "working"])
-            )
-        )
-        return result or 0
-
-    async def count_completed_agents(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(AgentExecution.agent_id)).where(
-                AgentExecution.tenant_key == tenant_key, AgentExecution.status == "complete"
-            )
-        )
-        return result or 0
-
-
     async def get_agent_role_distribution(
         self,
         session: AsyncSession,

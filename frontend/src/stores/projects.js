@@ -11,8 +11,8 @@ export const useProjectStore = defineStore('projects', () => {
   const deletedProjects = ref([])
   const hiddenProjects = ref([])
   const projectsTotal = ref(0)
-  const activeProjectMeta = ref(null)
   const activeProjectsMeta = ref([])
+  const unreviewedProjectsMeta = ref([])
   const loading = ref(false)
   const error = ref(null)
 
@@ -180,13 +180,13 @@ export const useProjectStore = defineStore('projects', () => {
   async function fetchActiveProject({ allProducts = false } = {}) {
     try {
       const productStore = useProductStore()
-      const response = await api.projects.getActive(allProducts ? null : productStore.effectiveProductId)
+      const response = await api.projects.getActive(allProducts ? null : productStore.effectiveProductId, true)
       const list = response.data || []
-      activeProjectsMeta.value = list
-      activeProjectMeta.value = list[0] || null
+      activeProjectsMeta.value = list.filter((project) => !project.review_pending)
+      unreviewedProjectsMeta.value = list.filter((project) => project.review_pending)
     } catch (err) {
       activeProjectsMeta.value = []
-      activeProjectMeta.value = null
+      unreviewedProjectsMeta.value = []
       console.error('Failed to fetch active project:', err)
     }
   }
@@ -242,58 +242,46 @@ export const useProjectStore = defineStore('projects', () => {
     }
   }
 
-  async function createProject(projectData) {
+  async function _mutate(label, call) {
     loading.value = true
     error.value = null
     try {
-      const response = await api.projects.create(projectData)
-
-      await fetchProjects()
-
-      return response.data
+      return await call()
     } catch (err) {
       error.value = err.message
-      console.error('Failed to create project:', err)
+      console.error(`Failed to ${label}:`, err)
       throw err
     } finally {
       loading.value = false
     }
   }
 
-  async function updateProject(id, updates) {
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.projects.update(id, updates)
-
+  function _mutateAndUpsert(label, apiCall) {
+    return _mutate(label, async () => {
+      const response = await apiCall()
       _upsertEntity(response.data)
-
       return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to update project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+    })
   }
 
-  async function deleteProject(id) {
-    loading.value = true
-    error.value = null
-    try {
+  function createProject(projectData) {
+    return _mutate('create project', async () => {
+      const response = await api.projects.create(projectData)
+      await fetchProjects()
+      return response.data
+    })
+  }
+
+  function updateProject(id, updates) {
+    return _mutateAndUpsert('update project', () => api.projects.update(id, updates))
+  }
+
+  function deleteProject(id) {
+    return _mutate('delete project', async () => {
       await api.projects.delete(id)
-
       projects.value = projects.value.filter((p) => p.id !== id)
-
       await fetchDeletedProjects()
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to delete project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+    })
   }
 
   async function activateProject(id) {
@@ -357,40 +345,12 @@ export const useProjectStore = defineStore('projects', () => {
     }
   }
 
-  async function completeProject(id) {
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.projects.complete(id)
-
-      _upsertEntity(response.data)
-
-      return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to complete project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+  function completeProject(id) {
+    return _mutateAndUpsert('complete project', () => api.projects.complete(id))
   }
 
-  async function cancelProject(id) {
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.projects.cancel(id)
-
-      _upsertEntity(response.data)
-
-      return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to cancel project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+  function cancelProject(id) {
+    return _mutateAndUpsert('cancel project', () => api.projects.cancel(id))
   }
 
   async function fetchSuccessorCandidates(excludeProjectId) {
@@ -406,68 +366,32 @@ export const useProjectStore = defineStore('projects', () => {
     return (response.data || []).filter((p) => p.id !== excludeProjectId)
   }
 
-  async function supersedeProject(id, successorProjectId) {
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.projects.update(id, {
-        status: 'superseded',
-        successor_project_id: successorProjectId,
-      })
-
-      _upsertEntity(response.data)
-
-      return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to supersede project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+  function supersedeProject(id, successorProjectId) {
+    return _mutateAndUpsert('supersede project', () =>
+      api.projects.update(id, { status: 'superseded', successor_project_id: successorProjectId }),
+    )
   }
 
-  async function restoreProject(id) {
-    loading.value = true
-    error.value = null
-    try {
+  function restoreProject(id) {
+    return _mutate('restore project', async () => {
       const response = await api.projects.restore(id)
-
       deletedProjects.value = deletedProjects.value.filter((p) => p.id !== id)
-
       projects.value.push(response.data)
       _upsertEntity(response.data)
-
       return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to restore project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+    })
   }
 
-  async function purgeDeletedProject(id) {
-    loading.value = true
-    error.value = null
-    try {
+  function purgeDeletedProject(id) {
+    return _mutate('purge deleted project', async () => {
       await api.projects.purgeDeleted(id)
       deletedProjects.value = deletedProjects.value.filter((p) => p.id !== id)
       await fetchDeletedProjects()
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to purge deleted project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+    })
   }
 
-  async function purgeAllDeletedProjects() {
-    loading.value = true
-    error.value = null
-    try {
+  function purgeAllDeletedProjects() {
+    return _mutate('purge all deleted projects', async () => {
       const productStore = useProductStore()
       const params = {}
       if (productStore.currentProductId) {
@@ -476,31 +400,11 @@ export const useProjectStore = defineStore('projects', () => {
       await api.projects.purgeAllDeleted(params)
       deletedProjects.value = []
       await fetchDeletedProjects()
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to purge all deleted projects:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+    })
   }
 
-  async function restoreCompletedProject(id) {
-    loading.value = true
-    error.value = null
-    try {
-      const response = await api.projects.restoreCompleted(id)
-
-      _upsertEntity(response.data)
-
-      return response.data
-    } catch (err) {
-      error.value = err.message
-      console.error('Failed to restore completed project:', err)
-      throw err
-    } finally {
-      loading.value = false
-    }
+  function restoreCompletedProject(id) {
+    return _mutateAndUpsert('restore completed project', () => api.projects.restoreCompleted(id))
   }
 
 
@@ -531,8 +435,8 @@ export const useProjectStore = defineStore('projects', () => {
     deletedProjects,
     hiddenProjects,
     projectsTotal,
-    activeProjectMeta,
     activeProjectsMeta,
+    unreviewedProjectsMeta,
     loading,
     error,
 

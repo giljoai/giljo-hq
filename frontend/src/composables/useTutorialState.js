@@ -93,8 +93,6 @@ export function useTutorialState() {
     productId: null,
   })
 
-  let beatSchemaSupported = null
-
   const railStop = computed(() => (s.screen === 'beats' ? s.beat : BEAT_MAX))
   const showBack = computed(
     () => s.screen === 'prompt' || s.screen === 'upload' || (s.screen === 'beats' && s.beat > BEAT_MIN),
@@ -103,14 +101,10 @@ export function useTutorialState() {
   const nextLabel = computed(() => (s.beat === 5 ? 'Choose your start' : 'Next'))
 
   async function persist() {
-    if (beatSchemaSupported === false) return
     try {
       const payload = { learning_beat: s.beat }
       if (s.path) payload.router_choice = s.path
-      const data = await userStore.updateSetupState(payload)
-      if (beatSchemaSupported === null) {
-        beatSchemaSupported = Boolean(data && 'learning_beat' in data)
-      }
+      await userStore.updateSetupState(payload)
     } catch {
       // Persistence is best-effort; the tutorial keeps working in-session.
     }

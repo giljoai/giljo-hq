@@ -379,10 +379,8 @@ notes, messages).
   interpreter in the server process).
 - Forward user content to any third-party AI provider, analytics service, or
   telemetry sink.
-- Spawn subprocesses from user content. The only `subprocess.run` site in
-  `api/` is admin-only (`openssl` cert generation), argv-form with hardcoded
-  or admin-scoped arguments. The `/root-ca` endpoint serves the configured
-  server certificate directly without spawning a subprocess. Agent
+- Spawn subprocesses from user content. The only subprocess call in `api/`
+  is the update checker's fixed, argv-form `git` command. Agent
   spawning is client-side — the operator's local CLI spawns workers; the
   server returns only prompt templates.
 - Write user content to disk as an executable or loadable file. Upload

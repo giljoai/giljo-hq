@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import logging
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,9 +19,6 @@ from giljo_mcp.services.settings_service import (
 )
 
 
-logger = logging.getLogger(__name__)
-
-
 class TenantConfigurationService:
 
     def __init__(
@@ -35,7 +31,6 @@ class TenantConfigurationService:
         self.tenant_key = tenant_key
         self._session = session
         self._repo = ConfigurationRepository(db_manager)
-        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def _get_session(self):
         if self._session is not None:

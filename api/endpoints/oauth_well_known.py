@@ -32,8 +32,7 @@ class ProtectedResourceMetadataResponse(BaseModel):
 
     Per RFC 8707 §3, advertises ``resource_indicators_supported: true`` so
     spec-aware clients (claude.ai connector backend) know they MUST send
-    ``resource`` to /authorize and /token. API-0021d Phase 2 enforces that
-    binding server-side.
+    ``resource`` to /authorize and /token. The server enforces that binding.
     """
 
     resource: str
@@ -117,7 +116,7 @@ async def oidc_configuration_not_supported():
 
 
 class McpServerInfoResponse(BaseModel):
-    """MCP spec-version + capability discovery document (API-0021h).
+    """MCP spec-version + capability discovery document.
 
     Lightweight companion to OAuth AS-metadata: exposes the declared MCP
     spec-version list, the server identity, and a capability snapshot read
@@ -137,7 +136,7 @@ class McpServerInfoResponse(BaseModel):
     tags=["oauth"],
 )
 async def mcp_server_info():
-    """Return MCP spec-version + capability discovery document (API-0021h).
+    """Return MCP spec-version + capability discovery document.
 
     Public, unauthenticated endpoint. Capability data is read from canonical
     sources — `TOOL_SCOPES` (defined alongside the FastMCP instance) for the
@@ -168,7 +167,7 @@ async def mcp_server_info():
     tags=["oauth"],
 )
 async def openai_apps_challenge():
-    """Serve the OpenAI apps directory domain-ownership token (INF-9618).
+    """Serve the OpenAI apps directory domain-ownership token.
 
     OpenAI verifies that you control this server's domain by fetching this
     path and expecting the body to be exactly the challenge token issued by

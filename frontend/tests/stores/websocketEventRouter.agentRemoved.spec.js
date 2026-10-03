@@ -43,21 +43,6 @@ describe('websocketEventRouter - agent:removed (BE-6123)', () => {
     expect(agentJobsStore.removeJob).toHaveBeenCalledWith('agent-abc')
   })
 
-  it('falls back to job_id when agent_id is absent', async () => {
-    const agentJobsStore = { removeJob: vi.fn() }
-    const storeRegistry = { agentJobs: () => agentJobsStore, agents: () => agentJobsStore }
-
-    await routeWebsocketEvent(
-      {
-        type: 'agent:removed',
-        data: { project_id: 'project-1', job_id: 'job-1', tenant_key: 'test-tenant' },
-      },
-      { eventMap: EVENT_MAP, storeRegistry },
-    )
-
-    expect(agentJobsStore.removeJob).toHaveBeenCalledWith('job-1')
-  })
-
   it('routes agent:removed when project_id matches the current project', async () => {
     useProjectTabsStore().setCurrentProject({ id: 'project-1' })
     const agentJobsStore = { removeJob: vi.fn() }

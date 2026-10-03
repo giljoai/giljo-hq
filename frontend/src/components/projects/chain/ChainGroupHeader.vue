@@ -104,7 +104,7 @@ const props = defineProps({
 const memberCount = computed(() => props.chainCtx.counter.m)
 
 const modeLabel = computed(() => {
-  const mode = props.chainCtx.run?.execution_mode
+  const mode = props.chainCtx.run.execution_mode
   if (!mode) return ''
   return isSubagentExecutionMode(mode) ? 'Subagent' : 'Multi-Terminal'
 })

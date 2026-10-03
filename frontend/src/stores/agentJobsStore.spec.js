@@ -20,7 +20,7 @@ describe('agentJobsStore — $reset (TSK-9372)', () => {
 
     store.$reset()
 
-    expect(store.jobsById.value.size).toBe(0)
+    expect(store.jobsById.size).toBe(0)
     expect(store.jobCount).toBe(0)
     expect(store.jobs).toHaveLength(0)
     expect(store.sortedJobs).toHaveLength(0)
@@ -62,7 +62,7 @@ describe('agentJobsStore — $reset cancels in-flight debounced updates (FE-9380
     vi.advanceTimersByTime(1000)
 
     expect(store.jobCount).toBe(0)
-    expect(store.jobsById.value.size).toBe(0)
+    expect(store.jobsById.size).toBe(0)
     expect(store.getJob('agent-1')).toBeNull()
     expect(store.getJob('job-1')).toBeNull()
   })

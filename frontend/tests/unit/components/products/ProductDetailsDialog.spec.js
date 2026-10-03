@@ -172,8 +172,8 @@ describe('ProductDetailsDialog Component', () => {
     it('lists vision documents with chunk counts', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'architecture.md', chunk_count: 5, chunked: true, file_size: 1024 },
-          { id: 'doc-2', filename: 'requirements.md', chunk_count: 3, chunked: true, file_size: 512 },
+          { id: 'doc-1', document_name: 'architecture.md', chunk_count: 5, chunked: true, file_size: 1024 },
+          { id: 'doc-2', document_name: 'requirements.md', chunk_count: 3, chunked: true, file_size: 512 },
         ],
       })
 
@@ -186,7 +186,7 @@ describe('ProductDetailsDialog Component', () => {
     it('lists vision documents with file sizes', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'design.pdf', chunk_count: 2, file_size: 2048 },
+          { id: 'doc-1', document_name: 'design.pdf', chunk_count: 2, file_size: 2048 },
         ],
       })
 
@@ -198,9 +198,9 @@ describe('ProductDetailsDialog Component', () => {
     it('displays document count in header', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'doc1.md', chunk_count: 1, file_size: 100 },
-          { id: 'doc-2', filename: 'doc2.md', chunk_count: 2, file_size: 200 },
-          { id: 'doc-3', filename: 'doc3.md', chunk_count: 3, file_size: 300 },
+          { id: 'doc-1', document_name: 'doc1.md', chunk_count: 1, file_size: 100 },
+          { id: 'doc-2', document_name: 'doc2.md', chunk_count: 2, file_size: 200 },
+          { id: 'doc-3', document_name: 'doc3.md', chunk_count: 3, file_size: 300 },
         ],
       })
 
@@ -230,8 +230,8 @@ describe('ProductDetailsDialog Component', () => {
     it('no longer renders the aggregate stats card', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'doc1.md', chunk_count: 5, file_size: 1024 },
-          { id: 'doc-2', filename: 'doc2.md', chunk_count: 8, file_size: 2048 },
+          { id: 'doc-1', document_name: 'doc1.md', chunk_count: 5, file_size: 1024 },
+          { id: 'doc-2', document_name: 'doc2.md', chunk_count: 8, file_size: 2048 },
         ],
       })
 
@@ -243,8 +243,8 @@ describe('ProductDetailsDialog Component', () => {
     it('no longer renders the "Pending analysis — N of N" product-level pill', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'a.md', file_size: 100 },
-          { id: 'doc-2', filename: 'b.md', file_size: 100, summary_light: 'x', summary_medium: 'y' },
+          { id: 'doc-1', document_name: 'a.md', file_size: 100 },
+          { id: 'doc-2', document_name: 'b.md', file_size: 100, summary_light: 'x', summary_medium: 'y' },
         ],
         product: {
           id: 'prod-1',
@@ -263,7 +263,7 @@ describe('ProductDetailsDialog Component', () => {
         visionDocuments: [
           {
             id: 'doc-1',
-            filename: 'a.md',
+            document_name: 'a.md',
             is_summarized: true,
             file_size: 1024,
             summary_light_tokens: 100,
@@ -281,7 +281,7 @@ describe('ProductDetailsDialog Component', () => {
     it('does not render when no consolidated_vision_light exists', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'a.md', file_size: 100 },
+          { id: 'doc-1', document_name: 'a.md', file_size: 100 },
         ],
         product: {
           id: 'prod-1',
@@ -295,7 +295,7 @@ describe('ProductDetailsDialog Component', () => {
     it('renders chevron header when consolidated_vision_light is present', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'a.md', file_size: 100, original_token_count: 1500 },
+          { id: 'doc-1', document_name: 'a.md', file_size: 100, original_token_count: 1500 },
         ],
         product: {
           id: 'prod-1',
@@ -315,8 +315,8 @@ describe('ProductDetailsDialog Component', () => {
     it('renders three tier tiles and "Last modified" line when chevron is expanded', async () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'a.md', file_size: 100, original_token_count: 1500 },
-          { id: 'doc-2', filename: 'b.md', file_size: 100, original_token_count: 2500 },
+          { id: 'doc-1', document_name: 'a.md', file_size: 100, original_token_count: 1500 },
+          { id: 'doc-2', document_name: 'b.md', file_size: 100, original_token_count: 2500 },
         ],
         product: {
           id: 'prod-1',
@@ -350,7 +350,7 @@ describe('ProductDetailsDialog Component', () => {
     it('does not render a Regenerate button anywhere', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'a.md', file_size: 100, original_token_count: 1500 },
+          { id: 'doc-1', document_name: 'a.md', file_size: 100, original_token_count: 1500 },
         ],
         product: {
           id: 'prod-1',
@@ -491,7 +491,7 @@ describe('ProductDetailsDialog Component', () => {
     it('formats bytes correctly', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'small.txt', chunk_count: 1, file_size: 500 },
+          { id: 'doc-1', document_name: 'small.txt', chunk_count: 1, file_size: 500 },
         ],
       })
 
@@ -501,7 +501,7 @@ describe('ProductDetailsDialog Component', () => {
     it('formats kilobytes correctly', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'medium.md', chunk_count: 1, file_size: 5120 },
+          { id: 'doc-1', document_name: 'medium.md', chunk_count: 1, file_size: 5120 },
         ],
       })
 
@@ -512,7 +512,7 @@ describe('ProductDetailsDialog Component', () => {
     it('formats megabytes correctly', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'large.pdf', chunk_count: 10, file_size: 2097152 },
+          { id: 'doc-1', document_name: 'large.pdf', chunk_count: 10, file_size: 2097152 },
         ],
       })
 
@@ -523,7 +523,7 @@ describe('ProductDetailsDialog Component', () => {
     it('handles zero file size', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'empty.txt', chunk_count: 0, file_size: 0 },
+          { id: 'doc-1', document_name: 'empty.txt', chunk_count: 0, file_size: 0 },
         ],
       })
 
@@ -589,7 +589,7 @@ describe('ProductDetailsDialog Component', () => {
     it('handles documents with missing chunk_count', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'test.md', file_size: 1024 },
+          { id: 'doc-1', document_name: 'test.md', file_size: 1024 },
         ],
       })
 
@@ -603,7 +603,7 @@ describe('ProductDetailsDialog Component', () => {
     it('handles documents with missing file_size', () => {
       const wrapper = createWrapper({
         visionDocuments: [
-          { id: 'doc-1', filename: 'test.md', chunk_count: 5 },
+          { id: 'doc-1', document_name: 'test.md', chunk_count: 5 },
         ],
       })
 

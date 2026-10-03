@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
 
@@ -22,7 +23,13 @@ from giljo_mcp.tenant import TenantManager
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        os.environ.get("GILJO_MODE") == "saas",
+        reason="CE chain REST contract; on SaaS an unlicensed tenant's writes are 402 by design",
+    ),
+]
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
@@ -228,7 +235,7 @@ async def test_create_rejects_invalid_execution_mode(api_client, seed_user):
 
 async def test_create_rejects_too_many_projects(api_client, seed_user):
     tenant = await seed_user()
-    too_many = [str(uuid.uuid4()) for _ in range(6)]
+    too_many = [str(uuid.uuid4()) for _ in range(11)]
     resp = await api_client.post(
         "/api/v1/sequence-runs",
         json={
@@ -239,3 +246,16 @@ async def test_create_rejects_too_many_projects(api_client, seed_user):
         headers=tenant["headers"],
     )
     assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+    assert "at most 10" in resp.text, resp.text
+
+
+async def test_create_accepts_ten_projects(api_client, seed_user):
+    tenant = await seed_user()
+    ten = [str(uuid.uuid4()) for _ in range(10)]
+    resp = await api_client.post(
+        "/api/v1/sequence-runs",
+        json=_run_payload(project_ids=ten, resolved_order=ten),
+        headers=tenant["headers"],
+    )
+    assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text}"
+    assert resp.json()["resolved_order"] == ten

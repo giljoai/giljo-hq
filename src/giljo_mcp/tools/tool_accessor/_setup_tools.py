@@ -89,10 +89,10 @@ class SetupMiscMixin:
                 zip_path, message = await staging.stage_setup_bundle(staging_path, platform=platform)
 
                 if not zip_path:
-                    await token_manager.mark_failed(token, message)
+                    await token_manager.mark_failed(token, message, tenant_key=tenant_key)
                     raise ValidationError(message)
 
-                await token_manager.mark_ready(token)
+                await token_manager.mark_ready(token, tenant_key=tenant_key)
 
 
                 server_url = get_public_url()

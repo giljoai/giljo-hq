@@ -17,6 +17,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError
+from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -71,10 +72,44 @@ def git_commits_required_rejection(project_id: str) -> dict[str, Any]:
         "project_id": project_id,
         "message": (
             "Git integration is enabled, so this closeout needs one of: git_commits (the "
-            "commits this project made), or no_code_changes='<why>' when it changed no code. "
-            "Do not create an empty commit to satisfy this."
+            "commits this project made); no_code_changes='<why>' when it changed no code; "
+            "or git_commits=[] when you checked and there are none to report (for example "
+            "the project folder is not a git repository). Do not create an empty commit."
         ),
     }
+
+
+GIT_COMMITS_EMPTY_WARNING = (
+    "Git integration is enabled and git_commits was an empty list, so this project closed "
+    "without commit history. If the project directory is a git repo and code changed, commit "
+    "those files and pass git_commits; if the project changed no code, pass "
+    "no_code_changes='<why>' instead (never an empty commit)."
+)
+
+
+async def resolve_git_closeout_rule(
+    session: AsyncSession,
+    tenant_key: str,
+    *,
+    project_id: str,
+    git_commits: list[Any] | None,
+    no_code_changes: str | None,
+    enforce: bool = True,
+) -> tuple[dict[str, Any] | None, str | None]:
+    from giljo_mcp.services.settings_service import SettingsService
+
+    git_settings = await SettingsService(session, tenant_key).get_setting_value("integrations", "git_integration", {})
+    git_integration_enabled = bool(git_settings.get("enabled", False))
+    if not (enforce and git_integration_enabled) or git_commits or no_code_changes:
+        return None, None
+    if git_commits is None:
+        return git_commits_required_rejection(project_id), None
+    logger.warning(
+        "git_commits_empty_with_integration_enabled project_id=%s tenant_key=%s",
+        sanitize(project_id),
+        sanitize(tenant_key),
+    )
+    return None, GIT_COMMITS_EMPTY_WARNING
 
 
 MAX_SUMMARY_LENGTH = 10000
@@ -136,16 +171,13 @@ async def emit_websocket_event(
     product_id: str,
     data: dict[str, Any],
 ) -> None:
-    try:
-        from giljo_mcp.app_registry.service_registry import get_websocket_manager
+    from giljo_mcp.app_registry.service_registry import get_websocket_manager
 
-        websocket_manager = get_websocket_manager()
+    websocket_manager = get_websocket_manager()
 
-        if websocket_manager:
-            await websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type=event_type,
-                data={"product_id": product_id, **data},
-            )
-    except (RuntimeError, ValueError, KeyError, TypeError) as exc:  # pragma: no cover - best-effort emit
-        logger.warning("WebSocket emit failed", extra={"error": str(exc), "event_type": event_type})
+    if websocket_manager:
+        await websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type=event_type,
+            data={"product_id": product_id, **data},
+        )

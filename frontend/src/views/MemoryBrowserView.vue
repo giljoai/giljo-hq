@@ -52,7 +52,7 @@
         />
         <v-select
           v-model="selectedProjectId"
-          :items="projectFilterItems"
+          :items="availableProjects"
           item-title="name"
           item-value="id"
           placeholder="Project"
@@ -177,8 +177,6 @@ const {
 } = storeToRefs(memoryStore)
 
 const productId = computed(() => productStore.effectiveProductId)
-
-const projectFilterItems = computed(() => availableProjects.value)
 
 const sortOptions = [
   { title: 'Newest first', value: 'date_desc' },

@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from contextlib import suppress
 from pathlib import Path
 
 import yaml
@@ -62,14 +62,13 @@ def configure_middleware(app: FastAPI) -> None:
 
     if not cors_origins:
         cors_origins_str = os.getenv("CORS_ORIGINS", "")
-        if cors_origins_str:
-            if cors_origins_str.startswith("["):
-                import json
-
-                with suppress(json.JSONDecodeError):
-                    cors_origins = json.loads(cors_origins_str)
-            else:
-                cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+        if cors_origins_str.startswith("["):
+            try:
+                cors_origins = json.loads(cors_origins_str)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"CORS_ORIGINS is not valid JSON: {exc}") from exc
+        elif cors_origins_str:
+            cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
 
     if not cors_origins:
         cors_origins = [
@@ -126,18 +125,6 @@ def configure_middleware(app: FastAPI) -> None:
         except (RuntimeError, ValueError, OSError, KeyError) as e:
             logger.warning(f"Network IP detection failed: {e} - continuing with static CORS config")
 
-    ssl_enabled = config.get("features", {}).get("ssl_enabled", False)
-    if ssl_enabled:
-        https_origins = []
-        for origin in cors_origins.copy():
-            if origin.startswith("http://"):
-                https_variant = "https://" + origin[len("http://") :]
-                if https_variant not in cors_origins:
-                    https_origins.append(https_variant)
-        if https_origins:
-            cors_origins.extend(https_origins)
-            logger.info(f"Added HTTPS CORS origins for SSL mode: {https_origins}")
-
     anthropic_connector_origins = ("https://claude.ai", "https://claude.com")
     for origin in anthropic_connector_origins:
         if origin not in cors_origins:
@@ -166,7 +153,7 @@ def configure_middleware(app: FastAPI) -> None:
 
     app.add_middleware(SecurityHeadersMiddleware)
 
-    app.add_middleware(InputValidationMiddleware, strict_mode=False)
+    app.add_middleware(InputValidationMiddleware)
 
     app.add_middleware(
         CSRFProtectionMiddleware,

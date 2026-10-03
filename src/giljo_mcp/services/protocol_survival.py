@@ -205,7 +205,7 @@ def _chain_suborch_staging() -> list[str]:
         "3. End staging: complete_job(job_id, ...) (staging-end).",
         "4. Post a 'staging-complete' note to the Hub thread (find it: get_context(categories=['chain']) "
         "-> hub_thread_id).",
-        "5. Call get_job_mission ONCE, passing the protocol_etag from this response — it returns your "
+        "5. Call get_job_mission ONCE, without this response's protocol_etag — it returns your full "
         "implementation protocol immediately (no gate, no human, no sleep-poll).",
     ]
 
@@ -293,7 +293,7 @@ def build_complete_job_footer(
                 'staging-complete and your orchestrator chip shows "waiting" (NOT complete; the '
                 "same execution resumes at implementation). This is a CHAIN member: the dashboard "
                 "has ALREADY advanced to implementation — there is NO human Implement click. Do "
-                "NOT wait for a human; call get_job_mission (pass your protocol_etag) to pick up "
+                "NOT wait for a human; call get_job_mission (without your staging protocol_etag) to pick up "
                 "your implementation protocol now."
             )
         return (

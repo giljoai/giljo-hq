@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useProductSoftDelete(loadProducts) {
   const { showToast } = useToast()
@@ -16,8 +17,7 @@ export function useProductSoftDelete(loadProducts) {
       const response = await api.products.getDeletedProducts()
       deletedProducts.value = response.data || []
     } catch (error) {
-      console.error('Failed to load deleted products:', error)
-      deletedProducts.value = []
+      showToast({ message: `Could not load the trash: ${parseErrorResponse(error).message}`, type: 'error' })
     }
   }
 
@@ -32,7 +32,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: `${product?.name || 'Product'} restored successfully`,
         type: 'success',
-        timeout: 3000,
       })
 
       await loadProducts()
@@ -46,7 +45,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: 'Failed to restore product. Try again or refresh the page.',
         type: 'error',
-        timeout: 5000,
       })
     } finally {
       restoringProductId.value = null
@@ -64,7 +62,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: `${product?.name || 'Product'} permanently deleted.`,
         type: 'warning',
-        timeout: 3000,
       })
 
       await loadProducts()
@@ -78,7 +75,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: 'Failed to permanently delete product. Try again or refresh the page.',
         type: 'error',
-        timeout: 5000,
       })
     } finally {
       purgingProductId.value = null
@@ -98,7 +94,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: `${ids.length} product(s) permanently deleted.`,
         type: 'warning',
-        timeout: 3000,
       })
 
       await loadProducts()
@@ -109,7 +104,6 @@ export function useProductSoftDelete(loadProducts) {
       showToast({
         message: 'Failed to delete all products. Try again or refresh the page.',
         type: 'error',
-        timeout: 5000,
       })
     } finally {
       purgingAllProducts.value = false

@@ -84,7 +84,7 @@ class AuthorizeRequest(BaseModel):
         max_length=1024,
         description=(
             "Requested OAuth scope. Must be a subset of "
-            f"{sorted(OAUTH_GRANTABLE_SCOPES)}. As of BE-6168 the orchestration "
+            f"{sorted(OAUTH_GRANTABLE_SCOPES)}. The orchestration "
             "scope (`mcp:agent`) IS grantable here so an OAuth client reaches "
             "API-key parity (guarded by the localhost redirect allowlist + consent)."
         ),
@@ -154,7 +154,7 @@ class OAuthMetadataResponse(BaseModel):
     revocation_endpoint: str | None = None
     mcp_spec_versions_supported: list[str] = Field(
         default_factory=list,
-        description="MCP protocol versions implemented by this server (API-0021h).",
+        description="MCP protocol versions implemented by this server.",
     )
 
 
@@ -228,6 +228,9 @@ async def authorize(
 
 
 _OAUTH_FIELD_MAX_LENGTHS = {
+    "code": 512,
+    "client_id": 256,
+    "redirect_uri": 2048,
     "client_secret": 512,
     "resource": 2048,
     "code_verifier": 512,
@@ -274,6 +277,8 @@ def _enforce_oauth_field_caps(**fields: str | None) -> None:
     for name, value in fields.items():
         if value is None:
             continue
+        if not isinstance(value, str):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid_request: {name} must be a string")
         cap = _OAUTH_FIELD_MAX_LENGTHS.get(name)
         if cap is not None and len(value) > cap:
             raise HTTPException(
@@ -297,6 +302,7 @@ async def _refresh_token_grant_response(
 
     try:
         _enforce_oauth_field_caps(
+            client_id=client_id,
             client_secret=client_secret,
             refresh_token=refresh_token,
         )
@@ -374,18 +380,17 @@ async def token(
 ):
     """Exchange an authorization code — or a refresh token — for a JWT access token.
 
-    RFC 6749 §6 (BE-9409): serves BOTH advertised grant types —
+    RFC 6749 §6: serves BOTH advertised grant types —
     ``grant_type=refresh_token`` dispatches to the shared refresh body that
     ``POST /refresh`` also runs; that route stays for back-compat.
 
     Public endpoint (no authentication required). Accepts THREE request
-    shapes (API-0021e Phase 1.2):
+    shapes:
 
     1. ``application/x-www-form-urlencoded`` body — RFC 6749 §3.2 canonical
        (claude.ai uses this).
     2. ``application/json`` body — pragmatic norm matching Google / GitHub /
-       Auth0 / Okta. ChatGPT connector uses this (observed in production,
-       from an Azure egress range, e.g. 203.0.113.0/24).
+       Auth0 / Okta. The ChatGPT connector uses this.
     3. HTTP Basic Auth header (``Authorization: Basic
        <b64(client_id:client_secret)>``) for ``client_secret_basic`` clients
        — RFC 6749 §2.3.1. Header credentials take precedence over body
@@ -403,7 +408,7 @@ async def token(
         redirect_uri: Must match the URI used during authorization.
         code_verifier: PKCE code verifier (RFC 7636). REQUIRED for every client
             type — public and confidential alike — and verified against the
-            stored S256 challenge (SEC-9227 H2 / RFC 9700 §2.1.1). A
+            stored S256 challenge (RFC 9700 §2.1.1). A
             confidential client's ``client_secret`` authenticates the client but
             does NOT substitute for the verifier.
         resource: RFC 8707 resource indicator. Optional at /token: when
@@ -412,13 +417,12 @@ async def token(
             MUST equal the bound value (mismatch → ``invalid_grant`` 401);
             if the client omits it, the server falls back to the bound
             value per RFC 8707 §2 (SHOULD use the value from /authorize).
-            API-0021e Phase 1.4 (ChatGPT compat).
         client_secret: Plaintext client secret for confidential clients
             registered via RFC 7591 DCR. Required when the resolved client
             carries a ``client_secret_hash``; rejected as ``invalid_client``
             (401) when missing or wrong. Public PKCE-only clients (built-in
             CE) MUST omit this field — sending it on a public client is also
-            ``invalid_request`` (400). API-0021e Phase 1.
+            ``invalid_request`` (400).
 
     Returns:
         TokenResponse with access_token, token_type, and expires_in.
@@ -428,7 +432,7 @@ async def token(
             required field, wrong grant_type, PKCE/expiry/code-reuse).
         HTTPException 401: ``invalid_grant`` (resource mismatch) or
             ``invalid_client`` (confidential auth failed).
-        HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
+        HTTPException 429: per-IP rate limit exceeded.
     """
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_token"), window=60, raise_on_limit=True)
@@ -464,6 +468,9 @@ async def token(
 
     try:
         _enforce_oauth_field_caps(
+            code=code,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
             client_secret=client_secret,
             resource=resource,
             code_verifier=code_verifier,
@@ -540,16 +547,16 @@ async def refresh(
     request: Request,
     db=Depends(get_db_session),
 ):
-    """Exchange a refresh token for a new access+refresh pair (API-0021e Phase 2).
+    """Exchange a refresh token for a new access+refresh pair.
 
     Public (unauthenticated) endpoint. Serves BOTH confidential clients
-    (``client_secret_post`` / ``client_secret_basic``) AND public PKCE clients
-    (BE-6161). Public clients present no secret — possession of the one-time-use
+    (``client_secret_post`` / ``client_secret_basic``) AND public PKCE clients.
+    Public clients present no secret — possession of the one-time-use
     rotating refresh token is the proof-of-possession (RFC 8252 / OAuth 2.1
     §4.3.1); the service rotates the token on every call and revokes the whole
     family on reuse of a consumed token.
 
-    Accepts the same three request shapes as /token (API-0021e Phase 1.2):
+    Accepts the same three request shapes as /token:
     form-encoded body, JSON body, or HTTP Basic Auth header for the client
     credentials.
 
@@ -571,7 +578,7 @@ async def refresh(
         HTTPException 400: ``invalid_request`` (grant_type wrong, missing field).
         HTTPException 401: ``invalid_client`` (auth failed) or
             ``invalid_grant`` (token unknown / revoked / expired).
-        HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
+        HTTPException 429: per-IP rate limit exceeded.
     """
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_refresh"), window=60, raise_on_limit=True)

@@ -12,6 +12,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.comm import CHT_TAXONOMY_ABBR
 from giljo_mcp.schemas.comm_serializers import thread_dict
 from giljo_mcp.services.comm_baton_targets import (
+    HubTargetRefusedError,
     _is_tenant_user,
     baton_target_rejection,
     resolve_operator_alias,
@@ -117,7 +118,7 @@ class CommThreadBatonMixin:
                 self._repo, self._user_repo, session, tk, thread_id, to, current_owner=current.next_action_owner
             )
             if rejection is not None:
-                return rejection
+                raise HubTargetRefusedError(rejection)
             thread = await self._repo.set_next_action_owner(session, tk, thread_id, owner)
             participant_ids = (
                 [p.participant_id for p in await self._repo.get_participants(session, tk, thread_id)]

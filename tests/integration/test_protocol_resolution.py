@@ -4,50 +4,9 @@
 # [CE] Community Edition.
 
 
-from unittest.mock import MagicMock
-
-import pytest
-import yaml
-
-from giljo_mcp.config_manager import ConfigManager
+from unittest.mock import MagicMock, patch
 
 
-
-
-def _make_config(tmp_path, ssl_enabled: bool) -> ConfigManager:
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text(
-        yaml.safe_dump(
-            {
-                "server": {"api": {"host": "0.0.0.0", "port": 7272}},
-                "features": {"ssl_enabled": ssl_enabled},
-                "services": {"external_host": "192.0.2.10"},
-                "paths": {"ssl_cert": "/tmp/cert.pem", "ssl_key": "/tmp/key.pem"},
-            }
-        )
-    )
-    mgr = ConfigManager(config_path=config_file)
-    mgr.load()
-    return mgr
-
-
-@pytest.fixture
-def ssl_config(tmp_path):
-    return _make_config(tmp_path, ssl_enabled=True)
-
-
-@pytest.fixture
-def no_ssl_config(tmp_path):
-    return _make_config(tmp_path, ssl_enabled=False)
-
-
-@pytest.fixture
-def ssl_config_data():
-    return {
-        "server": {"api": {"host": "0.0.0.0", "port": 7272}},
-        "features": {"ssl_enabled": True},
-        "services": {"external_host": "192.0.2.10"},
-    }
 
 
 
@@ -67,19 +26,6 @@ class TestDownloadsGetPublicBaseUrl:
         mock_request = MagicMock()
         mock_request.base_url.__str__ = lambda _self: "http://localhost:7272/"
         assert get_public_base_url(mock_request) == "http://localhost:7272"
-
-
-
-
-class TestAiToolsEndpointProtocol:
-
-    def test_https_when_ssl_enabled(self, ssl_config):
-        protocol = "https" if ssl_config.get_nested("features.ssl_enabled", False) else "http"
-        assert protocol == "https"
-
-    def test_http_when_ssl_disabled(self, no_ssl_config):
-        protocol = "https" if no_ssl_config.get_nested("features.ssl_enabled", False) else "http"
-        assert protocol == "http"
 
 
 
@@ -105,40 +51,39 @@ class TestToolAccessorDownloadUrl:
 
 class TestConfigurationEndpointProtocol:
 
-    def test_api_protocol_https_when_ssl_enabled(self, ssl_config):
-        ssl_enabled = ssl_config.get_nested("features.ssl_enabled", False)
-        api_protocol = "https" if ssl_enabled else "http"
-        ws_protocol = "wss" if ssl_enabled else "ws"
-        assert api_protocol == "https"
-        assert ws_protocol == "wss"
+    @staticmethod
+    def _call(scheme: str, host: str):
+        import asyncio
 
-    def test_api_protocol_http_when_ssl_disabled(self, no_ssl_config):
-        ssl_enabled = no_ssl_config.get_nested("features.ssl_enabled", False)
-        api_protocol = "https" if ssl_enabled else "http"
-        ws_protocol = "wss" if ssl_enabled else "ws"
-        assert api_protocol == "http"
-        assert ws_protocol == "ws"
+        from starlette.requests import Request
 
+        from api.endpoints.configuration import get_frontend_configuration
 
+        request = Request(
+            {
+                "type": "http",
+                "scheme": scheme,
+                "server": (host, 443 if scheme == "https" else 7272),
+                "path": "/api/v1/config/frontend",
+                "headers": [(b"host", host.encode())],
+                "query_string": b"",
+                "root_path": "",
+            }
+        )
+        state = MagicMock()
+        state.config.get_nested.return_value = False
+        state.config.tenant.default_tenant_key = "tk_test"
+        with patch("api.app_state.state", state):
+            return asyncio.run(get_frontend_configuration(request))
 
+    def test_http_request_yields_http_and_ws(self):
+        cfg = self._call("http", "192.0.2.10:7272")
+        assert cfg["api"]["protocol"] == "http"
+        assert cfg["websocket"]["protocol"] == "ws"
+        assert "ssl_enabled" not in cfg["api"]
+        assert "is_remote_client" not in cfg["api"]
 
-class TestNoHttpUrlsWhenSslEnabled:
-
-    def test_downloads_no_http(self):
-        from giljo_mcp.http.url_resolver import get_public_base_url
-
-        mock_request = MagicMock()
-        mock_request.base_url.__str__ = lambda _self: "https://mcp.example.com/"
-        url = get_public_base_url(mock_request)
-        assert "http://" not in url, f"Found http:// in downloads URL: {url}"
-
-    def test_ai_tools_no_http(self, ssl_config):
-        protocol = "https" if ssl_config.get_nested("features.ssl_enabled", False) else "http"
-        server_url = f"{protocol}://192.0.2.10:7272"
-        assert "http://" not in server_url
-
-    def test_config_endpoint_no_ws(self, ssl_config):
-        ssl_enabled = ssl_config.get_nested("features.ssl_enabled", False)
-        ws_protocol = "wss" if ssl_enabled else "ws"
-        ws_url = f"{ws_protocol}://192.0.2.10:7272"
-        assert "ws://" not in ws_url, f"Found ws:// in websocket URL: {ws_url}"
+    def test_proxied_https_request_yields_https_and_wss(self):
+        cfg = self._call("https", "giljo.example.com")
+        assert cfg["api"]["protocol"] == "https"
+        assert cfg["websocket"]["protocol"] == "wss"

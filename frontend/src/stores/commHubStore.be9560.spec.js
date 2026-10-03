@@ -77,14 +77,9 @@ describe('commHubStore.postMessage patches the local baton (BE-9560)', () => {
 
   it('a refused post never patches the local baton', async () => {
     commHub._testSeedThread({ thread_id: 't4', project_id: null, next_action_owner: 'user-001' })
-    api.threads.post = vi.fn().mockResolvedValue({
-      data: {
-        success: false,
-        error: 'TARGET_IS_A_DISPLAY_NAME',
-        thread_id: 't4',
-        next_action_owner: 'user-001',
-      },
-    })
+    const refusal = new Error('Request failed with status code 409')
+    refusal.response = { status: 409, data: { error_code: 'TARGET_IS_A_DISPLAY_NAME', message: 'use the id' } }
+    api.threads.post = vi.fn().mockRejectedValue(refusal)
 
     await expect(commHub.postMessage('t4', { to_participant: 'implementer', content: 'hi' })).rejects.toThrow()
     expect(commHub.threadsById.get('t4').next_action_owner).toBe('user-001')

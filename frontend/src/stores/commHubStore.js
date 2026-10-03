@@ -10,7 +10,7 @@ import { useProductStore } from '@/stores/products'
 
 function normalizeMessage(raw) {
   if (!raw) return null
-  const id = raw.message_id || raw.id
+  const id = raw.message_id
   if (!id) return null
   return {
     message_id: id,
@@ -33,7 +33,7 @@ function normalizeMessage(raw) {
 
 function normalizeThread(raw) {
   if (!raw) return null
-  const id = raw.thread_id || raw.id
+  const id = raw.thread_id
   if (!id) return null
   return {
     thread_id: id,
@@ -170,6 +170,12 @@ export const useCommHubStore = defineStore('commHub', () => {
     }
   }
 
+  function _patchThread(id, patch) {
+    const existing = threadsById.value.get(id)
+    if (!existing) return
+    threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
+  }
+
   function _upsertMessage(threadId, rawMessage) {
     const message = normalizeMessage(rawMessage)
     if (!message || !threadId) return
@@ -260,29 +266,11 @@ export const useCommHubStore = defineStore('commHub', () => {
     return thread
   }
 
-  function refusalToError(data) {
-    const err = new Error(data.hint || data.error || 'The server declined this request.')
-    err.refusal = data
-    return err
-  }
-
-  function isRefusal(data) {
-    return data?.success === false
-  }
-
   async function postMessage(id, body) {
     const res = await api.threads.post(id, body)
     const data = res.data
-    if (isRefusal(data)) throw refusalToError(data)
     if (data?.baton_passed || data?.baton_cleared) {
-      const existing = threadsById.value.get(id)
-      if (existing) {
-        threadsById.value = immutableMapSet(
-          threadsById.value,
-          id,
-          immutableObjectPatch(existing, { next_action_owner: data.next_action_owner }),
-        )
-      }
+      _patchThread(id, { next_action_owner: data.next_action_owner })
     }
     return data
   }
@@ -290,16 +278,8 @@ export const useCommHubStore = defineStore('commHub', () => {
   async function passBaton(id, to) {
     const res = await api.threads.passBaton(id, to)
     const updated = res.data
-    if (isRefusal(updated)) throw refusalToError(updated)
     if (updated?.thread_id) {
-      const existing = threadsById.value.get(updated.thread_id)
-      if (existing) {
-        threadsById.value = immutableMapSet(
-          threadsById.value,
-          updated.thread_id,
-          immutableObjectPatch(existing, { next_action_owner: updated.next_action_owner }),
-        )
-      }
+      _patchThread(updated.thread_id, { next_action_owner: updated.next_action_owner })
     }
     return updated
   }
@@ -307,11 +287,10 @@ export const useCommHubStore = defineStore('commHub', () => {
   async function renameThread(id, subject) {
     const res = await api.threads.update(id, { subject })
     const updated = res.data
-    const existing = threadsById.value.get(id)
-    if (existing && updated) {
+    if (updated) {
       const patch = { subject: updated.subject ?? subject }
       if ('title' in updated) patch.title = updated.title
-      threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
+      _patchThread(id, patch)
     }
     return updated
   }
@@ -325,12 +304,11 @@ export const useCommHubStore = defineStore('commHub', () => {
 
     const res = await api.threads.update(id, body)
     const updated = res.data
-    const existing = threadsById.value.get(id)
-    if (existing && updated) {
+    if (updated) {
       const patch = {}
       if ('product_id' in updated) patch.product_id = updated.product_id
       if ('project_ids' in updated) patch.project_ids = updated.project_ids
-      threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
+      _patchThread(id, patch)
     }
     return updated
   }
@@ -392,7 +370,7 @@ export const useCommHubStore = defineStore('commHub', () => {
       api.threads
         .markRead(id)
         .then(() => refreshThreadPostAttention())
-        .catch(() => {})
+        .catch((error) => console.warn('[commHubStore] read watermark not saved:', error))
     }
   }
 
@@ -401,14 +379,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     const threadId = payload?.thread_id
     if (!threadId) return
     _upsertMessage(threadId, payload)
-    const existing = threadsById.value.get(threadId)
-    if (existing && payload.created_at) {
-      threadsById.value = immutableMapSet(
-        threadsById.value,
-        threadId,
-        immutableObjectPatch(existing, { last_activity_at: payload.created_at }),
-      )
-    }
+    if (payload.created_at) _patchThread(threadId, { last_activity_at: payload.created_at })
     if (threadId !== selectedThreadId.value) {
       const prev = unreadByThreadId.value.get(threadId) || 0
       unreadByThreadId.value = immutableMapSet(unreadByThreadId.value, threadId, prev + 1)
@@ -433,10 +404,8 @@ export const useCommHubStore = defineStore('commHub', () => {
         const messages = res.data?.messages || []
         messages.forEach((m) => _upsertMessage(threadId, m))
       } while (_rehydrateWantedThreadIds.has(threadId))
-    } catch {
-      // Best-effort: the excerpt stays on screen and the next open re-reads the
-      // thread in full. A failed top-up must never blank a message the operator
-      // can already partly read.
+    } catch (error) {
+      console.warn('[commHubStore] thread history top-up failed:', error)
     } finally {
       _hydratingThreadIds.delete(threadId)
       _rehydrateWantedThreadIds.delete(threadId)

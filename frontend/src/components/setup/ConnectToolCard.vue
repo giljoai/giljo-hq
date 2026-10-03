@@ -74,11 +74,9 @@
       :existing-key-prefix="existingKeyPrefix"
       :key-error="keyError"
       :has-key="hasKey"
-      :needs-cert-trust="needsCertTrust"
       :active-normalized-id="normalizedId"
       :tool-label="toolLabel"
       :platform="platform"
-      :cert-command="certCommand"
       :env-var-text="envVarText"
       :config-command="configCommand"
       :is-generic="method === 'manual'"
@@ -90,23 +88,6 @@
       @copy-text="({ text }) => copyText(text)"
     />
 
-    <p v-if="showCertTrustLink" class="connect-subline" data-testid="node-tls-note">
-      Node-based clients such as OpenCode, Claude Code, and Codex reject a private or
-      self-signed certificate until it is in your trust store.
-    </p>
-    <div v-if="showCertTrustLink" class="fallback-row">
-      <span
-        class="fallback-link"
-        role="button"
-        tabindex="0"
-        data-testid="cert-trust-link"
-        @click="showCertTrust = true"
-        @keydown.enter.prevent="showCertTrust = true"
-      >
-        Tool rejecting the connection? Trust the certificate.
-      </span>
-    </div>
-
     <div v-if="method === 'oauth'" class="command-card" data-testid="oauth-section">
       <div class="command-card-head">
         <span class="command-step">1.</span>
@@ -116,23 +97,6 @@
         </button>
       </div>
       <pre class="command-code config-code">{{ oauthCommand }}</pre>
-
-      <div v-if="needsCertTrust" class="cert-note" data-testid="oauth-cert-note">
-        <v-icon size="13" :color="COLOR_MUTED">mdi-shield-lock-outline</v-icon>
-        <span>
-          <strong>HTTPS certificate trust (one-time):</strong>
-          If your browser warned you about this server&rsquo;s certificate, paste the command below so the CLI tool trusts it too.
-        </span>
-        <div class="command-card mt-2">
-          <div class="command-card-head">
-            <span class="command-label">Paste in your terminal</span>
-            <button class="copy-pill" data-testid="oauth-cert-copy-btn" @click="copyText(certCommand)">
-              <v-icon size="11">mdi-content-copy</v-icon>COPY
-            </button>
-          </div>
-          <pre class="command-code config-code">{{ certCommand }}</pre>
-        </div>
-      </div>
     </div>
 
     <div :class="['status-hero', connected ? 'status-hero--connected' : 'status-hero--waiting']" data-testid="status-hero">
@@ -181,10 +145,6 @@
       </span>
     </div>
 
-    <CertTrustModal
-      v-model="showCertTrust"
-      @continue="recordCertTrustDismissal"
-    />
   </div>
 </template>
 
@@ -199,17 +159,13 @@ import {
   normalizeToolId,
   detectPlatform,
   buildServerUrl,
-  isBackendHttps,
   generateConfigForTool,
   generateCodexEnvVar,
-  getCertTrustCommand,
   makeKeyName,
   getAuthCapabilities,
 } from '@/composables/useMcpConfig'
 import { toolName } from '@/config/setupTools'
 import SetupStep2KeyFlow from './SetupStep2KeyFlow.vue'
-import CertTrustModal from './CertTrustModal.vue'
-import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 
 const props = defineProps({
   toolId: { type: String, required: true },
@@ -278,11 +234,6 @@ const oauthCommand = computed(() =>
 )
 const mcpEndpoint = computed(() => `${serverUrl.value}/mcp`)
 const envVarText = computed(() => generateCodexEnvVar(currentApiKey.value, platform.value))
-const certCommand = computed(() => getCertTrustCommand(platform.value))
-const needsCertTrust = computed(() => isBackendHttps(backendConfig.value))
-
-const showCertTrust = ref(false)
-const showCertTrustLink = computed(() => isCe.value && serverUrl.value.startsWith('https:'))
 
 async function copyText(text) {
   const success = await clipboardCopy(text)
@@ -479,15 +430,6 @@ onMounted(() => {
   color: $lightest-blue;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.cert-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 0.76rem;
-  color: var(--text-secondary);
-  margin-top: 10px;
 }
 
 /* Status hero */

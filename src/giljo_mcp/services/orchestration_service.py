@@ -203,7 +203,7 @@ class OrchestrationService:
         if not tenant_key:
             tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
-            return None
+            raise ValidationError(message="No tenant context available", context={"method": "get_agent_result"})
 
         repo = AgentOperationsRepository()
         async with self._get_session(tenant_key) as session:

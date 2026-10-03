@@ -239,7 +239,5 @@ describe('PS 5.1 safety: no generated command ever contains &&', () => {
       if (typeof out !== 'string') continue
       expect(out.includes('&&'), `${name} output must not contain && (PS 5.1)`).toBe(false)
     }
-    expect(mod.CERT_TRUST_UNIX.includes('&&'), 'CERT_TRUST_UNIX must not contain &&').toBe(false)
-    expect(mod.CERT_TRUST_WINDOWS.includes('&&'), 'CERT_TRUST_WINDOWS must not contain &&').toBe(false)
   })
 })

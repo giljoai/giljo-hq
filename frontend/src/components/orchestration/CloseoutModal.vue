@@ -265,18 +265,17 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  orchestratorJobId: {
-    type: String,
-    default: null,
-  },
   suppressNavigation: {
+    type: Boolean,
+    default: false,
+  },
+  chainReview: {
     type: Boolean,
     default: false,
   },
 })
 
 const emit = defineEmits(['close', 'closeout'])
-
 
 const loading = ref(false)
 const error = ref(null)
@@ -318,6 +317,7 @@ const handleCloseOutProject = async () => {
       const response = await api.projects.archive(props.projectId)
       responseData = response.data
     }
+    if (!props.chainReview) await api.projects.markReviewed(props.projectId)
 
     emit('closeout', responseData)
     emit('close')

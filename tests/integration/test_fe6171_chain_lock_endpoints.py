@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -24,7 +25,13 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        os.environ.get("GILJO_MODE") == "saas",
+        reason="CE chain REST contract; on SaaS an unlicensed tenant's writes are 402 by design",
+    ),
+]
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 _MODE = "claude_code_cli"

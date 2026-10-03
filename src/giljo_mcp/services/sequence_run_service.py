@@ -24,6 +24,7 @@ from giljo_mcp.models.sequence_runs import (
     CHAIN_TERMINAL_PROJECT_STATUSES,
     SequenceRun,
 )
+from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.jsonb_validators import (
     VALID_REVIEWED_VIA,
     validate_sequence_run_project_ids,
@@ -33,6 +34,7 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.conductor_job_minter import broadcast_conductor_created, mint_conductor_job
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.sequence_run_backout_mixin import SequenceRunBackoutMixin
 from giljo_mcp.services.sequence_run_query_mixin import SequenceRunQueryMixin
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
@@ -164,7 +166,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 conductor_agent_id,
             )
             return result
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to create sequence_run")
@@ -288,11 +290,17 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 sanitize(run.current_index),
             )
             return serialized
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to update sequence_run")
             raise BaseGiljoError(message=str(exc), context={"operation": "update_sequence_run"}) from exc
+
+    async def _broadcast_after_commit(self, run_id: str, tenant_key: str) -> None:
+        if self._session is None:
+            await self._broadcast_sequence_updated(run_id, tenant_key)
+            return
+        self._session.info.setdefault(_DEFERRED_SEQUENCE_UPDATES, {})[run_id] = (tenant_key, self._websocket_manager)
 
     async def _broadcast_sequence_updated(self, run_id: str, tenant_key: str) -> None:
         if self._websocket_manager is None:
@@ -379,9 +387,8 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                         SequenceRun.tenant_key == effective_tenant_key,
                     )
                 )
-                await session.commit()
 
-            await self._broadcast_sequence_updated(run_id, effective_tenant_key)
+            await self._broadcast_after_commit(run_id, effective_tenant_key)
             self._logger.info(
                 "Purged sequence_run %s (tenant=%s, run_rows=%d, conductor_jobs=%d)",
                 run_id,
@@ -394,7 +401,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 "run_deleted": bool(run_delete.rowcount),
                 "conductor_jobs_deleted": len(conductor_job_ids),
             }
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to purge sequence_run")
@@ -416,7 +423,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
             .where(
                 Project.tenant_key == tenant_key,
                 Project.id.in_(member_ids),
-                Project.staging_status == "staging_complete",
+                Project.staging_status == STAGING_COMPLETE,
             )
             .limit(1)
         )
@@ -503,7 +510,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 len(remaining),
             )
             return serialized
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to remove member from sequence_run")
@@ -544,6 +551,8 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                         context={"field": "project_id", "run_id": run_id},
                     )
 
+                await ProjectRepository().stamp_reviewed(session, effective_tenant_key, project_id)
+
                 current = list(run.reviewed_project_ids or [])
                 if project_id in current:
                     return _serialize(run)
@@ -555,11 +564,11 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 run.reviewed_via = validate_sequence_run_reviewed_via(via_map)
                 run.updated_at = datetime.now(UTC)
 
-                await session.commit()
+                await session.flush()
                 await session.refresh(run)
                 serialized = _serialize(run)
 
-            await self._broadcast_sequence_updated(run_id, effective_tenant_key)
+            await self._broadcast_after_commit(run_id, effective_tenant_key)
             self._logger.info(
                 "Marked project %s reviewed (via=%s) in sequence_run %s (tenant=%s, reviewed=%d)",
                 sanitize(project_id),
@@ -569,7 +578,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 len(current),
             )
             return serialized
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
+        except BaseGiljoError:
             raise
         except Exception as exc:
             self._logger.exception("Failed to mark member reviewed on sequence_run")

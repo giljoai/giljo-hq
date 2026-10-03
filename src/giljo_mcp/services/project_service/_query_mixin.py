@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from giljo_mcp.domain.project_status import is_review_pending
 from giljo_mcp.exceptions import (
     BaseGiljoError,
     ResourceNotFoundError,
@@ -84,6 +85,8 @@ class QueryMixin:
                     implementation_launched_at=(
                         project.implementation_launched_at.isoformat() if project.implementation_launched_at else None
                     ),
+                    reviewed_at=project.reviewed_at.isoformat() if project.reviewed_at else None,
+                    review_pending=is_review_pending(project.status, project.reviewed_at),
                     product_id=project.product_id,
                     tenant_key=project.tenant_key,
                     execution_mode=project.execution_mode,

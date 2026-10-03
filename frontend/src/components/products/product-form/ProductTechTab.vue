@@ -7,82 +7,20 @@
     </div>
 
     <v-textarea
-      v-model="form.techStack.programming_languages"
-      placeholder="Python 3.11, JavaScript ES2023, TypeScript 5.2"
-      hint="List all programming languages used (comma-separated or line-by-line)"
+      v-for="field in FIELDS"
+      :key="field.key"
+      v-model="form.techStack[field.key]"
+      :placeholder="field.placeholder"
+      :hint="field.hint"
       persistent-hint
       variant="outlined"
       density="comfortable"
-      rows="3"
+      :rows="field.rows"
       auto-grow
       class="mb-4"
     >
       <template #label>
-        <span>Programming Languages</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.techStack.frontend_frameworks"
-      placeholder="Vue 3, Vuetify 3, Pinia, Vue Router"
-      hint="List frontend technologies (frameworks, libraries, tools)"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="3"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Frontend Frameworks & Libraries</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.techStack.backend_frameworks"
-      placeholder="FastAPI 0.104, SQLAlchemy 2.0, Alembic, asyncio"
-      hint="List backend technologies (frameworks, ORMs, services)"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="3"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Backend Frameworks & Services</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.techStack.databases_storage"
-      placeholder="PostgreSQL 16, Redis 7, Vector embeddings (pgvector)"
-      hint="List databases and data storage solutions"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="3"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Databases & Data Storage</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.techStack.infrastructure"
-      placeholder="Docker, Kubernetes, GitHub Actions CI/CD, AWS (EC2, S3, RDS)"
-      hint="List infrastructure and deployment tools"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="3"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Infrastructure & DevOps</span>
+        <span>{{ field.label }}</span>
       </template>
     </v-textarea>
 
@@ -94,54 +32,11 @@
 
       <div class="d-flex flex-wrap ga-3">
         <v-checkbox
+          v-for="platform in PLATFORMS"
+          :key="platform.value"
           v-model="form.targetPlatforms"
-          value="windows"
-          label="Windows"
-          hide-details
-          density="comfortable"
-          :disabled="isAllPlatformSelected"
-          @update:model-value="$emit('platform-change')"
-        />
-        <v-checkbox
-          v-model="form.targetPlatforms"
-          value="linux"
-          label="Linux"
-          hide-details
-          density="comfortable"
-          :disabled="isAllPlatformSelected"
-          @update:model-value="$emit('platform-change')"
-        />
-        <v-checkbox
-          v-model="form.targetPlatforms"
-          value="macos"
-          label="macOS"
-          hide-details
-          density="comfortable"
-          :disabled="isAllPlatformSelected"
-          @update:model-value="$emit('platform-change')"
-        />
-        <v-checkbox
-          v-model="form.targetPlatforms"
-          value="android"
-          label="Android"
-          hide-details
-          density="comfortable"
-          :disabled="isAllPlatformSelected"
-          @update:model-value="$emit('platform-change')"
-        />
-        <v-checkbox
-          v-model="form.targetPlatforms"
-          value="ios"
-          label="iOS"
-          hide-details
-          density="comfortable"
-          :disabled="isAllPlatformSelected"
-          @update:model-value="$emit('platform-change')"
-        />
-        <v-checkbox
-          v-model="form.targetPlatforms"
-          value="web"
-          label="Web"
+          :value="platform.value"
+          :label="platform.label"
           hide-details
           density="comfortable"
           :disabled="isAllPlatformSelected"
@@ -167,6 +62,22 @@
 
 <script setup>
 import { computed } from 'vue'
+
+const FIELDS = [
+  { key: 'programming_languages', label: 'Programming Languages', placeholder: 'Python 3.11, JavaScript ES2023, TypeScript 5.2', hint: 'List all programming languages used (comma-separated or line-by-line)', rows: '3' },
+  { key: 'frontend_frameworks', label: 'Frontend Frameworks & Libraries', placeholder: 'Vue 3, Vuetify 3, Pinia, Vue Router', hint: 'List frontend technologies (frameworks, libraries, tools)', rows: '3' },
+  { key: 'backend_frameworks', label: 'Backend Frameworks & Services', placeholder: 'FastAPI 0.104, SQLAlchemy 2.0, Alembic, asyncio', hint: 'List backend technologies (frameworks, ORMs, services)', rows: '3' },
+  { key: 'databases_storage', label: 'Databases & Data Storage', placeholder: 'PostgreSQL 16, Redis 7, Vector embeddings (pgvector)', hint: 'List databases and data storage solutions', rows: '3' },
+  { key: 'infrastructure', label: 'Infrastructure & DevOps', placeholder: 'Docker, Kubernetes, GitHub Actions CI/CD, AWS (EC2, S3, RDS)', hint: 'List infrastructure and deployment tools', rows: '3' },
+]
+const PLATFORMS = [
+  { value: 'windows', label: 'Windows' },
+  { value: 'linux', label: 'Linux' },
+  { value: 'macos', label: 'macOS' },
+  { value: 'android', label: 'Android' },
+  { value: 'ios', label: 'iOS' },
+  { value: 'web', label: 'Web' },
+]
 
 const props = defineProps({
   form: {

@@ -2,7 +2,7 @@
   <v-dialog v-model="isOpen" max-width="800" persistent retain-focus scrollable>
     <v-card v-draggable class="smooth-border">
       <div class="dlg-header">
-        <span class="dlg-title">{{ editingProject ? 'Edit Project' : 'Create New Project' }}</span>
+        <span class="dlg-title">{{ editingProject ? 'Edit Project' : 'Create new Project' }}</span>
         <v-btn icon variant="text" class="dlg-close" aria-label="Close dialog" @click="cancel">
           <v-icon>mdi-close</v-icon>
         </v-btn>
@@ -192,7 +192,7 @@
         <v-spacer></v-spacer>
         <v-btn variant="text" @click="cancel">Cancel</v-btn>
         <v-btn color="primary" variant="flat" @click="save">
-          {{ editingProject ? 'Update' : 'Create' }}
+          Save
         </v-btn>
       </div>
     </v-card>

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export const useApprovalsStore = defineStore('approvals', () => {
   const approvalsById = ref(new Map())
@@ -22,7 +23,8 @@ export const useApprovalsStore = defineStore('approvals', () => {
     error.value = null
     try {
       const res = await api.approvals.listPending()
-      const items = Array.isArray(res?.data?.items) ? res.data.items : []
+      const items = res?.data?.items
+      if (!Array.isArray(items)) throw new Error('Pending approvals reply has no items list')
       const next = new Map()
       for (const item of items) {
         if (item?.id) next.set(item.id, item)
@@ -30,7 +32,7 @@ export const useApprovalsStore = defineStore('approvals', () => {
       approvalsById.value = next
       return items
     } catch (err) {
-      error.value = err?.response?.data?.message || err?.message || 'Failed to load pending approvals'
+      error.value = parseErrorResponse(err).message
       throw err
     } finally {
       loading.value = false

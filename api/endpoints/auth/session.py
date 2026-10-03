@@ -169,10 +169,10 @@ async def login(
     This endpoint authenticates a user and sets an httpOnly cookie
     containing a JWT access token valid for 24 hours.
 
-    v3.0 Unified (Handover 0034): No more default password flow.
+    v3.0 Unified: No more default password flow.
     Fresh installs go directly to "Create Admin Account" page.
 
-    Rate Limiting (Handover 1009): 5 attempts per minute per IP
+    Rate Limiting: 5 attempts per minute per IP
 
     Args:
         request: Login credentials (username, password)
@@ -253,7 +253,7 @@ async def logout(
     """
     Logout by revoking the JWT and clearing the cookie.
 
-    SEC-6001: clearing the cookie alone left the bearer token valid until
+    Clearing the cookie alone left the bearer token valid until
     expiry, so a copied/leaked token survived "logout". We now write an
     ``OAuthRevokedToken`` row for the token's jti BEFORE clearing the cookie,
     so ``get_current_user`` rejects it on every future request. Revocation

@@ -76,6 +76,8 @@ export function useChainContext({ runId = () => null, projectId = () => null } =
       .filter(Boolean),
   )
 
+  const missingIds = computed(() => loadedIds.value.filter((id) => !projectStore.projectById(id)))
+
   const total = computed(() => orderedIds.value.length)
   const currentIndex = computed(() =>
     typeof run.value?.current_index === 'number' ? run.value.current_index : 0,
@@ -130,6 +132,7 @@ export function useChainContext({ runId = () => null, projectId = () => null } =
       name: chainDisplayName(run.value, projects.value),
       tabs: tabs.value,
       projects: projects.value,
+      missingIds: missingIds.value,
       counter: counter.value,
       currentPid: currentPid.value,
       chainMission: run.value?.chain_mission ?? '',

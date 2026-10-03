@@ -180,7 +180,7 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
     expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
 
     mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
-    wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
+    wsHandlers['setup:tool_connected']({ tool_name: 'generic' })
     await flushPromises()
 
     expect(mockCredentialStatus).toHaveBeenCalledTimes(2)

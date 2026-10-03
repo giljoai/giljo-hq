@@ -202,46 +202,46 @@ describe('projects store — handleRealtimeUpdate (full-refetch-on-event)', () =
     expect(projectStateStore.getProjectState('proj-1')?.execution_mode).toBe('subagent')
   })
 
-  // FE-9533 — LOAD-BEARING REGRESSION: activeProjectMeta (the dedicated
+  // FE-9533 — LOAD-BEARING REGRESSION: activeProjectsMeta (the dedicated
   // /projects/active read consumed by the Jobs board and by
   // ProjectsView's hasActiveProject) was written ONLY from the two local,
   // self-triggered actions (activateProject/deactivateProject). A project
   // activated from ANOTHER session or headlessly over MCP broadcasts the same
   // project_update/status_changed event this whole file already asserts
   // refetches the entity — but the entity refetch alone never touches
-  // activeProjectMeta, so a client that never separately re-ran
+  // activeProjectsMeta, so a client that never separately re-ran
   // fetchActiveProject() (e.g. the Jobs pane, which historically bypassed the
   // store) stayed stuck on stale activation state until a manual reload. The
-  // fix: a status_changed event also re-derives activeProjectMeta from the
+  // fix: a status_changed event also re-derives activeProjectsMeta from the
   // authoritative /projects/active read, the SAME live mechanism the Projects
   // list already uses for its own fields.
-  it('refreshes activeProjectMeta on a "status_changed" event for a project not yet in the list (FE-9533)', async () => {
+  it('refreshes activeProjectsMeta on a "status_changed" event for a project not yet in the list (FE-9533)', async () => {
     // Deliberately proj-2 is NOT seeded into store.projects — this is the Jobs
     // pane's real starting condition (it never fetches the paginated list at
     // all), not the Projects-list page's condition.
     mockGet.mockResolvedValue({ data: { id: 'proj-2', name: 'Activated Elsewhere', status: 'active' } })
     mockGetActive.mockResolvedValue({ data: [{ id: 'proj-2', name: 'Activated Elsewhere' }] })
 
-    expect(store.activeProjectMeta).toBeNull()
+    expect(store.activeProjectsMeta).toEqual([])
 
     store.handleRealtimeUpdate({ project_id: 'proj-2', update_type: 'status_changed' })
 
     await vi.waitFor(() => expect(mockGetActive).toHaveBeenCalled())
-    expect(store.activeProjectMeta).toMatchObject({ id: 'proj-2', name: 'Activated Elsewhere' })
+    expect(store.activeProjectsMeta[0]).toMatchObject({ id: 'proj-2', name: 'Activated Elsewhere' })
   })
 
-  it('refreshes activeProjectMeta to null on a "status_changed" deactivation event', async () => {
-    store.activeProjectMeta = { id: 'proj-1', name: 'Original Name' }
+  it('refreshes activeProjectsMeta to null on a "status_changed" deactivation event', async () => {
+    store.activeProjectsMeta = [{ id: 'proj-1', name: 'Original Name' }]
     mockGet.mockResolvedValue({ data: { id: 'proj-1', name: 'Original Name', status: 'inactive' } })
     mockGetActive.mockResolvedValue({ data: [] })
 
     store.handleRealtimeUpdate({ project_id: 'proj-1', update_type: 'status_changed' })
 
     await vi.waitFor(() => expect(mockGetActive).toHaveBeenCalled())
-    expect(store.activeProjectMeta).toBeNull()
+    expect(store.activeProjectsMeta).toEqual([])
   })
 
-  it('does NOT refresh activeProjectMeta on a non-status update_type (no extra request)', async () => {
+  it('does NOT refresh activeProjectsMeta on a non-status update_type (no extra request)', async () => {
     mockGet.mockResolvedValue({ data: { id: 'proj-1', name: 'New Name', status: 'active' } })
 
     store.handleRealtimeUpdate({ project_id: 'proj-1', update_type: 'updated' })

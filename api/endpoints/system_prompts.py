@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _PRODUCT_ID_DESCRIPTION = (
     "Optional product UUID. Supplied -> the request targets that product's rung of the "
-    "override ladder; omitted -> the tenant-wide rung (the pre-BE-9385d behavior)."
+    "override ladder; omitted -> the tenant-wide rung."
 )
 
 

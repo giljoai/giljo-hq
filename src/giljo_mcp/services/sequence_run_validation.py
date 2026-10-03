@@ -37,6 +37,14 @@ def _validate_project_statuses(project_statuses: dict[str, str]) -> None:
             )
 
 
+def _require_member(field: str, value: str, valid: frozenset[str], shown: frozenset[str] | None = None) -> None:
+    if value not in valid:
+        names = sorted(shown if shown is not None else valid)
+        raise ValidationError(
+            message=f"Invalid {field} {value!r}. Valid: {names}", context={"field": field, "valid": names}
+        )
+
+
 def validate_create_fields(
     *,
     project_ids: list[str],
@@ -55,21 +63,9 @@ def validate_create_fields(
             message=f"project_ids exceeds maximum of {MAX_SEQUENCE_PROJECTS} projects (got {len(project_ids)})",
             context={"field": "project_ids", "max": MAX_SEQUENCE_PROJECTS},
         )
-    if execution_mode not in ACCEPTED_EXECUTION_MODES:
-        raise ValidationError(
-            message=f"Invalid execution_mode {execution_mode!r}. Valid: {sorted(VALID_EXECUTION_MODES)}",
-            context={"field": "execution_mode", "valid": sorted(VALID_EXECUTION_MODES)},
-        )
-    if status not in VALID_RUN_STATUSES:
-        raise ValidationError(
-            message=f"Invalid status {status!r}. Valid: {sorted(VALID_RUN_STATUSES)}",
-            context={"field": "status", "valid": sorted(VALID_RUN_STATUSES)},
-        )
-    if review_policy not in VALID_REVIEW_POLICIES:
-        raise ValidationError(
-            message=f"Invalid review_policy {review_policy!r}. Valid: {sorted(VALID_REVIEW_POLICIES)}",
-            context={"field": "review_policy", "valid": sorted(VALID_REVIEW_POLICIES)},
-        )
+    _require_member("execution_mode", execution_mode, ACCEPTED_EXECUTION_MODES, shown=VALID_EXECUTION_MODES)
+    _require_member("status", status, VALID_RUN_STATUSES)
+    _require_member("review_policy", review_policy, VALID_REVIEW_POLICIES)
     _validate_project_statuses(project_statuses)
 
 
@@ -83,26 +79,17 @@ def validate_update_fields(
     resolved_order: list[str] | None,
     project_statuses: dict[str, str] | None,
 ) -> tuple[list[str] | None, dict[str, str] | None]:
-    if status is not None and status not in VALID_RUN_STATUSES:
-        raise ValidationError(
-            message=f"Invalid status {status!r}. Valid: {sorted(VALID_RUN_STATUSES)}",
-            context={"field": "status", "valid": sorted(VALID_RUN_STATUSES)},
-        )
-    if review_policy is not None and review_policy not in VALID_REVIEW_POLICIES:
-        raise ValidationError(
-            message=f"Invalid review_policy {review_policy!r}. Valid: {sorted(VALID_REVIEW_POLICIES)}",
-            context={"field": "review_policy", "valid": sorted(VALID_REVIEW_POLICIES)},
-        )
+    if status is not None:
+        _require_member("status", status, VALID_RUN_STATUSES)
+    if review_policy is not None:
+        _require_member("review_policy", review_policy, VALID_REVIEW_POLICIES)
     if current_index is not None and current_index < 0:
         raise ValidationError(
             message="current_index must be >= 0",
             context={"field": "current_index"},
         )
-    if execution_mode is not None and execution_mode not in ACCEPTED_EXECUTION_MODES:
-        raise ValidationError(
-            message=f"Invalid execution_mode {execution_mode!r}. Valid: {sorted(VALID_EXECUTION_MODES)}",
-            context={"field": "execution_mode", "valid": sorted(VALID_EXECUTION_MODES)},
-        )
+    if execution_mode is not None:
+        _require_member("execution_mode", execution_mode, ACCEPTED_EXECUTION_MODES, shown=VALID_EXECUTION_MODES)
     if chain_mission is not None:
         if not isinstance(chain_mission, str):
             raise ValidationError(

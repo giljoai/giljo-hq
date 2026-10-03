@@ -48,7 +48,18 @@ def create_mock_db_session(project_mock, product_mock):
 
 @pytest.fixture(autouse=True)
 def _solo_chain_member():
-    with patch("giljo_mcp.tools._closeout_finalize.mark_chain_member_status", AsyncMock(return_value=False)):
+
+    class _GitOff:
+        def __init__(self, session, tenant_key):
+            pass
+
+        async def get_setting_value(self, category, key, default=None):
+            return {"enabled": False}
+
+    with (
+        patch("giljo_mcp.tools._closeout_finalize.mark_chain_member_status", AsyncMock(return_value=False)),
+        patch("giljo_mcp.services.settings_service.SettingsService", _GitOff),
+    ):
         yield
 
 

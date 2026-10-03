@@ -148,3 +148,27 @@ async def test_spawn_job_without_mission_through_mcp_boundary_is_staged(spawn_bo
 
     assert execution.status == "staged", "boundary spawn without mission must yield a 'staged' execution"
     assert job.mission is None, "a staged job's mission must be NULL at the boundary"
+
+
+async def test_spawn_job_twice_with_a_100_char_name_through_mcp_boundary_suffixes_within_100(
+    spawn_boundary_client,
+) -> None:
+    new_client, tenant_key, db_session = spawn_boundary_client
+    project_id = await _seed_project_and_template(db_session, tenant_key)
+    name = "a" * 100
+
+    async with new_client() as session:
+        results = [
+            await session.call_tool(
+                "spawn_job",
+                {"agent_display_name": name, "agent_name": "implementer", "project_id": project_id, "mission": "m"},
+            )
+            for _ in range(2)
+        ]
+
+    for result in results:
+        assert result.is_error is False, _error_text(result)
+    names = [_payload(result)["agent_display_name"] for result in results]
+    assert names[0] == name
+    assert names[1] != name
+    assert len(names[1]) <= 100

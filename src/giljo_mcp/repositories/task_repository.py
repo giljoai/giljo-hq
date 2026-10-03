@@ -169,10 +169,6 @@ class TaskRepository:
     async def delete_task(self, session: AsyncSession, task: Task) -> None:
         await session.delete(task)
 
-
-    async def add_project(self, session: AsyncSession, project: Project) -> None:
-        session.add(project)
-
     async def flush(self, session: AsyncSession) -> None:
         await session.flush()
 

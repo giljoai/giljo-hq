@@ -47,11 +47,11 @@ async def verify_pin_and_reset_password(
     http_request: Request, request_data: PinPasswordResetRequest = Body(...), db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Verify recovery PIN and reset password (Handover 0023).
+    Verify recovery PIN and reset password.
 
     Security Features:
     - Generic error messages (doesn't reveal username existence)
-    - IP-based rate limiting: 3 attempts per minute (Handover 1009)
+    - IP-based rate limiting: 3 attempts per minute
     - Account lockout: 5 failed attempts → 15 minute lockout (per-user)
     - Timing-safe PIN comparison (bcrypt)
     - PIN never stored in plaintext
@@ -137,7 +137,7 @@ async def verify_pin_and_reset_password(
 
 
 class VerifyPinRequest(BaseModel):
-    username: str
+    username: str = Field(..., max_length=255)
     recovery_pin: str = Field(..., min_length=4, max_length=4, pattern="^[0-9]{4}$")
 
 
@@ -156,7 +156,7 @@ async def verify_pin(
     Used by the forgot-password UI to validate the PIN before
     showing the new password form. Does not modify any data.
 
-    AUTH-EMAIL Phase 4: wire field `username` accepts either username OR email.
+    The `username` field accepts either a username or an email.
 
     Every failure (unknown username, no PIN set, locked out, wrong PIN)
     returns the same generic message and a comparable bcrypt-verify time.
@@ -190,7 +190,7 @@ async def check_first_login(
     request_data: CheckFirstLoginRequest = Body(...), db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Check if user must change password or set PIN on first login (Handover 0023).
+    Check if user must change password or set PIN on first login.
 
     Used by frontend after successful login to determine if additional
     setup is required before accessing the dashboard.
@@ -219,7 +219,7 @@ async def complete_first_login(
     db: AsyncSession = Depends(get_db_session),
 ):
     """
-    Complete first login by changing password and setting recovery PIN (Handover 0023).
+    Complete first login by changing password and setting recovery PIN.
 
     Requires authentication (JWT token from initial login with default password).
 
@@ -242,9 +242,8 @@ async def complete_first_login(
     Raises:
         HTTPException: 400 if validation fails
     """
-    if not await asyncio.to_thread(
-        bcrypt.checkpw, request_data.current_password.encode("utf-8"), current_user.password_hash.encode("utf-8")
-    ):
+    stored = current_user.password_hash
+    if not (await async_verify_password(request_data.current_password, stored or DUMMY_BCRYPT_HASH) and stored):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
     if request_data.new_password == request_data.current_password:

@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from api.endpoints._boundary_types import ID_MAX, LIST_ITEMS_MAX, IdPath
 from api.endpoints.dependencies import get_roadmap_service
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
@@ -23,7 +24,7 @@ router = APIRouter()
 
 _PRODUCT_ID_QUERY = Query(
     None,
-    max_length=64,
+    max_length=ID_MAX,
     description="Product to scope to (the viewed tab). Omitted: the default product.",
 )
 
@@ -31,14 +32,14 @@ _PRODUCT_ID_QUERY = Query(
 class RoadmapReorderItem(BaseModel):
     """One {id, sort_order} pair in a reorder request."""
 
-    id: str = Field(..., min_length=1, description="roadmap_item id")
+    id: str = Field(..., min_length=1, max_length=ID_MAX, description="roadmap_item id")
     sort_order: int = Field(..., ge=0, le=MAX_ROADMAP_SORT_ORDER, description="New order index within the roadmap")
 
 
 class RoadmapReorderRequest(BaseModel):
     """Bulk reorder payload. Out-of-range priorities are rejected with 422."""
 
-    items: list[RoadmapReorderItem]
+    items: list[RoadmapReorderItem] = Field(..., max_length=LIST_ITEMS_MAX)
 
 
 @router.get("")
@@ -79,7 +80,7 @@ async def reorder_roadmap(
 
 @router.delete("/items/{item_id}")
 async def remove_roadmap_item(
-    item_id: str,
+    item_id: IdPath,
     product_id: str | None = _PRODUCT_ID_QUERY,
     current_user: User = Depends(get_current_active_user),
     roadmap_service: RoadmapService = Depends(get_roadmap_service),

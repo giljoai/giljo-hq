@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.endpoints._boundary_types import IdPath
 from api.schemas.prompt import (
     ProjectCompleteRequest,
     ProjectCompleteResponse,
@@ -34,7 +35,7 @@ router = APIRouter()
     tags=["Projects"],
 )
 async def complete_project(
-    project_id: str,
+    project_id: IdPath,
     request: ProjectCompleteRequest,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
@@ -70,12 +71,12 @@ async def complete_project(
 
 @router.post("/{project_id}/continue-working", response_model=ContinueWorkingResponse)
 async def continue_working(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ContinueWorkingResponse:
     """
-    Resume work on project (Handover 0113).
+    Resume work on project.
 
     Args:
         project_id: Project UUID
@@ -106,7 +107,7 @@ async def continue_working(
 
 @router.post("/{project_id}/closeout-without-summary", response_model=CloseoutWithoutSummaryResponse)
 async def closeout_without_summary(
-    project_id: str,
+    project_id: IdPath,
     request: CloseoutWithoutSummaryRequest,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),

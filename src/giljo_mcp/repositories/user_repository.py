@@ -61,6 +61,12 @@ class UserRepository:
         result = await session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_first_active_admin(self, session: AsyncSession, tenant_key: str) -> User | None:
+        result = await session.execute(
+            select(User).where(User.tenant_key == tenant_key, User.role == "admin", User.is_active.is_(True)).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def add_user(self, session: AsyncSession, user: User) -> User:
         session.add(user)
         await session.flush()

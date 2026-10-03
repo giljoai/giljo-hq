@@ -9,13 +9,17 @@ import contextlib
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.models.agent_identity import AgentExecution
+from giljo_mcp.domain.job_activity import HOLDING, WORKING, activity_word
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
+from giljo_mcp.schemas.responses.orchestration import OrchestratorDisplayState
 from giljo_mcp.services.settings_service import AGENT_SILENCE_THRESHOLD_KEY, MAX_AGENT_SILENCE_THRESHOLD_MINUTES
 
 
@@ -283,6 +287,87 @@ async def clear_silent_status(
         "status": agent.status,
         "last_progress_at": agent.last_progress_at.isoformat() if agent.last_progress_at else None,
     }
+
+
+def _minutes_since(moment: datetime | None, now: datetime) -> int:
+    return max(0, int((now - moment).total_seconds() // 60)) if moment else 0
+
+
+def _display_state(orchestrator, workers: list, counts: dict, now: datetime) -> OrchestratorDisplayState:
+    running = [w for w in workers if activity_word(w.status, counts.get(w.job_id)) == WORKING]
+    waiting = [w for w in workers if w.status == "complete"]
+    own = counts.get(orchestrator.job_id, {})
+    common = {
+        "stale_minutes": _minutes_since(orchestrator.last_progress_at or orchestrator.started_at, now),
+        "todos_done": own.get("completed", 0),
+        "todos_total": sum(own.values()),
+    }
+    if running:
+        noun = "agent" if len(running) == 1 else "agents"
+        label = f"Monitoring ({len(running)} {noun} running)"
+        return OrchestratorDisplayState(state="monitoring", label=label, agents=len(running), **common)
+    if waiting:
+        oldest = min((w.completed_at for w in waiting if w.completed_at), default=None)
+        minutes = _minutes_since(oldest, now)
+        label = f"Result waiting, not picked up ({minutes} min)"
+        return OrchestratorDisplayState(
+            state="result_waiting", label=label, agents=len(waiting), minutes=minutes, **common
+        )
+    return OrchestratorDisplayState(state="silent", label="Silent", **common)
+
+
+async def stale_orchestrator_states(
+    session: AsyncSession,
+    tenant_key: str,
+    project_ids: list[str] | None = None,
+    job_id: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, OrchestratorDisplayState]:
+    if job_id:
+        owner = aliased(AgentJob)
+        scope = (
+            AgentJob.project_id
+            == select(owner.project_id).where(owner.job_id == job_id, owner.tenant_key == tenant_key).scalar_subquery()
+        )
+    elif project_ids:
+        scope = AgentJob.project_id.in_(project_ids)
+    else:
+        return {}
+
+    rows = (
+        await session.execute(
+            select(
+                AgentJob.project_id,
+                AgentJob.job_id,
+                AgentJob.job_type,
+                AgentJob.job_metadata["chain_conductor"].as_boolean().label("conductor"),
+                AgentExecution.status,
+                AgentExecution.last_progress_at,
+                AgentExecution.started_at,
+                AgentExecution.completed_at,
+            )
+            .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
+            .where(
+                AgentExecution.tenant_key == tenant_key,
+                AgentJob.tenant_key == tenant_key,
+                AgentExecution.status.in_(("working", "silent", "complete")),
+                scope,
+            )
+        )
+    ).all()
+    stale = [r for r in rows if r.job_type == "orchestrator" and not r.conductor and r.status == "silent"]
+    if not stale:
+        return {}
+
+    counts = await AgentOperationsRepository().get_todo_counts_by_job(session, tenant_key, [r.job_id for r in rows])
+    now = now or datetime.now(UTC)
+    states: dict[str, OrchestratorDisplayState] = {}
+    for orchestrator in stale:
+        if activity_word(orchestrator.status, counts.get(orchestrator.job_id)) == HOLDING:
+            continue
+        workers = [r for r in rows if r.project_id == orchestrator.project_id and r.job_type != "orchestrator"]
+        states[orchestrator.job_id] = _display_state(orchestrator, workers, counts, now)
+    return states
 
 
 async def _get_silence_threshold(session: AsyncSession) -> int:

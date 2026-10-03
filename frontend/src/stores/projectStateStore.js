@@ -46,20 +46,7 @@ export const useProjectStateStore = defineStore('projectStateDomain', () => {
     if (!resolved) return
 
     const previous = stateByProjectId.value.get(resolved)
-    const base =
-      previous ||
-      normalizeProjectState({ id: resolved }) || {
-        project_id: resolved,
-        mission: '',
-        status: null,
-        execution_mode: null,
-        stagingComplete: false,
-        isStaged: false,
-        isStaging: false,
-        isLaunched: false,
-        implementationLaunched: false,
-        implementationLaunchedAt: null,
-      }
+    const base = previous || normalizeProjectState({ id: resolved })
 
     const next = immutableObjectPatch(base, patch)
 

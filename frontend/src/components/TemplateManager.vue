@@ -106,7 +106,6 @@
             :assignments-loading="assignmentsLoading"
             :headers="headers"
             :search="search"
-            :show-all-products="showAllProducts"
             :viewed-product-id="viewedProductId"
             :product-name-for="productNameFor"
             :remaining-user-slots="remainingUserSlots"
@@ -548,7 +547,7 @@ const deleteTemplate = async () => {
     deleteDialog.value = false
     deletingTemplate.value = null
   } catch (error) {
-    console.error('Failed to delete template:', error)
+    showToast({ message: `Could not delete the agent: ${parseErrorResponse(error).message}`, type: 'error' })
   } finally {
     deleting.value = false
   }
@@ -567,7 +566,7 @@ const resetTemplate = async () => {
     resetDialog.value = false
     resettingTemplate.value = null
   } catch (error) {
-    console.error('Failed to reset template:', error)
+    showToast({ message: `Could not reset the agent: ${parseErrorResponse(error).message}`, type: 'error' })
   } finally {
     resetting.value = false
   }

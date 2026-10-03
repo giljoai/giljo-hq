@@ -50,69 +50,6 @@ class _FakeWS:
         self.closed = True
 
 
-def _wire_subscriber(mgr: WebSocketManager, client_id: str, ws: _FakeWS, entity_key: str) -> None:
-    mgr.active_connections[client_id] = ws
-    mgr.auth_contexts[client_id] = {"tenant_key": "tk_x"}
-    mgr.subscriptions[client_id] = {entity_key}
-    mgr.entity_subscribers.setdefault(entity_key, set()).add(client_id)
-
-
-
-
-@pytest.mark.asyncio
-async def test_notify_entity_update_survives_subscriber_send_failure():
-    mgr = WebSocketManager()
-    entity_key = "project:p1"
-
-    failing = _FakeWS(fail=True)
-    healthy = _FakeWS()
-    _wire_subscriber(mgr, "c-fail", failing, entity_key)
-    _wire_subscriber(mgr, "c-ok", healthy, entity_key)
-
-    await mgr.notify_entity_update("project", "p1", {"hello": "world"})
-
-    assert len(healthy.sent) == 1
-    assert "c-fail" not in mgr.active_connections
-    assert "c-fail" not in mgr.entity_subscribers.get(entity_key, set())
-    assert "c-ok" in mgr.entity_subscribers.get(entity_key, set())
-
-
-@pytest.mark.asyncio
-async def test_notify_entity_update_single_failing_subscriber():
-    mgr = WebSocketManager()
-    entity_key = "agent:p1:builder"
-
-    failing = _FakeWS(fail=True)
-    _wire_subscriber(mgr, "only-client", failing, entity_key)
-
-    await mgr.notify_entity_update("agent", "p1:builder", {"x": 1})
-
-    assert "only-client" not in mgr.active_connections
-    assert entity_key not in mgr.entity_subscribers
-
-
-
-
-@pytest.mark.asyncio
-async def test_wedged_client_is_dropped_not_aborting_broadcast(monkeypatch):
-    import api.websocket as ws_mod
-
-    monkeypatch.setattr(ws_mod, "_WS_SEND_TIMEOUT_SECONDS", 0.05)
-
-    mgr = WebSocketManager()
-    entity_key = "project:p2"
-
-    wedged = _FakeWS(hang_seconds=5.0)
-    healthy = _FakeWS()
-    _wire_subscriber(mgr, "c-wedged", wedged, entity_key)
-    _wire_subscriber(mgr, "c-ok", healthy, entity_key)
-
-    await asyncio.wait_for(mgr.notify_entity_update("project", "p2", {"k": "v"}), timeout=2)
-
-    assert len(healthy.sent) == 1
-    assert "c-wedged" not in mgr.active_connections
-
-
 
 
 @pytest.mark.asyncio
@@ -191,21 +128,6 @@ async def test_send_heartbeat_delivers_to_all_and_drops_failures():
     assert len(ok1.sent) == 1 and len(ok2.sent) == 1
     assert "c" not in mgr.active_connections
     assert "a" in mgr.active_connections and "b" in mgr.active_connections
-
-
-@pytest.mark.asyncio
-async def test_notify_entity_update_happy_path_delivers_to_all_subscribers():
-    mgr = WebSocketManager()
-    entity_key = "project:p3"
-    subs = {f"c{i}": _FakeWS() for i in range(4)}
-    for cid, ws in subs.items():
-        _wire_subscriber(mgr, cid, ws, entity_key)
-
-    await mgr.notify_entity_update("project", "p3", {"n": 1})
-
-    for ws in subs.values():
-        assert len(ws.sent) == 1
-    assert mgr.entity_subscribers[entity_key] == set(subs)
 
 
 

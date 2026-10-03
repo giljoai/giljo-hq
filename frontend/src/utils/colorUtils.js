@@ -1,6 +1,5 @@
 
 import { getAgentColor } from '@/config/agentColors'
-import { TEXT_MUTED } from '@/config/colorTokens'
 
 export function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16)
@@ -9,11 +8,10 @@ export function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+export function tintedStyle(hex) {
+  return { backgroundColor: hexToRgba(hex, 0.15), color: hex }
+}
+
 export function getAgentBadgeStyle(agentName) {
-  const colorObj = getAgentColor(agentName)
-  const hex = colorObj?.hex || TEXT_MUTED
-  return {
-    backgroundColor: hexToRgba(hex, 0.15),
-    color: hex,
-  }
+  return tintedStyle(getAgentColor(agentName).hex)
 }

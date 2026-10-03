@@ -18,6 +18,7 @@ from giljo_mcp.execution_mode_default import (
     STAGE_MODE_ASK,
 )
 from giljo_mcp.models import User
+from giljo_mcp.schemas.jsonb_validators_settings import GeneralSettingsData
 from giljo_mcp.services.handover_template import (
     DEFAULT_HANDOVER_TEMPLATE,
     HANDOVER_TEMPLATE_MAX_CHARS,
@@ -46,7 +47,7 @@ router = APIRouter()
 class SettingsUpdate(BaseModel):
     """Settings update request - settings dict required"""
 
-    settings: dict[str, Any]
+    settings: GeneralSettingsData
 
 
 class SettingsResponse(BaseModel):
@@ -81,7 +82,7 @@ class AgentSilenceThresholdUpdateResponse(AgentSilenceThresholdResponse):
 
 
 class AgentCheckinCadenceUpdate(BaseModel):
-    """Update request for the account-level agent check-in cadence (FE-9296b)."""
+    """Update request for the account-level agent check-in cadence."""
 
     agent_checkin_cadence_minutes: int = Field(ge=1)
 
@@ -99,7 +100,7 @@ class AgentCheckinCadenceUpdateResponse(AgentCheckinCadenceResponse):
 
 
 class ExecutionModeDefaultResponse(BaseModel):
-    """The account's standing answer to the one question staging asks (FE-9555)."""
+    """The account's standing answer to the one question staging asks."""
 
     execution_mode_default: str
 
@@ -126,7 +127,7 @@ class CloseoutModeSetting(BaseModel):
 
 
 class HandoverTemplateResponse(BaseModel):
-    """The account's handover template, as it will be used (BE-9643a).
+    """The account's handover template, as it will be used.
 
     ``handover_template`` is what BOTH doors start a handover from -- the dialog
     pre-fills it and the generated retirement prompt carries it -- so it is always
@@ -186,7 +187,7 @@ async def update_general_settings(
     logger.info("Admin %s updating general settings", sanitize(current_user.username))
 
     service = SettingsService(db, current_user.tenant_key)
-    settings = await service.update_settings("general", request.settings)
+    settings = await service.update_settings("general", request.settings.model_dump(exclude_unset=True))
 
     return SettingsUpdateResponse(settings=settings, message="Settings updated successfully")
 

@@ -22,21 +22,13 @@
         Implementation <span class="jb-filter-n">{{ sideCounts.implementation }}</span>
       </button>
     </div>
-    <div class="jb-filter-group" role="group" aria-label="Filter by state">
-      <button
-        v-for="option in filterOptions"
-        :key="option.value"
-        type="button"
-        class="jb-filter"
-        :class="{ 'jb-filter--active': filter === option.value }"
-        :data-testid="`jobs-filter-${option.value}`"
-        @click="emit('select-filter', option.value)"
-      >
+    <div class="jb-status-line" data-testid="jobs-status-counters">
+      <span v-for="option in statusCounts" :key="option.value" :data-testid="`jobs-status-${option.value}`">
         {{ option.label }}
-        <span class="jb-filter-n" :class="{ 'jb-filter-n--hot': option.value === 'needs-input' && option.count > 0 }">
+        <span class="jb-filter-n" :class="{ 'jb-filter-n--hot': option.value === 'needs-decision' && option.count > 0 }">
           {{ option.count }}
         </span>
-      </button>
+      </span>
     </div>
     <div class="jb-filter-group jb-density" role="group" aria-label="View" data-testid="jobs-view-switch">
       <span class="jb-density-label" data-testid="jobs-view-label">View</span>
@@ -61,7 +53,6 @@
         Compact
       </button>
     </div>
-    <span class="jb-count-note">{{ countNote }}</span>
   </div>
 </template>
 
@@ -71,13 +62,11 @@ import { BOARD_DENSITIES } from '@/composables/useBoardDensity'
 defineProps({
   side: { type: String, required: true },
   sideCounts: { type: Object, required: true },
-  filter: { type: String, required: true },
-  filterOptions: { type: Array, required: true },
+  statusCounts: { type: Array, required: true },
   isCompact: { type: Boolean, default: false },
-  countNote: { type: String, default: '' },
 })
 
-const emit = defineEmits(['select-side', 'select-filter', 'select-density'])
+const emit = defineEmits(['select-side', 'select-density'])
 </script>
 
 <style scoped lang="scss">
@@ -135,6 +124,14 @@ const emit = defineEmits(['select-side', 'select-filter', 'select-density'])
   }
 }
 
+.jb-status-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: $color-text-secondary;
+  font-size: 0.8rem;
+}
+
 .jb-side-group {
   border-color: rgba($color-brand-yellow, 0.35);
 }
@@ -154,11 +151,5 @@ const emit = defineEmits(['select-side', 'select-filter', 'select-density'])
   text-transform: uppercase;
   color: $color-text-secondary;
   padding: 0 4px 0 12px;
-}
-
-.jb-count-note {
-  color: $color-text-secondary;
-  font-size: 0.8rem;
-  margin-left: auto;
 }
 </style>

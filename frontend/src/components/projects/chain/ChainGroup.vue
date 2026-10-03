@@ -27,16 +27,7 @@
           >
             &middot; {{ memberStateLabel(member) }}
           </span>
-          <button
-            v-if="member.tab.needsReview"
-            type="button"
-            class="cg-review"
-            :data-testid="`chain-member-review-${member.tab.projectId}`"
-            @click="handleTabReview(member.tab)"
-          >
-            Review
-          </button>
-          <span v-else-if="member.tab.isCompleted" class="cg-reviewed">Reviewed</span>
+          <span v-if="!member.tab.needsReview && member.tab.isCompleted" class="cg-reviewed">Reviewed</span>
           <span class="cg-spacer" />
           <v-btn
             v-if="chainCtx.locked"
@@ -70,8 +61,16 @@
           @edit-description="(p) => emit('edit-description', p)"
           @agent-mission-edit="(a) => emit('agent-mission-edit', a)"
           @steps="(a) => emit('steps', a)"
-          @review="(p) => emit('review', p)"
+          @review="handleTabReview(member.tab)"
         />
+        <p
+          v-else-if="chainCtx.missingIds.includes(member.tab.projectId)"
+          class="text-body-small"
+          data-testid="chain-member-load-error"
+        >
+          <v-icon size="16" color="error" class="mr-1">mdi-alert-circle</v-icon>
+          This step's project could not be loaded. Refresh the board to try again.
+        </p>
       </div>
     </div>
 
@@ -83,6 +82,7 @@
       :product-id="chainReviewTab.productId"
       :project-status="chainReviewTab.status || 'active'"
       suppress-navigation
+      chain-review
       @close="showChainReview = false"
       @closeout="handleChainReviewComplete"
     />
@@ -94,6 +94,7 @@ import { computed, reactive } from 'vue'
 import { REPLAY_LABEL } from '@/composables/usePlayButton'
 import { useChainContext } from '@/composables/useChainContext'
 import { useChainGroupControls } from '@/composables/useChainGroupControls'
+import { withChainReview } from '@/utils/jobsSectionLabel'
 import { useChainMemberReview } from '@/composables/useChainMemberReview'
 import CloseoutModal from '@/components/orchestration/CloseoutModal.vue'
 import JobsBoardCard from '@/components/projects/JobsBoardCard.vue'
@@ -118,7 +119,6 @@ const emit = defineEmits([
   'edit-description',
   'agent-mission-edit',
   'steps',
-  'review',
 ])
 
 const { chainCtx } = useChainContext({ runId: () => props.runId })
@@ -137,12 +137,17 @@ function memberStateLabel(member) {
   return step > 1 ? `waiting for step ${step - 1}` : 'waiting'
 }
 
+function memberProject(tab) {
+  const project = chainCtx.value.projects.find((p) => p.id === tab.projectId)
+  return project ? withChainReview(project, tab.needsReview) : null
+}
+
 const members = computed(() =>
   (chainCtx.value?.tabs || []).map((tab) => ({
     tab,
     state: memberState(tab),
     label: tab.taxonomyAlias || tab.name || `step ${tab.order + 1}`,
-    project: chainCtx.value.projects.find((p) => p.id === tab.projectId) || null,
+    project: memberProject(tab),
   })),
 )
 
@@ -224,18 +229,6 @@ const agentCount = computed(() =>
   &--current {
     color: $color-brand-yellow;
   }
-}
-
-.cg-review {
-  background: rgba($color-brand-yellow, 0.14);
-  color: $color-brand-yellow;
-  border: 0;
-  border-radius: $border-radius-pill;
-  padding: 2px 10px;
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .cg-reviewed {

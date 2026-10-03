@@ -17,8 +17,8 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.models import Task
 from giljo_mcp.schemas.service_responses import TaskUpdateResult
+from giljo_mcp.services.handover_validation import DOOR_REST
 from giljo_mcp.services.task_service._handover_guards import (
-    require_handover_description_shape_of,
     resolve_create_task_type,
 )
 from giljo_mcp.services.task_type_immutability import (
@@ -90,7 +90,7 @@ class _TaskMutationMixin:
                     actual_effort=actual_effort,
                     validate_product=validate_product,
                 )
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to log task")
@@ -250,7 +250,7 @@ class _TaskMutationMixin:
                 context={"operation": "create_task_for_rest"},
             )
 
-        requested_type = resolve_create_task_type(task_type, description)
+        requested_type = resolve_create_task_type(task_type, description, door=DOOR_REST)
 
         from giljo_mcp.services.taxonomy_service import TaxonomyService
 
@@ -286,14 +286,11 @@ class _TaskMutationMixin:
 
         ws = self._websocket_manager
         if ws:
-            try:
-                await ws.broadcast_to_tenant(
-                    tenant_key=effective_tenant_key,
-                    event_type="task:created",
-                    data={"task_id": task_id, "title": title, "product_id": product_id},
-                )
-            except (RuntimeError, ValueError, OSError) as ws_error:
-                self._logger.warning(f"Failed to broadcast task:created event: {ws_error}")
+            await ws.broadcast_to_tenant(
+                tenant_key=effective_tenant_key,
+                event_type="task:created",
+                data={"task_id": task_id, "title": title, "product_id": product_id},
+            )
 
         return task
 
@@ -349,8 +346,6 @@ class _TaskMutationMixin:
         if "title" in kwargs:
             require_non_blank(kwargs["title"], field="title", operation="update_task", entity="Task", task_id=task_id)
 
-        require_handover_description_shape_of(task, kwargs.get("description"))
-
         if "task_type" in kwargs:
             require_no_task_type_change(
                 current_type=getattr(task.task_type, "abbreviation", None) if task.task_type else None,
@@ -388,20 +383,17 @@ class _TaskMutationMixin:
 
         ws = self._websocket_manager
         if ws and updated_fields:
-            try:
-                await ws.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="task:updated",
-                    data={
-                        "task_id": task_id,
-                        "updated_fields": list(updated_fields),
-                        "hidden": bool(getattr(task, "hidden", False)),
-                        "status": task.status,
-                        "product_id": task.product_id,
-                    },
-                )
-            except (RuntimeError, ValueError, OSError) as ws_error:
-                self._logger.warning(f"Failed to broadcast task:updated event: {ws_error}")
+            await ws.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="task:updated",
+                data={
+                    "task_id": task_id,
+                    "updated_fields": list(updated_fields),
+                    "hidden": bool(getattr(task, "hidden", False)),
+                    "status": task.status,
+                    "product_id": task.product_id,
+                },
+            )
 
         return TaskUpdateResult(task_id=task_id, updated_fields=updated_fields)
 
@@ -409,7 +401,7 @@ class _TaskMutationMixin:
         try:
             async with self._get_session() as session:
                 return await self._delete_task_impl(session, task_id, user_id)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to delete task {task_id}")
@@ -449,7 +441,7 @@ class _TaskMutationMixin:
         try:
             async with self._get_session() as session:
                 return await self._restore_task_impl(session, task_id)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to restore task {task_id}")

@@ -54,7 +54,7 @@
         :title="message._name"
         aria-hidden="true"
       >
-        {{ avatarInitials(message._name) }}
+        {{ getAgentInitials(message._name) }}
       </div>
       <div v-else class="timeline-msg__avatar-spacer" aria-hidden="true" />
 
@@ -258,10 +258,6 @@ const decoratedMessages = computed(() =>
     }
   }),
 )
-
-function avatarInitials(name) {
-  return getAgentInitials(name)
-}
 
 const FALLBACK_HEX = getAgentColor('orchestrator')?.hex
 

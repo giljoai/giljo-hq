@@ -73,8 +73,8 @@ describe('UserGuideView — chain chapter uses canonical vocabulary', () => {
     expect(chainsMd).toContain('Run sequential')
   })
 
-  it('states the 2-to-5 project bound', () => {
-    expect(chainsMd).toContain('2 to 5 projects')
+  it('states the 2-to-10 project bound', () => {
+    expect(chainsMd).toContain('2 to 10 projects')
   })
 })
 

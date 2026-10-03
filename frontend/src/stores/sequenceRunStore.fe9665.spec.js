@@ -30,9 +30,8 @@ describe('handleSequenceUpdated — board-level chain-finished notice (FE-9665)'
     addNotificationMock.mockClear()
   })
 
-  it('raises the Chain finished bell when a run the board knew about is genuinely purged, with no cockpit activeRun open', async () => {
+  it('raises the Chain finished bell when a run the board knew about is genuinely purged', async () => {
     store._testSeedRuns([run('r1', ['p1', 'p2'], 'running')])
-    expect(store.activeRun).toBeNull()
 
     api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
     api.sequenceRuns.get.mockRejectedValueOnce({ response: { status: 404 } })

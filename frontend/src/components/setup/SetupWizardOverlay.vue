@@ -144,7 +144,6 @@
 
                 <SetupStep3Commands
                   v-else-if="currentStep === 2"
-                  :selected-tools="localSelectedTools"
                   :connected-tools="step2ConnectedTools"
                   @can-proceed="step3CanProceed = $event"
                   @step-data="step3Data = $event"

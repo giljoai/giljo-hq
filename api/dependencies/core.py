@@ -30,7 +30,6 @@ async def get_tenant_key(request: Request) -> str:
     from fastapi import HTTPException
 
     from api.app_state import state
-    from giljo_mcp.config_manager import get_config
 
     if hasattr(state, "api_state") and hasattr(state.api_state, "config"):
         setup_mode = getattr(state.api_state.config, "setup_mode", False)
@@ -51,17 +50,8 @@ async def get_tenant_key(request: Request) -> str:
     if tenant_key:
         return tenant_key
 
-    try:
-        mode = get_config().get_nested("installation.mode", "localhost")
-
-        if mode in ("server", "lan", "wan"):
-            raise HTTPException(
-                status_code=401, detail=f"Tenant key required for {mode} mode. Include X-Tenant-Key header."
-            )
-    except HTTPException:
-        raise
-    except (OSError, ValueError, KeyError):
-        pass
+    if os.environ.get("GILJO_MODE", "").strip().lower() == "saas":
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     default_tenant = _get_default_tenant_key()
     if hasattr(state, "db_manager") and state.db_manager:

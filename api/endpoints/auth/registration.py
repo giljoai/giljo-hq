@@ -40,7 +40,7 @@ async def register_user(
 
     This endpoint creates a new user account. Only admins can create new users.
 
-    Rate Limiting (Handover 1009): 3 attempts per minute per IP
+    Rate Limiting: 3 attempts per minute per IP
 
     Args:
         http_request: FastAPI request object
@@ -106,7 +106,7 @@ async def create_first_admin_user(
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Create first administrator account on fresh install (Handover 0034).
+    Create first administrator account on fresh install.
 
     Security:
     - LAN ACCESS ALLOWED: Can be accessed remotely for initial setup

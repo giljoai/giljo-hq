@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -20,11 +19,14 @@ from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
 from giljo_mcp.repositories.mission_repository import MissionRepository
 from giljo_mcp.schemas.responses.orchestration import IMPLEMENTATION_GATE_OPEN
 from giljo_mcp.schemas.service_responses import StagingDirective, build_next_action
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.project_helpers import (
     advance_chain_member_to_implementing,
     complete_chain_run_if_finished,
+    defer_tenant_event,
     heal_chain_member_statuses,
     mark_staging_complete,
+    stamp_launch,
 )
 
 
@@ -151,10 +153,10 @@ async def finalize_conductor_chain(
 def is_staging_phase_orchestrator(job: Any, project: Any) -> bool:
     if job is None or project is None or getattr(job, "job_type", None) != "orchestrator":
         return False
-    if getattr(project, "staging_status", None) not in ("staging", "staged", "staging_complete"):
+    if getattr(project, "staging_status", None) not in ("staging", "staged", STAGING_COMPLETE):
         return False
     launched = getattr(project, "implementation_launched_at", None) is not None
-    return not (launched and project.staging_status == "staging_complete")
+    return not (launched and project.staging_status == STAGING_COMPLETE)
 
 
 async def is_staging_end_orchestrator_call(
@@ -188,7 +190,7 @@ async def is_staging_end_orchestrator_call(
     if (
         project is not None
         and project.implementation_launched_at is not None
-        and project.staging_status == "staging_complete"
+        and project.staging_status == STAGING_COMPLETE
     ):
         return False, project
 
@@ -288,9 +290,7 @@ async def handle_staging_end(
     )
 
     if is_chain_member_suborch:
-        launched_at = datetime.now(UTC)
-        project.implementation_launched_at = launched_at
-        project.updated_at = launched_at
+        launched_at = stamp_launch(project)
         await session.flush()
         await advance_chain_member_to_implementing(
             db_manager=db_manager,
@@ -300,23 +300,18 @@ async def handle_staging_end(
             session=session,
             websocket_manager=websocket_manager,
         )
-        if websocket_manager is not None:
-            try:
-                await websocket_manager.broadcast_to_tenant(
-                    tenant_key=project.tenant_key,
-                    event_type="project:implementation_launched",
-                    data={
-                        "project_id": str(job.project_id),
-                        "product_id": project.product_id,
-                        "implementation_launched_at": launched_at.isoformat(),
-                        "source": "mcp",
-                    },
-                )
-            except Exception as ws_error:  # noqa: BLE001 — WS resilience
-                logger.warning(
-                    "[STAGING_END:BE-9111] implementation_launched WS broadcast failed: %s",
-                    ws_error,
-                )
+        defer_tenant_event(
+            session,
+            websocket_manager,
+            project.tenant_key,
+            "project:implementation_launched",
+            {
+                "project_id": str(job.project_id),
+                "product_id": project.product_id,
+                "implementation_launched_at": launched_at.isoformat(),
+                "source": "mcp",
+            },
+        )
 
     return staging_directive_for(is_chain_member_suborch, is_conductor=is_conductor)
 

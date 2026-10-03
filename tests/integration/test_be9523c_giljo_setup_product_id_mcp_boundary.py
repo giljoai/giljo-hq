@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -69,6 +71,21 @@ async def setup_client(monkeypatch):
     monkeypatch.setattr("giljo_mcp.services.silence_detector.auto_clear_silent", _noop)
     monkeypatch.setattr("giljo_mcp.services.heartbeat.touch_heartbeat", _noop)
 
+    class _NoAck:
+        def __init__(self, session, tenant_key):
+            pass
+
+        async def acknowledge(self, version):
+            return None
+
+    @contextlib.asynccontextmanager
+    async def _session(tenant_key=None):
+        yield object()
+
+    prior_db_manager = state.db_manager
+    state.db_manager = SimpleNamespace(get_session_async=_session)
+    monkeypatch.setattr("giljo_mcp.services.settings_service.TenantSkillsAckService", _NoAck)
+
     def _client():
         return create_connected_server_and_client_session(mcp_sdk_server.mcp)
 
@@ -77,6 +94,7 @@ async def setup_client(monkeypatch):
     finally:
         state.tool_accessor = prior_tool_accessor
         state.tenant_manager = prior_tenant_manager
+        state.db_manager = prior_db_manager
 
 
 async def test_giljo_setup_forwards_product_id_to_bootstrap_setup(setup_client):

@@ -34,10 +34,19 @@ class _RecordingWsManager:
         self.events.append((tenant_key, event))
 
 
-class _ExplodingWsManager:
+def _dead_socket_manager(tenant_key: str):
+    from unittest.mock import AsyncMock, MagicMock
 
-    async def broadcast_event_to_tenant(self, tenant_key, event):
-        raise RuntimeError("ws send failed")
+    from fastapi import WebSocketDisconnect
+
+    from api.websocket import WebSocketManager
+
+    manager = WebSocketManager()
+    socket = MagicMock()
+    socket.send_text = AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+    manager.active_connections["dead-client"] = socket
+    manager.tenant_connections[tenant_key] = {"dead-client"}
+    return manager
 
 
 def _payload(res) -> dict:
@@ -208,12 +217,12 @@ async def test_not_a_participant_rejection_emits_nothing(comm_mcp_client_ws):
 
 
 async def test_emit_is_best_effort_never_fails_the_drain(comm_mcp_client_ws):
-    new_client, _tk, _ws = comm_mcp_client_ws
+    new_client, tk, _ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread_with_beta(new_client)
 
     from api import app_state
 
-    app_state.state.websocket_manager = _ExplodingWsManager()
+    app_state.state.websocket_manager = _dead_socket_manager(tk)
     try:
         async with new_client() as s:
             res = await s.call_tool(

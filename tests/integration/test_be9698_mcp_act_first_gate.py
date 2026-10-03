@@ -50,11 +50,13 @@ async def _seed_user(db_manager, tenant_key: str, *, must_change_password: bool)
 class TestMiddlewareStampsMustChangePassword:
 
     async def test_jwt_path_stamps_the_flag(self, db_manager, monkeypatch):
+        from api import app_state
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.auth.jwt_manager import JWTManager
         from giljo_mcp.tenant import TenantManager
 
         monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+        monkeypatch.setattr(app_state.state, "db_manager", db_manager)
         tenant_key = TenantManager.generate_tenant_key()
         user_id = await _seed_user(db_manager, tenant_key, must_change_password=True)
         token = JWTManager.create_access_token(

@@ -280,17 +280,6 @@ async function copyThreadId() {
     font-size: 0.6875rem; // 11 — the floor
     color: var(--text-muted);
     white-space: nowrap;
-  }
-
-  &__id {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    cursor: pointer;
-    min-width: 0;
-    .v-icon { color: $color-brand-yellow; flex: none; }
-
     align-self: flex-start;
     padding: 3px 8px;
     border-radius: $border-radius-default; // 8
@@ -298,8 +287,5 @@ async function copyThreadId() {
     overflow-x: auto;
     max-width: 100%;
   }
-
-  &__id-cmd { color: var(--text-muted); }
-  &__id-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 </style>

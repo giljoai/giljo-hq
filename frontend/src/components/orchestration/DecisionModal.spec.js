@@ -54,6 +54,11 @@ describe('DecisionModal', () => {
     vi.clearAllMocks()
   })
 
+  it('dialog title reads "Needs decision"', () => {
+    const wrapper = mountModal()
+    expect(wrapper.find('.dlg-title').text()).toBe('Needs decision')
+  })
+
   it('renders ApprovalCard when an approval is in the store', () => {
     const store = useApprovalsStore()
     store.upsertApproval(approval)

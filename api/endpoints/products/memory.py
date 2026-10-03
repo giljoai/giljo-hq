@@ -31,7 +31,7 @@ async def get_memory_entries(
     search: str | None = Query(
         None,
         max_length=200,
-        description="Optional full-text search over summary, project, outcomes, decisions, and tags (BE-6082)",
+        description="Optional full-text search over summary, project, outcomes, decisions, and tags",
     ),
     current_user: User = Depends(get_current_active_user),
     memory_service: ProductMemoryService = Depends(get_product_memory_service),
@@ -46,7 +46,7 @@ async def get_memory_entries(
         project_id: Optional UUID to filter entries by specific project
         limit: Maximum number of entries to return (default: 10, max: 100)
         search: Optional full-text search term (max 200 chars). When present,
-            entries are filtered + relevance-ranked server-side (BE-6082).
+            entries are filtered + relevance-ranked server-side.
 
     Returns:
         MemoryEntriesResponse with entries array and counts

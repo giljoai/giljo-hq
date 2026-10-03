@@ -614,18 +614,14 @@ class UserService:
             self._logger.debug(f"No WebSocket manager available for event: {event_type}")
             return
 
-        try:
-            event_data_with_timestamp = {
-                **data,
-                "tenant_key": self.tenant_key,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
+        event_data_with_timestamp = {
+            **data,
+            "tenant_key": self.tenant_key,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=self.tenant_key, event_type=event_type, data=event_data_with_timestamp
-            )
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=self.tenant_key, event_type=event_type, data=event_data_with_timestamp
+        )
 
-            self._logger.debug(f"WebSocket event emitted: {event_type} for tenant {self.tenant_key}")
-
-        except (RuntimeError, ValueError) as e:
-            self._logger.warning(f"Failed to emit WebSocket event {event_type}: {e}", exc_info=True)
+        self._logger.debug(f"WebSocket event emitted: {event_type} for tenant {self.tenant_key}")

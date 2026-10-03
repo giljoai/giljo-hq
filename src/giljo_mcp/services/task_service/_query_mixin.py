@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from giljo_mcp.exceptions import (
-    AuthorizationError,
     BaseGiljoError,
     ResourceNotFoundError,
     ValidationError,
@@ -56,7 +55,7 @@ class _TaskQueryMixin:
                     offset,
                 )
 
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to list tasks")
@@ -121,7 +120,7 @@ class _TaskQueryMixin:
         try:
             async with self._get_session() as session:
                 return await self._get_task_impl(session, task_id)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to get task {task_id}")
@@ -153,7 +152,7 @@ class _TaskQueryMixin:
                 )
             async with self._get_session(tenant_key) as session:
                 return await self._repo.list_deleted_tasks(session, tenant_key, product_id)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
+        except BaseGiljoError:
             raise
         except Exception as e:
             self._logger.exception("Failed to list deleted tasks")

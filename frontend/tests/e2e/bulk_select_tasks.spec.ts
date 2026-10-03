@@ -21,7 +21,7 @@ async function createTask(page: Page, title: string) {
   const dialog = page.locator('.v-dialog').filter({ has: page.locator('[data-test="edit-task-title"]') })
   await expect(dialog).toBeVisible()
   await dialog.locator('[data-test="edit-task-title"] input').fill(title)
-  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.locator('.v-dialog')).not.toBeVisible()
 }
 

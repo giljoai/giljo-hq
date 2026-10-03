@@ -789,16 +789,16 @@ After completing a coordination loop with no actionable work remaining:
 
 **If waiting for user to start agents (multi-terminal):**
   → `set_agent_status(job_id="JID-golden", status="idle", reason="Monitoring — waiting for agents to start")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens
+  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on
 
 **If you want periodic auto-check-in:**
   → Ask the user: "Would you like me to periodically check on agents? I can sleep and re-check every N minutes. Note: this increases token consumption."
   → If yes: `set_agent_status(job_id="JID-golden", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`
   → Then sleep for the specified interval, wake, run the coordination loop, repeat
-  → Any MCP call after waking auto-transitions you back to "working"
+  → report_progress after waking transitions you back to "working"
 
 **Blocked vs Idle vs Sleeping:**
-  - `blocked` = I need human help to continue (shows "Needs Input")
+  - `blocked` = I need human help to continue (shows "Blocked")
   - `idle` = I'm done dispatching, nothing to do right now (shows "Monitoring")
   - `sleeping` = I'll check back in N minutes automatically (shows "Sleeping")
 
@@ -832,7 +832,7 @@ re-verify before closeout.
 2. `complete_job(job_id="JID-golden", result={"summary": "...", "artifacts": [...]})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "needs input" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
 4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
 5. Tell user: "Project complete. Use `/giljo` to create follow-ups or look up existing project/task state."
@@ -1332,16 +1332,16 @@ After completing a coordination loop with no actionable work remaining:
 
 **If waiting for user to start agents (multi-terminal):**
   → `set_agent_status(job_id="JID-golden", status="idle", reason="Monitoring — waiting for agents to start")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens
+  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on
 
 **If you want periodic auto-check-in:**
   → Ask the user: "Would you like me to periodically check on agents? I can sleep and re-check every N minutes. Note: this increases token consumption."
   → If yes: `set_agent_status(job_id="JID-golden", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`
   → Then sleep for the specified interval, wake, run the coordination loop, repeat
-  → Any MCP call after waking auto-transitions you back to "working"
+  → report_progress after waking transitions you back to "working"
 
 **Blocked vs Idle vs Sleeping:**
-  - `blocked` = I need human help to continue (shows "Needs Input")
+  - `blocked` = I need human help to continue (shows "Blocked")
   - `idle` = I'm done dispatching, nothing to do right now (shows "Monitoring")
   - `sleeping` = I'll check back in N minutes automatically (shows "Sleeping")
 
@@ -1375,7 +1375,7 @@ re-verify before closeout.
 2. `complete_job(job_id="JID-golden", result={"summary": "...", "artifacts": [...]})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "needs input" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
 4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
 5. Tell user: "Project complete. Use `/giljo` to create follow-ups or look up existing project/task state."

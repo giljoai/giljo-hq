@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hexToRgba, getAgentBadgeStyle } from '@/utils/colorUtils'
+import { hexToRgba, tintedStyle, getAgentBadgeStyle } from '@/utils/colorUtils'
 
 describe('colorUtils', () => {
   describe('hexToRgba', () => {
@@ -9,6 +9,12 @@ describe('colorUtils', () => {
 
     it('handles full opacity', () => {
       expect(hexToRgba('#FF0000', 1)).toBe('rgba(255, 0, 0, 1)')
+    })
+  })
+
+  describe('tintedStyle', () => {
+    it('tints the background at 15% and keeps the colour as text', () => {
+      expect(tintedStyle('#D4B08A')).toEqual({ backgroundColor: 'rgba(212, 176, 138, 0.15)', color: '#D4B08A' })
     })
   })
 

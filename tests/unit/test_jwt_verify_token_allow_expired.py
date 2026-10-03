@@ -158,17 +158,19 @@ class TestVerifyTokenAllowExpired:
         result = JWTManager.verify_token_allow_expired("")
         assert result is None
 
-    def test_missing_secret_key_returns_none(self, sample_user_id, monkeypatch):
+    def test_missing_secret_key_raises(self, sample_user_id, monkeypatch):
         from giljo_mcp.auth.jwt_manager import JWTManager
 
         monkeypatch.delenv("JWT_SECRET", raising=False)
         monkeypatch.delenv("GILJO_MCP_SECRET_KEY", raising=False)
         monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.setattr(
+            JWTManager, "_get_secret_key", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no secret")))
+        )
 
         token = _make_token("any-key", sample_user_id, expire_delta=timedelta(hours=1))
-        result = JWTManager.verify_token_allow_expired(token)
-
-        assert result is None
+        with pytest.raises(RuntimeError):
+            JWTManager.verify_token_allow_expired(token)
 
     def test_custom_grace_hours_override(self, sample_user_id, secret_key):
         from giljo_mcp.auth.jwt_manager import JWTManager

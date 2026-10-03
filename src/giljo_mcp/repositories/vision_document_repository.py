@@ -8,7 +8,7 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
@@ -166,11 +166,7 @@ class VisionDocumentRepository:
         if not doc:
             raise ResourceNotFoundError("Document not found")
 
-        stmt = select(MCPContextIndex).where(
-            MCPContextIndex.vision_document_id == document_id, MCPContextIndex.tenant_key == tenant_key
-        )
-        result = await session.execute(stmt)
-        chunk_count = len(result.scalars().all())
+        chunk_count = await self._count_chunks(session, tenant_key, document_id)
 
         document_name = doc.document_name
 
@@ -184,16 +180,20 @@ class VisionDocumentRepository:
             "chunks_deleted": chunk_count,
         }
 
+    @staticmethod
+    async def _count_chunks(session: AsyncSession, tenant_key: str, document_id: str) -> int:
+        return await session.scalar(
+            select(func.count())
+            .select_from(MCPContextIndex)
+            .where(MCPContextIndex.vision_document_id == document_id, MCPContextIndex.tenant_key == tenant_key)
+        )
+
     async def soft_delete(self, session: AsyncSession, tenant_key: str, document_id: str) -> dict[str, Any]:
         doc = await self.get_by_id(session, tenant_key, document_id)
         if not doc:
             raise ResourceNotFoundError("Document not found")
 
-        stmt = select(MCPContextIndex).where(
-            MCPContextIndex.vision_document_id == document_id, MCPContextIndex.tenant_key == tenant_key
-        )
-        result = await session.execute(stmt)
-        chunk_count = len(result.scalars().all())
+        chunk_count = await self._count_chunks(session, tenant_key, document_id)
 
         document_name = doc.document_name
         doc.deleted_at = datetime.now(UTC)

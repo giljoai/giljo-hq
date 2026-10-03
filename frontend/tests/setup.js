@@ -482,8 +482,6 @@ vi.mock('@/services/api', () => {
     users: {
       update: vi.fn(() => Promise.resolve({ data: {} })),
       getFieldToggleConfig: vi.fn(() => Promise.resolve({ data: {} })),
-      updateFieldToggleConfig: vi.fn(() => Promise.resolve({ data: { success: true } })),
-      resetFieldToggleConfig: vi.fn(() => Promise.resolve({ data: { success: true } })),
     },
     // Threads — Agent Message Hub (FE-6054e). BE-9012d: retires the bus's
     // `messages` namespace (`/api/v1/messages/*`) entirely; any UI code
@@ -568,10 +566,6 @@ vi.mock('@/services/api', () => {
       upload: vi.fn(() => Promise.resolve({ data: {} })),
       delete: vi.fn(() => Promise.resolve({ data: { success: true } })),
     },
-    serena: {
-      getStatus: vi.fn(() => Promise.resolve({ data: {} })),
-      toggle: vi.fn(() => Promise.resolve({ data: { success: true } })),
-    },
     git: {
       getSettings: vi.fn(() => Promise.resolve({ data: {} })),
       toggle: vi.fn(() => Promise.resolve({ data: { success: true } })),
@@ -585,7 +579,6 @@ vi.mock('@/services/api', () => {
       resetOrchestratorPrompt: vi.fn(() => Promise.resolve({ data: { success: true } })),
     },
     stats: {
-      getSystem: vi.fn(() => Promise.resolve({ data: {} })),
       getCallCounts: vi.fn(() => Promise.resolve({ data: {} })),
     },
     approvals: {

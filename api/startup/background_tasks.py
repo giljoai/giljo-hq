@@ -103,6 +103,9 @@ async def _emit_pending_migrations_banner(
     if pending_info is None:
         await service.resolve_by_dedupe_key(tenant_key, dedupe_key)
         return
+    if pending_info.get("unknown"):
+        logger.warning("migration status unknown; leaving the pending-migrations banner as it is")
+        return
     count = pending_info["pending"]
     await service.upsert_by_dedupe_key(
         tenant_key=tenant_key,

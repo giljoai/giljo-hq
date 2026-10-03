@@ -167,10 +167,15 @@ class TestR2LegacyAudlessJwtRejected:
     @pytest.mark.asyncio
     async def test_audless_jwt_returns_401_with_www_authenticate(
         self,
+        db_manager,
         jwt_env,
+        monkeypatch,
     ):
+        from api.app_state import state
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
+
+        monkeypatch.setattr(state, "db_manager", db_manager)
 
         tenant_key = TenantManager.generate_tenant_key()
         token = _make_jwt(aud=None, tenant_key=tenant_key)
@@ -245,9 +250,12 @@ class TestR3AudBoundJwtAccepted:
 class TestR4WrongAudRejected:
 
     @pytest.mark.asyncio
-    async def test_wrong_aud_returns_401_with_www_authenticate(self, jwt_env):
+    async def test_wrong_aud_returns_401_with_www_authenticate(self, db_manager, jwt_env, monkeypatch):
+        from api.app_state import state
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
+
+        monkeypatch.setattr(state, "db_manager", db_manager)
 
         tenant_key = TenantManager.generate_tenant_key()
         token = _make_jwt(aud="https://attacker.example/mcp", tenant_key=tenant_key)

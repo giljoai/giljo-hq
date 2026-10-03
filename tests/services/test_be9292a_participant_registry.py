@@ -19,6 +19,7 @@ from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.models.tasks import Message, MessageRecipient
+from giljo_mcp.services.comm_baton_targets import HubTargetRefusedError
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
@@ -26,6 +27,12 @@ from giljo_mcp.tenant import TenantManager
 
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _refused(call) -> dict:
+    with pytest.raises(HubTargetRefusedError) as caught:
+        await call
+    return caught.value.as_refusal()
 
 
 def _service(db_manager, db_session) -> CommThreadService:
@@ -244,7 +251,7 @@ async def test_undeliverable_baton_is_refused_with_the_ids_that_would_work(db_ma
     tid = thread["thread_id"]
     await svc.join_thread(thread_id=tid, participant_id="lane-a", tenant_key=tenant)
 
-    refused = await svc.pass_baton(thread_id=tid, to="Some Display Label", tenant_key=tenant)
+    refused = await _refused(svc.pass_baton(thread_id=tid, to="Some Display Label", tenant_key=tenant))
 
     assert refused["success"] is False
     assert refused["error"] == "BATON_TARGET_NOT_A_PARTICIPANT"
@@ -269,14 +276,16 @@ async def test_the_auto_pass_path_is_validated_like_any_other_hand_off(db_manage
         thread_id=tid, participant_id=conductor_id, display_name="Ledger Zero Conductor", tenant_key=tenant
     )
 
-    refused = await svc.post_to_thread(
-        thread_id=tid,
-        content="DONE - baton back to you",
-        from_agent="sub-orch",
-        to_participant="Ledger Zero Conductor",
-        requires_action=True,
-        pass_baton_to="Ledger Zero Conductor",
-        tenant_key=tenant,
+    refused = await _refused(
+        svc.post_to_thread(
+            thread_id=tid,
+            content="DONE - baton back to you",
+            from_agent="sub-orch",
+            to_participant="Ledger Zero Conductor",
+            requires_action=True,
+            pass_baton_to="Ledger Zero Conductor",
+            tenant_key=tenant,
+        )
     )
 
     assert refused["success"] is False
@@ -304,7 +313,7 @@ async def test_a_label_already_minted_as_a_participant_is_still_refused(db_manag
     await svc.join_thread(thread_id=tid, participant_id="Ledger Zero Conductor", tenant_key=tenant)
     assert await _participant_row(db_session, tenant, tid, "Ledger Zero Conductor") is not None
 
-    refused = await svc.pass_baton(thread_id=tid, to="Ledger Zero Conductor", tenant_key=tenant)
+    refused = await _refused(svc.pass_baton(thread_id=tid, to="Ledger Zero Conductor", tenant_key=tenant))
 
     assert refused["success"] is False, "a registered phantom laundered the hand-off past the validator"
     assert refused["error"] == "TARGET_IS_A_DISPLAY_NAME"
@@ -347,7 +356,7 @@ async def test_a_string_that_is_both_an_id_and_a_display_name_is_refused_honestl
     await svc.join_thread(thread_id=tid, participant_id="conductor", display_name="Relay", tenant_key=tenant)
     await svc.join_thread(thread_id=tid, participant_id="Relay", display_name="Relay Coordinator", tenant_key=tenant)
 
-    refused = await svc.pass_baton(thread_id=tid, to="Relay", tenant_key=tenant)
+    refused = await _refused(svc.pass_baton(thread_id=tid, to="Relay", tenant_key=tenant))
 
     assert refused["success"] is False
     assert refused["error"] == "TARGET_IS_A_DISPLAY_NAME"
@@ -366,7 +375,7 @@ async def test_the_remedy_the_ambiguous_refusal_names_actually_clears_the_shadow
     await svc.join_thread(thread_id=tid, participant_id="lane-a", display_name="Relay", tenant_key=tenant)
     await svc.join_thread(thread_id=tid, participant_id="lane-a-replacement", display_name="lane-a", tenant_key=tenant)
 
-    refused = await svc.pass_baton(thread_id=tid, to="lane-a", tenant_key=tenant)
+    refused = await _refused(svc.pass_baton(thread_id=tid, to="lane-a", tenant_key=tenant))
     assert refused["success"] is False
     assert refused["registered_id"] == "lane-a-replacement"
 

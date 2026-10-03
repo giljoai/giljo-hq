@@ -12,7 +12,7 @@ import pytest
 import pytest_asyncio
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, Project, Task
+from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.platform_registry import MODE_MULTI_TERMINAL, MODE_SUBAGENT
 from giljo_mcp.repositories.product_statistics_repository import ProductStatisticsRepository
@@ -38,147 +38,6 @@ def _project(tenant_key, status, *, series, product_id, **extra):
         series_number=series,
         **extra,
     )
-
-
-@pytest_asyncio.fixture
-async def seeded_stats(db_session, test_tenant_key):
-    tenant_a = test_tenant_key
-    tenant_b = f"tk_b_{uuid4().hex[:12]}"
-    series = count(1)
-
-    with tenant_session_context(db_session, tenant_a):
-        product_a = Product(tenant_key=tenant_a, name="Product A", description="d", is_active=True)
-        db_session.add(product_a)
-        await db_session.flush()
-
-        active_products = [
-            Product(tenant_key=tenant_a, name=f"Product A{i}", description="d", is_active=False) for i in range(3)
-        ]
-        db_session.add_all(active_products)
-        await db_session.flush()
-
-        projects = [
-            *[_project(tenant_a, "active", series=next(series), product_id=ap.id) for ap in active_products],
-            _project(
-                tenant_a,
-                "active",
-                series=next(series),
-                staging_status="staging_complete",
-                product_id=product_a.id,
-            ),
-            *[_project(tenant_a, "completed", series=next(series), product_id=product_a.id) for _ in range(2)],
-            _project(tenant_a, "cancelled", series=next(series), product_id=product_a.id),
-        ]
-        db_session.add_all(projects)
-        await db_session.flush()
-
-        msg_project = projects[0]
-        for status in ("pending", "pending", "acknowledged", "completed", "failed"):
-            db_session.add(Message(tenant_key=tenant_a, project_id=msg_project.id, content="hi", status=status))
-
-        job = AgentJob(
-            job_id=str(uuid4()),
-            tenant_key=tenant_a,
-            project_id=msg_project.id,
-            mission="seeded",
-            job_type="implementer",
-            status="active",
-            created_at=datetime.now(UTC),
-        )
-        db_session.add(job)
-        await db_session.flush()
-        for status in ("working", "waiting", "complete"):
-            db_session.add(
-                AgentExecution(
-                    job_id=job.job_id,
-                    agent_id=str(uuid4()),
-                    tenant_key=tenant_a,
-                    agent_display_name="implementer",
-                    agent_name=f"implementer-{status}",
-                    status=status,
-                    completed_at=datetime.now(UTC) if status == "complete" else None,
-                )
-            )
-
-        db_session.add_all(
-            [
-                Task(tenant_key=tenant_a, product_id=product_a.id, title="t1", status="completed"),
-                Task(tenant_key=tenant_a, product_id=product_a.id, title="t2", status="pending"),
-            ]
-        )
-        await db_session.flush()
-
-    with tenant_session_context(db_session, tenant_b):
-        product_b = Product(tenant_key=tenant_b, name="Product B", description="d", is_active=True)
-        db_session.add(product_b)
-        await db_session.flush()
-        product_b2 = Product(tenant_key=tenant_b, name="Product B2", description="d", is_active=False)
-        db_session.add(product_b2)
-        await db_session.flush()
-        db_session.add_all(
-            [_project(tenant_b, "active", series=next(series), product_id=pid) for pid in (product_b.id, product_b2.id)]
-        )
-        await db_session.flush()
-
-    return {"tenant_a": tenant_a, "tenant_b": tenant_b}
-
-
-@pytest.mark.asyncio
-async def test_get_system_stats_returns_expected_keys(stats_service, test_tenant_key):
-    result = await stats_service.get_system_stats(test_tenant_key)
-    expected_keys = {
-        "total_projects",
-        "active_projects",
-        "completed_projects",
-        "total_agents",
-        "active_agents",
-        "total_messages",
-        "pending_messages",
-        "total_tasks",
-        "completed_tasks",
-        "total_agents_spawned",
-        "total_jobs_completed",
-        "projects_staged",
-        "projects_cancelled",
-    }
-    assert set(result.keys()) == expected_keys
-
-
-@pytest.mark.asyncio
-async def test_get_system_stats_counts_seeded_data(stats_service, seeded_stats):
-    result = await stats_service.get_system_stats(seeded_stats["tenant_a"])
-
-    assert result["total_projects"] == 7
-    assert result["active_projects"] == 4
-    assert result["completed_projects"] == 2
-    assert result["projects_cancelled"] == 1
-    assert result["projects_staged"] == 1
-    assert result["total_messages"] == 5
-    assert result["pending_messages"] == 2
-    assert result["total_agents"] == 3
-    assert result["active_agents"] == 2
-    assert result["total_jobs_completed"] == 1
-    assert result["total_tasks"] == 2
-    assert result["completed_tasks"] == 1
-
-
-@pytest.mark.asyncio
-async def test_get_system_stats_isolates_tenants(stats_service, seeded_stats):
-    tenant_a = await stats_service.get_system_stats(seeded_stats["tenant_a"])
-    tenant_b = await stats_service.get_system_stats(seeded_stats["tenant_b"])
-
-    assert tenant_a["total_projects"] == 7
-    assert tenant_b["total_projects"] == 2
-    assert tenant_b["total_messages"] == 0
-    assert tenant_b["total_agents"] == 0
-
-
-@pytest.mark.asyncio
-async def test_get_system_stats_unknown_tenant_returns_zeros(stats_service):
-    result = await stats_service.get_system_stats("nonexistent_tenant_key")
-    assert result["total_projects"] == 0
-    assert result["total_agents"] == 0
-    assert result["total_messages"] == 0
 
 
 @pytest.mark.asyncio
@@ -320,24 +179,6 @@ async def test_agent_role_distribution_ticker_and_folding(db_session, test_tenan
 
     ticker = sum(seg["count"] for seg in dist)
     assert ticker == 6
-
-
-@pytest.mark.asyncio
-async def test_get_system_stats_uses_single_session(stats_service, monkeypatch):
-    real_get_session = stats_service._get_session
-    calls = 0
-
-    def _counting_get_session(tenant_key=None):
-        nonlocal calls
-        calls += 1
-        return real_get_session(tenant_key)
-
-    monkeypatch.setattr(stats_service, "_get_session", _counting_get_session)
-
-    result = await stats_service.get_system_stats("any_tenant_key")
-
-    assert calls == 1, f"expected one shared session for all counts, got {calls}"
-    assert "total_projects" in result
 
 
 
@@ -584,25 +425,6 @@ async def trashed_projects_stats(db_session, test_tenant_key):
 
 
 @pytest.mark.asyncio
-async def test_system_stats_total_projects_excludes_trashed(stats_service, trashed_projects_stats):
-    result = await stats_service.get_system_stats(trashed_projects_stats)
-
-    assert result["total_projects"] == 3, (
-        f"total_projects is counting soft-deleted projects (3 live, 5 trashed), got={result['total_projects']}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_system_stats_projects_staged_excludes_trashed(stats_service, trashed_projects_stats):
-    result = await stats_service.get_system_stats(trashed_projects_stats)
-
-    assert result["projects_staged"] == 1, (
-        "projects_staged is counting soft-deleted projects; a trashed project keeps its "
-        f"staging_status, got={result['projects_staged']}"
-    )
-
-
-@pytest.mark.asyncio
 async def test_execution_mode_distribution_excludes_trashed(stats_service, trashed_projects_stats):
     stats = await stats_service.get_dashboard_stats(trashed_projects_stats)
 
@@ -612,24 +434,6 @@ async def test_execution_mode_distribution_excludes_trashed(stats_service, trash
     assert sum(stats["project_status_dist"].values()) == 3, (
         "guard on the comparison itself: the status distribution must still see exactly the 3 live "
         f"projects, got={stats['project_status_dist']}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_live_projects_are_still_counted(stats_service, trashed_projects_stats):
-    result = await stats_service.get_system_stats(trashed_projects_stats)
-
-    assert result["active_projects"] == 1, f"the live active project must still be counted, got={result}"
-    assert result["completed_projects"] == 1, f"the live completed project must still be counted, got={result}"
-
-
-@pytest.mark.asyncio
-async def test_status_counts_exclude_trashed_projects(stats_service, trashed_projects_stats):
-    result = await stats_service.get_system_stats(trashed_projects_stats)
-
-    assert result["projects_cancelled"] == 1, (
-        "count_projects_by_status is counting soft-deleted projects; only the 1 live "
-        f"cancelled project should count, got={result['projects_cancelled']}"
     )
 
 

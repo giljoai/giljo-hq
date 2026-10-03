@@ -25,31 +25,16 @@
             <v-icon start size="small">mdi-cog</v-icon>
             Product Setup
           </v-btn>
-          <v-btn value="info" data-testid="product-form-tab-info" :disabled="analysisInProgress || isTabLocked('info')">
-            <v-icon start size="small">mdi-information-outline</v-icon>
-            Product Info
-            <v-tooltip v-if="isTabLocked('info')" activator="parent" location="bottom">
-              Run analysis to unlock
-            </v-tooltip>
-          </v-btn>
-          <v-btn value="tech" data-testid="product-form-tab-tech" :disabled="analysisInProgress || isTabLocked('tech')">
-            <v-icon start size="small">mdi-code-braces</v-icon>
-            Tech Stack
-            <v-tooltip v-if="isTabLocked('tech')" activator="parent" location="bottom">
-              Run analysis to unlock
-            </v-tooltip>
-          </v-btn>
-          <v-btn value="arch" data-testid="product-form-tab-arch" :disabled="analysisInProgress || isTabLocked('arch')">
-            <v-icon start size="small">mdi-sitemap</v-icon>
-            Architecture
-            <v-tooltip v-if="isTabLocked('arch')" activator="parent" location="bottom">
-              Run analysis to unlock
-            </v-tooltip>
-          </v-btn>
-          <v-btn value="features" data-testid="product-form-tab-features" :disabled="analysisInProgress || isTabLocked('features')">
-            <v-icon start size="small">mdi-test-tube</v-icon>
-            Testing
-            <v-tooltip v-if="isTabLocked('features')" activator="parent" location="bottom">
+          <v-btn
+            v-for="tab in LOCKABLE_TABS"
+            :key="tab.value"
+            :value="tab.value"
+            :data-testid="`product-form-tab-${tab.value}`"
+            :disabled="analysisInProgress || isTabLocked(tab.value)"
+          >
+            <v-icon start size="small">{{ tab.icon }}</v-icon>
+            {{ tab.label }}
+            <v-tooltip v-if="isTabLocked(tab.value)" activator="parent" location="bottom">
               Run analysis to unlock
             </v-tooltip>
           </v-btn>
@@ -284,9 +269,14 @@ const newProductUnlocked = computed(() => {
 
 const gateActive = computed(() => !props.isEdit && !newProductUnlocked.value)
 
-const TAB_LOCKABLE_VALUES = ['info', 'tech', 'arch', 'features']
+const LOCKABLE_TABS = [
+  { value: 'info', icon: 'mdi-information-outline', label: 'Product Info' },
+  { value: 'tech', icon: 'mdi-code-braces', label: 'Tech Stack' },
+  { value: 'arch', icon: 'mdi-sitemap', label: 'Architecture' },
+  { value: 'features', icon: 'mdi-test-tube', label: 'Testing' },
+]
 function isTabLocked(tabValue) {
-  return gateActive.value && TAB_LOCKABLE_VALUES.includes(tabValue)
+  return gateActive.value && LOCKABLE_TABS.some((t) => t.value === tabValue)
 }
 
 const {
@@ -411,7 +401,7 @@ async function resolveCtxProjectTypeId() {
 function buildBootstrapTemplateVars(docs) {
   const trim = (s) => (s ? String(s).slice(0, 200) : '')
   const truncated = (docs || []).slice(0, 50).map((d) => ({
-    document_name: trim(d?.filename || d?.document_name || ''),
+    document_name: trim(d?.document_name || ''),
     document_type: trim(d?.document_type || d?.mime_type || ''),
   }))
   return { new_documents: truncated }
@@ -587,11 +577,6 @@ function onPrimaryClick() {
 }
 
 function onFilesAttached(payload) {
-  if (Array.isArray(payload)) {
-    if (!payload.length) return
-    emit('upload-vision-files', { productName: productForm.value.name, files: [...payload] })
-    return
-  }
   if (!payload?.files || payload.files.length === 0) return
   emit('upload-vision-files', payload)
 }

@@ -17,6 +17,7 @@ from giljo_mcp.models.projects import Project
 from tests.integration.test_be6081_mcp_boundary_contract import (
     _enable_git_integration,
     _parse_content_dict,
+    _seed_orchestrator_job,
     _seed_product_and_project,
     memory_tool_client,  # noqa: F401 -- pytest fixture
 )
@@ -42,6 +43,12 @@ def _closeout_args(project_id: str, **extra) -> dict:
         **extra,
         "summary": "BE-9653 closeout boundary test.",
     }
+
+
+async def _author_args(tool: str, session, tenant_key: str, project_id: str) -> dict:
+    if tool != "write_memory_entry":
+        return {}
+    return {"author_job_id": await _seed_orchestrator_job(session, tenant_key, project_id)}
 
 
 async def _seed_uuid_project(session, tenant_key: str):
@@ -95,7 +102,8 @@ async def test_no_commits_and_no_declaration_is_refused_naming_both_options(memo
     await _enable_git_integration(session, tenant_key)
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("write_memory_entry", _closeout_args(project.id))
+        author = await _seed_orchestrator_job(session, tenant_key, project.id)
+        result = await mcp_session.call_tool("write_memory_entry", _closeout_args(project.id, author_job_id=author))
 
     assert not result.is_error, "the refusal is agent-actionable content, not isError"
     body = _parse_content_dict(result)
@@ -105,7 +113,7 @@ async def test_no_commits_and_no_declaration_is_refused_naming_both_options(memo
     assert "git_commits" in text and "no_code_changes" in text, f"the refusal must name both ways through; got {body!r}"
 
 
-async def test_write_project_closeout_without_either_still_closes_and_points_at_the_declaration(
+async def test_write_project_closeout_without_either_is_refused_like_the_other_door(
     memory_tool_client,  # noqa: F811
 ):
     client, tenant_key, session = memory_tool_client
@@ -116,8 +124,9 @@ async def test_write_project_closeout_without_either_still_closes_and_points_at_
         result = await mcp_session.call_tool("write_project_closeout", _closeout_args(project.id))
 
     body = _parse_content_dict(result)
-    assert body.get("success") is not False, body
-    assert "no_code_changes" in body.get("git_warning", ""), body
+    assert body.get("success") is False, body
+    assert body.get("error") == "GIT_COMMITS_REQUIRED", body
+    assert "no_code_changes" in body.get("message", ""), body
 
 
 @pytest.mark.parametrize("tool", ["write_project_closeout", "write_memory_entry"])
@@ -127,7 +136,8 @@ async def test_no_code_changes_declaration_is_accepted_and_recorded(memory_tool_
     await _enable_git_integration(session, tenant_key)
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool(tool, _closeout_args(project.id, no_code_changes=_REASON))
+        author = await _author_args(tool, session, tenant_key, project.id)
+        result = await mcp_session.call_tool(tool, _closeout_args(project.id, no_code_changes=_REASON, **author))
 
     assert not result.is_error, result
     body = _parse_content_dict(result)

@@ -106,7 +106,7 @@ async def get_setup_security_status(db: AsyncSession = Depends(get_db_session)):
             "requires_admin_creation": signal["requires_admin_creation"],
             "show_public_landing": signal["show_public_landing"],
             "route_signal": signal["route_signal"],
-            "total_users_count": total_users_count,
+            "total_users_count": min(total_users_count, 1) if GILJO_MODE == "saas" else total_users_count,
             "mode": GILJO_MODE,
             "sentryDsn": _resolve_sentry_dsn(GILJO_MODE),
             "environment": _resolve_environment(GILJO_MODE),

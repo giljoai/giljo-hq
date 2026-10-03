@@ -12,16 +12,10 @@ from sqlalchemy.orm import joinedload
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models.products import Product
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 logger = logging.getLogger(__name__)
-
-
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data)
-    return len(text) // 4
 
 
 async def get_testing(product_id: str, tenant_key: str, db_manager: DatabaseManager | None = None) -> dict[str, Any]:
@@ -54,7 +48,7 @@ async def get_testing(product_id: str, tenant_key: str, db_manager: DatabaseMana
         data = {
             "quality_standards": (tc.quality_standards if tc else "") or "",
             "testing_strategy": (tc.test_strategy if tc else "") or "",
-            "coverage_target": (tc.coverage_target if tc else 80) or 80,
+            "coverage_target": tc.coverage_target if tc and tc.coverage_target is not None else 80,
             "testing_frameworks": (tc.testing_frameworks if tc else "") or "",
         }
 

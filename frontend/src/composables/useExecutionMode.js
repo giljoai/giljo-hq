@@ -51,7 +51,6 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
       showToast({
         message: _modeLabels[newValue] || 'Execution mode updated',
         type: 'info',
-        timeout: 3000,
       })
     } catch (error) {
       executionPlatform.value = previousValue
@@ -60,7 +59,6 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
       showToast({
         message: GENERIC_EXECUTION_MODE_FAILURE,
         type: 'error',
-        timeout: 3000,
       })
       notifyFailure(notificationStore, {
         operation: 'project.executionMode',

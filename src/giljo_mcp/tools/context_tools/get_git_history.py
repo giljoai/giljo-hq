@@ -14,16 +14,10 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import Product
 from giljo_mcp.services.product_memory_service import ProductMemoryService
 from giljo_mcp.services.settings_service import SettingsService
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 logger = logging.getLogger(__name__)
-
-
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data) if not isinstance(data, str) else data
-    return len(text) // 4
 
 
 _DEPTH_TOKENS = {"summary": 10}
@@ -40,8 +34,7 @@ def parse_git_history_depth(depth: Any) -> int | None:
         token = _DEPTH_TOKENS.get(depth.strip().lower())
         if token is not None:
             return token
-    logger.warning("git_history_depth_unrecognized depth=%r fallback=default", depth)
-    return None
+    raise ValueError(f"git_history takes a commit count or one of {sorted(_DEPTH_TOKENS)}, got {depth!r}")
 
 
 async def get_git_history(

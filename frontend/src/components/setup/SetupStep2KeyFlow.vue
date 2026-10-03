@@ -60,36 +60,7 @@
 
     <div v-if="hasKey" class="key-flow-config">
 
-      <template v-if="needsCertTrust">
-        <div class="platform-pill-row">
-          <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'windows' }]" data-testid="platform-windows-btn" @click="$emit('set-platform', 'windows')">PowerShell</button>
-          <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'unix' }]" data-testid="platform-unix-btn" @click="$emit('set-platform', 'unix')">Linux / macOS</button>
-          <v-tooltip location="top" max-width="300">
-            <template #activator="{ props: tipProps }">
-              <v-btn v-bind="tipProps" icon variant="text" size="x-small" class="platform-help-icon">
-                <v-icon size="16">mdi-help-circle-outline</v-icon>
-              </v-btn>
-            </template>
-            HTTPS with a private or self-signed certificate: Node.js-based AI coding agents need to trust the certificate this server uses (one-time setup, requires Node.js 22+).
-          </v-tooltip>
-        </div>
-        <div class="config-block smooth-border" data-testid="cert-trust-block">
-          <div class="config-block-header">
-            <span class="config-block-label">CERTIFICATE TRUST (ONE-TIME) Paste in terminal</span>
-            <v-btn
-              icon="mdi-content-copy"
-              size="x-small"
-              variant="text"
-              aria-label="Copy certificate command"
-              data-testid="cert-copy-btn"
-              @click="$emit('copy-text', { text: certCommand, field: 'cert' })"
-            />
-          </div>
-          <pre class="config-code">{{ certCommand }}</pre>
-        </div>
-      </template>
-
-      <div v-if="!needsCertTrust && activeNormalizedId === 'codex'" class="platform-pill-row">
+      <div v-if="activeNormalizedId === 'codex'" class="platform-pill-row">
         <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'windows' }]" @click="$emit('set-platform', 'windows')">PowerShell</button>
         <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'unix' }]" @click="$emit('set-platform', 'unix')">Linux / macOS</button>
       </div>
@@ -134,11 +105,9 @@ defineProps({
   existingKeyPrefix: { type: String,  default: null },
   keyError:          { type: String,  default: '' },
   hasKey:            { type: Boolean, required: true },
-  needsCertTrust:    { type: Boolean, required: true },
   activeNormalizedId: { type: String, required: true },
   toolLabel:         { type: String,  default: 'your tool' },
   platform:          { type: String,  required: true },
-  certCommand:       { type: String,  default: '' },
   envVarText:        { type: String,  default: '' },
   configCommand:     { type: String,  required: true },
   isGeneric:         { type: Boolean, default: false },

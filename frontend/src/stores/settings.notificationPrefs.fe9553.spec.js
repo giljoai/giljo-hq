@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const getNotificationPrefs = vi.hoisted(() => vi.fn())
@@ -183,5 +183,34 @@ describe('the two kinds of setting do not contaminate each other (FE-9553)', () 
 
     expect(store.notificationPosition).toBe('top-left')
     expect(store.notificationDuration).toBe(9000)
+  })
+})
+
+describe('saved toast settings apply from the moment the store exists', () => {
+  const savedBlob = (value) =>
+    localStorage.getItem.mockImplementation((key) => (key === 'giljo_settings' ? value : null))
+
+  beforeEach(() => {
+    localStorage.getItem.mockReset()
+    setActivePinia(createPinia())
+  })
+  afterEach(() => localStorage.getItem.mockReset())
+
+  it('a fresh store reads the saved duration and position without loadSettings()', () => {
+    savedBlob(JSON.stringify({ notifications: { duration: 2, position: 'top-left' } }))
+
+    const store = useSettingsStore()
+
+    expect(store.notificationDuration).toBe(2000)
+    expect(store.notificationPosition).toBe('top-left')
+  })
+
+  it('a malformed saved blob falls back to the defaults', () => {
+    savedBlob('{not json')
+
+    const store = useSettingsStore()
+
+    expect(store.notificationDuration).toBe(5000)
+    expect(store.notificationPosition).toBe('bottom-right')
   })
 })

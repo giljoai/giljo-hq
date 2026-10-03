@@ -26,7 +26,7 @@ async def get_notification_preferences(
 ) -> dict[str, Any]:
     """Get the current user's notification preferences.
 
-    FE-9553: the stored value is MERGED OVER the defaults, so a row written
+    The stored value is MERGED OVER the defaults, so a row written
     before the notification-model keys existed still reads back complete --
     that is this column's answer to the old-shape question, and it needs no
     migration.
@@ -54,8 +54,6 @@ async def update_notification_preferences(
     user_service: UserService = Depends(get_user_service),
 ) -> dict[str, Any]:
     """Update the current user's notification preferences.
-
-    Sprint 003c: write routed through UserService (no direct session.commit).
 
     The fields, and why decisions / your-turn / mentions are deliberately not
     among them: see ``NotificationPreferencesUpdate`` in ``users_models.py``.

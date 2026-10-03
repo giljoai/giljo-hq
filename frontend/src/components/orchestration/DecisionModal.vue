@@ -12,7 +12,7 @@
     <v-card v-draggable class="smooth-border decision-modal-card">
       <div id="decision-modal-title" class="dlg-header dlg-header--primary">
         <v-icon class="dlg-icon" icon="mdi-clipboard-check-outline" />
-        <span class="dlg-title">Decision Required</span>
+        <span class="dlg-title">Needs decision</span>
         <v-btn
           icon
           variant="text"
@@ -34,6 +34,10 @@
           data-testid="decision-modal-card"
           @decided="handleDecided"
         />
+        <p v-else-if="approvalsStore.error" class="text-body-small" data-testid="decision-modal-error">
+          <v-icon size="16" color="error" class="mr-1" icon="mdi-alert-circle" />
+          Could not load the pending decision: {{ approvalsStore.error }}
+        </p>
       </div>
 
       <div class="dlg-footer">

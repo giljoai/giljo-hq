@@ -128,7 +128,7 @@
 
               <component :is="socialLoginButtonsComponent" v-if="socialLoginButtonsComponent" />
 
-              <div v-if="isNonCe" class="text-center mt-3">
+              <div v-if="isSaas" class="text-center mt-3">
                 <span class="text-body-small text-muted-a11y">Don't have an account?</span>
                 <router-link to="/register" class="text-body-small font-weight-bold ml-1">Register</router-link>
               </div>
@@ -191,7 +191,7 @@ import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME
 import configService from '@/services/configService'
-import { isCeModeValue, isNonCeModeValue } from '@/composables/useGiljoMode'
+import { isCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
 
 const forgotPasswordEmailComponent = shallowRef(null)
 
@@ -202,7 +202,7 @@ const route = useRoute()
 const userStore = useUserStore()
 
 const giljoMode = ref('ce')
-const isNonCe = computed(() => isNonCeModeValue(giljoMode.value))
+const isSaas = computed(() => isSaasModeValue(giljoMode.value))
 const editionLabel = computed(() => {
   switch (giljoMode.value) {
     case 'saas': return 'SaaS Edition'
@@ -269,7 +269,7 @@ async function handleLogin() {
       return
     }
 
-    if (isNonCeModeValue(giljoMode.value)) {
+    if (isSaasModeValue(giljoMode.value)) {
       try {
         const orgStatus = await fetchEditionOrgSetupStatus()
         if (orgStatus?.data?.needs_setup) {
@@ -385,7 +385,7 @@ onMounted(async () => {
     // Default to CE on config failure
   }
 
-  if (isNonCeModeValue(giljoMode.value)) {
+  if (isSaasModeValue(giljoMode.value)) {
     const forgotEmailLoaders = import.meta.glob('@/saas/components/ForgotPasswordEmail.vue')
     const [loader] = Object.values(forgotEmailLoaders)
     if (loader) {

@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from giljo_mcp.auth.jwt_manager import JWTManager
-from giljo_mcp.models import Product, Project, User
+from giljo_mcp.models import User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.test_db_helper import PostgreSQLTestHelper
@@ -33,7 +33,7 @@ async def _build_portal_db_manager():
     return db_manager
 
 
-async def _seed_tenant_with_project(db_manager) -> dict:
+async def _seed_tenant(db_manager) -> dict:
     suffix = uuid.uuid4().hex[:8]
     tenant_key = TenantManager.generate_tenant_key()
 
@@ -57,27 +57,6 @@ async def _seed_tenant_with_project(db_manager) -> dict:
             org_id=org.id,
         )
         session.add(user)
-        await session.flush()
-
-        _owning_product_project = Product(
-            id=str(uuid.uuid4()),
-            tenant_key=tenant_key,
-            name=f"Owning Product {uuid.uuid4().hex[:6]}",
-            description="seeded",
-            is_active=False,
-        )
-        session.add(_owning_product_project)
-        project = Project(
-            id=str(uuid.uuid4()),
-            name=f"WS Project {suffix}",
-            description="Subscribe target for the WS tenant-scope regression test",
-            mission="WS regression",
-            status="active",
-            tenant_key=tenant_key,
-            product_id=_owning_product_project.id,
-            series_number=int(uuid.uuid4().int % 900000) + 100000,
-        )
-        session.add(project)
         await session.commit()
 
     token = JWTManager.create_access_token(
@@ -86,7 +65,7 @@ async def _seed_tenant_with_project(db_manager) -> dict:
         role="developer",
         tenant_key=tenant_key,
     )
-    return {"tenant_key": tenant_key, "token": token, "project_id": project.id}
+    return {"tenant_key": tenant_key, "token": token}
 
 
 async def _cleanup_tenant(db_manager, tenant_key: str) -> None:
@@ -94,7 +73,6 @@ async def _cleanup_tenant(db_manager, tenant_key: str) -> None:
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         with tenant_session_context(session, tenant_key):
-            await session.execute(delete(Project).where(Project.tenant_key == tenant_key))
             await session.execute(delete(User).where(User.tenant_key == tenant_key))
             await session.execute(delete(Organization).where(Organization.tenant_key == tenant_key))
             await session.commit()
@@ -168,8 +146,14 @@ def _install_ws_app_state(db_manager):
     return restore
 
 
+async def _broadcast(tenant_key: str, marker: str) -> int:
+    from api.app_state import state
+
+    return await state.websocket_manager.broadcast_to_tenant(tenant_key, "project:updated", {"marker": marker})
+
+
 @pytest.mark.tenant_isolation
-def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkeypatch):
+def test_authenticated_ws_handshake_succeeds_and_tenant_event_delivers(monkeypatch):
     from api.app import app
 
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
@@ -177,7 +161,7 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkey
     with _no_op_lifespan(app), TestClient(app) as client:
         db_manager = client.portal.call(_build_portal_db_manager)
         restore = _install_ws_app_state(db_manager)
-        seeded = client.portal.call(_seed_tenant_with_project, db_manager)
+        seeded = client.portal.call(_seed_tenant, db_manager)
         client_id = f"ws-test-{uuid.uuid4().hex[:8]}"
         try:
             with client.websocket_connect(f"/ws/{client_id}?token={seeded['token']}") as ws:
@@ -185,11 +169,12 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkey
                 pong = ws.receive_json()
                 assert pong == {"type": "pong"}, pong
 
-                ws.send_json({"type": "subscribe", "entity_type": "project", "entity_id": seeded["project_id"]})
+                delivered = client.portal.call(_broadcast, seeded["tenant_key"], "own")
+                assert delivered == 1
                 msg = ws.receive_json()
-                assert msg.get("type") == "subscribed", msg
-                assert msg.get("entity_type") == "project", msg
-                assert msg.get("entity_id") == seeded["project_id"], msg
+                assert msg.get("type") == "project:updated", msg
+                assert msg["data"]["marker"] == "own", msg
+                assert msg["data"]["tenant_key"] == seeded["tenant_key"], msg
         finally:
             client.portal.call(_cleanup_tenant, db_manager, seeded["tenant_key"])
             client.portal.call(db_manager.close_async)
@@ -197,7 +182,7 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkey
 
 
 @pytest.mark.tenant_isolation
-def test_ws_subscribe_blocks_cross_tenant_project(monkeypatch):
+def test_ws_tenant_event_never_reaches_another_tenant(monkeypatch):
     from api.app import app
 
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
@@ -205,15 +190,24 @@ def test_ws_subscribe_blocks_cross_tenant_project(monkeypatch):
     with _no_op_lifespan(app), TestClient(app) as client:
         db_manager = client.portal.call(_build_portal_db_manager)
         restore = _install_ws_app_state(db_manager)
-        caller = client.portal.call(_seed_tenant_with_project, db_manager)
-        other = client.portal.call(_seed_tenant_with_project, db_manager)
-        client_id = f"ws-xtenant-{uuid.uuid4().hex[:8]}"
+        caller = client.portal.call(_seed_tenant, db_manager)
+        other = client.portal.call(_seed_tenant, db_manager)
         try:
-            with client.websocket_connect(f"/ws/{client_id}?token={caller['token']}") as ws:
-                ws.send_json({"type": "subscribe", "entity_type": "project", "entity_id": other["project_id"]})
+            with (
+                client.websocket_connect(f"/ws/ws-caller-{uuid.uuid4().hex[:8]}?token={caller['token']}") as ws,
+                client.websocket_connect(f"/ws/ws-other-{uuid.uuid4().hex[:8]}?token={other['token']}") as other_ws,
+            ):
+                for sock in (ws, other_ws):
+                    sock.send_json({"type": "ping"})
+                    assert sock.receive_json() == {"type": "pong"}
+
+                assert client.portal.call(_broadcast, other["tenant_key"], "foreign") == 1
+                assert client.portal.call(_broadcast, caller["tenant_key"], "own") == 1
+
+                assert other_ws.receive_json()["data"]["marker"] == "foreign"
                 msg = ws.receive_json()
-                assert msg.get("type") == "error", msg
-                assert msg.get("error") == "subscription_denied", msg
+                assert msg["data"]["marker"] == "own", msg
+                assert msg["data"]["tenant_key"] == caller["tenant_key"], msg
         finally:
             client.portal.call(_cleanup_tenant, db_manager, caller["tenant_key"])
             client.portal.call(_cleanup_tenant, db_manager, other["tenant_key"])

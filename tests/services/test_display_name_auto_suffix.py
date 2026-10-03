@@ -116,6 +116,28 @@ class TestDisplayNameAutoSuffix:
         assert result1.agent_display_name == "implementer"
         assert result2.agent_display_name == "implementer-2"
 
+    async def test_suffixed_full_length_name_still_fits_the_column(
+        self, suffix_service, suffix_project, suffix_tenant_key
+    ):
+        name = "a" * 100
+        first = await suffix_service.spawn_job(
+            agent_display_name=name,
+            agent_name="implementer",
+            mission="Task 1",
+            project_id=suffix_project.id,
+            tenant_key=suffix_tenant_key,
+        )
+        second = await suffix_service.spawn_job(
+            agent_display_name=name,
+            agent_name="implementer",
+            mission="Task 2",
+            project_id=suffix_project.id,
+            tenant_key=suffix_tenant_key,
+        )
+
+        assert first.agent_display_name == name
+        assert second.agent_display_name == "a" * 98 + "-2"
+
     async def test_triple_spawn_sequential_suffixes(self, suffix_service, suffix_project, suffix_tenant_key):
         r1 = await suffix_service.spawn_job(
             agent_display_name="implementer",

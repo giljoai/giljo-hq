@@ -242,6 +242,26 @@ class _NoiseFilter(logging.Filter):
         return not any(p.lower() in message for p in self.EXCLUDE_PATTERNS)
 
 
+def _note_ignored_ssl_settings(config_path: Path) -> bool:
+    try:
+        if not config_path.exists():
+            return False
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    features = config.get("features") or {}
+    paths = config.get("paths") or {}
+    stale = bool(features.get("ssl_enabled")) or bool(paths.get("ssl_cert")) or bool(paths.get("ssl_key"))
+    if stale:
+        logging.getLogger(__name__).info(
+            "config.yaml has HTTPS settings (features.ssl_enabled / paths.ssl_cert / paths.ssl_key). "
+            "Built-in HTTPS was removed and these are ignored; the server serves plain HTTP. "
+            "For HTTPS put a reverse proxy such as Caddy in front (see the user guide)."
+        )
+    return stale
+
+
 def main():
     parser = argparse.ArgumentParser(description="Giljo HQ REST API Server")
     parser.add_argument("--host", default=None, help="Host to bind to (default: auto-detect from config)")
@@ -265,8 +285,6 @@ def main():
         action="store_true",
         help="Enable verbose debug logging (equivalent to --log-level debug)",
     )
-    parser.add_argument("--ssl-keyfile", help="SSL key file for HTTPS")
-    parser.add_argument("--ssl-certfile", help="SSL certificate file for HTTPS")
 
     args = parser.parse_args()
 
@@ -310,62 +328,12 @@ def main():
     logger.info(f"Auto-reload: {'Enabled' if args.reload else 'Disabled'}")
     logger.info(f"Log level: {args.log_level.upper()}")
 
-    ssl_config = {}
-
-    force_http = os.getenv("GILJO_FORCE_HTTP") == "1"
-    if force_http:
-        logger.info("HTTP mode forced by launcher (GILJO_FORCE_HTTP=1) — SSL skipped")
-
-    if not force_http and args.ssl_keyfile and args.ssl_certfile:
-        ssl_config = {"ssl_keyfile": args.ssl_keyfile, "ssl_certfile": args.ssl_certfile}
-        logger.info(f"SSL enabled via CLI: {args.ssl_certfile}")
-
-    if not force_http and not ssl_config:
-        try:
-            import yaml
-
-            config_path = Path(__file__).parent.parent / "config.yaml"
-            if config_path.exists():
-                with open(config_path) as f:
-                    config = yaml.safe_load(f) or {}
-
-                ssl_enabled = config.get("features", {}).get("ssl_enabled", False)
-                ssl_cert = config.get("paths", {}).get("ssl_cert")
-                ssl_key = config.get("paths", {}).get("ssl_key")
-
-                if ssl_enabled and ssl_cert and ssl_key:
-                    cert_path = Path(ssl_cert)
-                    key_path = Path(ssl_key)
-
-                    if cert_path.exists() and key_path.exists():
-                        ssl_config = {"ssl_keyfile": str(key_path), "ssl_certfile": str(cert_path)}
-                        logger.info(f"SSL enabled via config.yaml: {cert_path}")
-                    else:
-                        logger.warning("SSL enabled in config but certificate files not found:")
-                        if not cert_path.exists():
-                            logger.warning(f"  Cert: {cert_path} (not found)")
-                        if not key_path.exists():
-                            logger.warning(f"  Key:  {key_path} (not found)")
-                        logger.info("Falling back to HTTP mode")
-        except (OSError, ValueError, ImportError) as e:
-            logger.warning(f"Failed to load SSL config from config.yaml: {e}")
-
-    if not force_http and not ssl_config:
-        ssl_cert_env = os.getenv("SSL_CERT_FILE")
-        ssl_key_env = os.getenv("SSL_KEY_FILE")
-        if ssl_cert_env and ssl_key_env:
-            cert_path = Path(ssl_cert_env)
-            key_path = Path(ssl_key_env)
-            if cert_path.exists() and key_path.exists():
-                ssl_config = {"ssl_keyfile": str(key_path), "ssl_certfile": str(cert_path)}
-                logger.info(f"SSL enabled via environment: {cert_path}")
-
-    if not ssl_config:
-        logger.info("Running in HTTP mode (no SSL configured)")
+    _note_ignored_ssl_settings(Path(__file__).parent.parent / "config.yaml")
+    logger.info("Serving plain HTTP; put a reverse proxy such as Caddy in front for HTTPS")
 
     logger.info("-" * 60)
-    http_proto = "https" if ssl_config else "http"
-    ws_proto = "wss" if ssl_config else "ws"
+    http_proto = "http"
+    ws_proto = "ws"
     logger.info("API Endpoints:")
     if os.environ.get("GILJO_MODE", "").strip().lower() in ("ce", ""):
         logger.info(f"  Documentation: {http_proto}://{args.host}:{args.port}/docs")
@@ -395,7 +363,6 @@ def main():
             reload=args.reload,
             workers=args.workers if not args.reload else 1,
             log_level=args.log_level,
-            **ssl_config,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down server...")

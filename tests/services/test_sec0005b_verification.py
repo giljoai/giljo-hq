@@ -211,7 +211,6 @@ def _make_ctx(override_content: str | None):
         "templates": [],
         "category_metadata": {},
         "integrations": {
-            "serena_mcp": {"use_in_prompts": False},
             "git_integration": {"enabled": False},
         },
         "orchestrator_prompt_override": override_content,

@@ -5,9 +5,11 @@
 
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from api.endpoints._boundary_types import IdPath, IdQuery
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
 from giljo_mcp.models import User
@@ -24,6 +26,9 @@ from .models import (
     ProjectReviewResponse,
     ProjectUpdate,
 )
+
+
+ProjectSortKey = Literal["series_number", "name", "created_at", "completed_at", "status", "staging_status", "roadmap"]
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +59,8 @@ def _to_project_response(
         updated_at=proj.updated_at,
         completed_at=proj.completed_at,
         implementation_launched_at=getattr(proj, "implementation_launched_at", None),
+        reviewed_at=getattr(proj, "reviewed_at", None),
+        review_pending=getattr(proj, "review_pending", False),
         agent_count=agent_count if agent_count is not None else getattr(proj, "agent_count", 0),
         message_count=message_count if message_count is not None else getattr(proj, "message_count", 0),
         execution_mode=proj.execution_mode,
@@ -128,8 +135,8 @@ async def create_project(
 @router.get("/", response_model=list[ProjectListResponse])
 async def list_projects(
     response: Response,
-    status_filter: str | None = None,
-    product_id: str | None = None,
+    status_filter: IdQuery = None,
+    product_id: IdQuery = None,
     include_completed: bool = Query(
         default=False,
         description=(
@@ -141,7 +148,7 @@ async def list_projects(
     include_hidden: bool = Query(
         default=False,
         description=(
-            "BE-6078: when false (default) hidden projects are excluded at the SQL "
+            "When false (default) hidden projects are excluded at the SQL "
             "layer (server-side offload). Set true to return both hidden and visible "
             "rows. Ignored when hidden_only=true."
         ),
@@ -149,7 +156,7 @@ async def list_projects(
     hidden_only: bool = Query(
         default=False,
         description=(
-            "BE-6078: when true, return ONLY hidden projects (the Projects page "
+            "When true, return ONLY hidden projects (the Projects page "
             "'Show hidden' view). Pair with include_completed=true to list hidden "
             "rows across all lifecycle statuses. Wins over include_hidden."
         ),
@@ -157,7 +164,7 @@ async def list_projects(
     statuses: list[str] | None = Query(
         default=None,
         description=(
-            "BE-6076: repeatable multi-status filter driving the dashboard Status "
+            "Repeatable multi-status filter driving the dashboard Status "
             "multi-select (e.g. ?statuses=active&statuses=inactive). When given it "
             "wins over the single status_filter and the include_completed default. "
             "Omit to keep the prior single-status / lifecycle-default behavior."
@@ -167,38 +174,34 @@ async def list_projects(
         default=None,
         max_length=200,
         description=(
-            "BE-6076: case-insensitive substring search across name, id, and the "
+            "Case-insensitive substring search across name, id, and the "
             "taxonomy alias (e.g. 'BE-50'). Applied at the SQL layer."
         ),
     ),
-    sort: str | None = Query(
+    sort: ProjectSortKey | None = Query(
         default=None,
         description=(
-            "BE-6076: server-side sort column key (series_number, name, created_at, "
-            "completed_at, status, staging_status). FE-6179: also 'roadmap' -- orders "
+            "Server-side sort column key (series_number, name, created_at, "
+            "completed_at, status, staging_status). Also 'roadmap' -- orders "
             "by each project's roadmap position (roadmap_items.sort_order), the same "
-            "ordering /roadmap renders; projects not on the roadmap sort last. Unknown "
-            "keys fall back to a deterministic order. Only honored alongside "
-            "limit/offset pagination."
+            "ordering /roadmap renders; projects not on the roadmap sort last. "
+            "Only honored alongside limit/offset pagination."
         ),
     ),
-    sort_dir: str | None = Query(
+    sort_dir: Literal["asc", "desc"] | None = Query(
         default=None,
-        description="BE-6076: sort direction ('asc' | 'desc'). Defaults to ascending.",
+        description="Sort direction ('asc' | 'desc'). Defaults to ascending.",
     ),
     limit: int | None = Query(
         default=None,
         ge=1,
         le=200,
-        description=(
-            "BE-6076: opt-in page size. When omitted the endpoint returns the full "
-            "set byte-compatibly with the pre-BE-6076 default response."
-        ),
+        description="Opt-in page size. When omitted the endpoint returns the full set.",
     ),
     offset: int | None = Query(
         default=None,
         ge=0,
-        description="BE-6076: opt-in row offset for pagination (pairs with limit).",
+        description="Opt-in row offset for pagination (pairs with limit).",
     ),
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
@@ -210,12 +213,12 @@ async def list_projects(
     the MCP ``list_projects`` tool applies); pass ``status_filter`` to query a
     specific status, or ``include_completed=true`` to show archived projects too.
 
-    Hidden is an orthogonal per-row axis (BE-6078). By default hidden rows are
+    Hidden is an orthogonal per-row axis. By default hidden rows are
     excluded server-side; ``hidden_only=true`` returns only hidden rows (the
     Projects-page "Show hidden" view, a pure read — it never re-tags), and
     ``include_hidden=true`` returns both.
 
-    Returns the thin ``ProjectListResponse`` wire shape (IMP-1002): per-row
+    Returns the thin ``ProjectListResponse`` wire shape: per-row
     ``mission``/``description`` are NOT emitted on the list — the dashboard
     fetches those lazily on row-open via the single-project detail endpoint.
 
@@ -314,17 +317,17 @@ async def list_projects(
 
 @router.get("/deleted", response_model=list[ProjectListResponse])
 async def get_deleted_projects(
-    product_id: str | None = None,
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> list[ProjectListResponse]:
     """
-    Get soft-deleted projects for recovery (Handover 0070).
+    Get soft-deleted projects for recovery.
 
     Returns projects with status='deleted' and deleted_at timestamp set.
     These projects can be recovered within 10 days of deletion.
 
-    Returns the thin ``ProjectListResponse`` wire shape (IMP-1002): the deleted
+    Returns the thin ``ProjectListResponse`` wire shape: the deleted
     list, like the main list, omits per-row mission/description.
 
     Args:
@@ -375,23 +378,20 @@ async def get_deleted_projects(
 
 @router.get("/active", response_model=list[ProjectResponse])
 async def get_active_project(
-    product_id: str | None = None,
+    product_id: IdQuery = None,
+    include_unreviewed: bool = False,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> list[ProjectResponse]:
     """
     Get the active project(s) for the user's tenant, scoped to product_id.
 
-    Returns a list — empty if no project is active in scope. BE-9525a: the read
-    used to be tenant-wide with no product filter, so a project active in
-    product A would show up as "the" active project while viewing product B
-    (e.g. incorrectly greying out product B's Activate button). ``product_id``
-    scopes the read to one product; omitting it keeps the prior tenant-wide
-    read for callers with no product context.
-
-    List-shaped from day one (BE-9525a); genuinely plural as of BE-9525b, which
-    dropped the one-active-project-per-product limit (ruling 5 amended) — this
-    response shape does not change again for that unlock.
+    Returns a list — empty if no project is active in scope.
+    ``include_unreviewed=true`` (the Jobs board's read) also returns completed
+    projects no human has reviewed yet, marked ``review_pending``.
+    ``product_id`` scopes the read to one product; omitting it reads across the
+    whole tenant for callers with no product context. Several projects may be
+    active at once.
 
     Args:
         product_id: Optional product ID to scope the read
@@ -403,7 +403,9 @@ async def get_active_project(
     """
     logger.debug(f"User {current_user.username} fetching active project (product={sanitize(str(product_id))})")
 
-    projects = await project_service.query.get_active_projects(product_id=product_id)
+    projects = await project_service.query.get_active_projects(
+        product_id=product_id, include_unreviewed=include_unreviewed
+    )
 
     if not projects:
         logger.info(f"No active projects found for tenant {current_user.tenant_key}")
@@ -416,7 +418,7 @@ async def get_active_project(
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
@@ -449,7 +451,7 @@ async def get_project(
 
 @router.get("/{project_id}/review", response_model=ProjectReviewResponse)
 async def get_project_review(
-    project_id: str,
+    project_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectReviewResponse:
@@ -492,13 +494,13 @@ async def get_project_review(
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
 async def update_project(
-    project_id: str,
+    project_id: IdPath,
     updates: ProjectUpdate,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
 ) -> ProjectResponse:
     """
-    Update project fields (Handover 0504).
+    Update project fields.
 
     Supports updating: name, description, mission, status.
     Only provided fields are updated (partial updates supported).

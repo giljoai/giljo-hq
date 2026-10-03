@@ -23,7 +23,7 @@ class AgentTodoCounts(BaseModel):
 
 
 class ThreadUnreadDetail(BaseModel):
-    """Per-thread unread breakdown for one agent (BE-9242 deliverable #2).
+    """Per-thread unread breakdown for one agent.
 
     ``thread_id`` is "" for unread messages with no thread (legacy/non-hub
     direct messages) so every unread message is still accounted for.
@@ -31,6 +31,22 @@ class ThreadUnreadDetail(BaseModel):
 
     thread_id: str
     unread_count: int
+
+
+class OrchestratorDisplayState(BaseModel):
+    """What the board shows for an orchestrator whose own entry is stale.
+
+    ``state`` is monitoring (``agents`` workers running), result_waiting (``agents``
+    results unread for ``minutes``) or silent. ``label`` is the wording to show.
+    """
+
+    state: str
+    label: str
+    agents: int = 0
+    minutes: int = 0
+    stale_minutes: int = 0
+    todos_done: int = 0
+    todos_total: int = 0
 
 
 class AgentWorkflowDetail(BaseModel):
@@ -48,6 +64,7 @@ class AgentWorkflowDetail(BaseModel):
     unread_by_thread: list[ThreadUnreadDetail] = []
     todos: AgentTodoCounts = AgentTodoCounts()
     not_picked_up: bool = False
+    orchestrator_state: OrchestratorDisplayState | None = None
 
 
 class WorkflowStatus(BaseModel):
@@ -118,7 +135,7 @@ class SpawnResult(BaseModel):
             "agent_prompt field IS the bootstrap. 'dashboard' means agent_prompt "
             "is a human-readable pointer telling the orchestrator the real prompt "
             "is in the dashboard UI for the user to copy. Set to 'dashboard' in "
-            "multi_terminal mode (BE-5103)."
+            "multi_terminal mode."
         ),
     )
     lifecycle_footer: str | None = Field(
@@ -145,7 +162,7 @@ class MissionResponse(BaseModel):
     Fields match OrchestrationService.get_job_mission() output.
     Contains the full team-aware mission with lifecycle protocol.
 
-    BE-9083a (truncation survival): declaration order IS the wire order (Pydantic
+    Declaration order IS the wire order (Pydantic
     serializes in declaration order), and harness-side truncation eats the TAIL of
     a large payload first. So every short critical scalar — identifiers, phase,
     the next_required_actions checklist, the truncation sentinel — is declared
@@ -169,7 +186,7 @@ class MissionResponse(BaseModel):
     project_phase: str | None = Field(
         default=None,
         description=(
-            "CE-0026: Lifecycle phase for orchestrator executions — 'staging' or "
+            "Lifecycle phase for orchestrator executions — 'staging' or "
             "'implementation'. Derived from live project state at read time. Null "
             "for non-orchestrator agents (they don't have phase semantics)."
         ),
@@ -323,18 +340,15 @@ SOLO_STAGING_END_NEXT_ACTION_WHY = (
 
 
 class StagingDirective(BaseModel):
-    """Staging-session-end directive returned by ``complete_job`` (CE-0026).
+    """Staging-session-end directive returned by ``complete_job``.
 
     Populated only when the staging-phase orchestrator calls ``complete_job``
     to end its staging session. Tells the orchestrator agent to stop and
-    reports whether the Implementation phase gate is open (BE-9653: at a solo
+    reports whether the Implementation phase gate is open (at a solo
     staging end it is still awaiting launch).
 
-    Historical note: previously emitted by the ``send_message`` broadcast
-    magic with five diagnostic statuses (NOT_BROADCAST, NOT_ORCHESTRATOR,
-    SENDER_NOT_FOUND, ALREADY_COMPLETE, STAGING_SESSION_COMPLETE). That
-    mechanism was removed in CE-0026; the success path is the only meaningful
-    case once ``complete_job`` is the canonical phase-transition tool.
+    ``complete_job`` is the canonical phase-transition tool, so the success
+    path is the only meaningful case.
     """
 
     status: str = "STAGING_SESSION_COMPLETE"
@@ -358,7 +372,7 @@ class CompleteJobResult(BaseModel):
 
     Fields match OrchestrationService.complete_job() output.
 
-    CE-0026: ``staging_directive`` is populated only when the staging-phase
+    ``staging_directive`` is populated only when the staging-phase
     orchestrator calls ``complete_job`` (i.e., ``execution.project_phase ==
     'staging'`` and ``project.staging_status`` transitions to
     ``staging_complete``). For all other complete_job calls (implementation
@@ -372,11 +386,11 @@ class CompleteJobResult(BaseModel):
     result_stored: bool = False
     phase: str = Field(
         default="deliverable",
-        description="Which complete_job phase ran: 'staging_end' | 'closeout' | 'deliverable' (BE-6083)",
+        description="Which complete_job phase ran: 'staging_end' | 'closeout' | 'deliverable'",
     )
     next_action: dict[str, Any] | None = Field(
         default=None,
-        description="Canonical next_action envelope for this completion, phase-specific (BE-6083, BE-8003a)",
+        description="Canonical next_action envelope for this completion, phase-specific",
     )
     closeout_checklist: dict | None = Field(
         default=None,
@@ -384,7 +398,7 @@ class CompleteJobResult(BaseModel):
     )
     staging_directive: StagingDirective | None = Field(
         default=None,
-        description="STOP directive for end-of-staging orchestrator (CE-0026)",
+        description="STOP directive for end-of-staging orchestrator",
     )
     lifecycle_footer: str | None = Field(
         default=None,
@@ -398,7 +412,7 @@ class CompleteJobResult(BaseModel):
 
 
 class ReactivationResult(BaseModel):
-    """Reactivation result (Handover 0827c).
+    """Reactivation result.
 
     Returned by OrchestrationService.reactivate_job().
     """
@@ -412,7 +426,7 @@ class ReactivationResult(BaseModel):
 
 
 class DismissResult(BaseModel):
-    """Dismiss reactivation result (Handover 0827c).
+    """Dismiss reactivation result.
 
     Returned by OrchestrationService.dismiss_reactivation().
     """
@@ -425,7 +439,7 @@ class DismissResult(BaseModel):
 
 
 class ErrorReportResult(BaseModel):
-    """Agent status change result (Handover 0880: expanded from report_error).
+    """Agent status change result (expanded from report_error).
 
     Returned by OrchestrationService.set_agent_status() for blocked/idle/sleeping states.
     """
@@ -440,7 +454,7 @@ class ErrorReportResult(BaseModel):
 
 
 class AgentStatusChangeEvent(BaseModel):
-    """One per-agent status transition surfaced for a POST-COMMIT WS broadcast (BE-9246).
+    """One per-agent status transition surfaced for a POST-COMMIT WS broadcast.
 
     ``ProjectCloseoutService.decommission_project_agents`` / ``close_completed_agents``
     capture ``old_status`` BEFORE overwriting ``execution.status``, then return a list of
@@ -488,7 +502,7 @@ class MissionUpdateResult(BaseModel):
 
 
 class SuccessionContextResult(BaseModel):
-    """Successor orchestrator context result (Handover 0461f).
+    """Successor orchestrator context result.
 
     Fields match OrchestrationService.create_successor_orchestrator() output.
     Same agent_id is preserved (no ID swap); context is reset and written to 360 Memory.

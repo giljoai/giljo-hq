@@ -592,12 +592,7 @@ function resetState() {
   error.value = null
 }
 
-const missionText = computed(() => {
-  const m = projectData.value?.mission
-  if (!m) return ''
-  if (typeof m === 'string') return m
-  return m.mission_statement || m.objective || JSON.stringify(m, null, 2)
-})
+const missionText = computed(() => projectData.value?.mission || '')
 
 const statusColor = computed(() => {
   const s = projectData.value?.status

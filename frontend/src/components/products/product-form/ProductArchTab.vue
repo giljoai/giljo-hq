@@ -7,86 +7,34 @@
     </div>
 
     <v-textarea
-      v-model="form.architecture.primary_pattern"
-      placeholder="Modular Monolith with Event-Driven components, CQRS for high-traffic modules"
-      hint="Describe the overall system architecture approach"
+      v-for="field in FIELDS"
+      :key="field.key"
+      v-model="form.architecture[field.key]"
+      :placeholder="field.placeholder"
+      :hint="field.hint"
       persistent-hint
       variant="outlined"
       density="comfortable"
-      rows="2"
+      :rows="field.rows"
       auto-grow
       class="mb-4"
     >
       <template #label>
-        <span>Primary Architecture Pattern</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.architecture.design_patterns"
-      placeholder="Repository Pattern, Dependency Injection, Factory Pattern, SOLID principles"
-      hint="List design patterns and architectural principles used"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="3"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Design Patterns & Principles</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.architecture.api_style"
-      placeholder="REST API (OpenAPI 3.0), WebSocket for real-time updates, GraphQL for complex queries"
-      hint="Describe API communication patterns and protocols"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="2"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>API Style & Communication</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.architecture.architecture_notes"
-      hint="Additional architectural decisions, constraints, or context"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="4"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Architecture Notes</span>
-      </template>
-    </v-textarea>
-
-    <v-textarea
-      v-model="form.architecture.coding_conventions"
-      hint="Define naming conventions, error handling patterns, code style rules, and other standards agents should follow when writing code"
-      persistent-hint
-      variant="outlined"
-      density="comfortable"
-      rows="6"
-      auto-grow
-      class="mb-4"
-    >
-      <template #label>
-        <span>Coding Conventions & Standards</span>
+        <span>{{ field.label }}</span>
       </template>
     </v-textarea>
   </div>
 </template>
 
 <script setup>
+const FIELDS = [
+  { key: 'primary_pattern', label: 'Primary Architecture Pattern', placeholder: 'Modular Monolith with Event-Driven components, CQRS for high-traffic modules', hint: 'Describe the overall system architecture approach', rows: '2' },
+  { key: 'design_patterns', label: 'Design Patterns & Principles', placeholder: 'Repository Pattern, Dependency Injection, Factory Pattern, SOLID principles', hint: 'List design patterns and architectural principles used', rows: '3' },
+  { key: 'api_style', label: 'API Style & Communication', placeholder: 'REST API (OpenAPI 3.0), WebSocket for real-time updates, GraphQL for complex queries', hint: 'Describe API communication patterns and protocols', rows: '2' },
+  { key: 'architecture_notes', label: 'Architecture Notes', hint: 'Additional architectural decisions, constraints, or context', rows: '4' },
+  { key: 'coding_conventions', label: 'Coding Conventions & Standards', hint: 'Define naming conventions, error handling patterns, code style rules, and other standards agents should follow when writing code', rows: '6' },
+]
+
 defineProps({
   form: {
     type: Object,

@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from api.endpoints._boundary_types import IdPath
 from api.endpoints.dependencies import get_notification_service
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
@@ -88,7 +89,7 @@ async def list_notifications(
 
 @router.patch("/{notification_id}/read", response_model=NotificationResponse)
 async def mark_notification_read(
-    notification_id: str,
+    notification_id: IdPath,
     service: NotificationService = Depends(get_notification_service),
     current_user: User = Depends(get_current_active_user),
 ) -> NotificationResponse:
@@ -103,7 +104,7 @@ async def mark_notification_read(
 
 @router.patch("/{notification_id}/dismiss", response_model=NotificationResponse)
 async def dismiss_notification(
-    notification_id: str,
+    notification_id: IdPath,
     service: NotificationService = Depends(get_notification_service),
     current_user: User = Depends(get_current_active_user),
 ) -> NotificationResponse:

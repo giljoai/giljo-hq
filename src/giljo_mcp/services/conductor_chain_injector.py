@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from giljo_mcp.platform_registry import Platform, get_platform
+from giljo_mcp.platform_registry import Platform
 from giljo_mcp.services.protocol_sections.chapters_chain import (
     _build_ch_capability,
     _build_ch_chain_drive,
@@ -94,11 +94,9 @@ async def inject_conductor_chain_drive(
         return full_protocol
 
     chain_mode = chain_ctx.execution_mode
-    platform = get_platform(chain_mode)
-    can_spawn = platform.can_spawn_terminals if platform is not None else True
 
     parts: list[str] = [
-        _build_ch_capability(execution_mode=chain_mode, can_spawn_terminals=can_spawn, preset=preset),
+        _build_ch_capability(execution_mode=chain_mode, preset=preset),
         _build_ch_chain_drive(
             run_id=chain_ctx.run_id,
             resolved_order=chain_ctx.resolved_order,

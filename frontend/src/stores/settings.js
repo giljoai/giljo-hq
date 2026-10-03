@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import configService from '@/services/configService'
 import { getApiBaseUrl, getWsBaseUrl } from '@/composables/useApiUrl'
 import {
@@ -28,12 +29,23 @@ function normalizeSettingsPayload(payload = {}) {
   }
 }
 
+function readSavedSettings() {
+  try {
+    return JSON.parse(localStorage.getItem('giljo_settings')) || {}
+  } catch {
+    return {}
+  }
+}
+
 export const useSettingsStore = defineStore('settings', () => {
-  const settings = ref({
-    notifications: { ...DEFAULT_NOTIFICATIONS },
-    apiUrl: getApiBaseUrl(),
-    wsUrl: getWsBaseUrl(),
-  })
+  const settings = ref(
+    normalizeSettingsPayload({
+      notifications: { ...DEFAULT_NOTIFICATIONS },
+      apiUrl: getApiBaseUrl(),
+      wsUrl: getWsBaseUrl(),
+      ...readSavedSettings(),
+    }),
+  )
 
   const loading = ref(false)
   const error = ref(null)
@@ -58,23 +70,18 @@ export const useSettingsStore = defineStore('settings', () => {
         })
       }
 
-      try {
-        await configService.fetchConfig()
-        if (configService.getGiljoMode() === 'ce') {
-          const response = await api.settings.get()
-          settings.value = normalizeSettingsPayload({
-            ...settings.value,
-            ...response.data,
-          })
+      await configService.fetchConfig()
+      if (configService.getGiljoMode() === 'ce') {
+        const response = await api.settings.get()
+        settings.value = normalizeSettingsPayload({
+          ...settings.value,
+          ...response.data,
+        })
 
-          saveToLocalStorage()
-        }
-      } catch {
-        // Using local settings, server not available
+        saveToLocalStorage()
       }
     } catch (err) {
-      error.value = err.message
-      console.error('Failed to load settings:', err)
+      error.value = parseErrorResponse(err).message
     } finally {
       loading.value = false
     }
@@ -171,29 +178,22 @@ export const useSettingsStore = defineStore('settings', () => {
     return executionModeDefault.value
   }
 
-  async function loadAgentSilenceThreshold() {
-    const response = await api.settings.getAgentSilenceThreshold()
-    agentSilenceThresholdMinutes.value = response.data.agent_silence_threshold_minutes
-    return agentSilenceThresholdMinutes.value
+  async function _mirror(state, field, request) {
+    const response = await request()
+    state.value = response.data[field]
+    return state.value
   }
 
-  async function updateAgentSilenceThreshold(minutes) {
-    const response = await api.settings.updateAgentSilenceThreshold(minutes)
-    agentSilenceThresholdMinutes.value = response.data.agent_silence_threshold_minutes
-    return agentSilenceThresholdMinutes.value
-  }
-
-  async function loadAgentCheckinCadence() {
-    const response = await api.settings.getAgentCheckinCadence()
-    agentCheckinCadenceMinutes.value = response.data.agent_checkin_cadence_minutes
-    return agentCheckinCadenceMinutes.value
-  }
-
-  async function updateAgentCheckinCadence(minutes) {
-    const response = await api.settings.updateAgentCheckinCadence(minutes)
-    agentCheckinCadenceMinutes.value = response.data.agent_checkin_cadence_minutes
-    return agentCheckinCadenceMinutes.value
-  }
+  const SILENCE = 'agent_silence_threshold_minutes'
+  const CADENCE = 'agent_checkin_cadence_minutes'
+  const loadAgentSilenceThreshold = () =>
+    _mirror(agentSilenceThresholdMinutes, SILENCE, () => api.settings.getAgentSilenceThreshold())
+  const updateAgentSilenceThreshold = (minutes) =>
+    _mirror(agentSilenceThresholdMinutes, SILENCE, () => api.settings.updateAgentSilenceThreshold(minutes))
+  const loadAgentCheckinCadence = () =>
+    _mirror(agentCheckinCadenceMinutes, CADENCE, () => api.settings.getAgentCheckinCadence())
+  const updateAgentCheckinCadence = (minutes) =>
+    _mirror(agentCheckinCadenceMinutes, CADENCE, () => api.settings.updateAgentCheckinCadence(minutes))
 
   function saveToLocalStorage() {
     localStorage.setItem('giljo_settings', JSON.stringify(settings.value))
@@ -218,26 +218,6 @@ export const useSettingsStore = defineStore('settings', () => {
       fieldToggleConfig.value = response.data
     } catch (err) {
       console.error('Failed to fetch field toggle config:', err)
-      throw err
-    }
-  }
-
-  async function updateFieldToggleConfig(config) {
-    try {
-      const response = await api.users.updateFieldToggleConfig(config)
-      fieldToggleConfig.value = response.data
-    } catch (err) {
-      console.error('Failed to update field toggle config:', err)
-      throw err
-    }
-  }
-
-  async function resetFieldToggleConfig() {
-    try {
-      const response = await api.users.resetFieldToggleConfig()
-      fieldToggleConfig.value = response.data
-    } catch (err) {
-      console.error('Failed to reset field toggle config:', err)
       throw err
     }
   }
@@ -280,7 +260,5 @@ export const useSettingsStore = defineStore('settings', () => {
     resetSettings,
     clearError,
     fetchFieldToggleConfig,
-    updateFieldToggleConfig,
-    resetFieldToggleConfig,
   }
 })

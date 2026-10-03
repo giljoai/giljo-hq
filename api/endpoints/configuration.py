@@ -5,12 +5,11 @@
 
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.engine import make_url
 
-from api.endpoints import configuration_ssl
 from giljo_mcp.auth.dependencies import get_current_active_user, require_admin, require_ce_mode
 from giljo_mcp.models import User
 
@@ -18,8 +17,6 @@ from giljo_mcp.models import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-router.include_router(configuration_ssl.router)
 
 
 class SuccessResponse(BaseModel):
@@ -83,32 +80,27 @@ async def get_database_configuration(
     current_user: User = Depends(require_admin),
     _ce: None = Depends(require_ce_mode),
 ):
-    """Get database configuration (password masked) - reads from .env file"""
-    from dotenv import dotenv_values
+    """The database connection this server is running on (password masked)."""
+    from api.app_state import state
 
-    env_path = Path.cwd() / ".env"
-
-    if not env_path.exists():
-        raise HTTPException(status_code=404, detail=".env file not found")
-
-    env_vars = dotenv_values(env_path)
-
-    host = env_vars.get("DB_HOST", "localhost")
-    port = int(env_vars.get("DB_PORT", "5432"))
-    name = env_vars.get("DB_NAME", "giljo_mcp")
-    user = env_vars.get("DB_USER", "giljo_user")
-    password = env_vars.get("DB_PASSWORD", "")
-
-    password_masked = "*" * len(password) if password else "****"
-
-    return DatabaseConfigResponse(host=host, port=port, name=name, user=user, password_masked=password_masked)
+    if state.db_manager is None:
+        raise HTTPException(status_code=503, detail="No database connection is initialised")
+    url = make_url(state.db_manager.database_url)
+    password = url.password or ""
+    return DatabaseConfigResponse(
+        host=url.host or "",
+        port=url.port or 5432,
+        name=url.database or "",
+        user=url.username or "",
+        password_masked="*" * len(password) if password else "****",
+    )
 
 
 @router.get("/frontend")
 async def get_frontend_configuration(request: Request):
     """Get frontend-specific configuration (host, port, websocket URL, security flags).
 
-    Response shape (INF-5012b): api.host/port/protocol derive from
+    Response shape: api.host/port/protocol derive from
     request.base_url (honors X-Forwarded-* via uvicorn proxy_headers), matching
     the pattern websocket.url already uses. api.port is int | null — null when
     implicit on a reverse proxy (standard 443/80), otherwise numeric (e.g. 7272
@@ -123,28 +115,23 @@ async def get_frontend_configuration(request: Request):
         raise HTTPException(status_code=503, detail="Configuration manager not available")
 
     api_keys_required = state.config.get_nested("features.api_keys_required", default=False)
-    ssl_enabled = state.config.get_nested("features.ssl_enabled", default=False)
 
     base = str(request.base_url).rstrip("/")
     parsed = urlparse(base)
     api_host = parsed.hostname or "localhost"
     api_port = parsed.port
-    api_protocol = parsed.scheme or ("https" if ssl_enabled else "http")
+    api_protocol = parsed.scheme or "http"
 
     ws_url = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
     ws_protocol = "wss" if ws_url.startswith("wss://") else "ws"
 
     default_tenant_key = state.config.tenant.default_tenant_key or ""
 
-    is_remote_client = _is_remote_client(request, api_host)
-
     return {
         "api": {
             "host": api_host,
             "port": api_port,
             "protocol": api_protocol,
-            "ssl_enabled": ssl_enabled,
-            "is_remote_client": is_remote_client,
         },
         "websocket": {
             "url": ws_url,
@@ -160,22 +147,6 @@ async def get_frontend_configuration(request: Request):
     }
 
 
-def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
-    return request.client.host if request.client else "unknown"
-
-
-def _is_remote_client(request: Request, server_host: str) -> bool:
-    client_ip = _get_client_ip(request)
-    local_addresses = {"127.0.0.1", "::1", "localhost", server_host}
-    return client_ip not in local_addresses
-
-
 @router.get("/network-info", response_model=NetworkInfoResponse)
 async def get_network_info(
     current_user: User = Depends(require_admin),
@@ -183,7 +154,7 @@ async def get_network_info(
 ):
     """Report the host IP(s) and port the server actually responds on (server-level, CE-only).
 
-    FE-6239 (INF-6236 follow-up): the Network settings tab used to show the
+    The Network settings tab used to show the
     configured external host (often "localhost") even though a LAN install binds
     0.0.0.0 and answers on every interface IP. We compute the REAL responding
     address(es): bound to all interfaces -> enumerate the machine's non-loopback
@@ -219,35 +190,6 @@ async def get_network_info(
         host_display=", ".join(hosts),
         port=int(port),
         bind_all=bind_all,
-    )
-
-
-@router.get(
-    "/root-ca",
-    dependencies=[Depends(get_current_active_user)],
-)
-async def download_root_ca():
-    """Download the server's certificate as a trust anchor for remote clients.
-
-    INF-6241: GiljoAI does not mint certificates. When an operator enables
-    bring-your-own-cert HTTPS (Settings -> Network), the configured server
-    certificate is its own trust anchor for a private/self-signed cert; we serve
-    that exact PEM so a remote machine can trust this server. A publicly-signed
-    cert (Let's Encrypt / corporate CA) needs no download -- clients already
-    trust it. Returns 404 when no certificate is configured. Requires auth.
-    """
-    from fastapi.responses import FileResponse
-
-    from api.endpoints.configuration_ssl import _ssl_status_from_config
-
-    _ssl_enabled, cert_path, _key_path, has_cert = _ssl_status_from_config()
-    if not has_cert or not cert_path:
-        raise HTTPException(status_code=404, detail="No server certificate is configured on this server")
-
-    return FileResponse(
-        path=cert_path,
-        filename="giljo-server-cert.pem",
-        media_type="application/x-pem-file",
     )
 
 

@@ -25,6 +25,10 @@
         color="primary"
         class="mt-4"
       />
+      <p v-if="settings.error" class="text-body-small mt-2" data-test="notification-settings-error">
+        <v-icon size="16" color="error" class="mr-1">mdi-alert-circle</v-icon>
+        Could not load the server settings: {{ settings.error }}. Saving here still applies to this browser.
+      </p>
     </v-card-text>
     <v-card-actions>
       <v-spacer />

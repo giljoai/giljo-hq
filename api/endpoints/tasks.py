@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from api.endpoints._boundary_types import ID_MAX, IdPath, IdQuery
 from api.endpoints.dependencies import get_task_service
 from api.endpoints.mcp_tools._base import CONSTRAINT_INVALID_CHOICE, validation_rejection
 from api.schemas.task import (
@@ -98,31 +99,28 @@ def task_to_response(task: Task) -> TaskResponse:
 
 @router.get("/", response_model=list[TaskResponse])
 async def list_tasks(
-    filter_type: str | None = Query(None, description="Filter: 'product_tasks' | 'all_tasks'"),
+    filter_type: str | None = Query(None, max_length=ID_MAX, description="Filter: 'product_tasks' | 'all_tasks'"),
     created_by_me: bool | None = Query(None, description="Only tasks I created"),
-    status: str | None = Query(None, description="Filter by status"),
-    priority: str | None = Query(None, description="Filter by priority"),
-    project_id: str | None = Query(None, description="Filter by project"),
-    product_id: str | None = Query(None, description="Filter by product"),
+    status: str | None = Query(None, max_length=ID_MAX, description="Filter by status"),
+    priority: str | None = Query(None, max_length=ID_MAX, description="Filter by priority"),
+    project_id: IdQuery = None,
+    product_id: IdQuery = None,
     limit: int | None = Query(
         default=None,
         ge=1,
         le=500,
-        description=(
-            "BE-9141: opt-in page size (mirrors /jobs). When omitted the endpoint "
-            "returns the full set byte-compatibly with the pre-BE-9141 response."
-        ),
+        description="Opt-in page size (mirrors /jobs). When omitted the endpoint returns the full set.",
     ),
     offset: int | None = Query(
         default=None,
         ge=0,
-        description="BE-9141: opt-in row offset for pagination (pairs with limit).",
+        description="Opt-in row offset for pagination (pairs with limit).",
     ),
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> list[TaskResponse]:
     """
-    List tasks with product-scoped filtering (Handover 0076).
+    List tasks with product-scoped filtering.
 
     Filter types:
     - 'product_tasks': Tasks for active product only
@@ -135,8 +133,8 @@ async def list_tasks(
         priority: Filter by task priority
         project_id: Filter by project
         product_id: Filter by product
-        limit: BE-9141 opt-in row cap (1-500); omitted returns the full set
-        offset: BE-9141 opt-in row offset over the newest-first ordering
+        limit: Opt-in row cap (1-500); omitted returns the full set
+        offset: Opt-in row offset over the newest-first ordering
         current_user: Current authenticated user
         task_service: Task service instance
 
@@ -177,14 +175,11 @@ async def create_task(
     """
     Create a new task.
 
-    The creator becomes the task owner. Product binding is required (Handover 0433)
+    The creator becomes the task owner. Product binding is required
     to ensure all tasks are isolated to a specific product.
 
-    BE-3006a single-writer rule: the row is written by
-    ``TaskService.create_task_for_rest``, which owns the validation that was
-    previously split between this endpoint (product exists + active) and the
-    service (project_id belonging). The endpoint no longer touches the DB
-    directly — it only maps domain errors to the same HTTP responses as before.
+    The row is written by ``TaskService.create_task_for_rest``, which validates
+    that the product exists and is active and that project_id belongs to it.
     """
     logger.debug(
         "User %s creating task '%s'",
@@ -222,7 +217,7 @@ async def create_task(
 @router.get("/summary")
 @router.get("/summary/")
 async def get_task_summary(
-    product_id: str | None = Query(None, description="Filter by product ID"),
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ):
@@ -250,7 +245,7 @@ async def get_task_summary(
 @router.get("/deleted", response_model=list[TaskResponse])
 @router.get("/deleted/", response_model=list[TaskResponse])
 async def list_deleted_tasks(
-    product_id: str | None = Query(None, description="Filter by product ID"),
+    product_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> list[TaskResponse]:
@@ -266,7 +261,7 @@ async def list_deleted_tasks(
 
 @router.get("/{task_id}/", response_model=TaskResponse)
 async def get_task(
-    task_id: str,
+    task_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
@@ -285,7 +280,7 @@ async def get_task(
 @router.patch("/{task_id}", response_model=TaskResponse)
 @router.put("/{task_id}/", response_model=TaskResponse)
 async def update_task(
-    task_id: str,
+    task_id: IdPath,
     task_update: TaskUpdate,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
@@ -293,11 +288,7 @@ async def update_task(
     """
     Update a task.
 
-    Users can update:
-    - Their own tasks (created_by_user_id == current_user.id)
-    - Tasks assigned to them (assigned_to_user_id == current_user.id)
-
-    Admins can update any task in their tenant.
+    Only the task's creator or an admin of the same tenant can update it.
 
     Args:
         task_id: Task ID to update
@@ -371,7 +362,7 @@ async def update_task(
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 @router.delete("/{task_id}/", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(
-    task_id: str,
+    task_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ):
@@ -401,7 +392,7 @@ async def delete_task(
 @router.post("/{task_id}/restore", response_model=TaskResponse)
 @router.post("/{task_id}/restore/", response_model=TaskResponse)
 async def restore_task(
-    task_id: str,
+    task_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
@@ -422,7 +413,7 @@ async def restore_task(
 @router.post("/{task_id}/convert", response_model=ProjectConversionResponse)
 @router.post("/{task_id}/convert/", response_model=ProjectConversionResponse)
 async def convert_task_to_project(
-    task_id: str,
+    task_id: IdPath,
     conversion_request: TaskConversionRequest,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),
@@ -474,7 +465,7 @@ async def convert_task_to_project(
 
 @router.patch("/{task_id}/status/", response_model=TaskResponse)
 async def change_task_status(
-    task_id: str,
+    task_id: IdPath,
     status_update: StatusUpdate,
     current_user: User = Depends(get_current_active_user),
     task_service: TaskService = Depends(get_task_service),

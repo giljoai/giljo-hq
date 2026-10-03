@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from mcp.server.mcpserver import Context
 from pydantic import Field
 
+from api.endpoints._boundary_types import LIST_ITEMS_MAX
 from api.endpoints.mcp_tools._base import (
     _HARNESS_PARAM_DESCRIPTION,
     MCP_HEAVY_TOOL_META,
@@ -38,7 +39,7 @@ from giljo_mcp.services.orchestrator_caller_guard import ORCHESTRATOR_ONLY
     annotations=_tool_hints("get_staging_instructions", destructive=True),
 )
 async def get_staging_instructions(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     harness: Annotated[str, Field(max_length=MCP_ID_MAX, description=_HARNESS_PARAM_DESCRIPTION)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
@@ -57,11 +58,11 @@ async def get_staging_instructions(
         "Persist an agent's mission/execution plan. Orchestrator-only, called during staging so a "
         "fresh-session orchestrator can retrieve it later via get_job_mission() during implementation."
     ),
-    annotations=_tool_hints("update_job_mission"),
+    annotations=_tool_hints("update_job_mission", destructive=True),
 )
 async def update_job_mission(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
-    mission: Annotated[str, Field(max_length=MCP_MISSION_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
+    mission: Annotated[str, Field(max_length=MCP_MISSION_MAX, description="The new mission text for this job.")],
     ctx: Context = None,
 ) -> dict[str, Any]:
     return await _call_tool(
@@ -84,17 +85,19 @@ async def update_job_mission(
     annotations=_tool_hints("report_progress", destructive=True),
 )
 async def report_progress(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     todo_items: Annotated[
         list[dict] | None,
         Field(
-            description="FULL TODO list (replaces existing). Each item: {content: str, status: 'pending'|'in_progress'|'completed'}. Include ALL items — completed + in_progress + pending. Never a partial list."
+            max_length=LIST_ITEMS_MAX,
+            description="FULL TODO list (replaces existing). Each item: {content: str, status: 'pending'|'in_progress'|'completed'}. Include ALL items — completed + in_progress + pending. Never a partial list.",
         ),
     ] = None,
     todo_append: Annotated[
         list[dict] | None,
         Field(
-            description="NEW items to append (does not replace). Same format as todo_items. Use this to add tasks discovered during work without overwriting existing list."
+            max_length=LIST_ITEMS_MAX,
+            description="NEW items to append (does not replace). Same format as todo_items. Use this to add tasks discovered during work without overwriting existing list.",
         ),
     ] = None,
     replace: Annotated[
@@ -127,23 +130,23 @@ async def report_progress(
     annotations=_tool_hints("complete_job", destructive=True),
 )
 async def complete_job(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     result: Annotated[
         dict,
         Field(
-            description="Completion result dict (validator-canonical shape, AgentExecutionResult): 'summary' (str, what was accomplished); 'artifacts' (list[str], optional); 'commits' (list[str], optional). artifacts and commits MUST be LISTS. Extra keys are allowed (e.g. files_changed, decisions_made)."
+            description="Completion result dict (validator-canonical shape, AgentExecutionResult): 'summary' (str, what was accomplished); 'artifacts' (list[str], optional); 'commits' (list[str], optional). artifacts and commits must be lists. Extra keys are allowed (e.g. files_changed, decisions_made)."
         ),
     ],
     acknowledge_closeout_todo: Annotated[
         bool,
         Field(
-            description="RETIRED: accepted-and-ignored. The self-referential closeout TODO auto-completes structurally on your closeout call whether or not this is passed; non-closeout TODOs still block either way. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
+            description="Retired and ignored: the closeout TODO completes on its own, and other open TODOs block either way. Do not pass it."
         ),
     ] = False,
     acknowledge_messages_on_complete: Annotated[
         bool,
         Field(
-            description="RETIRED: accepted-and-ignored. The messages gate blocks only on genuine action-required posts; drain them with get_thread_history() (unread_only=true, mark_read=true), act, and retry — there is no drain-bypass. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
+            description="Retired and ignored: only action-required posts block completion. Read them with get_thread_history(unread_only=true, mark_read=true), act, and retry. Do not pass it."
         ),
     ] = False,
     ctx: Context = None,
@@ -181,8 +184,8 @@ async def complete_job(
     annotations=_tool_hints("finalize_job", destructive=True),
 )
 async def finalize_job(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
-    caller_job_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
+    caller_job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Your own job id.")] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     try:
@@ -202,21 +205,25 @@ async def finalize_job(
 @mcp.tool(
     title="Resume Or Dismiss Job",
     description=(
-        "A finished job that receives a message needing action is put on hold. Use this to "
-        "say what happens next: 'resume' picks the work back up (then report_progress with "
-        "todo_append to add new steps -- do not overwrite completed ones), or 'dismiss' "
-        "acknowledges the message and leaves the job finished, when it was only for "
-        "information. Only works while the job is on hold."
+        "When a finished job receives a message that needs action, it is put on hold. This "
+        "tool answers that hold. 'resume' sets the job back to working so it can act on the "
+        "message. 'dismiss' acknowledges the message and sets the job back to finished, for "
+        "a message that was only information. It only changes the job's status in your own "
+        "private Giljo HQ workspace: nothing is deleted and no outside service is contacted. "
+        "It only works while the job is on hold."
     ),
     annotations=_tool_hints("resume_or_dismiss_job"),
 )
 async def resume_or_dismiss_job(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The job that is on hold.")],
     action: Annotated[
         Literal["resume", "dismiss"],
         Field(description="'resume' to pick the work back up, or 'dismiss' to acknowledge without resuming."),
     ],
-    reason: Annotated[str, Field(max_length=MCP_SHORT_TEXT_MAX)] = "",
+    reason: Annotated[
+        str,
+        Field(max_length=MCP_SHORT_TEXT_MAX, description="Optional note about the decision, kept in the server log."),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"job_id": job_id}
@@ -237,7 +244,7 @@ async def resume_or_dismiss_job(
     annotations=_tool_hints("set_agent_status"),
 )
 async def set_agent_status(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     status: Annotated[
         Literal["blocked", "idle", "sleeping"],
         Field(description="Target status: 'blocked', 'idle', or 'sleeping'. Other statuses are not valid here."),
@@ -246,7 +253,7 @@ async def set_agent_status(
         str,
         Field(
             max_length=MCP_SHORT_TEXT_MAX,
-            description="Human-readable reason. REQUIRED for 'blocked' status. Displayed on dashboard.",
+            description="Human-readable reason, shown on the dashboard. Needed when status is 'blocked'.",
         ),
     ] = "",
     wake_in_minutes: Annotated[
@@ -296,7 +303,7 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
     annotations=_tool_hints("get_job_mission"),
 )
 async def get_job_mission(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     protocol_etag: Annotated[
         str | None,
         Field(
@@ -375,7 +382,7 @@ async def spawn_job(
             description="Agent template name from agent_templates list, e.g. 'implementer-backend', 'code-reviewer'.",
         ),
     ],
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
     mission: Annotated[
         str,
         Field(
@@ -451,7 +458,7 @@ async def spawn_job(
     annotations=_tool_hints("get_agent_result"),
 )
 async def get_agent_result(
-    job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Job id.")],
     ctx: Context = None,
 ) -> dict[str, Any]:
     return await _call_tool(ctx, "get_agent_result", {"job_id": job_id})
@@ -469,8 +476,8 @@ async def get_agent_result(
     annotations=_tool_hints("get_workflow_status"),
 )
 async def get_workflow_status(
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
-    exclude_job_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")],
+    exclude_job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="A job to leave out of the counts.")] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"project_id": project_id}

@@ -5,6 +5,7 @@
 
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_db
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
-
-from .crud_ops import (
+from giljo_mcp.services.taxonomy_ops import (
     create_taxonomy_type,
     delete_taxonomy_type,
     ensure_default_types_seeded,
@@ -21,11 +21,26 @@ from .crud_ops import (
     list_taxonomy_types,
     update_taxonomy_type,
 )
+
 from .schemas import TaxonomyTypeCreate, TaxonomyTypeResponse, TaxonomyTypeUpdate
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _to_response(tt: Any, project_count: int) -> TaxonomyTypeResponse:
+    return TaxonomyTypeResponse(
+        id=str(tt.id),
+        tenant_key=tt.tenant_key,
+        abbreviation=tt.abbreviation,
+        label=tt.label,
+        color=tt.color,
+        sort_order=tt.sort_order,
+        project_count=project_count,
+        created_at=tt.created_at,
+        updated_at=tt.updated_at,
+    )
 
 
 @router.get("/", response_model=list[TaxonomyTypeResponse])
@@ -42,20 +57,7 @@ async def list_types(
     await ensure_default_types_seeded(session, tenant_key)
 
     types = await list_taxonomy_types(session, tenant_key)
-    return [
-        TaxonomyTypeResponse(
-            id=str(tt.id),
-            tenant_key=tt.tenant_key,
-            abbreviation=tt.abbreviation,
-            label=tt.label,
-            color=tt.color,
-            sort_order=tt.sort_order,
-            project_count=tt.project_count,
-            created_at=tt.created_at,
-            updated_at=tt.updated_at,
-        )
-        for tt in types
-    ]
+    return [_to_response(tt, tt.project_count) for tt in types]
 
 
 @router.post("/", response_model=TaxonomyTypeResponse, status_code=status.HTTP_201_CREATED)
@@ -79,17 +81,7 @@ async def create_type(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Taxonomy type already exists.") from None
 
-    return TaxonomyTypeResponse(
-        id=str(tt.id),
-        tenant_key=tt.tenant_key,
-        abbreviation=tt.abbreviation,
-        label=tt.label,
-        color=tt.color,
-        sort_order=tt.sort_order,
-        project_count=0,
-        created_at=tt.created_at,
-        updated_at=tt.updated_at,
-    )
+    return _to_response(tt, 0)
 
 
 @router.put("/{type_id}", response_model=TaxonomyTypeResponse)
@@ -110,17 +102,7 @@ async def update_type(
 
     count = await get_project_count_for_type(session, tenant_key, type_id)
 
-    return TaxonomyTypeResponse(
-        id=str(tt.id),
-        tenant_key=tt.tenant_key,
-        abbreviation=tt.abbreviation,
-        label=tt.label,
-        color=tt.color,
-        sort_order=tt.sort_order,
-        project_count=count,
-        created_at=tt.created_at,
-        updated_at=tt.updated_at,
-    )
+    return _to_response(tt, count)
 
 
 @router.delete("/{type_id}", status_code=status.HTTP_204_NO_CONTENT)

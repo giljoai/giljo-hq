@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import String, and_, asc, cast, delete, desc, func, or_, select, text, true
+from sqlalchemy import String, and_, asc, cast, delete, desc, func, or_, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -170,6 +170,20 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             select(Project).where(and_(Project.id == project_id, Project.tenant_key == tenant_key))
         )
         return result.scalar_one_or_none()
+
+    async def stamp_reviewed(self, session: AsyncSession, tenant_key: str, project_id: str) -> None:
+        await session.execute(
+            update(Project)
+            .where(Project.id == project_id, Project.tenant_key == tenant_key, Project.reviewed_at.is_(None))
+            .values(reviewed_at=func.now())
+            .execution_options(synchronize_session=False)
+        )
+
+    async def project_type_exists(self, session: AsyncSession, tenant_key: str, type_id: str) -> bool:
+        result = await session.execute(
+            select(TaxonomyType.id).where(TaxonomyType.tenant_key == tenant_key, TaxonomyType.id == type_id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def get_project_type_by_label(
         self,

@@ -6,6 +6,7 @@
 
 import logging
 from collections import Counter, defaultdict
+from contextlib import nullcontext
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from giljo_mcp.schemas.service_responses import JobListResult
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.not_picked_up import not_picked_up_job_ids
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
+from giljo_mcp.services.silence_detector import stale_orchestrator_states
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -75,8 +77,11 @@ class JobQueryService:
                 )
 
                 not_picked_up = await self._not_picked_up_executions(session, tenant_key, rows)
+                orchestrator_states = await self._orchestrator_states(session, tenant_key, rows)
                 job_dicts = [
-                    self._build_job_dict(execution, job, live_unread, live_action_required, not_picked_up)
+                    self._build_job_dict(
+                        execution, job, live_unread, live_action_required, not_picked_up, orchestrator_states
+                    )
                     for execution, job in rows
                 ]
 
@@ -128,7 +133,10 @@ class JobQueryService:
                     )
 
                 not_picked_up = await self._not_picked_up_executions(session, tenant_key, [(execution, job)])
-                return self._build_job_dict(execution, job, live_unread, live_action_required, not_picked_up)
+                orchestrator_states = await self._orchestrator_states(session, tenant_key, [(execution, job)])
+                return self._build_job_dict(
+                    execution, job, live_unread, live_action_required, not_picked_up, orchestrator_states
+                )
 
         except ResourceNotFoundError:
             raise
@@ -167,6 +175,21 @@ class JobQueryService:
             flagged |= await not_picked_up_job_ids(session, tenant_key, project, by_project[str(project.id)], cadence)
         return flagged
 
+    async def _orchestrator_states(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        rows: list[tuple[AgentExecution, AgentJob]],
+    ) -> dict:
+        project_ids = sorted(
+            {
+                str(job.project_id)
+                for execution, job in rows
+                if execution.status == "silent" and job.job_type == "orchestrator" and job.project_id
+            }
+        )
+        return await stale_orchestrator_states(session, tenant_key, project_ids=project_ids)
+
     def _build_job_dict(
         self,
         execution: AgentExecution,
@@ -174,6 +197,7 @@ class JobQueryService:
         live_unread: dict,
         live_action_required: dict,
         not_picked_up: set[str] | None = None,
+        orchestrator_states: dict | None = None,
     ) -> dict:
         self._logger.debug(
             f"[LIST_JOBS DEBUG] Agent {execution.agent_display_name} (job={job.job_id}, agent={execution.agent_id}): "
@@ -222,6 +246,9 @@ class JobQueryService:
             "working_started_at": execution.working_started_at.isoformat() if execution.working_started_at else None,
             "not_picked_up": execution.id in (not_picked_up or set()),
             "activity": activity_word(execution.status, Counter(item.status for item in job.todo_items or [])),
+            "orchestrator_state": (
+                state.model_dump() if (state := (orchestrator_states or {}).get(job.job_id)) is not None else None
+            ),
         }
 
     async def get_job_messages(
@@ -298,10 +325,8 @@ class JobQueryService:
         session: AsyncSession | None = None,
     ) -> AgentExecution | None:
         repo = AgentJobRepository(None)
-        if session is not None:
-            return await repo.get_execution_by_agent_id(session=session, tenant_key=tenant_key, agent_id=agent_id)
-        async with self._get_session(tenant_key) as new_session:
-            return await repo.get_execution_by_agent_id(session=new_session, tenant_key=tenant_key, agent_id=agent_id)
+        async with nullcontext(session) if session is not None else self._get_session(tenant_key) as active:
+            return await repo.get_execution_by_agent_id(session=active, tenant_key=tenant_key, agent_id=agent_id)
 
     async def get_execution_by_job_id(
         self,
@@ -310,10 +335,8 @@ class JobQueryService:
         session: AsyncSession | None = None,
     ) -> AgentExecution | None:
         repo = AgentJobRepository(None)
-        if session is not None:
-            return await repo.get_execution_by_job_id(session=session, tenant_key=tenant_key, job_id=job_id)
-        async with self._get_session(tenant_key) as new_session:
-            return await repo.get_execution_by_job_id(session=new_session, tenant_key=tenant_key, job_id=job_id)
+        async with nullcontext(session) if session is not None else self._get_session(tenant_key) as active:
+            return await repo.get_execution_by_job_id(session=active, tenant_key=tenant_key, job_id=job_id)
 
     async def get_agent_job_by_job_id(
         self,
@@ -322,10 +345,8 @@ class JobQueryService:
         session: AsyncSession | None = None,
     ) -> AgentJob | None:
         repo = AgentJobRepository(None)
-        if session is not None:
-            return await repo.get_agent_job_by_job_id(session=session, tenant_key=tenant_key, job_id=job_id)
-        async with self._get_session(tenant_key) as new_session:
-            return await repo.get_agent_job_by_job_id(session=new_session, tenant_key=tenant_key, job_id=job_id)
+        async with nullcontext(session) if session is not None else self._get_session(tenant_key) as active:
+            return await repo.get_agent_job_by_job_id(session=active, tenant_key=tenant_key, job_id=job_id)
 
     async def get_latest_execution_for_job(
         self,
@@ -334,7 +355,5 @@ class JobQueryService:
         session: AsyncSession | None = None,
     ) -> AgentExecution | None:
         repo = AgentJobRepository(None)
-        if session is not None:
-            return await repo.get_latest_execution_for_job(session=session, tenant_key=tenant_key, job_id=job_id)
-        async with self._get_session(tenant_key) as new_session:
-            return await repo.get_latest_execution_for_job(session=new_session, tenant_key=tenant_key, job_id=job_id)
+        async with nullcontext(session) if session is not None else self._get_session(tenant_key) as active:
+            return await repo.get_latest_execution_for_job(session=active, tenant_key=tenant_key, job_id=job_id)

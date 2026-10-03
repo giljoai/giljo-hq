@@ -9,6 +9,7 @@ from typing import Any
 
 from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.config_manager import get_config
+from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
@@ -47,7 +48,7 @@ class StagingPromptBuilder:
         auth_note = "(authenticated)" if api_key_configured else "(check config.yaml for API key)"
 
         toolsearch_bootstrap = ""
-        if tool == "claude-code":
+        if tool == HARNESS_CLAUDE_CODE:
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
                 "Claude Code defers MCP tool schemas. You CANNOT call any\n"
@@ -60,7 +61,7 @@ class StagingPromptBuilder:
 
         todo_tracking_line = (
             "Claude Code: Use TodoWrite tool to track workflow progress."
-            if tool == "claude-code"
+            if tool == HARNESS_CLAUDE_CODE
             else "Use your task list to track workflow progress."
         )
 
@@ -138,7 +139,7 @@ Begin by verifying MCP connection, then fetch complete context, and CREATE the m
         tool: str = "universal",
     ) -> str:
         toolsearch_bootstrap = ""
-        if tool == "claude-code":
+        if tool == HARNESS_CLAUDE_CODE:
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
                 "Claude Code defers MCP tool schemas. You CANNOT call any\n"

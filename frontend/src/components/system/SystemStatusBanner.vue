@@ -95,7 +95,7 @@
           @cta="onIntegCta"
           @dismiss="dismissIntegRow"
         >
-          Enable Git and Serena MCP in your connect settings to give your agents more context.
+          Enable Git in your connect settings to give your agents more context.
         </OnboardingNudgeRow>
 
         <OnboardingNudgeRow
@@ -273,7 +273,6 @@ const {
 } = useOnboardingReminders()
 const {
   gitEnabled,
-  serenaEnabled,
   resolved: integStatusResolved,
   refresh: refreshIntegrationStatus,
 } = useIntegrationStatus({
@@ -290,7 +289,7 @@ const showIntegRow = computed(
     !integHidden.value &&
     integStatusResolved.value &&
     integReminderCheck.value(hasProjects.value) &&
-    !(gitEnabled.value && serenaEnabled.value),
+    !gitEnabled.value,
 )
 const showAgentRow = computed(() => !agentHidden.value && agentReminderCheck.value(hasCompletedProject.value))
 
@@ -343,7 +342,7 @@ async function loadNudgeInputs() {
     try {
       await refreshIntegrationStatus()
     } catch {
-      /* keep git/serena false */
+      /* keep git false */
     }
   }
 }

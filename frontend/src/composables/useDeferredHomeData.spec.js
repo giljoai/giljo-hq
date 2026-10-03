@@ -15,7 +15,7 @@ vi.mock('@/services/api', () => {
   return { api: apiObj, default: apiObj }
 })
 vi.mock('@/composables/useIntegrationStatus', () => ({
-  useIntegrationStatus: () => ({ gitEnabled: ref(false), serenaEnabled: ref(false), refresh: vi.fn() }),
+  useIntegrationStatus: () => ({ gitEnabled: ref(false), refresh: vi.fn() }),
 }))
 
 import api from '@/services/api'
@@ -80,8 +80,7 @@ describe('useDeferredHomeData — the crew read is product-scoped', () => {
     await nextTick()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(templates.value.map((t) => t.id)).toEqual([1, 2])
-    expect(templates.value.every((t) => t.product_active === false)).toBe(true)
+    expect(templates.value).toEqual([])
   })
 
   it('still reports the slot cap from the server rather than a hardcoded default', async () => {

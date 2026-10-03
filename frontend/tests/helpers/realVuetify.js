@@ -69,10 +69,9 @@ function toKebab(name) {
 
 /**
  * Builds a real Vuetify plugin instance (bypassing tests/setup.js's mocks for
- * this call only, via `vi.importActual`). Use its return value as a
- * `global.plugins` entry in place of the usual mocked `createVuetify()`.
+ * this call only, via `vi.importActual`) for withRealVuetify.
  */
-export async function createRealVuetify(options = {}) {
+async function createRealVuetify(options = {}) {
   const [{ createVuetify }, components, directives] = await Promise.all([
     vi.importActual('vuetify'),
     vi.importActual('vuetify/components'),

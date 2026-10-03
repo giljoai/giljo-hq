@@ -208,34 +208,27 @@ class ProgressService:
         todo_items_payload: list[dict] | None,
         product_id: str | None = None,
     ) -> None:
-        try:
-            if self._websocket_manager:
-                await self._websocket_manager.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="job:progress_update",
-                    data={
-                        "job_id": job_id,
-                        "project_id": str(job.project_id) if job.project_id else None,
-                        "product_id": product_id,
-                        "chain_conductor": bool(
-                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                        ),
-                        "agent_id": execution.agent_id,
-                        "agent_display_name": execution.agent_display_name,
-                        "agent_name": execution.agent_name,
-                        "progress": progress,
-                        "progress_percent": execution.progress,
-                        "current_task": execution.current_task,
-                        "todo_steps": job.job_metadata.get("todo_steps") if job.job_metadata else None,
-                        "todo_items": todo_items_payload,
-                        "last_progress_at": execution.last_progress_at.isoformat()
-                        if execution.last_progress_at
-                        else None,
-                    },
-                )
-                self._logger.info(f"[WEBSOCKET] Broadcasted job:progress_update for {job_id}")
-        except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-            self._logger.warning(f"[WEBSOCKET] Failed to broadcast progress: {ws_error}")
+        if self._websocket_manager:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="job:progress_update",
+                data={
+                    "job_id": job_id,
+                    "project_id": str(job.project_id) if job.project_id else None,
+                    "product_id": product_id,
+                    "chain_conductor": bool((getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)),
+                    "agent_id": execution.agent_id,
+                    "agent_display_name": execution.agent_display_name,
+                    "agent_name": execution.agent_name,
+                    "progress": progress,
+                    "progress_percent": execution.progress,
+                    "current_task": execution.current_task,
+                    "todo_steps": job.job_metadata.get("todo_steps") if job.job_metadata else None,
+                    "todo_items": todo_items_payload,
+                    "last_progress_at": execution.last_progress_at.isoformat() if execution.last_progress_at else None,
+                },
+            )
+            self._logger.info(f"[WEBSOCKET] Broadcasted job:progress_update for {job_id}")
 
     def _derive_progress_dict(
         self,
@@ -284,6 +277,15 @@ class ProgressService:
 
         if todo_items is None and "todo_items" in progress:
             todo_items = progress.get("todo_items")
+
+        for field, items in (("todo_items", todo_items), ("todo_append", todo_append)):
+            for item in items or []:
+                status = item.get("status") if isinstance(item, dict) else None
+                if status is not None and status not in _VALID_TODO_STATUSES:
+                    raise ValidationError(
+                        message=f"Unknown TODO status {status!r} in {field}. Valid: {list(_VALID_TODO_STATUSES)}",
+                        context={"method": "report_progress", "field": field, "status": str(status)[:50]},
+                    )
 
         return progress, todo_items
 
@@ -449,18 +451,23 @@ class ProgressService:
                 await self._repo.delete_todo_items(session, tenant_key, job_id)
 
                 for content, status, seq in normalized_incoming:
-                    todo_item = AgentTodoItem(
-                        job_id=job_id,
-                        tenant_key=tenant_key,
-                        content=content,
-                        status=status,
-                        sequence=seq,
-                        todo_kind=classify_todo_kind(content),
-                    )
-                    await self._repo.add_todo_item(session, todo_item)
+                    await self._add_todo_row(session, job_id, tenant_key, content, status, seq)
 
         if isinstance(todo_append, list) and len(todo_append) > 0:
             await self._append_todo_items(session, job, job_id, tenant_key, todo_append)
+
+    async def _add_todo_row(
+        self, session: AsyncSession, job_id: str, tenant_key: str, content: str, status: str, sequence: int
+    ) -> None:
+        todo_item = AgentTodoItem(
+            job_id=job_id,
+            tenant_key=tenant_key,
+            content=content,
+            status=status,
+            sequence=sequence,
+            todo_kind=classify_todo_kind(content),
+        )
+        await self._repo.add_todo_item(session, todo_item)
 
     async def _append_todo_items(
         self,
@@ -475,20 +482,10 @@ class ProgressService:
         appended_count = 0
         for i, item in enumerate(todo_append):
             if isinstance(item, dict) and item.get("content"):
-                status = item.get("status", "pending")
-                if status not in ("pending", "in_progress", "completed", "skipped"):
-                    status = "pending"
-
-                content = str(item["content"])[:255]
-                todo_item = AgentTodoItem(
-                    job_id=job_id,
-                    tenant_key=tenant_key,
-                    content=content,
-                    status=status,
-                    sequence=max_seq + 1 + i,
-                    todo_kind=classify_todo_kind(content),
+                status = _normalize_todo_status(item.get("status", "pending"))
+                await self._add_todo_row(
+                    session, job_id, tenant_key, str(item["content"])[:255], status, max_seq + 1 + i
                 )
-                await self._repo.add_todo_item(session, todo_item)
                 appended_count += 1
 
         if appended_count > 0:
@@ -522,31 +519,22 @@ class ProgressService:
         product_id: str | None = None,
     ) -> ProgressResult:
         if blocked_to_working and self._websocket_manager:
-            try:
-                await self._websocket_manager.broadcast_to_tenant(
-                    tenant_key=tenant_key,
-                    event_type="agent:status_changed",
-                    data={
-                        "job_id": str(job_id),
-                        "agent_display_name": execution.agent_display_name or "unknown",
-                        "old_status": old_resting_status or "blocked",
-                        "status": "working",
-                        "project_id": str(job.project_id),
-                        "chain_conductor": bool(
-                            (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                        ),
-                        "duration_seconds": execution.duration_seconds,
-                        "working_started_at": execution.working_started_at.isoformat()
-                        if execution.working_started_at
-                        else None,
-                    },
-                )
-            except Exception as _exc:
-                self._logger.exception(
-                    "Failed to broadcast %s->working for agent %s",
-                    old_resting_status or "blocked",
-                    execution.agent_id,
-                )
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="agent:status_changed",
+                data={
+                    "job_id": str(job_id),
+                    "agent_display_name": execution.agent_display_name or "unknown",
+                    "old_status": old_resting_status or "blocked",
+                    "status": "working",
+                    "project_id": str(job.project_id),
+                    "chain_conductor": bool((getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)),
+                    "duration_seconds": execution.duration_seconds,
+                    "working_started_at": execution.working_started_at.isoformat()
+                    if execution.working_started_at
+                    else None,
+                },
+            )
 
         await self._fetch_and_broadcast_progress(
             tenant_key, job_id, job, execution, progress, todo_items_payload, product_id=product_id

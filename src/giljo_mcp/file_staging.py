@@ -97,23 +97,6 @@ class FileStaging:
                 raise
             return (None, msg)
 
-    async def cleanup(self, tenant_key: str, token: str) -> bool:
-        try:
-            staging_dir = self.base_path / tenant_key / token
-
-            if not staging_dir.exists():
-                logger.debug(f"Staging directory already removed: {staging_dir}")
-                return True
-
-            shutil.rmtree(staging_dir)
-
-            logger.debug(f"Cleaned up staging directory: {staging_dir}")
-            return True
-
-        except (OSError, RuntimeError) as e:
-            logger.warning(f"Error cleaning up staging directory: {e}")
-            return False
-
     async def purge_token_dir(self, tenant_key: str, token: str) -> bool:
         if not tenant_key or ".." in tenant_key or "/" in tenant_key or "\\" in tenant_key:
             logger.error("Refusing staging-dir purge: invalid tenant_key (path traversal)")

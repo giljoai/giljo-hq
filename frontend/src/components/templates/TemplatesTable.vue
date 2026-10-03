@@ -28,11 +28,7 @@
     <template #item.role="{ item }">
       <span
         class="template-role-badge"
-        :style="{
-          backgroundColor: hexToRgba(getCategoryColor(item.role), 0.15),
-          color: getCategoryColor(item.role),
-          opacity: rowActive(item) ? 1 : 0.4,
-        }"
+        :style="{ ...tintedStyle(getCategoryColor(item.role)), opacity: rowActive(item) ? 1 : 0.4 }"
       >
         {{ item.role }}
       </span>
@@ -183,7 +179,7 @@
 <script setup>
 import { format } from 'date-fns'
 import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { tintedStyle } from '@/utils/colorUtils'
 import {
   templateUpdatedState,
   templateRowActive,
@@ -218,10 +214,6 @@ const props = defineProps({
   userAgentLimit: {
     type: Number,
     default: 7,
-  },
-  showAllProducts: {
-    type: Boolean,
-    default: false,
   },
   viewedProductId: {
     type: String,
@@ -330,28 +322,6 @@ const rowActive = (item) => templateRowActive(item)
 
 :deep(.v-table) {
   background: transparent;
-}
-
-// Custom toggle colors: green when ON, faded blue when OFF
-// Duplicated from container (scoped CSS stamps only the owner file's leaf nodes)
-.v-switch {
-  :deep(.v-switch__thumb) {
-    background-color: rgba(33, 150, 243, 0.4); // Faded blue when OFF
-  }
-
-  :deep(.v-switch__track) {
-    background-color: rgba(33, 150, 243, 0.2); // Faded blue track when OFF
-  }
-}
-
-.v-switch :deep(.v-selection-control--dirty) {
-  .v-switch__thumb {
-    background-color: rgb(var(--v-theme-success));
-  }
-
-  .v-switch__track {
-    background-color: rgba(76, 175, 80, 0.3); // Green track when ON
-  }
 }
 
 // Inactive template row styling

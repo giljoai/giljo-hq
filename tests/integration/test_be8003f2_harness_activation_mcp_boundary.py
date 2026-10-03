@@ -127,7 +127,9 @@ async def _seed_chain_project(db_session, tenant_key: str) -> str:
     return project.id
 
 
-async def _seed_impl_worker(db_session, tenant_key: str, product_id: str) -> str:
+async def _seed_impl_worker(
+    db_session, tenant_key: str, product_id: str, role: str = "implementer", mode: str = "multi_terminal"
+) -> str:
     now = datetime.now(UTC)
     project = Project(
         id=str(uuid.uuid4()),
@@ -138,7 +140,7 @@ async def _seed_impl_worker(db_session, tenant_key: str, product_id: str) -> str
         mission="ship it",
         status="active",
         series_number=uuid.uuid4().int % 9000 + 1,
-        execution_mode="multi_terminal",
+        execution_mode=mode,
         staging_status="staging_complete",
         implementation_launched_at=now,
         created_at=now,
@@ -151,7 +153,7 @@ async def _seed_impl_worker(db_session, tenant_key: str, product_id: str) -> str
         job_id=str(uuid.uuid4()),
         tenant_key=tenant_key,
         project_id=project.id,
-        job_type="implementer",
+        job_type=role,
         mission="BE-8003f2 worker mission",
         status="active",
         created_at=now,
@@ -164,7 +166,7 @@ async def _seed_impl_worker(db_session, tenant_key: str, product_id: str) -> str
         agent_id=str(uuid.uuid4()),
         job_id=job.job_id,
         tenant_key=tenant_key,
-        agent_display_name="implementer",
+        agent_display_name=role,
         status="waiting",
         started_at=now,
     )
@@ -257,3 +259,112 @@ async def test_get_staging_instructions_default_and_garbage_degrade_to_cli(mcp_c
     assert _INLINE not in capability, (
         f"CLI conductor render (harness={harness!r}) must NOT carry the inline-conducting marker"
     )
+
+
+
+_CONDUCTOR_CLI_ONLY = ("SUB-ORCH SPAWN", "sleep 1 60", "Start-Sleep", "wait_seconds=45", "CH6")
+
+
+async def _launched_conductor_protocol(mcp_client, db_session, tenant_key, monkeypatch, harness: str) -> str:
+    from api.endpoints.mcp_tools import _base
+
+    monkeypatch.setattr(_base, "_resolve_user_id", lambda ctx: "test-human-user")
+    await _seed_product(db_session, tenant_key)
+    p1 = await _seed_chain_project(db_session, tenant_key)
+    p2 = await _seed_chain_project(db_session, tenant_key)
+    await db_session.commit()
+
+    async with mcp_client() as session:
+        conductor_job_id = await _start_chain_and_get_conductor(session, p1, p2)
+        pressed = await session.call_tool("launch_implementation", {"project_id": p1})
+        assert pressed.is_error is False, _error_text(pressed)
+        result = await session.call_tool("get_job_mission", {"job_id": conductor_job_id, "harness": harness})
+        assert result.is_error is False, _error_text(result)
+        payload = _payload(result)
+
+    assert not payload.get("blocked"), payload.get("error")
+    return payload["full_protocol"]
+
+
+async def test_get_job_mission_desktop_app_conductor_gets_no_terminal_instructions(
+    mcp_client, db_session, tenant_key, monkeypatch
+):
+    protocol = await _launched_conductor_protocol(mcp_client, db_session, tenant_key, monkeypatch, "desktop_app")
+
+    assert _INLINE in protocol
+    assert "STEP A — CONDUCT P_i INLINE" in protocol
+    assert "COORDINATING FROM A DESKTOP APP SESSION" in protocol
+    leaked = [marker for marker in _CONDUCTOR_CLI_ONLY if marker in protocol]
+    assert not leaked, f"desktop_app conductor leaked {leaked}"
+
+
+async def test_get_job_mission_cli_conductor_keeps_terminal_instructions(
+    mcp_client, db_session, tenant_key, monkeypatch
+):
+    protocol = await _launched_conductor_protocol(mcp_client, db_session, tenant_key, monkeypatch, "")
+
+    assert _INLINE not in protocol
+    for marker in _CONDUCTOR_CLI_ONLY:
+        assert marker in protocol, f"CLI conductor lost {marker!r}"
+
+
+
+_SOLO_CLI_ONLY = ("sleep-and-check", "I can sleep and re-check", "sleep 1 ", "Start-Sleep", "wait_seconds=45", "CH6")
+_SOLO_WORKER_START = "The USER opens each agent's new session"
+
+
+async def _solo_orchestrator_protocol(
+    mcp_client, db_session, tenant_key, harness: str, mode: str = "multi_terminal"
+) -> str:
+    product_id = await _seed_product(db_session, tenant_key)
+    job_id = await _seed_impl_worker(db_session, tenant_key, product_id, role="orchestrator", mode=mode)
+
+    async with mcp_client() as session:
+        result = await session.call_tool("get_job_mission", {"job_id": job_id, "harness": harness})
+        assert result.is_error is False, _error_text(result)
+        payload = _payload(result)
+
+    assert not payload.get("blocked"), payload.get("error")
+    return payload["full_protocol"]
+
+
+async def test_get_job_mission_desktop_app_solo_orchestrator_gets_no_sleep_orders(mcp_client, db_session, tenant_key):
+    protocol = await _solo_orchestrator_protocol(mcp_client, db_session, tenant_key, "desktop_app")
+
+    assert "COORDINATING FROM A DESKTOP APP SESSION" in protocol
+    assert _SOLO_WORKER_START in protocol
+    leaked = [marker for marker in _SOLO_CLI_ONLY if marker in protocol]
+    assert not leaked, f"desktop_app solo orchestrator leaked {leaked}"
+
+
+async def test_get_job_mission_cli_solo_orchestrator_keeps_its_wait_orders(mcp_client, db_session, tenant_key):
+    protocol = await _solo_orchestrator_protocol(mcp_client, db_session, tenant_key, "")
+
+    assert "COORDINATING FROM A" not in protocol
+    assert _SOLO_WORKER_START in protocol
+    for marker in _SOLO_CLI_ONLY:
+        assert marker in protocol, f"CLI solo orchestrator lost {marker!r}"
+
+
+_SUBAGENT_SLEEP_OFFER = ("I can sleep and re-check", "Then sleep for the specified interval", "wake_in_minutes=15")
+_SUBAGENT_WORKER_START = "I will spawn each agent directly via"
+
+
+async def test_get_job_mission_desktop_app_solo_subagent_orchestrator_gets_no_sleep_offer(
+    mcp_client, db_session, tenant_key
+):
+    protocol = await _solo_orchestrator_protocol(mcp_client, db_session, tenant_key, "desktop_app", mode="subagent")
+
+    assert "COORDINATING FROM A DESKTOP APP SESSION" in protocol
+    assert _SUBAGENT_WORKER_START in protocol
+    leaked = [marker for marker in _SUBAGENT_SLEEP_OFFER if marker in protocol]
+    assert not leaked, f"desktop_app solo subagent orchestrator leaked {leaked}"
+
+
+async def test_get_job_mission_cli_solo_subagent_orchestrator_keeps_its_sleep_offer(mcp_client, db_session, tenant_key):
+    protocol = await _solo_orchestrator_protocol(mcp_client, db_session, tenant_key, "", mode="subagent")
+
+    assert "COORDINATING FROM A" not in protocol
+    assert _SUBAGENT_WORKER_START in protocol
+    for marker in _SUBAGENT_SLEEP_OFFER:
+        assert marker in protocol, f"CLI solo subagent orchestrator lost {marker!r}"

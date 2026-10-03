@@ -80,7 +80,6 @@
         </template>
         <v-list density="compact">
           <v-list-item
-            title="New task"
             aria-label="Create new task"
             data-testid="new-task-menu-item"
             @click="handleNewTask"
@@ -88,7 +87,6 @@
             <v-list-item-title>New task</v-list-item-title>
           </v-list-item>
           <v-list-item
-            title="New Agent Handover"
             aria-label="Create new agent handover"
             data-testid="new-handover-menu-item"
             @click="handleNewHandover"
@@ -110,7 +108,7 @@
     <BulkActionBar
       :count="bulk.count.value"
       :page-count="pageCount"
-      :matching-total="hierarchicalTasks.length"
+      :matching-total="filteredTasks.length"
       :all-matching="bulk.allMatching.value"
       :can-archive="canArchive"
       :can-unarchive="canUnarchive"
@@ -125,7 +123,7 @@
     />
 
     <TasksTable
-      :tasks="hierarchicalTasks"
+      :tasks="filteredTasks"
       :selected-ids="bulk.selectedIds.value"
       :loading="loading"
       :status-select-options="statusSelectOptions"
@@ -305,8 +303,6 @@ const {
   clearFilters,
 } = useTaskFilters(userFilteredTasks)
 
-const hierarchicalTasks = computed(() => filteredTasks.value)
-
 const {
   bulk,
   busy: bulkBusy,
@@ -319,7 +315,7 @@ const {
   unarchiveSelected,
   deleteSelected,
 } = useTaskBulkActions({
-  visibleTasks: hierarchicalTasks,
+  visibleTasks: filteredTasks,
   filterKeys: computed(() => [search.value, statusFilter.value, priorityFilter.value]),
 })
 
@@ -366,17 +362,10 @@ function handleNewTask() {
   }
 }
 
-async function handleNewHandover() {
-  if (!productStore.effectiveProductId) {
+function handleNewHandover() {
+  const result = openHandoverDialog()
+  if (result?.noProduct) {
     showNoProductDialog.value = true
-    return
-  }
-  try {
-    const response = await api.settings.getHandoverTemplate()
-    openHandoverDialog(response?.data?.handover_template || '')
-  } catch (error) {
-    console.error('[TASKS] Failed to load the handover template:', error)
-    showToast({ message: 'Failed to load the handover template. Please try again.', type: 'error' })
   }
 }
 

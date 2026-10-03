@@ -105,9 +105,13 @@ class _RecordingWS:
 
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.other_events: list[tuple[str, str]] = []
 
     async def broadcast_event_to_tenant(self, tenant_key: str, event: dict[str, Any]) -> None:
         self.events.append((tenant_key, event))
+
+    async def broadcast_to_tenant(self, tenant_key: str, event_type: str, data: dict[str, Any]) -> None:
+        self.other_events.append((tenant_key, event_type))
 
 
 
@@ -353,6 +357,30 @@ async def test_rejects_one_member_chain(chain_mcp_client, db_session, primary_te
 
     assert payload["success"] is False
     assert payload["error"] == "CHAIN_TOO_SMALL"
+
+
+async def test_link_projects_takes_ten_members_and_refuses_eleven(chain_mcp_client, db_session, primary_tenant_key):
+    new_client, _switch = chain_mcp_client
+    await _seed_product_context(db_session, primary_tenant_key)
+    members = [await _seed_project(db_session, primary_tenant_key) for _ in range(11)]
+    await db_session.commit()
+
+    async with new_client() as session:
+        too_many = await session.call_tool(
+            "link_projects",
+            {"project_ids": members, "execution_mode": "multi_terminal"},
+        )
+        ten = await session.call_tool(
+            "link_projects",
+            {"project_ids": members[:10], "execution_mode": "multi_terminal"},
+        )
+
+    assert too_many.is_error is True
+    assert "maximum of 10 projects" in _error_text(too_many)
+    assert ten.is_error is False, _error_text(ten)
+    payload = _payload(ten)
+    assert payload["success"] is True
+    assert payload["run"]["project_ids"] == members[:10]
 
 
 async def test_rejects_non_permutation_resolved_order(chain_mcp_client, db_session, primary_tenant_key):

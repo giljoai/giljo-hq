@@ -36,7 +36,7 @@ html {
 }
 
 html {
-  /* Disable transitions during theme initialization */
+  /* Smooth theme colour changes; .no-transition turns them off during theme initialization */
   transition:
     background-color 0.3s,
     color 0.3s;

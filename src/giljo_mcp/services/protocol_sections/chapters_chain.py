@@ -47,7 +47,6 @@ def _ch_capability_preset(mode: str, preset: Platform) -> str:
 
 def _build_ch_capability(
     execution_mode: str | None,
-    can_spawn_terminals: bool,
     preset: Platform | None = None,
 ) -> str:
     mode = (execution_mode or "multi_terminal").strip() or "multi_terminal"
@@ -310,6 +309,42 @@ def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform 
     subagent mode (CH_CAPABILITY clause 4). NEVER silently downgrade."""
 
 
+def _chain_drive_loop_fragments(preset: Platform | None) -> tuple[str, str, str, str]:
+    if preset is None:
+        return (
+            """You are the SOLE spawner. Sub-orchestrators never spawn each other — you spawn each one, and
+each runs FREE (there is NO per-project gate; your spawn IS the release). One project at a
+time; NEVER batch-unlock / spawn the tail.""",
+            """P_i's sub-orch runs FREE (STEP A released it); it self-stages, implements, commits, and
+    writes its closeout.""",
+            """PARK
+    AND SELF-PACE the poll loop. CAUTION (CLI): set_agent_status(status="sleeping",
+    wake_in_minutes=N) only sets the DASHBOARD label -- it does NOT re-invoke you, so calling
+    it then stopping STALLS the whole chain. Drive your OWN wake: launch a short BACKGROUND sleep
+    whose completion re-enters you -- Bash: run_in_background `sleep 1 60` (sleep sums its
+    args; the harness inspects only the first); PowerShell: run_in_background `Start-Sleep
+    -Seconds 60`. You MAY also set_agent_status(status="sleeping", wake_in_minutes=1) for the
+    label, but the BACKGROUND SLEEP is what wakes you. On each wake:""",
+            "ready_to_advance False → start ANOTHER background sleep and poll again (never sleep-and-stop).",
+        )
+    return (
+        """You drive every project yourself: inline, as its orchestrator, or through the ONE subagent
+you spawned as its sub-orchestrator (STEP A). There is NO per-project gate. One project at a
+time; NEVER batch-unlock the tail.""",
+        """P_i is driven the way STEP A set it up: by you, inline, as its orchestrator, or by the
+    ONE subagent you spawned as its sub-orchestrator. Either way P_i gets staged, implemented,
+    committed, and its closeout written.""",
+        f"""THIS
+    {preset.display_label.upper()} SESSION HAS NO BACKGROUND TIMER: do NOT start a background sleep and do NOT
+    ask the user to open a terminal. RE-CHECK state each time you act: after every step you
+    take for P_i, and whenever the user prompts you. set_agent_status(status="sleeping",
+    wake_in_minutes=N) only sets the DASHBOARD label -- it does NOT re-invoke you. On each
+    check:""",
+        "ready_to_advance False → keep driving P_i, or ask the user to prompt you to check again,\n"
+        "    then re-check (never advance early).",
+    )
+
+
 def _build_ch_chain_drive(
     run_id: str,
     resolved_order: list[str],
@@ -329,6 +364,7 @@ def _build_ch_chain_drive(
     )
     nudge = conductor_nudge(mode_str)
     step_a = _build_chain_drive_step_a(run_id, spawn_command, preset, nudge.step_a)
+    intro, driver, wake, not_ready = _chain_drive_loop_fragments(preset)
 
     return f"""════════════════════════════════════════════════════════════════════════════
           CH_CHAIN_DRIVE: SEQUENTIAL CHAIN — IMPLEMENTATION (AUTO-CONTINUE)
@@ -390,9 +426,7 @@ CONDUCTOR_CHAIN_INCOMPLETE. THIS wins over the solo finale.
 
 ── THE AUTO-CONTINUE LOOP ──────────────────────────────────────────────────
 
-You are the SOLE spawner. Sub-orchestrators never spawn each other — you spawn each one, and
-each runs FREE (there is NO per-project gate; your spawn IS the release). One project at a
-time; NEVER batch-unlock / spawn the tail.
+{intro}
 
 For each project P_i from current_index ({current_index}) to {n - 1} (inclusive), in run
 order, do these IN ORDER:
@@ -400,23 +434,15 @@ order, do these IN ORDER:
 {step_a}
 
   STEP B — WAIT FOR P_i's CLOSEOUT, THEN ADVANCE:
-    P_i's sub-orch runs FREE (STEP A released it); it self-stages, implements, commits, and
-    writes its closeout. The server advances the run's current_index + marks P_i
-    "planning" at the sub-orch's OWN staging-end, so you cross nothing to progress. PARK
-    AND SELF-PACE the poll loop. CAUTION (CLI): set_agent_status(status="sleeping",
-    wake_in_minutes=N) only sets the DASHBOARD label -- it does NOT re-invoke you, so calling
-    it then stopping STALLS the whole chain. Drive your OWN wake: launch a short BACKGROUND sleep
-    whose completion re-enters you -- Bash: run_in_background `sleep 1 60` (sleep sums its
-    args; the harness inspects only the first); PowerShell: run_in_background `Start-Sleep
-    -Seconds 60`. You MAY also set_agent_status(status="sleeping", wake_in_minutes=1) for the
-    label, but the BACKGROUND SLEEP is what wakes you. On each wake:
+    {driver} The server advances the run's current_index + marks P_i
+    "planning" at the sub-orch's OWN staging-end, so you cross nothing to progress. {wake}
       1. get_thread_history(thread_id=<Hub>, as_participant="{conductor_id_str}",
          unread_only=true, mark_read=true) -- resolve <Hub> ONCE via
          get_context(categories=["chain"]) -> hub_thread_id and reuse it. This ONE poll is BOTH your USER-
          directive inbox (above) and the Hub log -- one messaging surface; the unread_only +
          mark_read cursor returns only what's new since your last read.
       2. get_workflow_status(project_id=<P_i>) -> read ready_to_advance (the advance gate).
-    ready_to_advance False → start ANOTHER background sleep and poll again (never sleep-and-stop).
+    {not_ready}
     ready_to_advance True → P_i is DONE — that is the server's ONE authoritative advance signal
     (the companion project_closeout_at is the commit-SHA timestamp, log evidence only, NOT the
     trigger). Do NOT advance on status "complete" alone, nor on a sub-orch's Hub "clear to
@@ -446,9 +472,10 @@ When ALL projects complete, IN ORDER:
      report_progress(job_id="{job_id_str}", todo_items=[...FULL list, all completed...]). The
      closeout gate refuses with orchestrator_incomplete_todos while any non-closeout drive TODO
      is open, so clear them BEFORE step 2 (the one ordering trap).
-  2. write_memory_entry(project_id=<resolved_order[0]>, summary="Chain run {run_id} completed:
-     <N_completed> of {n} projects done.", key_outcomes=[<per-project>],
-     decisions_made=["Sequential chain conductor auto-continued"], tags=["chore"]).
+  2. write_memory_entry(project_id=<resolved_order[0]>, author_job_id="{job_id_str}",
+     summary="Chain run {run_id} completed: <N_completed> of {n} projects done.",
+     key_outcomes=[<per-project>], decisions_made=["Sequential chain conductor auto-continued"],
+     tags=["chore"], no_code_changes="Chain series summary; each project's closeout records its commits.").
      Caps (rejected if exceeded): summary <= 1500 chars; <= 5 key_outcomes AND <= 5
      decisions_made; each item <= 250 chars.
   3. complete_job(job_id="{job_id_str}", ...) — valid now (the FINAL project has closed out).

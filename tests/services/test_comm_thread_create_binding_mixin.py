@@ -77,9 +77,7 @@ async def test_project_id_derives_the_projects_own_product(db_manager, db_sessio
     svc = _service(db_manager, db_session)
 
     async with svc._scoped_session(tenant) as session:
-        resolved = await svc._resolve_create_product_id(
-            session, tenant, product_id=None, project_id=project_id, sequence_run_id=None
-        )
+        resolved = await svc._resolve_create_product_id(session, tenant, project_id=project_id, sequence_run_id=None)
 
     assert resolved == project_product
     assert resolved != decoy_product
@@ -92,9 +90,7 @@ async def test_single_product_resolves_silently(db_manager, db_session):
     svc = _service(db_manager, db_session)
 
     async with svc._scoped_session(tenant) as session:
-        resolved = await svc._resolve_create_product_id(
-            session, tenant, product_id=None, project_id=None, sequence_run_id=None
-        )
+        resolved = await svc._resolve_create_product_id(session, tenant, project_id=None, sequence_run_id=None)
 
     assert resolved == product_id
 
@@ -108,6 +104,4 @@ async def test_multiple_products_with_no_project_raises_ambiguous(db_manager, db
 
     with pytest.raises(ProductAmbiguousError):
         async with svc._scoped_session(tenant) as session:
-            await svc._resolve_create_product_id(
-                session, tenant, product_id=None, project_id=None, sequence_run_id=None
-            )
+            await svc._resolve_create_product_id(session, tenant, project_id=None, sequence_run_id=None)

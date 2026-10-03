@@ -13,6 +13,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -172,7 +173,7 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        product = await self._fetch_product(project_id)
+        product = await self._fetch_product(project)
 
         field_toggles, depth_config = await self._resolve_user_config(user_id, field_toggles, depth_config)
 
@@ -396,20 +397,10 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
 
         return orchestrator_id, agent_id, execution_id
 
-    async def _fetch_product(self, project_id: str) -> Any | None:
-        from giljo_mcp.models.products import Product
-        from giljo_mcp.models.projects import Project as ProjectModel
-
-        project_stmt = select(ProjectModel).where(
-            and_(ProjectModel.id == project_id, ProjectModel.tenant_key == self.tenant_key)
-        )
-        project_result = await self.db.execute(project_stmt)
-        project = project_result.scalar_one_or_none()
-
-        if not project:
-            return None
-
+    async def _fetch_product(self, project: Any) -> Any | None:
         from sqlalchemy.orm import selectinload
+
+        from giljo_mcp.models.products import Product
 
         product_stmt = (
             select(Product)
@@ -443,12 +434,11 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         tool: str = "universal",
     ) -> str:
         project = await self._fetch_project(project_id)
-        product = await self._fetch_product(project_id)
+        product = await self._fetch_product(project) if project else None
 
         if not project or not product:
             raise ValueError(f"Project {project_id} or its product not found")
 
-        execution = None
         if not agent_id:
             exec_stmt = (
                 select(AgentExecution)
@@ -458,18 +448,13 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
                     AgentExecution.tenant_key == self.tenant_key,
                 )
             )
-            exec_result = await self.db.execute(exec_stmt)
-            execution = exec_result.scalars().first()
-            if execution:
-                agent_id = execution.agent_id
-            else:
-                agent_id = orchestrator_id
-        else:
-            exec_stmt = select(AgentExecution).where(
-                AgentExecution.agent_id == agent_id,
-                AgentExecution.tenant_key == self.tenant_key,
-            )
-            await self.db.execute(exec_stmt)
+            execution = (await self.db.execute(exec_stmt)).scalars().first()
+            if execution is None:
+                raise ResourceNotFoundError(
+                    message=f"Orchestrator job {orchestrator_id} has no execution to address the staging prompt to",
+                    context={"orchestrator_id": orchestrator_id, "project_id": project_id},
+                )
+            agent_id = execution.agent_id
 
         mcp_url = self._get_public_base_url()
 

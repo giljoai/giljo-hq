@@ -10,7 +10,7 @@
  *   // eslint-allow giljo-internal/no-manual-api-url-composition
  * anywhere in the file to suppress this rule for that file. Use only for
  * sanctioned exceptions: useMcpConfig.js (MCP-server URLs for AI-tool
- * config files), config/api.js (dev-mode fallback), and views that
+ * config files) and views that
  * display a target URL to the user (DashboardView.vue, Login.vue) rather
  * than using it as an HTTP client base.
  */

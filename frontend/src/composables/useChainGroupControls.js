@@ -59,7 +59,7 @@ export function useChainGroupControls({ chainCtx }) {
     try {
       await sequenceRunStore.patchRun(chainCtx.value.runId, { execution_mode: mode })
     } catch (err) {
-      showToast({ message: errorText(err, 'Could not change the chain execution mode.'), type: 'error', timeout: 5000 })
+      showToast({ message: errorText(err, 'Could not change the chain execution mode.'), type: 'error' })
     }
   }
 
@@ -96,12 +96,12 @@ export function useChainGroupControls({ chainCtx }) {
       const prompt = data?.prompt
       if (!prompt) throw new Error('No prompt text returned')
       if (await copy(prompt)) {
-        showToast({ message: successMessage, type: 'success', timeout: 5000 })
+        showToast({ message: successMessage, type: 'success' })
       } else {
-        showToast({ message: 'Browser blocked clipboard access. Try again.', type: 'error', timeout: 6000 })
+        showToast({ message: 'Browser blocked clipboard access. Try again.', type: 'error' })
       }
     } catch (err) {
-      showToast({ message: errorText(err, failureMessage), type: 'error', timeout: 6000 })
+      showToast({ message: errorText(err, failureMessage), type: 'error' })
     }
   }
 
@@ -141,7 +141,7 @@ export function useChainGroupControls({ chainCtx }) {
       showChainStopConfirm.value = false
       showToast({ message: 'Chain stopped.', type: 'success' })
     } catch (err) {
-      showToast({ message: errorText(err, 'Could not stop the chain.'), type: 'error', timeout: 5000 })
+      showToast({ message: errorText(err, 'Could not stop the chain.'), type: 'error' })
     } finally {
       chainStopping.value = false
     }
@@ -164,7 +164,7 @@ export function useChainGroupControls({ chainCtx }) {
       showDeactivateConfirm.value = false
       showToast({ message: 'Chain deactivated. Its projects are back to their original state.', type: 'success' })
     } catch (err) {
-      showToast({ message: errorText(err, 'Could not deactivate the chain.'), type: 'error', timeout: 5000 })
+      showToast({ message: errorText(err, 'Could not deactivate the chain.'), type: 'error' })
     } finally {
       deactivating.value = false
     }

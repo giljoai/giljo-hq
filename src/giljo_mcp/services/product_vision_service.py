@@ -91,6 +91,7 @@ class ProductVisionService:
                 )
 
                 await self._consolidate_vision(session, product_id)
+                await self.evaluate_vision_analysis_complete(session, product_id)
 
                 return VisionUploadResult(
                     document_id=str(doc.id),
@@ -278,6 +279,16 @@ class ProductVisionService:
             tenant_key=self.tenant_key,
             document_id=document_id,
         )
+
+    async def delete_product_document(self, session: AsyncSession, product_id: str, document_id: str) -> None:
+        doc = await self._vision_repo.get_by_id(session, self.tenant_key, document_id)
+        if doc is None or str(doc.product_id) != str(product_id):
+            raise ResourceNotFoundError(
+                message="Vision document not found",
+                context={"product_id": product_id, "document_id": document_id},
+            )
+        await self._vision_repo.delete(session, self.tenant_key, document_id)
+        await self.evaluate_vision_analysis_complete(session, product_id)
 
     async def restore_document(
         self,

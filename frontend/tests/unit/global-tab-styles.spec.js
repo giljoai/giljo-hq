@@ -75,8 +75,6 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/services/setupService', () => ({
   default: {
-    getSerenaStatus: vi.fn().mockResolvedValue({ enabled: false }),
-    toggleSerena: vi.fn().mockResolvedValue({ success: true, enabled: false }),
   },
 }))
 
@@ -89,10 +87,8 @@ const globalStubs = {
   TemplateManager: true,
   ApiKeyManager: true,
   AgentExport: true,
-  SerenaAdvancedSettingsDialog: true,
   ContextPriorityConfig: true,
   McpIntegrationCard: true,
-  SerenaIntegrationCard: true,
   GitIntegrationCard: true,
 
   ProductIntroTour: true,

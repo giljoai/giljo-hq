@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useSettingsStore } from '@/stores/settings'
+import api from '@/services/api'
 
 vi.mock('@/services/api', () => ({
   default: {
@@ -108,5 +109,25 @@ describe('settings store (FE-9000d)', () => {
 
     expect(await store.updateAgentCheckinCadence(25)).toBe(25)
     expect(store.agentCheckinCadenceMinutes).toBe(25)
+  })
+
+  it('silence threshold mirrors what the server confirmed on load and on save', async () => {
+    const store = useSettingsStore()
+    api.settings.getAgentSilenceThreshold.mockResolvedValueOnce({ data: { agent_silence_threshold_minutes: 12 } })
+    expect(await store.loadAgentSilenceThreshold()).toBe(12)
+    expect(store.agentSilenceThresholdMinutes).toBe(12)
+
+    api.settings.updateAgentSilenceThreshold.mockResolvedValueOnce({ data: { agent_silence_threshold_minutes: 15 } })
+    expect(await store.updateAgentSilenceThreshold(99)).toBe(15)
+    expect(api.settings.updateAgentSilenceThreshold).toHaveBeenLastCalledWith(99)
+    expect(store.agentSilenceThresholdMinutes).toBe(15)
+  })
+
+  it('a failed timing read or write rejects and leaves the value alone', async () => {
+    const store = useSettingsStore()
+    await store.loadAgentCheckinCadence()
+    api.settings.updateAgentCheckinCadence.mockRejectedValueOnce(new Error('no'))
+    await expect(store.updateAgentCheckinCadence(30)).rejects.toThrow('no')
+    expect(store.agentCheckinCadenceMinutes).toBe(20)
   })
 })

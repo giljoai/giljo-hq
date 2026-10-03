@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from api.endpoints.mcp_tools._base import (
     MCP_DESCRIPTION_MAX,
     MCP_ID_MAX,
+    MCP_LIST_ITEMS_MAX,
     MCP_NAME_MAX,
     MCP_SHORT_TEXT_MAX,
     READ_PRODUCT_ID_DESC,
@@ -30,7 +31,7 @@ _PRODUCT_PROSE = Field(max_length=MCP_DESCRIPTION_MAX)
 
 
 class _TechStackContext(BaseModel):
-    """Grouped tech-stack fields (BE-9118). Unpacked to flat ProductService kwargs."""
+    """Grouped tech-stack fields. Unpacked to flat ProductService kwargs."""
 
     model_config = {"extra": "forbid"}
 
@@ -50,7 +51,7 @@ class _TechStackContext(BaseModel):
 
 
 class _ArchitectureContext(BaseModel):
-    """Grouped architecture/design fields (BE-9118). Unpacked to flat kwargs."""
+    """Grouped architecture/design fields. Unpacked to flat kwargs."""
 
     model_config = {"extra": "forbid"}
 
@@ -63,7 +64,7 @@ class _ArchitectureContext(BaseModel):
 
 
 class _QualityContext(BaseModel):
-    """Grouped quality field(s) (BE-9118). Unpacked to flat kwargs."""
+    """Grouped quality field(s). Unpacked to flat kwargs."""
 
     model_config = {"extra": "forbid"}
 
@@ -71,7 +72,7 @@ class _QualityContext(BaseModel):
 
 
 class _TestingContext(BaseModel):
-    """Grouped testing fields (BE-9118). Unpacked to flat kwargs."""
+    """Grouped testing fields. Unpacked to flat kwargs."""
 
     model_config = {"extra": "forbid"}
 
@@ -112,29 +113,35 @@ async def get_context(
     product_id: Annotated[
         str,
         Field(
+            max_length=MCP_ID_MAX,
             description=(
                 "Product UUID. Optional when project_id is supplied — the server resolves the "
                 "product from the project (tenant-scoped). Also optional for tenant-scoped-only "
                 "categories (products, threads, project, chain, self_identity, todos) — omit it "
                 "entirely when you have no product_id yet, e.g. calling categories=['products'] "
                 "to resolve one."
-            )
+            ),
         ),
     ] = "",
-    project_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project id.")] = "",
     agent_name: Annotated[
-        str, Field(description="Agent template name (e.g. 'implementer-backend') for self_identity category. Optional.")
+        str,
+        Field(
+            max_length=MCP_NAME_MAX,
+            description="Agent template name (e.g. 'implementer-backend') for self_identity category. Optional.",
+        ),
     ] = "",
     job_id: Annotated[
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="Agent job UUID. REQUIRED for the 'todos' category (read-back of an agent's TODO list — sequence + content + status). Ignored by other categories.",
+            description="Agent job UUID. Needed for the 'todos' category (read-back of an agent's TODO list — sequence + content + status). Ignored by other categories.",
         ),
     ] = "",
     categories: Annotated[
-        list[str] | None,
+        list[Annotated[str, Field(max_length=MCP_ID_MAX)]] | None,
         Field(
+            max_length=MCP_LIST_ITEMS_MAX,
             description=(
                 "List of categories to fetch (required, must be a list, e.g. ['tech_stack', "
                 "'architecture']): product_core (~100 tokens), vision_documents (0-24K), "
@@ -144,14 +151,15 @@ async def get_context(
                 "'shape': 'full'|'headlines'}}), git_history (500-5K), agent_templates (400-2.4K), "
                 "project (~300), self_identity (agent template content), tasks (open task list), "
                 "todos (TODO content for a job — pass job_id, used for force-recovery), "
-                "chain (the caller's active chain run: run_id, chain_mission, resolved_order — "
+                "chain (the caller's active chain run: run_id, chain_mission, resolved_order, "
+                "current_index, project_statuses — "
                 "requires project_id; empty + error='no_active_chain_run' outside a chain), "
                 "threads (the tenant's Hub threads, read-only, up to 25 most recent; not "
                 "depth-tunable), products (~25 tokens/product: id, name, is_active for every "
                 "product owned by the calling tenant — resolve a product name to its id before "
                 "any product_id-taking call; works even with no product_id/default product set; "
                 "names are NOT guaranteed unique per tenant, so more than one match is possible)."
-            )
+            ),
         ),
     ] = None,
     depth_config: Annotated[
@@ -166,7 +174,9 @@ async def get_context(
             )
         ),
     ] = None,
-    output_format: Annotated[str, Field(description="Output format: 'structured' (default) or 'flat'.")] = "structured",
+    output_format: Annotated[
+        Literal["structured", "flat"], Field(description="Output format: 'structured' (default) or 'flat'.")
+    ] = "structured",
     ctx: Context = None,
 ) -> dict[str, Any]:
     if isinstance(categories, str):
@@ -258,7 +268,9 @@ async def create_product(
             description="Product name (required). Create fails if a product with this name already exists.",
         ),
     ],
-    description: Annotated[str, _PRODUCT_PROSE] = "",
+    description: Annotated[
+        str, Field(max_length=MCP_DESCRIPTION_MAX, description="What the product is and who it is for, in plain prose.")
+    ] = "",
     project_path: Annotated[
         str,
         Field(
@@ -269,8 +281,13 @@ async def create_product(
             ),
         ),
     ] = "",
-    core_features: Annotated[str, _PRODUCT_PROSE] = "",
-    brand_guidelines: Annotated[str, _PRODUCT_PROSE] = "",
+    core_features: Annotated[
+        str,
+        Field(max_length=MCP_DESCRIPTION_MAX, description="What the product does: its main features, in plain prose."),
+    ] = "",
+    brand_guidelines: Annotated[
+        str, Field(max_length=MCP_DESCRIPTION_MAX, description="Brand voice, naming and visual rules for the product.")
+    ] = "",
     target_platforms: Annotated[
         list[str] | None,
         Field(description="Subset of: windows, linux, macos, android, ios, web, all."),
@@ -306,7 +323,7 @@ async def create_product(
     annotations=_tool_hints("create_vision_document"),
 )
 async def create_vision_document(
-    product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Product id.")],
     content: Annotated[
         str,
         Field(
@@ -346,8 +363,11 @@ async def create_vision_document(
     annotations=_tool_hints("get_vision_document"),
 )
 async def get_vision_document(
-    product_id: str,
-    chunk: int | None = None,
+    product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Product id.")],
+    chunk: Annotated[
+        int | None,
+        Field(description="Which chunk of a long vision document to return. Omit for the first or only chunk."),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"product_id": product_id}
@@ -367,13 +387,19 @@ async def get_vision_document(
         "so you never have to infer what landed. See the tech_stack/architecture/quality/testing "
         "param groups, project_path, and vision_summaries/consolidated_vision for field detail."
     ),
-    annotations=_tool_hints("update_product_context"),
+    annotations=_tool_hints("update_product_context", destructive=True),
 )
 async def update_product_context(
-    product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
-    product_name: Annotated[str, _PRODUCT_LABEL] = "",
-    product_description: Annotated[str, _PRODUCT_PROSE] = "",
-    core_features: Annotated[str, _PRODUCT_PROSE] = "",
+    product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Product id.")],
+    product_name: Annotated[
+        str, Field(max_length=MCP_NAME_MAX, description="New product name. Empty keeps the current one.")
+    ] = "",
+    product_description: Annotated[
+        str, Field(max_length=MCP_DESCRIPTION_MAX, description="New product description. Empty keeps the current one.")
+    ] = "",
+    core_features: Annotated[
+        str, Field(max_length=MCP_DESCRIPTION_MAX, description="New core features text. Empty keeps the current one.")
+    ] = "",
     project_path: Annotated[
         str,
         Field(
