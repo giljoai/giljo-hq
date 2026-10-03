@@ -81,7 +81,7 @@ describe('sequenceRunStore FE-9632 — isRunning', () => {
   })
 
   it('is false once the run has finished (a cancelled run is not running)', () => {
-    store._testSetActiveRun(run('r1', ['pA'], 'cancelled', { project_statuses: { pA: 'terminated' } }))
+    store._testSeedRuns([run('r1', ['pA'], 'cancelled', { project_statuses: { pA: 'terminated' } })])
     expect(store.isRunning('r1')).toBe(false)
   })
 })

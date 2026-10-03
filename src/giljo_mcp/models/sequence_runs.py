@@ -40,7 +40,7 @@ VALID_REVIEW_POLICIES: frozenset[str] = frozenset({"per_card", "auto_close"})
 
 __all__ = ["ACCEPTED_EXECUTION_MODES", "VALID_EXECUTION_MODES"]
 
-MAX_SEQUENCE_PROJECTS: int = 5
+MAX_SEQUENCE_PROJECTS: int = 10
 
 
 class SequenceRun(Base):

@@ -16,7 +16,8 @@ logger = logging.getLogger("api.app")
 
 
 def register_saas_tenant_scoped_models(*, giljo_mode: str) -> None:
-    if giljo_mode != "saas":
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
         return
     try:
         importlib.import_module("giljo_mcp.saas.tenant_registration").register_saas_tenant_scoped_models()
@@ -30,7 +31,8 @@ def register_saas_tenant_scoped_models(*, giljo_mode: str) -> None:
 
 
 def require_public_base_url(*, giljo_mode: str) -> None:
-    if giljo_mode != "saas":
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
         return
     pinned = os.environ.get("GILJO_PUBLIC_BASE_URL", "").strip()
     if not pinned:
@@ -75,7 +77,8 @@ def _public_base_url_problem(pinned: str) -> str | None:
 
 
 def register_mcp_subscription_gate(*, giljo_mode: str) -> None:
-    if giljo_mode != "saas":
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
         return
     try:
         importlib.import_module("giljo_mcp.saas.billing.mcp_subscription_gate").register()

@@ -9,14 +9,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from giljo_mcp.platform_registry import Platform
 from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
 from giljo_mcp.services.protocol_sections.chapters_coordination import _build_thread_loop_directive
 
 
-def append_loop_directive(full_protocol: str, active: bool) -> str:
+def append_loop_directive(full_protocol: str, active: bool, preset: Platform | None = None) -> str:
     if not active:
         return full_protocol
-    return full_protocol + "\n" + _build_thread_loop_directive()
+    return full_protocol + "\n" + _build_thread_loop_directive(preset)
 
 
 async def compose_loop_directive(
@@ -25,6 +26,7 @@ async def compose_loop_directive(
     tenant_key: str,
     agent_id: str,
     logger: logging.Logger | None = None,
+    preset: Platform | None = None,
 ) -> str:
     try:
         async with open_session(tenant_key) as session:
@@ -33,4 +35,4 @@ async def compose_loop_directive(
         if logger is not None:
             logger.warning("[LOOP-DIRECTIVE] Failed to read loop-directive state")
         active = False
-    return append_loop_directive(full_protocol, active)
+    return append_loop_directive(full_protocol, active, preset)

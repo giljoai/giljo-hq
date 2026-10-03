@@ -58,7 +58,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._change_password_impl(session, user_id, old_password, new_password, is_admin)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to change password")
@@ -104,7 +104,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._set_initial_password_impl(session, user_id, new_password)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to set initial password")
@@ -137,7 +137,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._verify_password_impl(session, user_id, password)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to verify password")
@@ -157,7 +157,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._repo.check_username_exists(session, username)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to check username")
@@ -170,7 +170,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._repo.check_email_exists(session, email)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to check email")
@@ -182,7 +182,7 @@ class UserAuthService:
             async with self._get_session() as session:
                 return await self._change_role_impl(session, user_id, new_role)
 
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to change role")
@@ -225,7 +225,7 @@ class UserAuthService:
         try:
             async with self._get_session() as session:
                 return await self._force_logout_impl(session, user_id)
-        except (ResourceNotFoundError, ValidationError, AuthenticationError, AuthorizationError, BaseGiljoError):
+        except BaseGiljoError:
             raise
         except (RuntimeError, ValueError) as e:
             self._logger.exception("Failed to force logout")

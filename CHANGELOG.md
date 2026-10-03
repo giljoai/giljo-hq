@@ -2,6 +2,58 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.7.0] — 2026-10-03
+
+**Before you upgrade:** if you turned on HTTPS in Settings, Giljo HQ will serve plain HTTP after this update. To keep HTTPS, set up a reverse proxy such as Caddy first (the user guide has a working example), then point your browser and agents at the new address.
+
+### Added
+
+- Give your coding agent the link to your server's connect page (/connect.md) and it can connect itself, with the right command for your tool. The setup wizard and Tools > Connect now show that link with a copy button.
+- An agent that reads its linked run with `get_context` now also receives how far the run has progressed: the position of the current project and the status of each project in the run. A session that restarts partway through can pick up where the run stands.
+
+### Changed
+
+- **Saying go now puts the project on the Jobs board.** Launching implementation, from the dashboard Implement button or from your coding agent, also makes an inactive project active, so the work shows up right away. Projects in a chain follow the same rule as each one starts.
+- A chain now takes up to 10 projects, up from 5, whether you start it from the Projects list or link the projects from your AI coding tool.
+- A finished project now stays on the Jobs board, in a folded "Done, not reviewed" group under its product, until you press Close in Review. A finished step in a chain shows the same green Review project button as a standalone project, and pressing it does not pause the chain.
+- Clearer Jobs board statuses. "Needs Input" is gone: a card waiting on your choice reads "Needs decision", and a card that is blocked, has an unanswered post, or has gone quiet reads "Needs attention". The reason pill reads, for example, "Orchestrator: answer 1 of 4". An orchestrator whose agents are still working shows Monitoring with the number running, not Silent. The status counts are a plain line instead of buttons that looked clickable.
+- The Task, Handover, Project and agent Template create dialogs now look and read the same: "Create new ..." titles, a plain header and a Save button.
+- The New Agent Handover window now has six plain fields: Prior work, Next steps, Please validate, Human approvals, Unknowns and Links. Every field is optional and Save is never blocked. Editing an older handover sorts its text into the matching fields without losing anything.
+- Tools that overwrite stored text, post messages, answer an approval, or replace your installed Giljo HQ skills now declare themselves destructive, so Claude and ChatGPT ask before running them. Every tool input now has a short, plain description.
+- Agents on a desktop, web or chat client are no longer told to sleep on timers or open terminals they cannot use. Orchestrators and chain conductors re-check their work whenever they next act.
+- Requests with a malformed value, such as an id that is too long, a value outside the allowed choices, or a list that is too large, are now refused with a clear validation error instead of a "not found" or a server error, in the dashboard's API and in the MCP tools.
+- If Giljo HQ cannot confirm your subscription status for about a week, it keeps working as before and shows a "No active subscription" reminder in your notifications, with a link to your billing page.
+- New accounts now accept the updated Terms of Service and Privacy Policy (version 2.1, effective October 1, 2026). Existing accounts that accepted version 2.0 are not asked again.
+- The banner and dialog that ask you to decide something for an agent now read "Needs decision" instead of "Decision Required".
+
+### Fixed
+
+- **The getting-started tour is more reliable.** If the vision document fails to upload, the upload screen shows the error with a Try again button instead of saying it was uploaded, and trying again reuses the product already created. The tour no longer gets stuck on "Waiting for your agent's analysis" when loading your product fails briefly just as the agent finishes.
+- **Every notification now follows your Display duration setting.** Some error messages closed the instant they appeared; every toast, errors included, now stays up for the duration you set under Settings > Notifications.
+- The Jobs board counts now match what is on screen: chains count every project they hold, and Implementing and Review include projects inside chains and in the Done, not reviewed group.
+- A chain project shows on the Jobs board as soon as it starts and updates its staging status right away. The first project's elapsed time stays correct, a chain shows under its own product on the All tab, and the "Chain finished" notice appears only when the server confirms it.
+- A chain with git integration turned on can now finish. Both closeout tools apply the same rule for commits, and an unattended run in a folder that is not a git repository carries on and says so instead of stopping to ask.
+- **When something cannot be loaded or saved, Giljo HQ now says so** with the server's reason, instead of showing an empty list, made-up defaults, or a success. This covers the product trash, agent roster, Home team, pending decisions, vision documents, chains, network and database settings, backups and restore points, agent and tool changes, and the closeout approval and headless switches.
+- **Server faults no longer hide behind a wrong answer.** A database outage while signing in answers "service unavailable" instead of "invalid credentials" and is not counted as a failed sign-in. Every email the server could not send (set-password, password reset, email change, account deletion) is reported, and nothing changes, so you can simply try again.
+- The Database settings tab shows the connection the server is actually using. Unknown sort keys, filters, to-do statuses and context depth values are refused with the accepted choices instead of being quietly replaced. A misconfigured setting such as CORS_ORIGINS or a numeric value now stops startup with its name instead of a silent default.
+- Hosted links in prompts and setup instructions always use the deployment's public address, never localhost. The health check names every optional service that failed to start.
+- When a project cannot close because an agent is waiting on your approval, the closeout says so and names the approval. Converting a task to a project now checks the new name like any other project.
+- Switching products from the tab bar while on a product's detail page now opens the product you picked.
+- The "+" menu on the Tasks page no longer lists "New task" and "New Agent Handover" twice.
+- Message Hub threads whose name starts with "chain run" now show that name instead of "Untitled thread".
+
+### Removed
+
+- Built-in HTTPS certificate management is gone (the Settings > Network HTTPS switch, certificate upload, and the Certificate Trust helper). Installs that still have the old HTTPS settings in config.yaml start normally on HTTP. See "Before you upgrade" above.
+- The Serena integration is gone: the Serena card on the Connect page, the Serena status icon on Jobs board cards, and the Serena guidance in agent missions. If you use Serena in your own AI tool it keeps working, because your tool runs it. A saved Serena setting is ignored and cleared the next time your integration settings are saved.
+
+### Security
+
+- Inviting people to an organization, changing their role, removing them and transferring ownership are switched off on every plan that does not include extra seats. Viewing the members list still works.
+- A failed sign-in, first-time setup, password or PIN change, or PIN-based password recovery no longer writes the typed password or PIN to the browser console.
+- Downloading your data is limited to 3 exports every 15 minutes, so repeated requests cannot fill the server's disk.
+- The slash-command bundle and install-script downloads tell browsers and proxies not to store them, since each one carries the server address it was requested from.
+
 ## [2.6.0] — 2026-09-29
 
 ### Added

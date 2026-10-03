@@ -15,18 +15,32 @@ from sqlalchemy import text
 from api.app_state import GILJO_MODE, state
 from api.exception_handlers import register_exception_handlers
 from giljo_mcp import branding
+from giljo_mcp._config_io import read_config
 from giljo_mcp.utils.log_sanitizer import sanitize
 
-from .websocket import authenticate_ws_connection, handle_ws_subscribe
+from .websocket import authenticate_ws_connection
 
 
 logger = logging.getLogger("api.app")
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def resolve_static_dir() -> Path:
+    configured = (read_config(_REPO_ROOT / "config.yaml").get("paths") or {}).get("static")
+    dist_dir = Path(configured) if configured else _REPO_ROOT / "frontend" / "dist"
+    if not dist_dir.is_absolute():
+        dist_dir = _REPO_ROOT / dist_dir
+    if configured and not (dist_dir / "index.html").exists():
+        logger.warning("paths.static=%s has no index.html; the dashboard is not served", dist_dir)
+    return dist_dir
+
+
 def register_event_handlers(app: FastAPI) -> None:
 
-    dist_dir = Path(state.config.get_nested("paths.static", "frontend/dist")) if state.config else Path("frontend/dist")
-    has_frontend = dist_dir.exists() and (dist_dir / "index.html").exists()
+    dist_dir = resolve_static_dir()
+    has_frontend = (dist_dir / "index.html").exists()
 
     if not has_frontend:
 
@@ -133,22 +147,6 @@ def register_event_handlers(app: FastAPI) -> None:
 
                 if data.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
-
-                elif data.get("type") == "subscribe":
-                    await handle_ws_subscribe(
-                        websocket=websocket,
-                        client_id=client_id,
-                        data=data,
-                        auth_context=auth_context,
-                    )
-
-                elif data.get("type") == "unsubscribe":
-                    entity_type = data.get("entity_type")
-                    entity_id = data.get("entity_id")
-                    await state.websocket_manager.unsubscribe(client_id, entity_type, entity_id)
-                    await websocket.send_json(
-                        {"type": "unsubscribed", "entity_type": entity_type, "entity_id": entity_id}
-                    )
 
         except WebSocketDisconnect:
             state.websocket_manager.disconnect(client_id, websocket)

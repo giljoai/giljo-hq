@@ -67,9 +67,7 @@ export function useProjectTaxonomy({
       if (inputNow !== '' || projectData.value.series_number != null) return
       seriesNumberInput.value = String(next).padStart(4, '0')
       projectData.value.series_number = next
-      seriesChecking.value = true
-      if (seriesCheckTimer) clearTimeout(seriesCheckTimer)
-      seriesCheckTimer = setTimeout(() => checkSeriesAvailability(next), 300)
+      scheduleSeriesCheck(next)
     } catch (err) {
 
       console.warn('[useProjectTaxonomy] getNextSeries failed:', err)
@@ -86,9 +84,7 @@ export function useProjectTaxonomy({
     seriesCheckMessage.value = ''
     usedSubseries.value = []
     if (projectData.value.series_number) {
-      seriesChecking.value = true
-      if (seriesCheckTimer) clearTimeout(seriesCheckTimer)
-      seriesCheckTimer = setTimeout(() => checkSeriesAvailability(projectData.value.series_number), 300)
+      scheduleSeriesCheck()
     } else {
       autoFillNextSeries(typeId)
     }
@@ -99,9 +95,7 @@ export function useProjectTaxonomy({
     projectData.value.project_type_id = newType.id
     usedSubseries.value = []
     if (projectData.value.series_number) {
-      seriesChecking.value = true
-      if (seriesCheckTimer) clearTimeout(seriesCheckTimer)
-      seriesCheckTimer = setTimeout(() => checkSeriesAvailability(projectData.value.series_number), 300)
+      scheduleSeriesCheck()
     } else {
       autoFillNextSeries(newType.id)
     }
@@ -130,9 +124,13 @@ export function useProjectTaxonomy({
 
     projectData.value.series_number = num
     usedSubseries.value = []
+    scheduleSeriesCheck(num)
+  }
 
+  function scheduleSeriesCheck(num) {
+    if (seriesCheckTimer) clearTimeout(seriesCheckTimer)
     seriesChecking.value = true
-    seriesCheckTimer = setTimeout(() => checkSeriesAvailability(num), 300)
+    seriesCheckTimer = setTimeout(() => checkSeriesAvailability(num ?? projectData.value.series_number), 300)
   }
 
   async function checkSeriesAvailability(num) {
@@ -181,14 +179,7 @@ export function useProjectTaxonomy({
   }
 
   function onSubseriesChange() {
-    if (projectData.value.series_number) {
-      if (seriesCheckTimer) clearTimeout(seriesCheckTimer)
-      seriesChecking.value = true
-      seriesCheckTimer = setTimeout(
-        () => checkSeriesAvailability(projectData.value.series_number),
-        300,
-      )
-    }
+    if (projectData.value.series_number) scheduleSeriesCheck()
   }
 
   function resetTaxonomy() {

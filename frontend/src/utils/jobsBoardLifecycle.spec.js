@@ -10,8 +10,9 @@ describe('jobsBoardLifecycleColor', () => {
     expect(jobsBoardLifecycleColor(JOBS_SECTION_LABELS.IMPLEMENTING)).toBe(getAgentColor('implementer').hex)
   })
 
-  it('Needs Input resolves to the blocked status color', () => {
-    expect(jobsBoardLifecycleColor(JOBS_SECTION_LABELS.NEEDS_INPUT)).toBe(getStatusColor('blocked'))
+  it('Needs decision and Needs attention resolve to the blocked status color', () => {
+    expect(jobsBoardLifecycleColor('Needs decision')).toBe(getStatusColor('blocked'))
+    expect(jobsBoardLifecycleColor('Needs attention')).toBe(getStatusColor('blocked'))
   })
 
   it('Review resolves to the complete/success status color', () => {

@@ -323,24 +323,6 @@ async function onSend() {
     }
   }
 
-  &__cadence-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: $border-radius-default; // 8
-    cursor: pointer;
-    transition: color $transition-fast, background $transition-fast;
-
-    &:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.06); }
-    &--on { color: $color-brand-yellow; background: rgba($color-brand-yellow, 0.14); }
-  }
-
   &__agent-badge {
     margin-right: v.$spacing-xs;
   }

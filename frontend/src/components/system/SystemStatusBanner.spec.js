@@ -13,7 +13,6 @@ const h = vi.hoisted(() => ({
   dismissInteg: vi.fn(),
   dismissAgent: vi.fn(),
   git: { value: false },
-  serena: { value: false },
   dist: { value: {} },
 }))
 
@@ -46,7 +45,6 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
   return {
     useIntegrationStatus: () => ({
       gitEnabled: ref(h.git.value),
-      serenaEnabled: ref(h.serena.value),
       resolved: ref(true),
       loading: ref(false),
       refresh: vi.fn().mockResolvedValue(),
@@ -113,7 +111,6 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     h.integShow.fn = () => false
     h.agentShow.fn = () => false
     h.git.value = false
-    h.serena.value = false
     h.dist.value = {}
   })
 
@@ -209,22 +206,20 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
   })
 
 
-  it('shows the integration nudge when eligible with projects and integrations off', async () => {
+  it('shows the integration nudge when eligible with projects and Git off', async () => {
     h.integShow.fn = () => true
     h.git.value = false
-    h.serena.value = false
     h.dist.value = { active: 2 }
     const wrapper = await mountBanner({ activeProduct: { id: 'p1' } })
     const row = wrapper.find('[data-testid="onboarding-integration-banner"]')
     expect(row.exists()).toBe(true)
     expect(row.find('img.system-banner-alert__avatar').exists()).toBe(true)
-    expect(row.text()).toContain('Git and Serena')
+    expect(row.text()).toContain('Enable Git in your connect settings')
   })
 
-  it('hides the integration nudge when both integrations are enabled', async () => {
+  it('hides the integration nudge when Git is enabled', async () => {
     h.integShow.fn = () => true
     h.git.value = true
-    h.serena.value = true
     h.dist.value = { active: 2 }
     const wrapper = await mountBanner({ activeProduct: { id: 'p1' } })
     expect(wrapper.find('[data-testid="onboarding-integration-banner"]').exists()).toBe(false)

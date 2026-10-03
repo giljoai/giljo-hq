@@ -9,7 +9,3 @@
 <script setup>
 import UserManager from '@/components/UserManager.vue'
 </script>
-
-<style scoped>
-/* Standalone Users page styling */
-</style>

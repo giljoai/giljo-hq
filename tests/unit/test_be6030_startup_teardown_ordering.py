@@ -42,7 +42,6 @@ def test_be6030_stop_services_called_before_start_api_server(tmp_path):
         patch.object(startup, "seed_default_settings", return_value=None),
         patch.object(startup, "check_first_run", return_value=(False, MagicMock())),
         patch.object(startup, "get_config_ports", return_value=(8000, 5173)),
-        patch.object(startup, "get_ssl_enabled", return_value=False),
         patch.object(startup, "verify_install_consistency", return_value=[]),
         patch.object(startup, "stop_services", side_effect=_record_stop_services),
         patch.object(startup, "is_port_available", return_value=True),
@@ -64,7 +63,6 @@ def test_be6030_stop_services_called_before_start_api_server(tmp_path):
     try:
         startup.run_startup(
             no_migrations=True,
-            no_ssl=True,
             no_browser=True,
         )
     finally:

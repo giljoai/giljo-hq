@@ -71,7 +71,7 @@ export function useTaskCrud() {
     return { noProduct: false }
   }
 
-  function openHandoverDialog(templateText) {
+  function openHandoverDialog() {
     if (!productStore.effectiveProductId) {
       return { noProduct: true }
     }
@@ -79,7 +79,7 @@ export function useTaskCrud() {
     currentTask.value = {
       ...DEFAULT_TASK(),
       task_type: RESERVED_HANDOVER_TYPE_ABBR,
-      description: templateText,
+      description: '',
     }
     editSnapshot.value = null
     showTaskDialog.value = true

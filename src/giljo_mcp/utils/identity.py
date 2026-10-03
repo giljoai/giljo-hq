@@ -40,9 +40,10 @@ def validate_from_agent(raw: str | None, *, max_len: int = 64) -> str | None:
 
 
 _DISPLAY_NAME_ALLOWED_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]*$")
+AGENT_DISPLAY_NAME_MAX = 100
 
 
-def validate_agent_display_name(raw: str | None, *, max_len: int = 128) -> str:
+def validate_agent_display_name(raw: str | None, *, max_len: int = AGENT_DISPLAY_NAME_MAX) -> str:
     if raw is not None and not isinstance(raw, str):
         raise ValidationError(
             "agent_display_name must be a string.",

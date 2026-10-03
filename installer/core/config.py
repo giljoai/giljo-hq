@@ -141,9 +141,8 @@ class ConfigManager:
             bind_address = self.settings.get("bind", "127.0.0.1")
             api_url_host = self.settings.get("external_host", "localhost")
             network_mode = self.settings.get("network_mode", "localhost")
-            ssl_enabled = self.settings.get("ssl_enabled", False)
-            http_proto = "https" if ssl_enabled else "http"
-            ws_proto = "wss" if ssl_enabled else "ws"
+            http_proto = "http"
+            ws_proto = "ws"
 
             is_localhost_install = network_mode == "localhost" and api_url_host in (
                 "localhost",
@@ -385,7 +384,6 @@ ACTIVE_PRODUCT=GiljoAI-MCP Coding Orchestrator
                     "authentication": True,
                     "auto_login_localhost": True,
                     "firewall_configured": self.settings.get("configure_firewall", False),
-                    "ssl_enabled": self.settings.get("ssl_enabled", False),
                 },
                 "paths": {
                     "install_dir": install_dir,
@@ -395,9 +393,6 @@ ACTIVE_PRODUCT=GiljoAI-MCP Coding Orchestrator
                     "temp": str(Path(install_dir) / "temp"),
                     "static": str(Path(install_dir) / "frontend" / "dist"),
                     "templates": str(Path(install_dir) / "frontend" / "templates"),
-                    "certs": str(Path(install_dir) / "certs") if self.settings.get("ssl_enabled") else None,
-                    "ssl_cert": self.settings.get("ssl_cert"),
-                    "ssl_key": self.settings.get("ssl_key"),
                 },
                 "logging": {
                     "level": "DEBUG",

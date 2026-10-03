@@ -21,6 +21,7 @@ ALL_HINTS = (
     na.PROJECT_AWAITING_USER_HINT,
     na.PROJECT_PARKED_HINT,
     na.TASK_OPEN_HINT,
+    na.TASK_HANDOVER_HINT,
 )
 
 WIRED_READ_PATHS = (
@@ -124,6 +125,24 @@ def test_a_page_holding_an_open_task_gets_the_task_hint(statuses):
             "If it grows into multi-step work, create_project instead."
         ),
     }
+
+
+def test_an_open_handover_on_the_page_tells_the_successor_to_complete_it_after_verifying():
+    hint = na.task_list_next_action(["pending"], open_handover=True)
+    assert na.TASK_HANDOVER_HINT in hint["why"]
+    assert na.TASK_OPEN_HINT in hint["why"]
+    assert "completion_notes" in na.TASK_HANDOVER_HINT
+    assert "status='completed'" in na.TASK_HANDOVER_HINT
+
+
+def test_open_handover_flag_alone_never_invents_a_hint_for_a_finished_page():
+    assert na.task_list_next_action(["completed"], open_handover=True) is None
+
+
+def test_open_handover_detection_needs_an_open_status_and_the_hnd_type():
+    assert na.has_open_handover([("pending", "HND")])
+    assert na.has_open_handover([("completed", "HND"), ("in_progress", "HND")])
+    assert not na.has_open_handover([("completed", "HND"), ("pending", "TSK"), ("pending", None)])
 
 
 @pytest.mark.parametrize("statuses", [[], ["completed"], ["cancelled", "completed"]])

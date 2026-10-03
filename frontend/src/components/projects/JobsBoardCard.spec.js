@@ -43,11 +43,11 @@ const needsInputAgents = [
 ]
 
 describe('JobsBoardCard', () => {
-  it('renders the taxonomy pill, title, and status pill for a Needs Input project', () => {
+  it('renders the taxonomy pill, title, and status pill for a Needs attention project', () => {
     const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
     expect(wrapper.find('[data-testid="jb-tax-pill"]').text()).toBe('BE-6174')
     expect(wrapper.find('[data-testid="jb-title"]').text()).toContain('headless launch fence')
-    expect(wrapper.attributes('data-lifecycle')).toBe('Needs Input')
+    expect(wrapper.attributes('data-lifecycle')).toBe('Needs attention')
     expect(wrapper.find('[data-testid="jb-status-pill"]').text()).toBe('Implementer blocked')
   })
 
@@ -110,7 +110,7 @@ describe('JobsBoardCard', () => {
     expect(wrapper.find('[data-testid="jb-btn-detail"]').exists()).toBe(true)
   })
 
-  it('Needs Input / Implementing: Jobs detail present, no Open, no Review & close, no Implement button anywhere', () => {
+  it('Needs attention / Implementing: Jobs detail present, no Open, no Review & close, no Implement button anywhere', () => {
     const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
     expect(wrapper.find('[data-testid="jb-btn-open"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-btn-review"]').exists()).toBe(false)
@@ -192,14 +192,14 @@ describe('JobsBoardCard status words (BE-9655b)', () => {
     expect(wrapper.find('[data-testid="jb-status-pill"]').text()).toBe('Implementing...')
   })
 
-  it('names the owner and the count on Needs Input: "Orchestrator has 1 unread"', async () => {
+  it('names the owner and the count on Needs attention: "Orchestrator: answer 1"', async () => {
     const wrapper = mountCard({
       project: launchedProject,
       agents: [{ ...orchestrator, action_required_unread: 1 }],
     })
-    expect(wrapper.attributes('data-lifecycle')).toBe('Needs Input')
+    expect(wrapper.attributes('data-lifecycle')).toBe('Needs attention')
     const pill = wrapper.find('[data-testid="jb-status-pill"]')
-    expect(pill.text()).toBe('Orchestrator has 1 unread')
+    expect(pill.text()).toBe('Orchestrator: answer 1')
     expect(pill.element.tagName).not.toBe('BUTTON')
     expect(wrapper.find('[data-testid="jb-status-pill-hint"]').text()).toMatch(/Hub thread/)
     await wrapper.find('[data-testid="jb-btn-hub"]').trigger('click')
@@ -254,7 +254,7 @@ describe('JobsBoardCard fixes (FE-9678)', () => {
     expect(rows[0].find('[data-testid="jb-agent-tooltip"]').text()).toMatch(/orchestrator/i)
   })
 
-  it('the Needs input pill is not a button, says what happened, and its tooltip says what to do', () => {
+  it('the Needs attention reason pill is not a button, says what happened, and its tooltip says what to do', () => {
     const wrapper = mountCard({
       project: secProject,
       agents: [{ agent_id: 'a-or', agent_name: 'orchestrator', agent_display_name: 'orchestrator', status: 'silent', steps: { completed: 7, total: 9 } }],

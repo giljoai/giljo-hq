@@ -73,14 +73,11 @@ async def test_git_history_depth_numeric_string_parses():
 
 
 @pytest.mark.asyncio
-async def test_git_history_depth_unrecognized_string_falls_back_to_default():
-    response, git_tool = await _run_fetch("bogus-token")
+async def test_git_history_depth_unrecognized_string_is_refused():
+    from giljo_mcp.exceptions import ValidationError
 
-    failed = {e["category"] for e in response.get("errors", [])}
-    assert "git_history" not in failed
-    assert "git_history" in response["categories_returned"]
-    commits = git_tool.await_args.kwargs.get("commits")
-    assert commits is None or isinstance(commits, int)
+    with pytest.raises(ValidationError, match="git_history"):
+        await _run_fetch("bogus-token")
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+import json
 from typing import Any
 
 
@@ -12,9 +13,11 @@ PROTECTED_ENTRY_FIELDS = frozenset({"id", "sequence", "project_name", "type", "t
 
 
 def _serialized_size(obj: Any) -> int:
-    import json
-
     return len(json.dumps(obj))
+
+
+def estimate_tokens(data: Any) -> int:
+    return len(data if isinstance(data, str) else json.dumps(data)) // 4
 
 
 def _apply_response_ceiling(response: dict[str, Any]) -> dict[str, Any]:

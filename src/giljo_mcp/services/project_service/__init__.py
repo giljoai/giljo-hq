@@ -98,25 +98,18 @@ class ProjectService(QueryMixin, MutationMixin, ArchiveMixin, McpAdapterMixin, M
             self._logger.debug("[WEBSOCKET] No WebSocket manager available for project:mission_updated")
             return
 
-        try:
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=tenant_key,
-                event_type="project:mission_updated",
-                data={
-                    "project_id": project_id,
-                    "mission": mission,
-                    "token_estimate": len(mission) // 4,
-                    "user_config_applied": False,
-                    "generated_by": "orchestrator",
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-            )
-
-        except Exception as ws_error:
-            self._logger.error(
-                f"[WEBSOCKET ERROR] Failed to broadcast project:mission_updated: {ws_error}",
-                exc_info=True,
-            )
+        await self._websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="project:mission_updated",
+            data={
+                "project_id": project_id,
+                "mission": mission,
+                "token_estimate": len(mission) // 4,
+                "user_config_applied": False,
+                "generated_by": "orchestrator",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
 
     @staticmethod
     def _extract_git_commits(memory_entries: list[dict]) -> list[dict]:

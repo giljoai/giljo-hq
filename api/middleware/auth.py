@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -82,7 +83,16 @@ class AuthMiddleware:
             bool(request.headers.get("authorization")),
         )
 
-        auth_result = await auth_manager.authenticate_request(request)
+        try:
+            auth_result = await auth_manager.authenticate_request(request)
+        except SQLAlchemyError:
+            logger.exception("authentication_database_unavailable path=%s", request.url.path)
+            response = JSONResponse(
+                status_code=503,
+                content={"error": "Authentication service unavailable", "detail": "Try again shortly"},
+            )
+            await response(scope, receive, send)
+            return
 
         logger.debug(
             "auth_result authenticated=%s user=%s error=%s is_auto_login=%s",
@@ -195,6 +205,7 @@ class AuthMiddleware:
             return True
         public_paths = [
             "/health",
+            "/connect.md",
             "/docs",
             "/redoc",
             "/openapi.json",

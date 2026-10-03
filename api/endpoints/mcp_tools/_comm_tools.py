@@ -24,7 +24,7 @@ from api.endpoints.mcp_tools._base import (
 )
 from api.endpoints.mcp_tools._comm_broadcast_helpers import broadcast_thread_metadata_update
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
-from giljo_mcp.models.comm import VALID_SELF_REPORTED_STATUSES
+from giljo_mcp.models.comm import VALID_SELF_REPORTED_STATUSES, VALID_THREAD_STATUSES
 from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS
 
 
@@ -143,22 +143,19 @@ async def create_thread(
     if sequence_run_id:
         kwargs["sequence_run_id"] = sequence_run_id
     result = await _call_tool(ctx, "create_thread", kwargs)
-    try:
-        from api.app_state import state as _state
+    from api.app_state import state as _state
 
-        if _state.websocket_manager:
-            tenant_key = _base._resolve_tenant(ctx)
-            await broadcast_thread_update(
-                _state.websocket_manager,
-                tenant_key,
-                thread_id=result.get("thread_id", ""),
-                chat_id=result.get("chat_id", ""),
-                status=result.get("status", "open"),
-                next_action_owner=result.get("next_action_owner"),
-                update_type="created",
-            )
-    except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
-        logger.debug("MCP create_thread WS broadcast failed (non-fatal)", exc_info=True)
+    if _state.websocket_manager:
+        tenant_key = _base._resolve_tenant(ctx)
+        await broadcast_thread_update(
+            _state.websocket_manager,
+            tenant_key,
+            thread_id=result.get("thread_id", ""),
+            chat_id=result.get("chat_id", ""),
+            status=result.get("status", "open"),
+            next_action_owner=result.get("next_action_owner"),
+            update_type="created",
+        )
     return result
 
 
@@ -201,7 +198,7 @@ async def join_thread(
         "registered on the thread, and a to_participant post to a never-joined id is stored "
         "but nobody is polling for it."
     ),
-    annotations=_tool_hints("post_to_thread"),
+    annotations=_tool_hints("post_to_thread", destructive=True),
 )
 async def post_to_thread(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
@@ -211,8 +208,8 @@ async def post_to_thread(
         Field(
             max_length=MCP_ID_MAX,
             description="Your agent role/id from your activated template (e.g. implementer, tester, "
-            "reviewer). Drives the Hub author badge. REQUIRED — an omitted from_agent is refused "
-            "(FROM_AGENT_REQUIRED), never silently attributed to the human user. To post "
+            "reviewer). Drives the Hub author badge. Needed on every post: an omitted from_agent is refused "
+            "(FROM_AGENT_REQUIRED) and is not attributed to the human user. To post "
             "deliberately in the human user's voice, pass as_user=true instead.",
         ),
     ] = "",
@@ -510,7 +507,7 @@ async def set_next_actor(
     annotations=_tool_hints("list_threads"),
 )
 async def list_threads(
-    status: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by status. Optional.")] = "",
+    status: Annotated[Literal["", *VALID_THREAD_STATUSES], Field(description="Filter by status. Optional.")] = "",
     owner: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by next_action_owner. Optional.")] = "",
     product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by product UUID. Optional.")] = "",
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by project UUID. Optional.")] = "",
@@ -579,7 +576,7 @@ async def get_thread_history(
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="Your participant_id — REQUIRED to use unread_only/mark_read/directed_only/"
+            description="Your participant_id. Needed to use unread_only/mark_read/directed_only/"
             "action_required_only (the server-persistent cursor is per participant). Omit for a plain read.",
         ),
     ] = "",
@@ -645,20 +642,17 @@ async def get_thread_history(
         and result.get("success") is not False
         and result.get("marked_read", 0) > 0
     ):
-        try:
-            from api.app_state import state as _state
+        from api.app_state import state as _state
 
-            if _state.websocket_manager:
-                t = result.get("thread") or {}
-                await broadcast_thread_update(
-                    _state.websocket_manager,
-                    _base._resolve_tenant(ctx),
-                    thread_id=thread_id,
-                    chat_id=t.get("chat_id", ""),
-                    status=t.get("status", "open"),
-                    next_action_owner=t.get("next_action_owner"),
-                    update_type="read",
-                )
-        except Exception:  # noqa: BLE001 - WS failure is non-fatal; the drain already committed
-            logger.debug("MCP get_thread_history mark_read WS broadcast failed (non-fatal)", exc_info=True)
+        if _state.websocket_manager:
+            t = result.get("thread") or {}
+            await broadcast_thread_update(
+                _state.websocket_manager,
+                _base._resolve_tenant(ctx),
+                thread_id=thread_id,
+                chat_id=t.get("chat_id", ""),
+                status=t.get("status", "open"),
+                next_action_owner=t.get("next_action_owner"),
+                update_type="read",
+            )
     return result

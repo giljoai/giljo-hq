@@ -1,6 +1,7 @@
 
 import { useUserStore } from '@/stores/user'
 import { PRODUCT_NAME } from '@/branding'
+import { isCeModeValue } from '@/composables/useGiljoMode'
 
 export function createAuthGuard({ setupService, configService }) {
   return async function authGuard(to, from, next) {
@@ -21,8 +22,7 @@ export function createAuthGuard({ setupService, configService }) {
         return 'ce'
       }
     })()
-    // eslint-disable-next-line giljo-internal/no-scattered-mode-checks -- ADR-002: guard reads mode from setupState (not composable); non-component factory function cannot use Vue composable
-    const isPublicLandingMode = mode !== 'ce'
+    const isPublicLandingMode = !isCeModeValue(mode)
 
     const userStore = useUserStore()
     const isAuthRouteLayout = to.meta?.layout === 'auth'
@@ -125,8 +125,7 @@ export function createAuthGuard({ setupService, configService }) {
       return
     }
 
-    // eslint-disable-next-line giljo-internal/no-scattered-mode-checks
-    if (to.meta?.ceOrTeamOnly && mode !== 'ce') {
+    if (to.meta?.ceOrTeamOnly && !isCeModeValue(mode)) {
       next({ name: 'Dashboard' })
       return
     }

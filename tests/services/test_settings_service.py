@@ -408,86 +408,101 @@ class TestGitHistoryFieldPriorityValidationGate:
 
 
 
-class TestSeedDefaultSettingsDataConstruction:
+class _ScriptedConnection:
 
-    def _build_seed_data_from_config(self, config: dict) -> dict:
+    def __init__(self, inserts: list[dict]):
+        self._inserts = inserts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        if "information_schema" in sql:
+            return _Scalar(True)
+        if "FROM users" in sql:
+            return _Rows([("tenant-seed",)])
+        if sql.startswith("INSERT"):
+            self._inserts.append(params)
+            return None
+        return _Scalar(None)
+
+    def commit(self):
+        pass
+
+
+class _Scalar:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
+class _Rows(_Scalar):
+    def fetchall(self):
+        return self._value
+
+
+class _ScriptedEngine:
+    def __init__(self, inserts: list[dict]):
+        self._inserts = inserts
+
+    def connect(self):
+        return _ScriptedConnection(self._inserts)
+
+    def dispose(self):
+        pass
+
+
+class TestSeedDefaultSettings:
+
+    def _seed(self, monkeypatch, config: dict) -> dict:
         import json
 
-        features = config.get("features", {})
-        security_cfg = config.get("security", {})
+        import sqlalchemy
 
-        integrations_data = {
-            "git_integration": {
-                "enabled": features.get("git_integration", {}).get("enabled", False),
-                "use_in_prompts": features.get("git_integration", {}).get("use_in_prompts", False),
-            },
-            "serena_mcp": {
-                "use_in_prompts": features.get("serena_mcp", {}).get("use_in_prompts", False),
-            },
-        }
+        from startup_support import checks
 
-        security_data = {
-            "cookie_domain_whitelist": security_cfg.get("cookie_domain_whitelist", []),
-        }
+        inserts: list[dict] = []
+        monkeypatch.setenv("DATABASE_URL", "postgresql://seed:seed@localhost/seed")
+        monkeypatch.setattr("src.giljo_mcp._config_io.read_config", lambda: config)
+        monkeypatch.setattr(sqlalchemy, "create_engine", lambda *a, **k: _ScriptedEngine(inserts))
+        assert checks.seed_default_settings() is True
+        return {row["cat"]: json.loads(row["data"]) for row in inserts}
 
-        json.dumps(integrations_data)
-        json.dumps(security_data)
+    def test_fresh_install_seeds_only_live_keys(self, monkeypatch):
+        seed = self._seed(monkeypatch, {})
+        assert set(seed) == {"integrations", "security"}
+        assert seed["integrations"] == {"git_integration": {"enabled": False, "use_in_prompts": False}}
+        assert "serena_mcp" not in seed["integrations"]
+        assert seed["security"] == {"cookie_domain_whitelist": []}
 
-        return {
-            "integrations": integrations_data,
-            "security": security_data,
-        }
-
-    def test_seed_data_uses_defaults_on_fresh_install_with_empty_config(self):
-        seed = self._build_seed_data_from_config({})
-        assert seed["integrations"]["git_integration"]["enabled"] is False
-        assert "max_commits" not in seed["integrations"]["git_integration"]
-        assert "include_commit_history" not in seed["integrations"]["git_integration"]
-        assert "branch_strategy" not in seed["integrations"]["git_integration"]
-        assert seed["integrations"]["serena_mcp"]["use_in_prompts"] is False
-        assert "ssl_enabled" not in seed["security"]
-        assert "rate_limiting" not in seed["security"]
-        assert seed["security"]["cookie_domain_whitelist"] == []
-        assert "runtime" not in seed
-
-    def test_seed_data_reads_git_settings_from_config_on_upgrade(self):
+    def test_upgrade_reads_config_values(self, monkeypatch):
         config = {
             "features": {
-                "git_integration": {
-                    "enabled": True,
-                    "use_in_prompts": True,
-                },
+                "git_integration": {"enabled": True, "use_in_prompts": True},
                 "serena_mcp": {"use_in_prompts": True},
-            }
-        }
-        seed = self._build_seed_data_from_config(config)
-        assert seed["integrations"]["git_integration"]["enabled"] is True
-        assert seed["integrations"]["git_integration"]["use_in_prompts"] is True
-        assert seed["integrations"]["serena_mcp"]["use_in_prompts"] is True
-
-    def test_seed_data_reads_security_config_on_upgrade(self):
-        config = {
+            },
             "security": {"cookie_domain_whitelist": ["prod.example.com"]},
         }
-        seed = self._build_seed_data_from_config(config)
+        seed = self._seed(monkeypatch, config)
+        assert seed["integrations"]["git_integration"] == {"enabled": True, "use_in_prompts": True}
+        assert "serena_mcp" not in seed["integrations"]
         assert seed["security"]["cookie_domain_whitelist"] == ["prod.example.com"]
 
-    def test_seed_integrations_data_accepted_by_jsonb_validator(self):
+    def test_seed_rows_accepted_by_jsonb_validators(self, monkeypatch):
         from giljo_mcp.schemas.jsonb_validators import validate_settings_by_category
 
-        seed = self._build_seed_data_from_config({})
-        result = validate_settings_by_category("integrations", seed["integrations"])
-        assert "git_integration" in result
-
-    def test_seed_security_data_accepted_by_jsonb_validator(self):
-        from giljo_mcp.schemas.jsonb_validators import validate_settings_by_category
-
-        seed = self._build_seed_data_from_config({})
-        result = validate_settings_by_category("security", seed["security"])
-        assert "cookie_domain_whitelist" in result
+        seed = self._seed(monkeypatch, {})
+        assert "git_integration" in validate_settings_by_category("integrations", seed["integrations"])
+        assert "cookie_domain_whitelist" in validate_settings_by_category("security", seed["security"])
 
     async def test_seed_idempotency_simulated_via_settings_service(self, settings_service_a):
-        data = {"git_integration": {"enabled": False}, "serena_mcp": {"use_in_prompts": False}}
+        data = {"git_integration": {"enabled": False}}
         await settings_service_a.update_settings("integrations", data)
         await settings_service_a.update_settings("integrations", data)
         result = await settings_service_a.get_settings("integrations")

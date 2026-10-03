@@ -27,6 +27,8 @@ vi.mock('@/composables/useProductVisionUpload', () => ({
     h.editingRef = editingProduct
     return {
       uploadingVision: ref(false),
+      visionUploadError: ref(null),
+      visionUploadRetrySafe: ref(null),
       uploadVisionFilesOnAttach: vi.fn(async () => {
         h.editingRef.value = { id: 'prod-1', name: 'Live Product' }
       }),

@@ -12,7 +12,7 @@ function activityOf(project) {
   return latest
 }
 
-export function groupBoardByProduct({ projects = [], chainMembers = [], runs = [], membersOf, productsById = {}, sideOf, sideOfRun, side }) {
+export function groupBoardByProduct({ projects = [], unreviewed = [], chainMembers = [], runs = [], membersOf, productsById = {}, sideOf, sideOfRun, side }) {
   const groups = new Map()
   const memberProduct = new Map(chainMembers.map((project) => [project.id, project.product_id]))
 
@@ -24,6 +24,7 @@ export function groupBoardByProduct({ projects = [], chainMembers = [], runs = [
         name: id === OTHER_PRODUCT_ID ? OTHER_PRODUCT_NAME : productsById[id].name || OTHER_PRODUCT_NAME,
         projects: [],
         runIds: [],
+        unreviewed: [],
         counts: { staging: 0, implementation: 0 },
         quiet: false,
         lastActivity: 0,
@@ -40,9 +41,15 @@ export function groupBoardByProduct({ projects = [], chainMembers = [], runs = [
     if (projectSide === side) group.projects.push(project)
   }
 
+  for (const project of unreviewed) {
+    const group = groupFor(project.product_id)
+    group.lastActivity = Math.max(group.lastActivity, activityOf(project))
+    group.unreviewed.push(project)
+  }
+
   for (const run of runs) {
     const members = membersOf(run) || []
-    const productId = members.map((id) => memberProduct.get(id)).find(Boolean) || null
+    const productId = run.product_id || members.map((id) => memberProduct.get(id)).find(Boolean) || null
     const group = groupFor(productId)
     const runSide = sideOfRun(run)
     group.counts[runSide]++
@@ -54,6 +61,9 @@ export function groupBoardByProduct({ projects = [], chainMembers = [], runs = [
   }
 
   return [...groups.values()]
-    .map((group) => ({ ...group, quiet: group.projects.length === 0 && group.runIds.length === 0 }))
+    .map((group) => ({
+      ...group,
+      quiet: group.projects.length === 0 && group.runIds.length === 0 && !group.unreviewed.length,
+    }))
     .sort((a, b) => b.lastActivity - a.lastActivity || a.name.localeCompare(b.name))
 }

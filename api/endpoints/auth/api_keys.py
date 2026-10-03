@@ -34,7 +34,7 @@ async def get_active_api_keys(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Return active API keys for current user (no plaintext). Used by setup wizard (Handover 0855a)."""
+    """Return active API keys for current user (no plaintext). Used by setup wizard."""
     from giljo_mcp.models.auth import APIKey
 
     stmt = select(APIKey).where(
@@ -110,7 +110,7 @@ async def create_api_key(
     This endpoint creates a new API key and returns it in plaintext.
     WARNING: The key is only shown once! Store it securely.
 
-    SEC-9171 #3: minting a key requires a browser session — a held API key or
+    Minting a key requires a browser session — a held API key or
     OAuth Bearer cannot self-replicate into a fresh long-lived key.
 
     Args:

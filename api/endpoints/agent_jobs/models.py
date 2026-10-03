@@ -8,17 +8,20 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from api.endpoints._boundary_types import ID_MAX
+from giljo_mcp.schemas.responses.orchestration import OrchestratorDisplayState
+
 
 
 
 class SpawnAgentRequest(BaseModel):
     """Request model for spawning a new agent job."""
 
-    agent_display_name: str = Field(..., description="Human-readable display name for UI")
-    agent_name: str | None = Field(None, description="User-readable agent name")
+    agent_display_name: str = Field(..., max_length=100, description="Human-readable display name for UI")
+    agent_name: str | None = Field(None, max_length=255, description="User-readable agent name")
     mission: str = Field(..., description="Agent mission/instructions")
-    project_id: str = Field(..., description="Project UUID")
-    parent_job_id: str | None = Field(None, description="Parent job UUID")
+    project_id: str = Field(..., max_length=ID_MAX, description="Project UUID")
+    parent_job_id: str | None = Field(None, max_length=ID_MAX, description="Parent job UUID")
     context_chunks: list[str] = Field(default_factory=list, description="Context chunk IDs")
 
 
@@ -26,7 +29,7 @@ class SpawnAgentResponse(BaseModel):
     """Response model for agent spawn operation."""
 
     success: bool = Field(..., description="Whether spawn succeeded")
-    job_id: str = Field(..., description="Created agent job ID (Handover 0381: renamed from agent_job_id)")
+    job_id: str = Field(..., description="Created agent job ID (renamed from agent_job_id)")
     agent_prompt: str = Field(..., description="Generated agent prompt")
     mission_stored: bool = Field(..., description="Whether mission was stored")
     thin_client: bool = Field(..., description="Whether using thin client architecture")
@@ -35,7 +38,7 @@ class SpawnAgentResponse(BaseModel):
 
 
 class TodoItemResponse(BaseModel):
-    """Response model for individual TODO item - Handover 0423."""
+    """Response model for individual TODO item."""
 
     content: str
     status: str
@@ -76,12 +79,13 @@ class JobResponse(BaseModel):
     duration_seconds: float | None = None
     not_picked_up: bool = False
     activity: str = ""
+    orchestrator_state: OrchestratorDisplayState | None = None
 
 
 
 
 class JobListResponse(BaseModel):
-    """Response model for job list with pagination (Handover 0135)."""
+    """Response model for job list with pagination."""
 
     jobs: list[JobResponse]
     total: int
@@ -108,7 +112,7 @@ class UpdateMissionResponse(BaseModel):
 
 
 class AgentExecutionResponse(BaseModel):
-    """Response model for agent execution instance (Handover 0366d-1)."""
+    """Response model for agent execution instance."""
 
     agent_id: str
     job_id: str

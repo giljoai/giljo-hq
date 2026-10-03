@@ -39,20 +39,15 @@ vi.mock('@/services/api', () => ({
 }))
 
 const getGitSettings = vi.fn().mockResolvedValue({ enabled: false })
-const getSerenaStatus = vi.fn().mockResolvedValue({ enabled: false })
 vi.mock('@/services/setupService', () => ({
   default: {
     getGitSettings: (...a) => getGitSettings(...a),
-    getSerenaStatus: (...a) => getSerenaStatus(...a),
   },
 }))
 
 vi.mock('@/components/GilMascot.vue', () => ({ default: { name: 'GilMascot', template: '<div />' } }))
 vi.mock('@/components/setup/SetupWizardOverlay.vue', () => ({
   default: { name: 'SetupWizardOverlay', template: '<div />' },
-}))
-vi.mock('@/components/setup/CertTrustModal.vue', () => ({
-  default: { name: 'CertTrustModal', template: '<div />' },
 }))
 vi.mock('@/components/dashboard/RecentProjectsList.vue', () => ({
   default: { name: 'RecentProjectsList', template: '<div />' },
@@ -102,7 +97,7 @@ describe('WelcomeView — FE-6059 first-paint defer', () => {
     vi.clearAllMocks()
   })
 
-  it('does NOT request templates / git / serena on cold (onboarding) first paint', async () => {
+  it('does NOT request templates / git on cold (onboarding) first paint', async () => {
     productsState = {
       activeProduct: null,
       hasProducts: false,
@@ -121,7 +116,6 @@ describe('WelcomeView — FE-6059 first-paint defer', () => {
     expect(templatesList).not.toHaveBeenCalled()
     expect(templatesActiveCount).not.toHaveBeenCalled()
     expect(getGitSettings).not.toHaveBeenCalled()
-    expect(getSerenaStatus).not.toHaveBeenCalled()
   })
 
   it('DOES load team templates once onboarded (defer is conditional, not removal)', async () => {

@@ -237,7 +237,8 @@ class TestConnectionBudgetHonestAccounting:
         assert _reserved_slots() == 26
 
         monkeypatch.setenv("GILJO_DB_RESERVED_SLOTS", "garbage")
-        assert _reserved_slots() == 0
+        with pytest.raises(ValueError, match="GILJO_DB_RESERVED_SLOTS"):
+            _reserved_slots()
 
         monkeypatch.setenv("GILJO_DB_RESERVED_SLOTS", "-5")
         assert _reserved_slots() == 0

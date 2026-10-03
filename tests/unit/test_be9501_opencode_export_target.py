@@ -78,7 +78,7 @@ class TestTheDoorTheFixDidNotClose:
 
     def test_giljo_setup_description_names_every_platform_it_accepts(self) -> None:
         src = (REPO_ROOT / "api" / "endpoints" / "mcp_tools" / "_setup_tools.py").read_text(encoding="utf-8")
-        block = src[src.index("description=(") : src.index('annotations=_tool_hints("giljo_setup")')]
+        block = src[src.index("description=(") : src.index('annotations=_tool_hints("giljo_setup", destructive=True)')]
         for platform in EXPORT_PLATFORMS:
             if platform == EXPORT_GENERIC:
                 continue

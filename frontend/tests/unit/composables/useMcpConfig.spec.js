@@ -8,7 +8,6 @@ import {
   generateGenericMcpConfig,
   generateConfigForTool,
   generateCodexEnvVar,
-  getCertTrustCommand,
   makeKeyName,
 } from '@/composables/useMcpConfig'
 
@@ -70,19 +69,6 @@ describe('useMcpConfig', () => {
   // ─── buildServerUrl ────────────────────────────────────────────────
 
   describe('buildServerUrl', () => {
-    it('builds URL with protocol from window.location', () => {
-      // jsdom defaults to http:
-      expect(buildServerUrl('myhost.local', '8372')).toBe(
-        'http://myhost.local:8372',
-      )
-    })
-
-    it('defaults to hostname and current page port', () => {
-      const result = buildServerUrl()
-      const expectedPort = window.location.port || '7272'
-      expect(result).toContain(`:${expectedPort}`)
-    })
-
     // INF-5012b — reverse-proxy/Cloudflare Tunnel deployments: backend returns
     // api.port=null when reached on the standard 443/80 port. The composed URL
     // must omit the ':port' segment.
@@ -257,24 +243,6 @@ describe('useMcpConfig', () => {
     it('returns export command for unix platform', () => {
       const result = generateCodexEnvVar('giljo_mykey', 'unix')
       expect(result).toContain('export')
-    })
-  })
-
-  // ─── getCertTrustCommand ───────────────────────────────────────────
-
-  describe('getCertTrustCommand', () => {
-    it('returns Windows cert trust command for windows platform', () => {
-      const result = getCertTrustCommand('windows')
-      expect(result.length).toBeGreaterThan(0)
-    })
-
-    it('returns Unix cert trust command for unix platform', () => {
-      const result = getCertTrustCommand('unix')
-      expect(result.length).toBeGreaterThan(0)
-    })
-
-    it('returns different commands for windows vs unix', () => {
-      expect(getCertTrustCommand('windows')).not.toBe(getCertTrustCommand('unix'))
     })
   })
 

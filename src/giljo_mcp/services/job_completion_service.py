@@ -49,8 +49,9 @@ from giljo_mcp.services.job_completion_staging import (  # noqa: F401 — consta
     staging_directive_for,
 )
 from giljo_mcp.services.orchestrator_caller_guard import warn_if_never_started
+from giljo_mcp.services.project_helpers import broadcast_deferred_events
 from giljo_mcp.services.protocol_survival import build_complete_job_footer
-from giljo_mcp.services.sequence_run_service import active_chain_run, broadcast_deferred_sequence_updates
+from giljo_mcp.services.sequence_run_service import active_chain_run
 from giljo_mcp.tenant import TenantManager
 
 
@@ -189,12 +190,8 @@ class JobCompletionService:
                     )
 
                     warn_if_never_started(job, execution, warnings)
-                    old_status, duration_seconds = self._apply_completion_status(
-                        execution, result, is_staging_end=is_staging_end
-                    )
-
-                    await self._finalize_job_if_last_execution(
-                        session, job, execution, tenant_key, job_id, is_staging_end=is_staging_end
+                    old_status, duration_seconds = await self.apply_completion(
+                        session, job, execution, result, tenant_key, is_staging_end=is_staging_end
                     )
 
                     await self._handle_completion_side_effects(
@@ -230,7 +227,7 @@ class JobCompletionService:
                 else:
                     await self._raise_for_missing_execution(session, job_id, tenant_key)
 
-            await broadcast_deferred_sequence_updates(session)
+            await broadcast_deferred_events(session)
             if execution:
                 await self._broadcast_completion(
                     tenant_key, job_id, job, execution, old_status, duration_seconds, product_id_for_broadcast
@@ -416,52 +413,38 @@ class JobCompletionService:
             created_at = created_at.replace(tzinfo=UTC)
         return created_at <= completion_attempt_time
 
-    def _apply_completion_status(
+    async def apply_completion(
         self,
+        session: AsyncSession,
+        job: AgentJob,
         execution: AgentExecution,
         result: dict[str, Any],
+        tenant_key: str,
         *,
         is_staging_end: bool = False,
     ) -> tuple[str | None, float | None]:
         old_status = execution.status
-
+        execution.result = result
         if is_staging_end:
             execution.status = "waiting"
-            execution.result = result
             execution.completed_at = None
             return old_status, None
 
         execution.status = "complete"
         execution.completed_at = datetime.now(UTC)
         execution.progress = 100
-        execution.result = result
 
-        duration_seconds = None
-        if execution.started_at and execution.completed_at:
-            duration_seconds = (execution.completed_at - execution.started_at).total_seconds()
-        return old_status, duration_seconds
-
-    async def _finalize_job_if_last_execution(
-        self,
-        session: AsyncSession,
-        job: AgentJob,
-        execution: AgentExecution,
-        tenant_key: str,
-        job_id: str,
-        *,
-        is_staging_end: bool = False,
-    ) -> None:
-        if is_staging_end:
-            return
-
-        repo = AgentCompletionRepository()
-        other_active = await repo.find_other_active_executions_by_agent_id(
-            session, tenant_key, job_id, execution.agent_id
+        other_active = await AgentCompletionRepository().find_other_active_executions_by_agent_id(
+            session, tenant_key, job.job_id, execution.agent_id
         )
-
         if not other_active:
             job.status = "completed"
             job.completed_at = execution.completed_at
+
+        duration_seconds = None
+        if execution.started_at:
+            duration_seconds = (execution.completed_at - execution.started_at).total_seconds()
+        return old_status, duration_seconds
 
     async def _finalize_conductor_chain(
         self,

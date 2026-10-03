@@ -37,12 +37,7 @@ class VisionDocumentChunker:
         if not text:
             return 0
 
-        try:
-            tokens = self.encoding.encode(text)
-            return len(tokens)
-        except (ValueError, KeyError, ImportError):
-            logger.exception("Error counting tokens")
-            return len(text) // 4
+        return len(self.encoding.encode(text, disallowed_special=()))
 
     def extract_keywords(self, text: str, max_keywords: int = 10) -> list[str]:
         if not text or not text.strip():

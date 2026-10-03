@@ -120,24 +120,16 @@ def _launch_log_viewer(stdout_path: Path, run_stamp: str) -> None:
         print_warning(f"Could not open live log viewer ({viewer_err}). Tail manually: tail -f {stdout_path}")
 
 
-def wait_for_api_ready(port: int, max_attempts: int = 60, interval: float = 0.5, ssl_enabled: bool = False) -> bool:
-    import ssl
+def wait_for_api_ready(port: int, max_attempts: int = 60, interval: float = 0.5) -> bool:
     import urllib.error
     import urllib.request
 
-    protocol = "https" if ssl_enabled else "http"
-    url = f"{protocol}://localhost:{port}/health"
+    url = f"http://localhost:{port}/health"
     print_info(f"Waiting for API to be ready (max {max_attempts * interval:.0f}s)...")
-
-    ssl_context = None
-    if ssl_enabled:
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
 
     for attempt in range(1, max_attempts + 1):
         try:
-            with urllib.request.urlopen(url, timeout=1, context=ssl_context) as response:  # noqa: S310  # reason: url is dev-server localhost http(s):// only, scheme controlled by config
+            with urllib.request.urlopen(url, timeout=1) as response:  # noqa: S310  # reason: url is a fixed localhost http:// health probe
                 if response.status == 200:
                     print_success(f"API ready after {attempt * interval:.1f}s")
                     return True

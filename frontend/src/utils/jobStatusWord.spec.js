@@ -29,9 +29,20 @@ describe('needsInputOwner', () => {
 
   it('names the orchestrator and counts its unread action-required posts', () => {
     expect(needsInputOwner([{ ...orch, action_required_unread: 2 }])).toMatchObject({
-      owner: 'orchestrator', count: 2, text: 'Orchestrator has 2 unread',
+      owner: 'orchestrator', count: 2, text: 'Orchestrator: answer 2',
     })
     expect(needsInputOwner([{ ...orch, action_required_unread: 2 }]).hint).toMatch(/Hub/)
+  })
+
+  it('reads "answer N of M": posts to answer, out of posts waiting', () => {
+    const text = (row) => needsInputOwner([{ ...orch, ...row }]).text
+    expect(text({ action_required_unread: 1, messages_waiting_count: 4 })).toBe('Orchestrator: answer 1 of 4')
+    expect(text({ action_required_unread: 1, messages_waiting_count: 1 })).toBe('Orchestrator: answer 1')
+    expect(text({ action_required_unread: 2 })).toBe('Orchestrator: answer 2')
+    expect(text({ action_required_unread: 2, messages_waiting_count: 1 })).toBe('Orchestrator: answer 2')
+    expect(
+      needsInputOwner([orch, { agent_display_name: 'implementer', status: 'working', action_required_unread: 1, messages_waiting_count: 2 }]).text,
+    ).toBe('Implementer: answer 1 of 2')
   })
 
   it('names the operator for an awaiting-decision agent, ahead of a blocked one and of unread posts', () => {
@@ -79,7 +90,7 @@ describe('needsInputOwner', () => {
   it('names a worker by its role when the unread post is for it', () => {
     expect(
       needsInputOwner([orch, { agent_display_name: 'implementer', status: 'working', action_required_unread: 1 }]),
-    ).toMatchObject({ owner: 'implementer', count: 1, text: 'Implementer has 1 unread' })
+    ).toMatchObject({ owner: 'implementer', count: 1, text: 'Implementer: answer 1' })
   })
 
   it('hands a silent worker to the orchestrator, by the role that went quiet', () => {

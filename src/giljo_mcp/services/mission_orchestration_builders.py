@@ -14,6 +14,7 @@ from giljo_mcp.platform_registry import (
     SUBAGENT_EXECUTION_MODES,
     get_harness,
 )
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.protocol_builder import _build_orchestrator_protocol
 from giljo_mcp.services.vision_hash import (
     compute_vision_inputs_hash,
@@ -147,7 +148,7 @@ def maybe_build_ctx_self_close_directive(ctx: dict[str, Any]) -> dict[str, Any] 
 
 
 def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool = False) -> dict[str, Any] | None:
-    if project.staging_status == "staging_complete":
+    if project.staging_status == STAGING_COMPLETE:
         identity = {
             "job_id": job_id,
             "project_id": str(project.id),

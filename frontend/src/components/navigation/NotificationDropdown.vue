@@ -267,30 +267,27 @@ const toggleExpand = (id) => {
   expandedIds.value = next
 }
 
+async function markReadQuietly(notification) {
+  if (notification.read) return
+  try {
+    await notificationStore.markRead(notification.id)
+  } catch (error) {
+    console.error('[NotificationDropdown] Error marking notification as read:', error)
+  }
+}
+
 const navigateToProject = async (notification) => {
   const route = projectRouteFor(notification)
   if (!route) return
 
-  if (!notification.read) {
-    try {
-      await notificationStore.markRead(notification.id)
-    } catch (error) {
-      console.error('[NotificationDropdown] Error marking notification as read:', error)
-    }
-  }
+  await markReadQuietly(notification)
 
   menuOpen.value = false
   router.push(route)
 }
 
 const handleNotificationClick = async (notification) => {
-  if (!notification.read) {
-    try {
-      await notificationStore.markRead(notification.id)
-    } catch (error) {
-      console.error('[NotificationDropdown] Error marking notification as read:', error)
-    }
-  }
+  await markReadQuietly(notification)
 
   const route = resolveNotificationRoute(notification)
   if (route) {

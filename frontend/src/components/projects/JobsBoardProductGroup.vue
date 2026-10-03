@@ -116,7 +116,6 @@ const quietLine = computed(() =>
 }
 
 .jb-pgroup-sum {
-  margin-left: auto;
   font-size: 0.72rem;
   color: $color-text-secondary;
   font-family: $typography-font-mono;

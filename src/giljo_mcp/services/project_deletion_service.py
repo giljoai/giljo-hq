@@ -90,19 +90,16 @@ class ProjectDeletionService:
             )
 
             if self._websocket_manager:
-                try:
-                    await self._websocket_manager.broadcast_project_update(
-                        project_id=project_id,
-                        update_type="status_changed",
-                        project_data={
-                            "name": project.name,
-                            "status": ProjectStatus.DELETED.value,
-                            "product_id": project.product_id,
-                        },
-                        tenant_key=tenant_key,
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                await self._websocket_manager.broadcast_project_update(
+                    project_id=project_id,
+                    update_type="status_changed",
+                    project_data={
+                        "name": project.name,
+                        "status": ProjectStatus.DELETED.value,
+                        "product_id": project.product_id,
+                    },
+                    tenant_key=tenant_key,
+                )
 
             deleted_at_iso = project.deleted_at.isoformat() if project.deleted_at else None
 
@@ -209,19 +206,16 @@ class ProjectDeletionService:
             )
 
             if websocket_manager:
-                try:
-                    await websocket_manager.broadcast_project_update(
-                        project_id=project_id,
-                        update_type="deleted",
-                        project_data={
-                            "name": project_name,
-                            "deleted_counts": deleted_counts,
-                            "product_id": project_product_id,
-                        },
-                        tenant_key=tenant_key,
-                    )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                    self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+                await websocket_manager.broadcast_project_update(
+                    project_id=project_id,
+                    update_type="deleted",
+                    project_data={
+                        "name": project_name,
+                        "deleted_counts": deleted_counts,
+                        "product_id": project_product_id,
+                    },
+                    tenant_key=tenant_key,
+                )
 
             return NuclearDeleteResult(
                 message=f"Project '{project_name}' permanently deleted",

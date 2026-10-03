@@ -243,8 +243,9 @@ class AuthManager:
                         result["user"] = user_obj.username
                         result["user_id"] = user_obj.username
                         result["tenant_key"] = user_obj.tenant_key
-            except SQLAlchemyError as e:
-                logger.debug(f"No user object found for API key: {e}")
+            except SQLAlchemyError:
+                logger.exception("API key user lookup failed: database unavailable")
+                raise
 
         if not result.get("tenant_key"):
             logger.warning("API key authentication rejected: no tenant_key resolved")

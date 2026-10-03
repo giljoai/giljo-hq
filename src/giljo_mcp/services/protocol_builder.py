@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from giljo_mcp.platform_registry import Platform, get_platform
+from giljo_mcp.platform_registry import Platform
 from giljo_mcp.services.protocol_sections.agent_lifecycle import (
     _generate_orchestrator_protocol,
 )
@@ -39,7 +39,6 @@ from giljo_mcp.services.protocol_sections.team_context import (
     _generate_team_context_header,
 )
 from giljo_mcp.services.protocol_sections.user_config import (
-    DEFAULT_DEPTH_CONFIG,
     DEFAULT_FIELD_PRIORITIES,
     _get_user_config,
     _normalize_field_toggles,
@@ -53,7 +52,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DEFAULT_DEPTH_CONFIG",
     "DEFAULT_FIELD_PRIORITIES",
     "_build_ch1_mission",
     "_build_ch2_startup",
@@ -71,6 +69,11 @@ __all__ = [
     "_get_user_config",
     "_normalize_field_toggles",
 ]
+
+
+_REFERENCE_SLEEP_OFFER = """5. If user wants auto-monitoring: set_agent_status(job_id, status="sleeping", wake_in_minutes=15)
+   Warn user this increases token consumption. Sleep locally, then wake and run coordination loop.
+"""
 
 
 def _build_orchestrator_protocol(
@@ -91,6 +94,7 @@ def _build_orchestrator_protocol(
     chain_ctx: ChainContext | None = None,
     preset: Platform | None = None,
     detected_harness: str | None = None,
+    headless_launch: bool = False,
 ) -> dict:
     effective_tool = tool if cli_mode else "multi_terminal"
     ch1 = _build_ch1_mission(effective_tool)
@@ -107,13 +111,17 @@ def _build_orchestrator_protocol(
     ch_authority = _build_ch_orchestrator_authority(cli_mode)
     ch4 = _build_ch4_error_handling()
     ch5 = (
-        _build_ch5_reference(project_id, orchestrator_id, effective_tool, git_integration_enabled)
+        _build_ch5_reference(
+            project_id, orchestrator_id, effective_tool, git_integration_enabled, headless_launch=headless_launch
+        )
         if include_implementation_reference
         else None
     )
     ch6 = (
         _build_ch6_auto_checkin(auto_checkin_interval) if (include_implementation_reference and not cli_mode) else None
     )
+    if preset is not None:
+        ch5, ch6 = ch5 and ch5.replace(_REFERENCE_SLEEP_OFFER, ""), None
 
 
     is_conductor_chain = chain_ctx is not None and chain_ctx.role == "conductor"
@@ -135,11 +143,8 @@ def _build_orchestrator_protocol(
 
     if is_conductor_chain:
         chain_mode = chain_ctx.execution_mode
-        platform = get_platform(chain_mode)
-        can_spawn = platform.can_spawn_terminals if platform is not None else True
         ch_capability = _build_ch_capability(
             execution_mode=chain_mode,
-            can_spawn_terminals=can_spawn,
             preset=preset,
         )
         if chain_ctx.is_staging:

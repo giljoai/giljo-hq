@@ -50,7 +50,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:modelValue', 'refresh-product'])
+const emit = defineEmits(['update:modelValue'])
 
 const isOpen = computed({
   get: () => props.modelValue,

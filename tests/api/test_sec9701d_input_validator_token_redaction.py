@@ -23,7 +23,7 @@ def _build_app() -> FastAPI:
     async def public_json():
         return {"ok": True}
 
-    app.add_middleware(InputValidationMiddleware, strict_mode=False)
+    app.add_middleware(InputValidationMiddleware)
     return app
 
 

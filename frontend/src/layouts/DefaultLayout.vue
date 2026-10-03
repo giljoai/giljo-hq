@@ -85,7 +85,7 @@ const AccountDeletionBannerComponent = shallowRef(null)
 const LapsedStateBannerComponent = shallowRef(null)
 const SetPasswordNudgeBannerComponent = shallowRef(null)
 
-const { isNonCeMode } = useGiljoMode()
+const { isSaasMode } = useGiljoMode()
 
 const route = useRoute()
 const router = useRouter()
@@ -198,7 +198,7 @@ onMounted(async () => {
 
   if (userLoaded && currentUser.value) {
     void (async () => {
-      if (isNonCeMode()) {
+      if (isSaasMode()) {
         try {
           const bannerLoaders = import.meta.glob('@/saas/components/TrialBanner.vue')
           const overlayLoaders = import.meta.glob('@/saas/components/TrialExpiredOverlay.vue')

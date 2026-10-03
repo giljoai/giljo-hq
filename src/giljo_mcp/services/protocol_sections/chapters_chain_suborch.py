@@ -108,11 +108,11 @@ def _render_ch_sub_orchestrator(*, run_id: str, position: int, n_projects: int, 
 
 5. CONTINUE TO IMPLEMENTATION (no gate, no wait) -- There is NO per-project gate and you
    do NOT call any launch tool (you do not have one and must not). The conductor's spawn
-   already released you. After staging-end, call get_job_mission ONCE, passing the
-   protocol_etag value your boot get_job_mission returned -- on a match the server omits
-   the unchanged identity+protocol block (tens of KB smaller, so your harness cannot
-   truncate it) and you reuse your cached copy. It returns your implementation protocol
-   immediately and flips you to working. Do NOT wait for a human, do NOT return to the
+   already released you. After staging-end, call get_job_mission ONCE, WITHOUT your boot
+   protocol_etag: the implementation protocol differs from this staging one, so the full
+   block always comes back and you need all of it. Keep the NEW protocol_etag it returns
+   for any later refetch. It returns your implementation protocol immediately and flips
+   you to working. Do NOT wait for a human, do NOT return to the
    dashboard, and do NOT sleep-poll a gate: a single get_job_mission carries you straight
    into implementation.
 

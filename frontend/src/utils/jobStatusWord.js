@@ -1,12 +1,22 @@
 
 import { isOrchestrator, getAgentRoleLabel } from '@/utils/agentDisplay'
+import { getStatusLabel } from '@/utils/statusConfig'
 
 const LIVE_STATUSES = new Set(['working', 'silent'])
+const ORCHESTRATOR_STATES = new Set(['monitoring', 'result_waiting', 'silent'])
 
 export function jobStatusWord(agent) {
   const status = agent?.status || ''
-  if (LIVE_STATUSES.has(status) && agent?.activity === 'holding') return 'holding'
-  return status
+  if (!LIVE_STATUSES.has(status)) return status
+  if (agent?.activity === 'holding') return 'holding'
+  const derived = agent?.orchestrator_state?.state
+  return ORCHESTRATOR_STATES.has(derived) ? derived : status
+}
+
+export function jobStatusLabel(agent) {
+  const word = jobStatusWord(agent)
+  if (word === agent?.orchestrator_state?.state && agent.orchestrator_state.label) return agent.orchestrator_state.label
+  return getStatusLabel(word, agent?.block_reason)
 }
 
 export function isLiveStatusWord(word) {
@@ -51,12 +61,24 @@ export function needsInputOwner(agents = []) {
   if (unreadHolder) {
     const label = ownerLabel(unreadHolder)
     const count = unreadHolder.action_required_unread
+    const waiting = Math.max(unreadHolder.messages_waiting_count ?? 0, count)
     return {
       owner: label.toLowerCase(),
       kind: 'unread',
       count,
-      text: `${label} has ${count} unread`,
+      text: waiting === count ? `${label}: answer ${count}` : `${label}: answer ${count} of ${waiting}`,
       hint: `${plural(count, 'post')} in the Hub thread ${count === 1 ? 'asks' : 'ask'} the ${label.toLowerCase()} to act. It clears when they read and answer.`,
+    }
+  }
+
+  const resultWaiting = agents.find((a) => isOrchestrator(a) && jobStatusWord(a) === 'result_waiting')
+  if (resultWaiting) {
+    return {
+      owner: 'operator',
+      kind: 'silent',
+      count: resultWaiting.orchestrator_state?.agents || 1,
+      text: 'Result not picked up',
+      hint: 'A worker finished and the orchestrator has not picked up its result. Open its Hub thread and post, or replay its prompt from the row.',
     }
   }
 

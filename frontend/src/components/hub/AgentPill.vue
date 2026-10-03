@@ -28,7 +28,7 @@ const initials = computed(() => {
 })
 
 const badgeStyle = computed(() => {
-  const hex = getAgentColor(getAgentColorKey(props.participant))?.hex
+  const { hex } = getAgentColor(getAgentColorKey(props.participant))
   return { backgroundColor: hexToRgba(hex, 0.2), color: hex }
 })
 

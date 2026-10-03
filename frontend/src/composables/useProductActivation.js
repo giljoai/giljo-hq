@@ -16,7 +16,6 @@ export function useProductActivation(loadProducts) {
         showToast({
           message: `${product.name} hidden`,
           type: 'info',
-          timeout: 3000,
         })
 
         await loadProducts()
@@ -26,7 +25,6 @@ export function useProductActivation(loadProducts) {
         showToast({
           message: `${product.name} shown`,
           type: 'success',
-          timeout: 3000,
         })
 
         await loadProducts()
@@ -37,7 +35,6 @@ export function useProductActivation(loadProducts) {
       showToast({
         message: 'Failed to change product visibility. Try again or refresh the page.',
         type: 'error',
-        timeout: 5000,
       })
     }
   }

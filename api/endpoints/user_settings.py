@@ -229,7 +229,7 @@ async def get_headless_launch(
     """Get the account-wide setting controlling whether a connected agent may
     advance the implement gate.
 
-    BE-9670b: off (False) by default. Admin-gated and tenant-scoped. Requires
+    Off (False) by default. Admin-gated and tenant-scoped. Requires
     admin role.
     """
     logger.debug("Admin %s retrieving headless-launch toggle", sanitize(current_user.username))

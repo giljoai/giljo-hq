@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -47,7 +47,7 @@ class MemoryEntryCreateParams:
     priority: int = 3
     significance_score: float = 0.5
     token_estimate: int | None = None
-    tags: list[str] | None = field(default=None)
+    tags: list[str] | None = None
     author_job_id: UUID | None = None
     author_name: str | None = None
     author_type: str | None = None

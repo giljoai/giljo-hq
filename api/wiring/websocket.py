@@ -7,18 +7,12 @@
 from __future__ import annotations
 
 import logging
-from contextlib import nullcontext
 
-from fastapi import HTTPException, WebSocket
+from fastapi import WebSocket
 from fastapi.exceptions import WebSocketException
-from sqlalchemy import select
 
 from api.app_state import state
 from api.auth_utils import authenticate_websocket
-from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.models import Project
-from giljo_mcp.models.agent_identity import AgentJob
-from giljo_mcp.models.tasks import Message
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
@@ -84,91 +78,3 @@ async def authenticate_ws_connection(
         logger.warning("WebSocket authentication failed for %s: %s", sanitize(client_id), sanitize(str(e.reason)))
         await websocket.close(code=1008, reason=e.reason or "Unauthorized")
         return None
-
-
-def ws_entity_resolution_scope(session, *, is_setup: bool, tenant_key: str | None):
-    if is_setup or not tenant_key:
-        return tenant_isolation_bypass(
-            session,
-            reason="setup-mode WS subscribe resolves entity tenant before auth",
-            models=(Project, AgentJob, Message),
-        )
-    return nullcontext()
-
-
-async def handle_ws_subscribe(
-    websocket: WebSocket,
-    client_id: str,
-    data: dict,
-    auth_context: dict,
-) -> None:
-    entity_type = data.get("entity_type")
-    entity_id = data.get("entity_id")
-    connection_tenant_key = auth_context.get("tenant_key")
-    is_setup = auth_context.get("context") == "setup"
-
-    try:
-        tenant_key = None
-        if state.db_manager:
-            async with state.db_manager.get_session_async(tenant_key=connection_tenant_key) as session:
-                with ws_entity_resolution_scope(session, is_setup=is_setup, tenant_key=connection_tenant_key):
-                    if entity_type == "project":
-                        stmt = select(Project).where(Project.id == entity_id)
-                        result = await session.execute(stmt)
-                        project = result.scalar_one_or_none()
-                        if project:
-                            tenant_key = project.tenant_key
-                    elif entity_type == "agent":
-                        stmt = select(AgentJob).where(AgentJob.job_id == entity_id)
-                        result = await session.execute(stmt)
-                        agent_job = result.scalar_one_or_none()
-                        if agent_job:
-                            tenant_key = agent_job.tenant_key
-                    elif entity_type == "message":
-                        stmt = select(Message).where(Message.id == entity_id)
-                        result = await session.execute(stmt)
-                        message = result.scalar_one_or_none()
-                        if message:
-                            tenant_key = message.tenant_key
-
-        if not tenant_key:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": "subscription_denied",
-                    "message": f"Cannot resolve tenant for {entity_type}:{entity_id}",
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                }
-            )
-            return
-
-        if tenant_key != auth_context.get("tenant_key"):
-            logger.warning(
-                f"Cross-tenant subscription blocked: user tenant={auth_context.get('tenant_key')}, "
-                f"entity tenant={tenant_key}"
-            )
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "error": "subscription_denied",
-                    "message": "Cross-tenant subscription not allowed",
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                }
-            )
-            return
-
-        await state.websocket_manager.subscribe(client_id, entity_type, entity_id, tenant_key)
-        await websocket.send_json({"type": "subscribed", "entity_type": entity_type, "entity_id": entity_id})
-
-    except HTTPException as e:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "error": "subscription_denied",
-                "message": str(e.detail),
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-            }
-        )

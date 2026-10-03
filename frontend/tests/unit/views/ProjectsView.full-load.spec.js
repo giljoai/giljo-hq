@@ -32,7 +32,6 @@ vi.mock('@/stores/projects', () => ({
     hiddenProjects: [],
     // BE-6076: server-mode page state + active-project flag.
     projectsTotal: 0,
-    activeProjectMeta: null,
     loading: false,
     error: null,
     fetchProjects: mockFetchProjects,

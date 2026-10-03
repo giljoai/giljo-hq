@@ -104,8 +104,8 @@ test.describe('Jobs board updates live (FE-9689)', () => {
     await expect(workerStatus).toHaveText('Working...', { timeout: 10000 })
 
     await mcp.tool('set_agent_status', { job_id: spawned.job_id, status: 'blocked', reason: 'Needs a deploy key' })
-    await expect(workerStatus).toHaveText('Needs Input', { timeout: 10000 })
-    await expect(card.locator('[data-testid="jb-lifecycle-pill"]')).toHaveText('Needs Input', { timeout: 10000 })
+    await expect(workerStatus).toHaveText('Blocked', { timeout: 10000 })
+    await expect(card.locator('[data-testid="jb-lifecycle-pill"]')).toHaveText('Needs attention', { timeout: 10000 })
     await page.request.delete(`${API}/api/auth/api-keys/${keyId}`, { headers })
 
     const marker = await page.evaluate(() => (window as unknown as { __fe9689?: string }).__fe9689)

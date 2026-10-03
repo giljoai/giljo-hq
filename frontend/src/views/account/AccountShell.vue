@@ -32,6 +32,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import setupService from '@/services/setupService'
+import { isSaasModeValue } from '@/composables/useGiljoMode'
 
 const tabs = ref([
   {
@@ -55,21 +56,17 @@ const tabs = ref([
 ])
 
 onMounted(async () => {
-  try {
-    const status = await setupService.checkEnhancedStatus()
-    if ((status?.mode ?? 'ce') !== 'ce') {
-      tabs.value = [
-        ...tabs.value,
-        {
-          name: 'AccountConnectedAccounts',
-          label: 'Connected Accounts',
-          icon: 'mdi-link-variant',
-          dataTest: 'account-connected-tab',
-        },
-      ]
-    }
-  } catch (err) {
-    console.warn('[AccountShell] setupService error, defaulting to CE tabs:', err)
+  const status = await setupService.checkEnhancedStatus()
+  if (isSaasModeValue(status?.mode)) {
+    tabs.value = [
+      ...tabs.value,
+      {
+        name: 'AccountConnectedAccounts',
+        label: 'Connected Accounts',
+        icon: 'mdi-link-variant',
+        dataTest: 'account-connected-tab',
+      },
+    ]
   }
 })
 </script>

@@ -46,6 +46,6 @@ async def init_validation(state: APIState) -> None:
             else:
                 logger.info("Setup state validation passed")
 
-        except Exception as e:
-            logger.error(f"Startup setup check failed: {e}", exc_info=True)
-            logger.warning("Continuing startup despite setup check failure")
+        except Exception:
+            logger.exception("Optional startup phase [setup_validation] failed")
+            state.degraded_services.append("setup_validation")

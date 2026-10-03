@@ -181,7 +181,6 @@ class MessageRoutingService:
             live_orchestrator.agent_id,
             live_orchestrator.job_id,
             live_orchestrator.agent_display_name,
-            "orchestrator",
         }
         if message.from_agent_id in orchestrator_identities:
             return f"{finished_prefix}; you are the live orchestrator for this project -- respawn or redirect this work yourself."

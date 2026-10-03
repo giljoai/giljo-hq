@@ -63,7 +63,7 @@ Most work is a single project. Reach for a **chain** when several related projec
 - **One project** when the work is self-contained and finishes in a single run.
 - **A chain** when the work spans multiple projects with a natural order, and you want one coordinator to run them one after another without you launching each project by hand.
 
-A chain links 2 to 5 projects and runs them under a dedicated coordinator called the **conductor**. See the **Chain Projects** chapter for how to link projects, launch a chain, and monitor it.
+A chain links 2 to 10 projects and runs them under a dedicated coordinator called the **conductor**. See the **Chain Projects** chapter for how to link projects, launch a chain, and monitor it.
 
 ### Roadmap or Projects List?
 

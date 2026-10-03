@@ -6,7 +6,7 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import Text, and_, case, cast, func, literal_column, or_, select, update
@@ -16,7 +16,10 @@ from giljo_mcp.database import tenant_session_context
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models import Product, Project, Task, VisionDocument
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
-from giljo_mcp.services.dto import MemoryEntryCreateParams
+
+
+if TYPE_CHECKING:
+    from giljo_mcp.services.dto import MemoryEntryCreateParams
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +47,7 @@ class ProductMemoryRepository:
     async def create_entry(
         self,
         session: AsyncSession,
-        params: MemoryEntryCreateParams,
+        params: "MemoryEntryCreateParams",
     ) -> ProductMemoryEntry:
         from giljo_mcp.schemas.jsonb_validators import (
             validate_git_commits,

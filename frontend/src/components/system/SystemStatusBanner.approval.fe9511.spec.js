@@ -37,7 +37,6 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
   return {
     useIntegrationStatus: () => ({
       gitEnabled: ref(true),
-      serenaEnabled: ref(true),
       resolved: ref(true),
       loading: ref(false),
       refresh: vi.fn().mockResolvedValue(),

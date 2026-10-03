@@ -70,6 +70,22 @@ export const useProductStore = defineStore('products', () => {
     }
   }
 
+  function _clearCurrentProduct() {
+    currentProductId.value = null
+    currentProduct.value = null
+    localStorage.removeItem('currentProductId')
+  }
+
+  async function _applyCurrentProduct(productId, product) {
+    currentProductId.value = productId
+    currentProduct.value = product
+    localStorage.setItem('currentProductId', productId)
+    await projectStore.fetchProjects()
+    await useTaskStore().fetchTasks({ product_id: productId })
+    await useCommHubStore().loadThreads({ product_id: productId })
+    window.dispatchEvent(new CustomEvent('product-changed', { detail: { productId, product } }))
+  }
+
   async function setCurrentProduct(productId) {
     if (productId === currentProductId.value && productId !== null) {
       return
@@ -77,61 +93,23 @@ export const useProductStore = defineStore('products', () => {
 
     await fetchProducts()
 
-    if (!productId || products.value.length === 0) {
-      if (products.value.length > 0) {
-        productId = products.value[0].id
-      } else {
-        currentProductId.value = null
-        currentProduct.value = null
-        localStorage.removeItem('currentProductId')
-        console.warn('No products available to set as current product')
-        return
-      }
+    if (products.value.length === 0) {
+      _clearCurrentProduct()
+      console.warn('No products available to set as current product')
+      return
     }
+    if (!productId) productId = products.value[0].id
 
     const product = await fetchProductById(productId)
-    if (!product) {
-      console.warn(`Product ${productId} not found, switching to first available`)
-
-      if (products.value.length > 0) {
-        productId = products.value[0].id
-        const fallbackProduct = await fetchProductById(productId)
-        if (fallbackProduct) {
-          currentProductId.value = productId
-          currentProduct.value = fallbackProduct
-          localStorage.setItem('currentProductId', productId)
-          await projectStore.fetchProjects()
-          await useTaskStore().fetchTasks({ product_id: productId })
-          await useCommHubStore().loadThreads({ product_id: productId })
-          window.dispatchEvent(
-            new CustomEvent('product-changed', {
-              detail: { productId, product: fallbackProduct },
-            }),
-          )
-        }
-        return
-      } else {
-        currentProductId.value = null
-        currentProduct.value = null
-        localStorage.removeItem('currentProductId')
-        return
-      }
+    if (product) {
+      await _applyCurrentProduct(productId, product)
+      return
     }
 
-    currentProductId.value = productId
-    currentProduct.value = product
-
-    localStorage.setItem('currentProductId', productId)
-
-    await projectStore.fetchProjects()
-    await useTaskStore().fetchTasks({ product_id: productId })
-    await useCommHubStore().loadThreads({ product_id: productId })
-
-    window.dispatchEvent(
-      new CustomEvent('product-changed', {
-        detail: { productId, product },
-      }),
-    )
+    console.warn(`Product ${productId} not found, switching to first available`)
+    const fallbackId = products.value[0].id
+    const fallbackProduct = await fetchProductById(fallbackId)
+    if (fallbackProduct) await _applyCurrentProduct(fallbackId, fallbackProduct)
   }
 
   async function createProduct(productData) {
@@ -347,25 +325,6 @@ export const useProductStore = defineStore('products', () => {
   }
 
 
-  function handleProductMemoryUpdated(payload) {
-    if (!payload?.product_id) {
-      console.warn('[PRODUCTS] product:memory:updated missing product_id', payload)
-      return
-    }
-
-    const product = products.value.find((p) => p.id === payload.product_id)
-    const nextMemory = payload.product_memory || payload.data?.product_memory
-
-    if (product && nextMemory) {
-      product.product_memory = nextMemory
-
-      if (currentProduct.value?.id === payload.product_id) {
-        currentProduct.value.product_memory = nextMemory
-      }
-
-    }
-  }
-
   async function revalidateActiveProduct() {
     const previousActive = activeProduct.value
     const read = await fetchActiveProduct()
@@ -413,7 +372,6 @@ export const useProductStore = defineStore('products', () => {
     switchTab,
     closeTab,
 
-    handleProductMemoryUpdated,
     handleProductStatusChanged,
   }
 })

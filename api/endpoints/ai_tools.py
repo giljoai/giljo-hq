@@ -20,10 +20,8 @@ def get_codex_config(server_url: str, api_key: str) -> str:
     return f"codex mcp add {branding.MCP_ALIAS} --url {server_url}/mcp --bearer-token-env-var GILJO_API_KEY"
 
 
-def get_claude_desktop_config(server_url: str, api_key: str, self_signed_https: bool) -> str:
+def get_claude_desktop_config(server_url: str, api_key: str) -> str:
     env: dict[str, str] = {"AUTH_HEADER": f"Bearer {api_key}"}
-    if self_signed_https:
-        env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
 
     config = {
         "mcpServers": {
@@ -54,6 +52,25 @@ def get_codex_oauth_config(server_url: str) -> str:
 
 def get_claude_desktop_oauth_config() -> str:
     return "Add the GiljoAI connector in Claude Desktop or claude.ai settings; it runs OAuth in the browser."
+
+
+def get_opencode_oauth_config(server_url: str) -> str:
+    return f"opencode mcp add {branding.MCP_ALIAS} --url {server_url}/mcp\nopencode mcp auth {branding.MCP_ALIAS}"
+
+
+def get_opencode_config(server_url: str, api_key: str) -> str:
+    return f'opencode mcp add {branding.MCP_ALIAS} --url {server_url}/mcp --header "Authorization=Bearer {api_key}"'
+
+
+def get_generic_mcp_config(server_url: str, api_key: str) -> str:
+    config = {
+        branding.MCP_ALIAS: {
+            "transport": "streamable-http",
+            "url": f"{server_url}/mcp",
+            "headers": {"Authorization": f"Bearer {api_key}"},
+        }
+    }
+    return json.dumps(config, indent=2)
 
 
 AUTH_CAPABILITIES: dict[str, dict] = {

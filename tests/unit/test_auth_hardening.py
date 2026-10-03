@@ -80,51 +80,6 @@ class TestValidateJwtTokenTenantKeyRequired:
 
 
 
-class TestSubscriptionPermissionTenantKeyRequired:
-
-    def test_subscription_denied_when_user_missing_tenant_key(self):
-        from api.auth_utils import check_subscription_permission
-
-        auth_context = {
-            "user": {
-                "user_id": "testuser",
-                "role": "developer",
-                "permissions": ["*"],
-            }
-        }
-
-        result = check_subscription_permission(
-            auth_context=auth_context,
-            entity_type="project",
-            entity_id=str(uuid.uuid4()),
-            tenant_key="tk_entity_tenant",
-        )
-        assert result is False, "Subscription should be denied when user has no tenant_key"
-
-    def test_subscription_allowed_when_tenant_key_matches(self):
-        from api.auth_utils import check_subscription_permission
-
-        tenant = "tk_matching_tenant"
-        auth_context = {
-            "user": {
-                "user_id": "testuser",
-                "tenant_key": tenant,
-                "role": "developer",
-                "permissions": ["*"],
-            }
-        }
-
-        result = check_subscription_permission(
-            auth_context=auth_context,
-            entity_type="project",
-            entity_id=str(uuid.uuid4()),
-            tenant_key=tenant,
-        )
-        assert result is True
-
-
-
-
 class TestAuthenticateWebsocketApiKeyTenantKey:
 
     @pytest.mark.asyncio

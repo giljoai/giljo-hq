@@ -462,6 +462,27 @@ async def test_f2_server_side_ctx_self_close_transitions_project_to_completed(
     assert job_count == 1, "Only the orchestrator job should exist; no agents spawned."
 
 
+@pytest.mark.asyncio
+async def test_ctx_self_close_finishes_the_orchestrator_job_like_complete_job(
+    db_session: AsyncSession,
+    ctx_orchestrator_setup,
+) -> None:
+    setup = ctx_orchestrator_setup
+    service = MissionOrchestrationService(
+        db_manager=None,  # type: ignore[arg-type]
+        tenant_manager=TenantManager(),
+        test_session=db_session,
+    )
+
+    await service.get_staging_instructions(job_id=setup["job_id"], tenant_key=setup["tenant_key"])
+
+    await db_session.refresh(setup["job"])
+    await db_session.refresh(setup["execution"])
+    assert setup["job"].status == "completed"
+    assert setup["job"].completed_at == setup["execution"].completed_at
+    assert setup["execution"].result["summary"]
+
+
 
 
 @pytest.mark.asyncio

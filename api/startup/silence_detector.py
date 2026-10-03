@@ -27,6 +27,6 @@ async def init_silence_detector(state: APIState) -> None:
         await state.silence_detector.start()
         logger.info("Silence detector started (scan interval: 60s)")
 
-    except Exception as _exc:
-        logger.exception("Failed to start silence detector")
-        logger.warning("Continuing without silence detection")
+    except Exception:
+        logger.exception("Optional startup phase [silence_detector] failed; running without silence detection")
+        state.degraded_services.append("silence_detector")

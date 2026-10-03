@@ -42,24 +42,19 @@ async def broadcast_agent_status_changed(
 ) -> None:
     if not websocket_manager:
         return
-    try:
-        await websocket_manager.broadcast_to_tenant(
-            tenant_key=tenant_key,
-            event_type="agent:status_changed",
-            data={
-                "job_id": event.job_id,
-                "project_id": project_id,
-                "product_id": product_id,
-                "agent_display_name": event.agent_display_name,
-                "agent_name": event.agent_name,
-                "old_status": event.old_status,
-                "status": event.new_status,
-            },
-        )
-    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-        _module_logger.warning(
-            "[WEBSOCKET] Failed to broadcast agent:status_changed for %s: %s", event.job_id, ws_error
-        )
+    await websocket_manager.broadcast_to_tenant(
+        tenant_key=tenant_key,
+        event_type="agent:status_changed",
+        data={
+            "job_id": event.job_id,
+            "project_id": project_id,
+            "product_id": product_id,
+            "agent_display_name": event.agent_display_name,
+            "agent_name": event.agent_name,
+            "old_status": event.old_status,
+            "status": event.new_status,
+        },
+    )
 
 
 async def broadcast_agent_status_events(

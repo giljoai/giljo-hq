@@ -42,17 +42,14 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
   return {
     useIntegrationStatus: () => {
       const gitEnabled = ref(false)
-      const serenaEnabled = ref(false)
       const resolved = ref(false)
       return {
         gitEnabled,
-        serenaEnabled,
         resolved,
         loading: ref(false),
         refresh: () =>
-          h.refreshDeferred.value.promise.then(({ git, serena }) => {
+          h.refreshDeferred.value.promise.then(({ git }) => {
             gitEnabled.value = git
-            serenaEnabled.value = serena
             resolved.value = true
           }),
       }
@@ -120,7 +117,7 @@ function mountPending() {
 
 async function resolveNudge(wrapper) {
   await flushPromises()
-  h.refreshDeferred.value.settle({ git: false, serena: false })
+  h.refreshDeferred.value.settle({ git: false })
   await flushPromises()
   return wrapper
 }

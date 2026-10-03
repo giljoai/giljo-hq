@@ -112,7 +112,6 @@ vi.mock('@/composables/useNavConnectionStatus', () => ({
 vi.mock('@/composables/useApiUrl', () => ({ getApiBaseUrl: () => 'http://localhost:8000' }))
 
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
-import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 
 function mountDrawer(piniaInstance) {
   return mount(NavigationDrawer, {
@@ -173,28 +172,6 @@ describe('NavigationDrawer — Jobs nav follows the viewed product tab (FE-9627)
     const path = jobsPath(wrapper)
     expect(path).not.toContain('yapper-p1')
     expect(path).not.toContain('run-yapper')
-    expect(path).toBe('/jobs-overview')
-  })
-
-  it('does not let a chain opened from another product win the Jobs link', async () => {
-    h.getRun.mockResolvedValue({
-      data: {
-        id: 'run-yapper-review',
-        project_ids: ['yapper-p1'],
-        resolved_order: ['yapper-p1'],
-        project_statuses: { 'yapper-p1': 'completed' },
-        status: 'stalled',
-      },
-    })
-    const wrapper = mountDrawer(pinia)
-    await flushPromises()
-
-    await useSequenceRunStore(pinia).fetchRun('run-yapper-review')
-    await flushPromises()
-
-    const path = jobsPath(wrapper)
-    expect(path).not.toContain('yapper-p1')
-    expect(path).not.toContain('run-yapper-review')
     expect(path).toBe('/jobs-overview')
   })
 

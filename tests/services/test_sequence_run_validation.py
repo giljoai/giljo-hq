@@ -9,6 +9,11 @@ from __future__ import annotations
 import pytest
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.schemas.jsonb_validators_sequence_runs import (
+    validate_sequence_run_project_ids,
+    validate_sequence_run_reviewed_project_ids,
+    validate_sequence_run_reviewed_via,
+)
 from giljo_mcp.services.sequence_run_validation import (
     MAX_CHAIN_MISSION_CHARS,
     validate_create_fields,
@@ -103,3 +108,48 @@ def test_validate_update_fields_all_none_is_noop() -> None:
     )
     assert resolved_order is None
     assert project_statuses is None
+
+
+def _ids(n: int) -> list[str]:
+    return [f"p{i}" for i in range(1, n + 1)]
+
+
+def test_validate_create_fields_accepts_ten_projects() -> None:
+    kwargs = _valid_create_kwargs()
+    kwargs["project_ids"] = _ids(10)
+    kwargs["project_statuses"] = dict.fromkeys(_ids(10), "pending")
+    validate_create_fields(**kwargs)
+
+
+def test_validate_create_fields_rejects_eleven_projects_naming_max_ten() -> None:
+    kwargs = _valid_create_kwargs()
+    kwargs["project_ids"] = _ids(11)
+    with pytest.raises(ValidationError, match="maximum of 10 projects"):
+        validate_create_fields(**kwargs)
+
+
+def test_validate_update_fields_accepts_ten_member_resolved_order() -> None:
+    resolved_order, _ = validate_update_fields(
+        status=None,
+        review_policy=None,
+        current_index=None,
+        execution_mode=None,
+        chain_mission=None,
+        resolved_order=_ids(10),
+        project_statuses=None,
+    )
+    assert resolved_order == _ids(10)
+
+
+@pytest.mark.parametrize(
+    ("validator", "make"),
+    [
+        (validate_sequence_run_project_ids, _ids),
+        (validate_sequence_run_reviewed_project_ids, _ids),
+        (validate_sequence_run_reviewed_via, lambda n: dict.fromkeys(_ids(n), "ui")),
+    ],
+)
+def test_sequence_run_jsonb_validators_take_ten_members_and_refuse_eleven(validator, make) -> None:
+    assert len(validator(make(10))) == 10
+    with pytest.raises(ValueError):
+        validator(make(11))

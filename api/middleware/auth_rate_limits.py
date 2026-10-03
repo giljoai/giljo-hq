@@ -26,6 +26,7 @@ DEFAULTS: dict[str, int] = {
     "account_deletion_confirm": 5,
     "account_deletion_cancel": 10,
     "restore_request": 5,
+    "account_export": 3,
     "api_key_auth_failed": 10,
     "social_login_start": 10,
     "social_login_callback": 10,

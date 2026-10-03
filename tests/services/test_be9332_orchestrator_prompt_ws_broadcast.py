@@ -18,14 +18,27 @@ pytestmark = pytest.mark.asyncio
 
 
 class _SpyManager:
-    def __init__(self, raises: bool = False) -> None:
+    def __init__(self) -> None:
         self.calls: list[dict] = []
-        self._raises = raises
 
     async def broadcast_to_tenant(self, tenant_key: str, event_type: str, data: dict) -> None:
         self.calls.append({"tenant_key": tenant_key, "event_type": event_type, "data": data})
-        if self._raises:
-            raise RuntimeError("simulated WebSocket failure")
+
+
+def _dead_socket_manager(tenant_key: str):
+    from unittest.mock import AsyncMock as _AsyncMock
+    from unittest.mock import MagicMock as _MagicMock
+
+    from fastapi import WebSocketDisconnect
+
+    from api.websocket import WebSocketManager
+
+    manager = WebSocketManager()
+    socket = _MagicMock()
+    socket.send_text = _AsyncMock(side_effect=WebSocketDisconnect(code=1006))
+    manager.active_connections["dead-client"] = socket
+    manager.tenant_connections[tenant_key] = {"dead-client"}
+    return manager
 
 
 async def test_emits_the_canonical_event_type_scoped_to_the_tenant():
@@ -108,9 +121,9 @@ async def test_no_manager_is_a_silent_no_op():
     await broadcast_orchestrator_prompt_generated(None, tenant_key="t", project_id="p1", orchestrator_id="o1")
 
 
-async def test_broadcast_failure_is_swallowed():
-    spy = _SpyManager(raises=True)
+async def test_a_delivery_failure_never_fails_the_staging():
+    manager = _dead_socket_manager("t")
 
-    await broadcast_orchestrator_prompt_generated(spy, tenant_key="t", project_id="p1", orchestrator_id="o1")
+    await broadcast_orchestrator_prompt_generated(manager, tenant_key="t", project_id="p1", orchestrator_id="o1")
 
-    assert len(spy.calls) == 1, "the broadcast was attempted before the failure was swallowed"
+    assert "dead-client" not in manager.active_connections, "the dead client was attempted and evicted"

@@ -28,7 +28,7 @@
           :min="1"
           :max="1440"
           :rules="RULES"
-          :disabled="saving"
+          :disabled="saving || loadFailed"
           class="ats-number"
           data-test="silence-threshold-input"
           @update:model-value="saveSilence"
@@ -65,7 +65,7 @@
           :min="1"
           :max="1440"
           :rules="RULES"
-          :disabled="saving"
+          :disabled="saving || loadFailed"
           class="ats-number"
           data-test="checkin-cadence-input"
           @update:model-value="saveCadence"
@@ -76,7 +76,7 @@
 
     <p v-if="error" class="text-body-small mt-2" data-test="agent-timing-error">
       <v-icon size="16" color="error" class="mr-1">mdi-alert-circle</v-icon>
-      Could not save that. The value on the server is unchanged.
+      {{ error }}
     </p>
   </div>
 </template>
@@ -85,6 +85,7 @@
 import { onMounted, ref } from 'vue'
 
 import { useSettingsStore } from '@/stores/settings'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 const RULES = [
   (v) => (v >= 1 && v <= 1440) || 'Must be between 1 and 1440 minutes',
@@ -95,18 +96,20 @@ const settings = useSettingsStore()
 const silenceMinutes = ref(10)
 const cadenceMinutes = ref(10)
 const saving = ref(false)
-const error = ref(false)
+const error = ref('')
+const loadFailed = ref(false)
 
 onMounted(async () => {
-  try {
-    silenceMinutes.value = await settings.loadAgentSilenceThreshold()
-  } catch {
-    // Leave the default; the field stays usable and a save still works.
-  }
-  try {
-    cadenceMinutes.value = await settings.loadAgentCheckinCadence()
-  } catch {
-    // As above.
+  const [silence, cadence] = await Promise.allSettled([
+    settings.loadAgentSilenceThreshold(),
+    settings.loadAgentCheckinCadence(),
+  ])
+  if (silence.status === 'fulfilled') silenceMinutes.value = silence.value
+  if (cadence.status === 'fulfilled') cadenceMinutes.value = cadence.value
+  const failed = [silence, cadence].find((r) => r.status === 'rejected')
+  if (failed) {
+    loadFailed.value = true
+    error.value = `Could not load the agent timing settings: ${parseErrorResponse(failed.reason).message}`
   }
 })
 
@@ -117,11 +120,11 @@ function isValid(value) {
 async function commit(fn, value) {
   if (!isValid(value)) return
   saving.value = true
-  error.value = false
+  error.value = ''
   try {
     await fn(value)
   } catch {
-    error.value = true
+    error.value = 'Could not save that. The value on the server is unchanged.'
   } finally {
     saving.value = false
   }

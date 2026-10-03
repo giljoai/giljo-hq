@@ -13,7 +13,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.tenant_guard import TenantIsolationError
 from giljo_mcp.tools._unknown_keys import split_known
 from giljo_mcp.tools.context_tools._response_assembly import assemble_fetch_context_response
-from giljo_mcp.tools.context_tools.get_360_memory import get_360_memory
+from giljo_mcp.tools.context_tools.get_360_memory import get_360_memory, parse_memory_360_depth
 from giljo_mcp.tools.context_tools.get_agent_templates import get_agent_templates
 from giljo_mcp.tools.context_tools.get_architecture import get_architecture
 from giljo_mcp.tools.context_tools.get_chain_context import get_chain_context
@@ -297,6 +297,19 @@ async def _resolve_missing_product_id(
     return product_id
 
 
+_DEPTH_VALUE_PARSERS: dict[str, Any] = {"memory_360": parse_memory_360_depth, "git_history": parse_git_history_depth}
+
+
+def _reject_invalid_depth_values(depth_config: dict[str, Any] | None) -> None:
+    for category, parse in _DEPTH_VALUE_PARSERS.items():
+        depth = (depth_config or {}).get(category)
+        try:
+            if depth not in (None, ""):
+                parse(depth)
+        except ValueError as exc:
+            raise ValidationError(f"Invalid depth_config value for {category!r}: {exc}") from exc
+
+
 def _reject_unknown_depth_keys(depth_config: dict[str, Any] | None) -> None:
     if not depth_config:
         return
@@ -362,6 +375,7 @@ async def fetch_context(
         raise ValidationError(f"Invalid categories: {invalid}. Valid categories: {ALL_CATEGORIES}")
 
     _reject_unknown_depth_keys(depth_config)
+    _reject_invalid_depth_values(depth_config)
 
     if not product_id:
         product_id = await _resolve_missing_product_id(
@@ -504,17 +518,8 @@ async def _fetch_category(
     elif category == "memory_360":
         kwargs["product_id"] = product_id
         kwargs["tenant_key"] = tenant_key
-        if isinstance(depth, dict):
-            if "last_n_projects" in depth:
-                kwargs["last_n_projects"] = int(depth["last_n_projects"])
-            shape = depth.get("shape")
-            if shape in ("full", "headlines"):
-                kwargs["depth"] = shape
-        elif isinstance(depth, str):
-            if depth in ("full", "headlines"):
-                kwargs["depth"] = depth
-        elif depth:
-            kwargs["last_n_projects"] = int(depth)
+        if depth not in (None, ""):
+            kwargs.update(parse_memory_360_depth(depth))
 
     elif category == "git_history":
         kwargs["product_id"] = product_id

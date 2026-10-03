@@ -109,8 +109,9 @@ describe('AgentTimingSettings (FE-9553, relocated from the Notifications tab)', 
 
       const wrapper = await mountIt()
 
-      expect(wrapper.vm.silenceMinutes).toBe(10)
       expect(wrapper.vm.cadenceMinutes).toBe(15)
+      expect(wrapper.find('[data-test="agent-timing-error"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="silence-threshold-input"]').attributes('disabled')).toBeDefined()
     })
 
     it('a rejected save surfaces an error and says the server value is unchanged', async () => {

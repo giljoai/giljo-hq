@@ -90,9 +90,8 @@ class GiljoLauncher:
             "Dashboard", [sys.executable, "-m", "http.server", str(dashboard_port), "--directory", "frontend"]
         )
 
-        ssl_enabled = self.config.get("features", {}).get("ssl_enabled", False)
-        http_proto = "https" if ssl_enabled else "http"
-        ws_proto = "wss" if ssl_enabled else "ws"
+        http_proto = "http"
+        ws_proto = "ws"
 
         print()
         print("All services started successfully!")

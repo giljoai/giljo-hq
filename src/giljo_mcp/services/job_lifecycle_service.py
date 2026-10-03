@@ -33,7 +33,7 @@ from giljo_mcp.services.protocol_survival import build_spawn_footer
 from giljo_mcp.services.sequence_chain_context import renders_multi_terminal
 from giljo_mcp.system_roles import ORCHESTRATOR_AGENT_NAME
 from giljo_mcp.tenant import TenantManager
-from giljo_mcp.utils.identity import validate_agent_display_name
+from giljo_mcp.utils.identity import AGENT_DISPLAY_NAME_MAX, validate_agent_display_name
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
@@ -140,7 +140,6 @@ class JobLifecycleService:
                 }
                 if context_chunks:
                     metadata_dict["context_chunks"] = context_chunks
-
 
                 mission, resolved_template_id, spawn_template = await self._resolve_spawn_template(
                     session, project, agent_name, mission, tenant_key, agent_display_name
@@ -307,7 +306,8 @@ class JobLifecycleService:
             return agent_display_name
 
         for suffix in range(2, 51):
-            candidate = f"{agent_display_name}-{suffix}"
+            tail = f"-{suffix}"
+            candidate = f"{agent_display_name[: AGENT_DISPLAY_NAME_MAX - len(tail)]}{tail}"
             if candidate not in active_names:
                 self._logger.info(
                     "Auto-suffixed display name '%s' -> '%s' (collision in project %s)",
@@ -533,25 +533,22 @@ class JobLifecycleService:
         self._logger.info(
             f"[WEBSOCKET] Broadcasting agent:created for {ctx.agent_name} ({ctx.agent_display_name}) via direct WebSocket"
         )
-        try:
-            if self._websocket_manager:
-                await self._websocket_manager.broadcast_to_tenant(
-                    tenant_key=ctx.tenant_key,
-                    event_type="agent:created",
-                    data={
-                        "project_id": ctx.project_id,
-                        "product_id": ctx.product_id,
-                        "execution_id": ctx.agent_execution.id,
-                        "agent_id": ctx.agent_id,
-                        "job_id": ctx.job_id,
-                        "agent_display_name": ctx.agent_display_name,
-                        "agent_name": ctx.agent_name,
-                        "status": "waiting",
-                        "thin_client": True,
-                        "timestamp": ctx.created_at.isoformat(),
-                        "mission": ctx.mission,
-                        "phase": ctx.phase,
-                    },
-                )
-        except Exception as ws_error:
-            self._logger.error(f"[WEBSOCKET ERROR] Failed to broadcast agent:created: {ws_error}", exc_info=True)
+        if self._websocket_manager:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=ctx.tenant_key,
+                event_type="agent:created",
+                data={
+                    "project_id": ctx.project_id,
+                    "product_id": ctx.product_id,
+                    "execution_id": ctx.agent_execution.id,
+                    "agent_id": ctx.agent_id,
+                    "job_id": ctx.job_id,
+                    "agent_display_name": ctx.agent_display_name,
+                    "agent_name": ctx.agent_name,
+                    "status": "waiting",
+                    "thin_client": True,
+                    "timestamp": ctx.created_at.isoformat(),
+                    "mission": ctx.mission,
+                    "phase": ctx.phase,
+                },
+            )

@@ -52,6 +52,8 @@ async def get_chain_context(
         "run_id": run["id"],
         "chain_mission": run.get("chain_mission"),
         "resolved_order": run.get("resolved_order") or [],
+        "current_index": run.get("current_index", 0),
+        "project_statuses": run.get("project_statuses") or {},
         "hub_thread_id": hub["thread_id"] if hub else None,
         "hub_chat_id": hub["chat_id"] if hub else None,
     }

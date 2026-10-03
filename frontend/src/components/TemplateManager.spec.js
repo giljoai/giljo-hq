@@ -450,6 +450,28 @@ describe('TemplateManager — delete confirm flow', () => {
     expect(api.templates.delete).toHaveBeenCalledWith(77)
     expect(wrapper.vm.deleteDialog).toBe(false)
   })
+
+  it('a failed delete shows the server reason and keeps the dialog open', async () => {
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.templates.delete.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { status: 409, data: { message: 'agent is in use' } } }),
+    )
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+
+    wrapper.vm.deletingTemplate = makeTemplate({ id: 77 })
+    wrapper.vm.deleteDialog = true
+    await wrapper.vm.deleteTemplate()
+    await flushPromises()
+
+    expect(wrapper.vm.deleteDialog).toBe(true)
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('agent is in use') }),
+    )
+  })
 })
 
 
@@ -470,6 +492,28 @@ describe('TemplateManager — reset confirm flow', () => {
 
     expect(api.templates.reset).toHaveBeenCalledWith(88)
     expect(wrapper.vm.resetDialog).toBe(false)
+  })
+
+  it('a failed reset shows the server reason and keeps the dialog open', async () => {
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.templates.reset.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { status: 500, data: { message: 'reset failed upstream' } } }),
+    )
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+
+    wrapper.vm.resettingTemplate = makeTemplate({ id: 88 })
+    wrapper.vm.resetDialog = true
+    await wrapper.vm.resetTemplate()
+    await flushPromises()
+
+    expect(wrapper.vm.resetDialog).toBe(true)
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('reset failed upstream') }),
+    )
   })
 })
 

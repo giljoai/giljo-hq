@@ -100,6 +100,13 @@ describe('NavAvatarMenu', () => {
     expect(wrapper.text()).not.toContain('Admin Settings')
   })
 
+  it('shows the SaaS-only Reset Password item only for a saas mode', () => {
+    expect(mountMenu({ giljoMode: 'saas' }).text()).toContain('Reset Password')
+    for (const giljoMode of ['ce', 'unknown', '']) {
+      expect(mountMenu({ giljoMode }).text()).not.toContain('Reset Password')
+    }
+  })
+
   describe('role/owner badges edition visibility (FE-9172)', () => {
     it('shows the role chip and org-role badge in CE mode', () => {
       const wrapper = mountMenu({ giljoMode: 'ce', orgRole: 'owner' })

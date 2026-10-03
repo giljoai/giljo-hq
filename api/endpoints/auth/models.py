@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from api.endpoints.auth_models import BoundedPassword, validate_password_strength
+from giljo_mcp.schemas.jsonb_validators import API_KEY_PERMISSIONS_MAX, ApiKeyPermission
 from giljo_mcp.utils.password_helper import BCRYPT_MAX_PASSWORD_BYTES
 
 
@@ -81,11 +82,13 @@ class APIKeyCreateRequest(BaseModel):
     """Request to create new API key"""
 
     name: str = Field(..., min_length=3, max_length=255, description="Description of API key purpose")
-    permissions: list[str] = Field(default=["*"], description="List of permissions (default: all)")
+    permissions: list[ApiKeyPermission] = Field(
+        default=["*"], max_length=API_KEY_PERMISSIONS_MAX, description="List of permissions (default: all)"
+    )
 
 
 class SetupStateUpdate(BaseModel):
-    """Request model for updating setup wizard state (Handover 0855a)"""
+    """Request model for updating setup wizard state"""
 
     setup_selected_tools: list[str] | None = None
     setup_step_completed: int | None = Field(None, ge=0, le=4)
@@ -127,9 +130,7 @@ class RegisterUserRequest(BaseModel):
         default=None,
         description="Tenant key for multi-tenant isolation (resolved from config if not provided)",
     )
-    workspace_name: str | None = Field(
-        default="My Organization", description="Organization name for first admin user (Handover 0424h)"
-    )
+    workspace_name: str | None = Field(default="My Organization", description="Organization name for first admin user")
     recovery_pin: str | None = Field(
         default=None,
         min_length=4,

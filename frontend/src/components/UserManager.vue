@@ -393,6 +393,7 @@ import { formatDistanceToNow } from 'date-fns'
 import api from '@/services/api'
 import configService from '@/services/configService'
 import setupService from '@/services/setupService'
+import { isCeModeValue } from '@/composables/useGiljoMode'
 import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import { useFormatDate } from '@/composables/useFormatDate'
@@ -418,24 +419,19 @@ const showPasswordPinAction = computed(() => isCe.value)
 const saasResetAction = ref(null)
 
 async function loadCapabilities() {
-  try {
-    const status = await setupService.checkEnhancedStatus()
-    isCe.value = (status?.mode ?? 'ce') === 'ce'
-    if (!isCe.value) {
-      const loaders = import.meta.glob('@/saas/components/UserPasswordResetAction.js')
-      const [loader] = Object.values(loaders)
-      if (loader) {
-        try {
-          const mod = await loader()
-          saasResetAction.value = mod.default ?? null
-        } catch (err) {
-          console.warn('[UserManager] UserPasswordResetAction failed to load:', err)
-        }
+  const { mode } = await setupService.checkEnhancedStatus()
+  isCe.value = isCeModeValue(mode)
+  if (mode && !isCe.value) {
+    const loaders = import.meta.glob('@/saas/components/UserPasswordResetAction.js')
+    const [loader] = Object.values(loaders)
+    if (loader) {
+      try {
+        const mod = await loader()
+        saasResetAction.value = mod.default ?? null
+      } catch (err) {
+        console.warn('[UserManager] UserPasswordResetAction failed to load:', err)
       }
     }
-  } catch (err) {
-    console.warn('[UserManager] loadCapabilities error, defaulting to CE:', err)
-    isCe.value = true
   }
 }
 
@@ -634,7 +630,7 @@ async function saveUser() {
     await loadUsers()
     closeUserDialog()
   } catch (err) {
-    console.error('[UserManager] Failed to save user:', err)
+    console.error('[UserManager] Failed to save user:', err?.response?.status ?? err?.code)
     const errorMessage = parseErrorResponse(err).message || 'Failed to save user'
     if (errorMessage.toLowerCase().includes('already exists')) {
       showToast({
@@ -687,7 +683,7 @@ async function changePassword() {
     confirmPassword.value = ''
     showToast({ message: 'Password updated successfully', type: 'success' })
   } catch (err) {
-    console.error('[UserManager] Failed to change password:', err)
+    console.error('[UserManager] Failed to change password:', err?.response?.status ?? err?.code)
     showToast({ message: 'Failed to update password', type: 'error' })
   } finally {
     changingPassword.value = false
@@ -706,7 +702,7 @@ async function changePin() {
     confirmPin.value = ''
     showToast({ message: 'Recovery PIN updated successfully', type: 'success' })
   } catch (err) {
-    console.error('[UserManager] Failed to change PIN:', err)
+    console.error('[UserManager] Failed to change PIN:', err?.response?.status ?? err?.code)
     showToast({ message: 'Failed to update PIN', type: 'error' })
   } finally {
     changingPin.value = false

@@ -45,7 +45,7 @@ def _solo_orchestrator_protocol(*, is_chain_conductor: bool) -> str:
 def _conductor_render() -> str:
     full_protocol = _solo_orchestrator_protocol(is_chain_conductor=True)
     parts = [
-        _build_ch_capability(execution_mode=_MODE, can_spawn_terminals=True),
+        _build_ch_capability(execution_mode=_MODE),
         _build_ch_chain_drive(
             run_id="run-6214",
             resolved_order=_ORDER,

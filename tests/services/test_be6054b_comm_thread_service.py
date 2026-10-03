@@ -259,10 +259,8 @@ async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db
     svc = _service(db_manager, db_session)
     thread = await svc.create_thread(subject="t", creator_id="a", tenant_key=tenant)
 
-    omitted = await svc.post_to_thread(thread_id=thread["thread_id"], content="hi", user_id=user.id, tenant_key=tenant)
-    assert omitted["attribution_warning"] is not None
-    assert omitted["from_agent_id"] == "orchestrator"
-    assert omitted["from_kind"] == "agent"
+    with pytest.raises(ValidationError, match="from_agent"):
+        await svc.post_to_thread(thread_id=thread["thread_id"], content="hi", user_id=user.id, tenant_key=tenant)
 
     as_user = await svc.post_to_thread(
         thread_id=thread["thread_id"], content="me", user_id=user.id, as_user=True, tenant_key=tenant

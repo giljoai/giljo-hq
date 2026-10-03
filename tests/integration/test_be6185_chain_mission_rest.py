@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import uuid
 
@@ -22,7 +23,13 @@ from giljo_mcp.services.sequence_run_service import MAX_CHAIN_MISSION_CHARS
 from giljo_mcp.tenant import TenantManager
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skipif(
+        os.environ.get("GILJO_MODE") == "saas",
+        reason="CE chain REST contract; on SaaS an unlicensed tenant's writes are 402 by design",
+    ),
+]
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 _EXECUTION_MODE = "claude_code_cli"

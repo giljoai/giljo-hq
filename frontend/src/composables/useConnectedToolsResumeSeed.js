@@ -1,17 +1,20 @@
 import { watch } from 'vue'
 import api from '@/services/api'
 import { toolIdForHarness } from '@/config/setupTools'
+import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 
 export function useConnectedToolsResumeSeed({ currentStep, selectedTools, step2Data }) {
+  const { showToast } = useToast()
   let seeded = false
 
   async function seed() {
     if (seeded) return
     if (currentStep() < 2) return
     if (step2Data.value?.connectedTools?.length) return
-    seeded = true
     try {
       const { data } = await api.connect.credentialStatus()
+      seeded = true
       const connectedHarnesses = data?.connected_harnesses || {}
       const ids = new Set()
       for (const harness of Object.keys(connectedHarnesses)) {
@@ -22,7 +25,10 @@ export function useConnectedToolsResumeSeed({ currentStep, selectedTools, step2D
         step2Data.value = { ...step2Data.value, connectedTools: [...ids] }
       }
     } catch (e) {
-      console.warn('[useConnectedToolsResumeSeed] Failed to seed connectedTools on resume:', e)
+      showToast({
+        message: `Could not read which tools are connected: ${parseErrorResponse(e).message}`,
+        type: 'error',
+      })
     }
   }
 

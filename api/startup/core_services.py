@@ -65,6 +65,7 @@ async def init_websocket_broker(state: APIState) -> None:
         logger.error(f"Failed to initialize WebSocket broker: {e}", exc_info=True)
         if worker_count > 1:
             raise
+        state.degraded_services.append("websocket_broker")
 
 
 async def init_core_services(state: APIState) -> None:
@@ -124,8 +125,9 @@ async def init_core_services(state: APIState) -> None:
         logger.info("Starting WebSocket heartbeat task...")
         _start_supervised_heartbeat(state, interval=30)
         logger.info("WebSocket heartbeat started (interval: 30s, supervised)")
-    except Exception as e:
-        logger.error(f"Failed to start heartbeat task: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Optional startup phase [ws_heartbeat] failed")
+        state.degraded_services.append("ws_heartbeat")
 
 
 def _start_supervised_heartbeat(state: APIState, interval: int = 30) -> None:

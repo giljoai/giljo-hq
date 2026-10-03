@@ -20,7 +20,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_helpers import complete_chain_run_if_finished
-from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.services.sequence_run_service import SequenceRunService, broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
@@ -339,9 +339,13 @@ async def test_create_broadcasts_regardless_of_door(db_session, primary_tenant_k
     class _RecordingWS:
         def __init__(self) -> None:
             self.events: list[tuple[str, dict[str, Any]]] = []
+            self.other_events: list[tuple[str, str]] = []
 
         async def broadcast_event_to_tenant(self, tenant_key: str, event: dict[str, Any]) -> None:
             self.events.append((tenant_key, event))
+
+        async def broadcast_to_tenant(self, tenant_key: str, event_type: str, data: dict[str, Any]) -> None:
+            self.other_events.append((tenant_key, event_type))
 
     await _seed_product_context(db_session, tenant_key)
     p1 = await _seed_project(db_session, tenant_key)
@@ -444,9 +448,13 @@ async def test_mark_reviewed_broadcasts_sequence_updated(db_session, primary_ten
     class _RecordingWS:
         def __init__(self) -> None:
             self.events: list[tuple[str, dict[str, Any]]] = []
+            self.other_events: list[tuple[str, str]] = []
 
         async def broadcast_event_to_tenant(self, tenant_key: str, event: dict[str, Any]) -> None:
             self.events.append((tenant_key, event))
+
+        async def broadcast_to_tenant(self, tenant_key: str, event_type: str, data: dict[str, Any]) -> None:
+            self.other_events.append((tenant_key, event_type))
 
     await _seed_product_context(db_session, tenant_key)
     p1 = await _seed_project(db_session, tenant_key)
@@ -464,6 +472,8 @@ async def test_mark_reviewed_broadcasts_sequence_updated(db_session, primary_ten
     ws.events.clear()
 
     await svc.mark_member_reviewed(run_id=run["id"], project_id=p1, tenant_key=tenant_key)
+    await db_session.commit()
+    await broadcast_deferred_sequence_updates(db_session)
 
     assert any(evt["type"] == "sequence:updated" for _tk, evt in ws.events), (
         "mark_member_reviewed must broadcast sequence:updated so the cockpit tracks a "

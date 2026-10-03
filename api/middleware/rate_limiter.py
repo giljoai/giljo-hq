@@ -8,7 +8,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -156,48 +156,3 @@ class RateLimitMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_rate_headers)
-
-
-class EndpointRateLimiter:
-
-    def __init__(self, requests_per_minute: int):
-        self.requests_per_minute = requests_per_minute
-
-    def __call__(self, func):
-        rate_limiter = RateLimiter(
-            self.requests_per_minute,
-            scope=f"endpoint:{func.__module__}.{func.__qualname__}",
-        )
-
-        async def wrapper(*args, **kwargs):
-            request = kwargs.get("request") or (args[0] if args else None)
-
-            if not request or not isinstance(request, Request):
-                logger.error("EndpointRateLimiter: Could not extract Request object")
-                return await func(*args, **kwargs)
-
-            client_ip = request.client.host if request.client else "unknown"
-
-            decision = await rate_limiter.hit(client_ip)
-            if not decision.allowed:
-                logger.warning(
-                    f"Endpoint rate limit exceeded for IP: {client_ip}, "
-                    f"endpoint: {request.url.path}, limit: {self.requests_per_minute}/min"
-                )
-
-                retry_after = int(decision.reset_time - time.time())
-
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Rate limit exceeded for this endpoint. Limit: {self.requests_per_minute}/min",
-                    headers={
-                        "Retry-After": str(max(1, retry_after)),
-                        "X-RateLimit-Limit": str(self.requests_per_minute),
-                        "X-RateLimit-Remaining": "0",
-                        "X-RateLimit-Reset": str(int(decision.reset_time)),
-                    },
-                )
-
-            return await func(*args, **kwargs)
-
-        return wrapper

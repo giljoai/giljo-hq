@@ -176,8 +176,8 @@ async def _update_check_loop(state) -> None:
                     await _emit_update_event(state, None)
                     await _refresh_update_banner(state)
 
-        except Exception as exc:
-            logger.debug("Update check cycle error: %s", exc)
+        except Exception:
+            logger.error("Update check cycle error", exc_info=True)
 
         await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
 
@@ -262,8 +262,8 @@ async def _release_check_loop(state) -> None:
                     await _emit_update_event(state, None)
                     await _refresh_update_banner(state)
 
-        except Exception as exc:
-            logger.debug("Release check cycle error: %s", exc)
+        except Exception:
+            logger.error("Release check cycle error", exc_info=True)
 
         await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
 
@@ -289,6 +289,7 @@ async def start_update_checker(state) -> asyncio.Task | None:
             return None
         logger.info("Update checker started (release mode — git not installed)")
         return asyncio.create_task(_release_check_loop(state))
-    except Exception as exc:
-        logger.debug("Update checker could not start: %s", exc)
+    except Exception:
+        logger.exception("Optional startup phase [update_checker] failed")
+        state.degraded_services.append("update_checker")
         return None

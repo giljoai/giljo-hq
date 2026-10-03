@@ -136,10 +136,6 @@ def test_frontend_configuration_endpoint_is_not_ce_gated():
     ("path_suffix", "method"),
     [
         ("/database", "GET"),
-        ("/ssl", "GET"),
-        ("/ssl", "POST"),
-        ("/ssl/cert/upload", "POST"),
-        ("/ssl/cert/reference", "POST"),
         ("/health/database", "GET"),
     ],
 )

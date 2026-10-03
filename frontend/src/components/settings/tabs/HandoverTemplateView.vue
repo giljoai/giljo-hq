@@ -3,8 +3,8 @@
     <div class="tab-header mb-4">
       <h2 class="text-title-large">Handover template</h2>
       <p class="text-body-medium text-muted-a11y mt-1">
-        Every new agent handover starts from this, whether you or an agent writes it. The three
-        required sections are always included.
+        Agents start every handover they write from this, and the three required sections are
+        always included. The handover form in Tasks has its own plain fields and does not use it.
       </p>
     </div>
     <v-card variant="flat" class="smooth-border handover-card">

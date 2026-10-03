@@ -9,6 +9,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.domain.project_status import is_review_pending
 from giljo_mcp.exceptions import BaseGiljoError, ValidationError
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import ActiveProjectDetail
@@ -100,7 +101,9 @@ class ProjectQueryService:
             self.db_manager, tenant_key or self.tenant_manager.get_current_tenant(), self._test_session
         )
 
-    async def get_active_projects(self, product_id: str | None = None) -> list[ActiveProjectDetail]:
+    async def get_active_projects(
+        self, product_id: str | None = None, include_unreviewed: bool = False
+    ) -> list[ActiveProjectDetail]:
         try:
             tenant_key = self.tenant_manager.get_current_tenant()
 
@@ -114,7 +117,7 @@ class ProjectQueryService:
                 )
 
             async with self._get_session() as session:
-                projects = await self._repo.get_active_projects(session, tenant_key, product_id)
+                projects = await self._repo.get_active_projects(session, tenant_key, product_id, include_unreviewed)
 
                 if not projects:
                     self._logger.info(f"No active projects found for tenant {tenant_key}")
@@ -145,6 +148,8 @@ class ProjectQueryService:
                                 if project.implementation_launched_at
                                 else None
                             ),
+                            reviewed_at=project.reviewed_at.isoformat() if project.reviewed_at else None,
+                            review_pending=is_review_pending(project.status, project.reviewed_at),
                             deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
                             agent_count=agent_count,
                             message_count=message_count,

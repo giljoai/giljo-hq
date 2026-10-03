@@ -12,10 +12,11 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from giljo_mcp.auth.jwt_manager import JWTManager
+from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager
 from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.models.oauth import OAuthRefreshToken, OAuthRevokedToken
 
@@ -110,7 +111,11 @@ async def _revoke_access_jwt(
 ) -> bool:
     try:
         payload = JWTManager.verify_token(token)
-    except Exception:  # noqa: BLE001 -- RFC 7009: never leak token validity
+    except JWTAudienceMismatchError:
+        return False
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            raise
         return False
 
     return await _persist_access_jti_revocation(db_session, payload)

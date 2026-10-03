@@ -19,6 +19,7 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
   const ANALYSIS_POLL_INTERVAL_MS = 10_000
   let analysisPollTimer = null
   let analysisPollInFlight = false
+  let completionSignalled = false
 
   function clearHintTimer() {
     clearTimeout(analysisHintTimer)
@@ -34,6 +35,7 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
   }
 
   function resetAnalysisState() {
+    completionSignalled = false
     analysisInProgress.value = false
     analysisAgentConnected.value = false
     analysisHintVisible.value = false
@@ -117,17 +119,18 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
 
     promptFallbackText.value = null
     analysisPromptText.value = prompt
+    completionSignalled = false
 
     if (copyPromptOnStage) {
       const didCopy = await copyToClipboard(prompt)
 
       if (didCopy) {
         analysisPromptCopied.value = true
-        showToast({ message: 'Discovery prompt copied. Paste into your AI agent to analyze your vision doc.', type: 'success', timeout: 4000 })
+        showToast({ message: 'Discovery prompt copied. Paste into your AI agent to analyze your vision doc.', type: 'success' })
         setTimeout(() => { analysisPromptCopied.value = false }, 3000)
       } else {
         promptFallbackText.value = prompt
-        showToast({ message: 'Clipboard blocked. Select the prompt below and press Ctrl+C.', type: 'warning', timeout: 5000 })
+        showToast({ message: 'Clipboard blocked. Select the prompt below and press Ctrl+C.', type: 'warning' })
       }
     }
 
@@ -147,7 +150,7 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
       analysisPollInFlight = true
       try {
         const updated = await productStore.fetchProductById(productId)
-        if (updated && updated.vision_analysis_complete === true) {
+        if (updated && (completionSignalled || updated.vision_analysis_complete === true)) {
           completeAnalysis(updated)
         }
       } catch (err) {
@@ -170,6 +173,7 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
     if (!productId || productId !== currentProductId) return
 
     analysisHintVisible.value = false
+    completionSignalled = true
 
     let updated = null
     try {

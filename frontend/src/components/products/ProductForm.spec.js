@@ -26,7 +26,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ showToast: showToastMock, hideToast: vi.fn(), removeToast: vi.fn(), toasts: { value: [] } }),
+  useToast: () => ({ showToast: showToastMock }),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -880,8 +880,8 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     })
 
     const docs = [
-      { id: 'd1', filename: 'one.md', document_type: 'text/markdown', created_at: '2026-05-15T00:00:00Z' },
-      { id: 'd2', filename: 'two.md', created_at: '2026-05-16T00:00:00Z' },
+      { id: 'd1', document_name: 'one.md', document_type: 'text/markdown', created_at: '2026-05-15T00:00:00Z' },
+      { id: 'd2', document_name: 'two.md', created_at: '2026-05-16T00:00:00Z' },
     ]
     const wrapper = mountWithProduct({
       productOverrides: { vision_inputs_hash: 'sha256:bbbb', consolidated_vision_hash: 'aaaa' },
@@ -916,7 +916,7 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     apiMock.taxonomyTypes.list.mockClear()
     apiMock.projects.create.mockClear()
     wrapper.vm.productForm.name = 'AcmeApp'
-    wrapper.vm.onFilesAttached([new File(['x'], 'new.md', { type: 'text/markdown' })])
+    wrapper.vm.onFilesAttached({ productName: 'P', files: [new File(['x'], 'new.md', { type: 'text/markdown' })] })
     await nextTick()
     expect(apiMock.products.getContextUpdateProject).not.toHaveBeenCalled()
     expect(apiMock.taxonomyTypes.list).not.toHaveBeenCalled()

@@ -1,5 +1,7 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
+import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { templateRowActive } from '@/components/templates/templateTableConfig'
 
 const ORCHESTRATOR_ROW = Object.freeze({
@@ -25,6 +27,7 @@ const DEFAULT_EDITING_TEMPLATE = () => ({
 })
 
 export function useTemplateData(search, filterRole, filterStatus, productId, showAllProducts) {
+  const { showToast } = useToast()
   const templates = ref([])
   const loading = ref(false)
   const activeStats = ref({
@@ -105,7 +108,7 @@ export function useTemplateData(search, filterRole, filterStatus, productId, sho
       const response = await api.templates.list(showAllProducts?.value ? null : scope)
       templates.value = (response.data || []).filter((t) => !t.is_system_role)
     } catch (error) {
-      console.error('Failed to load templates:', error)
+      showToast({ message: `Could not load the agents: ${parseErrorResponse(error).message}`, type: 'error' })
     } finally {
       loading.value = false
     }

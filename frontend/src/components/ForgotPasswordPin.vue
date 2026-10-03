@@ -308,7 +308,7 @@ async function handleVerifyPin() {
       error.value = response.data.message || 'Invalid username or PIN.'
     }
   } catch (err) {
-    console.error('[ForgotPassword] PIN verification failed:', err)
+    console.error('[ForgotPassword] PIN verification failed:', err?.response?.status ?? err?.code)
 
     if (err.response?.data?.detail) {
       error.value = err.response.data.detail
@@ -345,7 +345,7 @@ async function handleResetPassword() {
     emit('update:show', false)
     emit('success', 'Password reset successfully! Please log in with your new credentials.')
   } catch (err) {
-    console.error('[ForgotPassword] Password reset failed:', err)
+    console.error('[ForgotPassword] Password reset failed:', err?.response?.status ?? err?.code)
 
     if (err.response?.status === 429) {
       lockoutMessage.value =

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_tenant_key
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.services import ProductService
@@ -35,16 +36,16 @@ router = APIRouter()
 
 @router.post("/{product_id}/activate", response_model=ProductActivationResponse)
 async def activate_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductActivationResponse:
     """
-    Show a product's tab (FE-9524/D1). No longer deactivates other products or
+    Show a product's tab. No longer deactivates other products or
     pauses their projects/jobs -- several products may be shown at once.
 
     Uses ProductService.activate_product() for database operations.
-    Handover 0503: Updated response to match frontend expectations.
+    Updated response to match frontend expectations.
     """
     logger.info("User %s activating product %s", sanitize(current_user.username), sanitize(product_id))
 
@@ -93,12 +94,12 @@ async def activate_product(
 
 @router.post("/{product_id}/deactivate", response_model=ProductResponse)
 async def deactivate_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductResponse:
     """
-    Hide a product's tab (FE-9524/D1). No longer pauses its projects or jobs.
+    Hide a product's tab. No longer pauses its projects or jobs.
 
     Uses ProductService.deactivate_product() for database operations.
     """
@@ -130,12 +131,12 @@ async def deactivate_product(
 
 @router.post("/{product_id}/set-default", response_model=ProductResponse)
 async def set_default_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductResponse:
     """
-    Set the tenant's DEFAULT product (FE-9524, operator ruling 2026-08-29):
+    Set the tenant's DEFAULT product (operator ruling 2026-08-29):
     where an unscoped read resolves. Independent of shown/hidden -- does not
     require the target to be shown (D2: hidden is still a fully valid
     default), and never touches projects or jobs.
@@ -158,7 +159,7 @@ async def set_default_product(
 
 @router.delete("/{product_id}", response_model=ProductDeleteResponse)
 async def delete_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductDeleteResponse:
@@ -189,7 +190,7 @@ async def delete_product(
 
 @router.delete("/{product_id}/purge")
 async def purge_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ):
@@ -207,7 +208,7 @@ async def purge_product(
 
 @router.post("/{product_id}/restore", response_model=ProductResponse)
 async def restore_product(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> ProductResponse:
@@ -228,7 +229,7 @@ async def restore_product(
 
 @router.get("/{product_id}/cascade-impact", response_model=CascadeImpact)
 async def get_cascade_impact(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: ProductService = Depends(get_product_service),
 ) -> CascadeImpact:
@@ -257,10 +258,8 @@ async def refresh_active_product(
     service: ProductService = Depends(get_product_service),
 ) -> ActiveProductRefreshResponse:
     """
-    Refresh default-product information (endpoint path/field names predate
-    the FE-9524 split and are left as-is -- no frontend consumer reads
-    ``previous_active_product_id``-style ids here, only ``has_active_product``/
-    ``product``, and the wire shape is unchanged).
+    Refresh default-product information. The response carries
+    ``has_active_product`` and ``product``.
 
     Uses ProductService.get_default_product() for database operations.
     """
@@ -294,8 +293,8 @@ async def get_vision_document_stats(
     Returns token counts and metadata for the default product's vision document.
     Used by frontend to dynamically display context depth options with actual token counts.
 
-    Handover 0345: Dynamic vision document token counts for context depth configuration.
-    FE-9524: resolves is_default, not is_active -- see ProductService.get_default_product.
+    Dynamic vision document token counts for context depth configuration.
+    Resolves is_default, not is_active -- see ProductService.get_default_product.
     """
     logger.debug(f"User {current_user.username} requesting vision stats for default product")
 
@@ -356,7 +355,7 @@ async def get_vision_document_stats(
 
 @router.get("/{product_id}/context_update_project", response_model=ContextUpdateProjectResponse)
 async def get_context_update_project(
-    product_id: str,
+    product_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     tenant_key: str = Depends(get_tenant_key),
     db: AsyncSession = Depends(get_db_session),

@@ -19,6 +19,7 @@ from api.endpoints import (
     comm_threads,
     configuration,
     connect,
+    connect_page,
     downloads,
     git,
     notifications,
@@ -33,7 +34,6 @@ from api.endpoints import (
     prompts,
     roadmap,
     sequence_runs,
-    serena,
     settings,
     setup_security,
     slash_commands,
@@ -90,12 +90,12 @@ def register_routers(app: FastAPI) -> None:
         app.include_router(oauth_register.router, prefix="/api/oauth", tags=["oauth"])
         oauth.register_edition_registration_endpoint("/api/oauth/register")
     app.include_router(oauth_well_known.well_known_router, tags=["oauth"])
+    app.include_router(connect_page.router)
     app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
     app.include_router(user_settings.router, prefix="/api/v1/user", tags=["user-settings"])
     app.include_router(settings.router, prefix="/api/v1/settings", tags=["settings"])
     app.include_router(tenant_data.router, prefix="/api/v1/account", tags=["tenant-data"])
     app.include_router(setup_security.router, prefix="/api/setup", tags=["setup-security"])
-    app.include_router(serena.router, prefix="/api/serena", tags=["serena"])
     app.include_router(git.router, prefix="/api/git", tags=["git"])
     app.include_router(version.router, prefix="/api/version", tags=["version"])
     app.include_router(notifications.router)

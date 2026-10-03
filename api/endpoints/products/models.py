@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class TechStackSchema(BaseModel):
-    """Typed schema for product tech stack configuration. Handover 0840i."""
+    """Typed schema for product tech stack configuration."""
 
     programming_languages: str | None = None
     frontend_frameworks: str | None = None
@@ -22,7 +22,7 @@ class TechStackSchema(BaseModel):
 
 
 class ArchitectureSchema(BaseModel):
-    """Typed schema for product architecture configuration. Handover 0840i."""
+    """Typed schema for product architecture configuration."""
 
     primary_pattern: str | None = None
     design_patterns: str | None = None
@@ -32,7 +32,7 @@ class ArchitectureSchema(BaseModel):
 
 
 class TestConfigSchema(BaseModel):
-    """Typed schema for product test configuration. Handover 0840i."""
+    """Typed schema for product test configuration."""
 
     quality_standards: str | None = None
     test_strategy: str | None = None
@@ -46,17 +46,17 @@ class ProductCreate(BaseModel):
     name: str = Field(..., max_length=255, description="Product name")
     description: str | None = Field(None, description="Product description")
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
-    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration - Handover 0840i")
-    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration - Handover 0840i")
-    test_config: TestConfigSchema | None = Field(None, description="Test configuration - Handover 0840i")
-    core_features: str | None = Field(None, description="Core product features - Handover 0840i")
+    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration")
+    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration")
+    test_config: TestConfigSchema | None = Field(None, description="Test configuration")
+    core_features: str | None = Field(None, description="Core product features")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
     product_memory: dict[str, Any] | None = Field(
-        None, description="360 Memory storage (git integration, learnings, context) - Handover 0135"
+        None, description="360 Memory storage (git integration, learnings, context)"
     )
     target_platforms: list[str] | None = Field(
         default=["all"],
-        description="Target platforms: windows, linux, macos, android, ios, web, or all - Handover 0425",
+        description="Target platforms: windows, linux, macos, android, ios, web, or all",
     )
 
 
@@ -66,10 +66,10 @@ class ProductUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     description: str | None = None
     project_path: str | None = None
-    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration - Handover 0840i")
-    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration - Handover 0840i")
-    test_config: TestConfigSchema | None = Field(None, description="Test configuration - Handover 0840i")
-    core_features: str | None = Field(None, description="Core product features - Handover 0840i")
+    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration")
+    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration")
+    test_config: TestConfigSchema | None = Field(None, description="Test configuration")
+    core_features: str | None = Field(None, description="Core product features")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
     extraction_custom_instructions: str | None = Field(
         None, description="Custom instructions for vision document extraction"
@@ -78,11 +78,11 @@ class ProductUpdate(BaseModel):
         None,
         description=(
             "Not updatable via this endpoint — product memory has its own write path "
-            "(360 memory tools). Sending this field returns 422. (TSK-9265)"
+            "(360 memory tools). Sending this field returns 422."
         ),
     )
     target_platforms: list[str] | None = Field(
-        None, description="Target platforms: windows, linux, macos, android, ios, web, or all - Handover 0425"
+        None, description="Target platforms: windows, linux, macos, android, ios, web, or all"
     )
 
     @field_validator("product_memory")
@@ -111,37 +111,37 @@ class ProductResponse(BaseModel):
     unresolved_tasks: int = 0
     unfinished_projects: int = 0
     vision_documents_count: int = 0
-    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration - Handover 0840i")
-    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration - Handover 0840i")
-    test_config: TestConfigSchema | None = Field(None, description="Test configuration - Handover 0840i")
-    core_features: str | None = Field(None, description="Core product features - Handover 0840i")
+    tech_stack: TechStackSchema | None = Field(None, description="Tech stack configuration")
+    architecture: ArchitectureSchema | None = Field(None, description="Architecture configuration")
+    test_config: TestConfigSchema | None = Field(None, description="Test configuration")
+    core_features: str | None = Field(None, description="Core product features")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
     extraction_custom_instructions: str | None = Field(
         None, description="Custom instructions for vision document extraction"
     )
-    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip (FE-9524/D1)")
+    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip")
     is_default: bool = Field(
         default=False,
-        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown (FE-9524).",
+        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown.",
     )
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
     product_memory: dict[str, Any] | None = Field(
         default_factory=lambda: {"git_integration": {}, "sequential_history": [], "context": {}},
-        description="360 Memory storage (git integration, sequential_history, context) - Handover 0412",
+        description="360 Memory storage (git integration, sequential_history, context)",
     )
     target_platforms: list[str] | None = Field(
         default=["all"],
-        description="Target platforms: windows, linux, macos, android, ios, web, or all - Handover 0425",
+        description="Target platforms: windows, linux, macos, android, ios, web, or all",
     )
     vision_analysis_complete: bool = Field(
         default=False,
-        description="True when every active vision doc + the product aggregate have light + medium summaries. Gates ProductForm Next + tab nav (BE-5118).",
+        description="True when every active vision doc + the product aggregate have light + medium summaries. Gates ProductForm Next + tab nav.",
     )
     consolidated_vision_light: str | None = Field(
-        None, description="Aggregate 33% summary across all active vision documents (BE-5117)."
+        None, description="Aggregate 33% summary across all active vision documents."
     )
     consolidated_vision_medium: str | None = Field(
-        None, description="Aggregate 66% summary across all active vision documents (BE-5117)."
+        None, description="Aggregate 66% summary across all active vision documents."
     )
     consolidated_vision_light_tokens: int | None = Field(None, description="Token count of aggregate light summary.")
     consolidated_vision_medium_tokens: int | None = Field(None, description="Token count of aggregate medium summary.")
@@ -153,12 +153,12 @@ class ProductResponse(BaseModel):
     )
     vision_inputs_hash: str = Field(
         default="sha256:empty",
-        description="Derived SHA-256 fingerprint of current vision inputs (BE-5122). Compare to consolidated_vision_hash for drift detection.",
+        description="Derived SHA-256 fingerprint of current vision inputs. Compare to consolidated_vision_hash for drift detection.",
     )
 
 
 class VisionSummarySchema(BaseModel):
-    """BE-6066 P4: per-product vision-document aggregates for the products LIST.
+    """Per-product vision-document aggregates for the products LIST.
 
     Mirrors the four values ``ProductCard.vue`` used to compute client-side from
     the full ``vision_documents`` array (now no longer shipped on the list):
@@ -177,7 +177,7 @@ class VisionSummarySchema(BaseModel):
 
 
 class ProductListResponse(BaseModel):
-    """BE-6066 P4: lean response model for the products LIST endpoint.
+    """Lean response model for the products LIST endpoint.
 
     The list cards only need identity/flags/timestamps, the P1 count fields, and
     vision AGGREGATES — NOT the full detail graph (tech_stack / architecture /
@@ -192,22 +192,20 @@ class ProductListResponse(BaseModel):
     description: str | None
     created_at: datetime
     updated_at: datetime | None
-    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip (FE-9524/D1)")
+    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip")
     is_default: bool = Field(
         default=False,
-        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown (FE-9524).",
+        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown.",
     )
     project_path: str | None = Field(None, description="File system path to product folder")
-    target_platforms: list[str] | None = Field(default=["all"], description="Target platforms - Handover 0425")
+    target_platforms: list[str] | None = Field(default=["all"], description="Target platforms")
     project_count: int = 0
     task_count: int = 0
     has_vision: bool = False
     unresolved_tasks: int = 0
     unfinished_projects: int = 0
     vision_documents_count: int = 0
-    vision_analysis_complete: bool = Field(
-        default=False, description="True when vision analysis is complete (BE-5118 card pill)."
-    )
+    vision_analysis_complete: bool = Field(default=False, description="True when vision analysis is complete.")
     vision_summary: VisionSummarySchema = Field(default_factory=VisionSummarySchema)
 
 
@@ -222,7 +220,7 @@ class ActiveProductInfo(BaseModel):
 
 
 class ProductActivationResponse(BaseModel):
-    """Response for product activation matching frontend expectations (Handover 0503)"""
+    """Response for product activation matching frontend expectations"""
 
     product_id: str = Field(..., description="ID of the activated product")
     previous_active_product_id: str | None = Field(
@@ -292,7 +290,7 @@ class VisionDocumentStatsResponse(BaseModel):
     """Aggregated vision document statistics for active product.
 
     Stats are summed across all active vision documents for the product,
-    since products support multiple uploaded documents (Handover 0043).
+    since products support multiple uploaded documents.
     """
 
     product_id: str = Field(..., description="Active product ID")
@@ -305,7 +303,7 @@ class VisionDocumentStatsResponse(BaseModel):
 
 
 class ContextUpdateProjectResponse(BaseModel):
-    """BE-5122: idempotency lookup for an open CTX project on a product.
+    """Idempotency lookup for an open CTX project on a product.
 
     Returned by ``GET /api/v1/products/{product_id}/context_update_project``.
     Lets the frontend skip spawning a duplicate CTX project when one is already

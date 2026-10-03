@@ -29,45 +29,6 @@ class ProductStatisticsRepository:
         self.db = db_manager
 
 
-    async def count_total_projects(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Project.id)).where(Project.tenant_key == tenant_key, project_not_trashed())
-        )
-        return result or 0
-
-    async def count_projects_by_status(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        status: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Project.id)).where(
-                Project.tenant_key == tenant_key,
-                Project.status == status,
-                project_not_trashed(),
-            )
-        )
-        return result or 0
-
-    async def count_projects_staged(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Project.id)).where(
-                Project.tenant_key == tenant_key,
-                Project.staging_status.in_(("staged", "staging_complete")),
-                project_not_trashed(),
-            )
-        )
-        return result or 0
-
     async def get_project_stats_aggregated(
         self,
         session: AsyncSession,
@@ -133,49 +94,6 @@ class ProductStatisticsRepository:
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         return list(result.all())
-
-
-    async def count_total_messages(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(select(func.count(Message.id)).where(Message.tenant_key == tenant_key))
-        return result or 0
-
-    async def count_messages_by_status(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        status: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Message.id)).where(Message.tenant_key == tenant_key, Message.status == status)
-        )
-        return result or 0
-
-
-    async def count_total_tasks(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Task.id)).where(Task.tenant_key == tenant_key, Task.deleted_at.is_(None))
-        )
-        return result or 0
-
-    async def count_completed_tasks(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> int:
-        result = await session.scalar(
-            select(func.count(Task.id)).where(
-                Task.tenant_key == tenant_key, Task.status == "completed", Task.deleted_at.is_(None)
-            )
-        )
-        return result or 0
 
 
     async def get_project_status_distribution(

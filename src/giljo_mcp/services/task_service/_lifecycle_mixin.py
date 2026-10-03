@@ -36,20 +36,17 @@ class _TaskLifecycleMixin:
 
         ws = self._websocket_manager
         if ws:
-            try:
-                await ws.broadcast_to_tenant(
-                    tenant_key=self.tenant_manager.get_current_tenant(),
-                    event_type="task:updated",
-                    data={
-                        "task_id": task_id,
-                        "updated_fields": ["status"],
-                        "hidden": bool(getattr(task, "hidden", False)),
-                        "status": task.status,
-                        "product_id": task.product_id,
-                    },
-                )
-            except (RuntimeError, ValueError, OSError) as ws_error:
-                self._logger.warning(f"Failed to broadcast task:updated event: {ws_error}")
+            await ws.broadcast_to_tenant(
+                tenant_key=self.tenant_manager.get_current_tenant(),
+                event_type="task:updated",
+                data={
+                    "task_id": task_id,
+                    "updated_fields": ["status"],
+                    "hidden": bool(getattr(task, "hidden", False)),
+                    "status": task.status,
+                    "product_id": task.product_id,
+                },
+            )
 
         return task
 

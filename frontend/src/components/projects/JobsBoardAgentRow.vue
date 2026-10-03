@@ -76,7 +76,7 @@
       data-testid="jb-agent-status"
       :style="{ color: getStatusColor(statusWord) }"
     >
-      {{ getStatusLabel(statusWord, agent.block_reason) }}<LiveDots v-if="live" />
+      {{ jobStatusLabel(agent) }}<LiveDots v-if="live" />
     </span>
 
     <button
@@ -148,12 +148,12 @@
 <script setup>
 import { computed } from 'vue'
 import { REPLAY_LABEL } from '@/composables/usePlayButton'
-import { getStatusLabel, getStatusColor } from '@/utils/statusConfig'
+import { getStatusColor } from '@/utils/statusConfig'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel, getAgentRoleLabel } from '@/utils/agentDisplay'
 import { formatAgentDuration } from '@/utils/durationFormat'
-import { jobStatusWord, isLiveStatusWord } from '@/utils/jobStatusWord'
+import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
 import LiveDots from './LiveDots.vue'
 
 const props = defineProps({

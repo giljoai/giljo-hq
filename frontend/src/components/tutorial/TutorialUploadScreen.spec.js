@@ -20,6 +20,8 @@ vi.mock('@/composables/useProductVisionUpload', () => ({
     h.editingRef = editingProduct
     return {
       uploadingVision: ref(false),
+      visionUploadError: ref(null),
+      visionUploadRetrySafe: ref(null),
       uploadVisionFilesOnAttach: vi.fn(async (args) => h.uploadImpl?.(args)),
     }
   },

@@ -188,24 +188,8 @@ class PortManager:
 
         return self.find_available_port(self.config.api_port, self.config.api_alternatives)
 
-    def get_frontend_port(self, check_availability: bool = False) -> int:
-        if not check_availability:
-            return self.config.frontend_port
-
-        return self.find_available_port(self.config.frontend_port, self.config.frontend_alternatives)
-
 
 def get_port_manager(config_path: Path | None = None) -> PortManager:
     manager = PortManager(config_path)
     manager.load_configuration()
     return manager
-
-
-def get_api_port(config_path: Path | None = None, check_availability: bool = False) -> int:
-    manager = get_port_manager(config_path)
-    return manager.get_api_port(check_availability)
-
-
-def get_frontend_port(config_path: Path | None = None, check_availability: bool = False) -> int:
-    manager = get_port_manager(config_path)
-    return manager.get_frontend_port(check_availability)

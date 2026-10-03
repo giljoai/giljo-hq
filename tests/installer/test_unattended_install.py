@@ -117,7 +117,7 @@ def test_unattended_lan_http_skips_ssl(tmp_path, monkeypatch):
 
     assert inst.settings["bind"] == "0.0.0.0"
     assert inst.settings["network_mode"] != "localhost"
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     assert "ssl_opt_out" not in inst.settings
 
 
@@ -133,7 +133,7 @@ def test_unattended_force_http_opts_out_on_lan(tmp_path, monkeypatch):
     inst._apply_unattended_settings()
 
     assert inst.settings["bind"] == "0.0.0.0"
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     assert "ssl_opt_out" not in inst.settings
 
 
@@ -150,7 +150,7 @@ def test_unattended_bare_lan_configures_http(tmp_path, monkeypatch):
     inst._apply_unattended_settings()
 
     assert inst.settings["bind"] == "0.0.0.0"
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     assert "ssl_opt_out" not in inst.settings
 
 
@@ -206,7 +206,7 @@ def test_unattended_always_configures_http(tmp_path, monkeypatch, mode, expected
     inst._apply_unattended_settings()
 
     assert inst.settings["bind"] == expected_bind
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     assert "ssl_opt_out" not in inst.settings
 
 
@@ -221,7 +221,7 @@ def test_unattended_wan_warns_but_does_not_fail(tmp_path, monkeypatch, capsys):
     )
     inst._apply_unattended_settings()
 
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     combined = " ".join(capsys.readouterr()).lower()
     assert "cleartext" in combined or "reverse proxy" in combined or "tunnel" in combined, (
         f"expected a cleartext/WAN warning in output; got: {combined!r}"
@@ -245,7 +245,7 @@ def test_interactive_autodetect_public_ip_warns_no_fail(tmp_path, monkeypatch, c
     assert "ssl_opt_out" not in inst.settings, (
         "public IP auto-detect (choice 2) must not set ssl_opt_out (removed concept)"
     )
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     combined = " ".join(capsys.readouterr()).lower()
     assert "cleartext" in combined or "reverse proxy" in combined or "tunnel" in combined, (
         f"expected a WAN cleartext warning in output; got: {combined!r}"
@@ -269,7 +269,7 @@ def test_interactive_specific_adapter_public_ip_warns_no_fail(tmp_path, monkeypa
     assert "ssl_opt_out" not in inst.settings, (
         "public IP specific-adapter (choice 3) must not set ssl_opt_out (removed concept)"
     )
-    assert inst.settings.get("ssl_enabled") is False
+    assert "ssl_enabled" not in inst.settings
     combined = " ".join(capsys.readouterr()).lower()
     assert "cleartext" in combined or "reverse proxy" in combined or "tunnel" in combined, (
         f"expected a WAN cleartext warning in output; got: {combined!r}"

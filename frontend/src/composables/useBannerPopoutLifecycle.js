@@ -17,7 +17,7 @@ export function useBannerPopoutLifecycle() {
     const tags = new Set()
 
     for (const thread of yourTurnThreads.value || []) {
-      const id = thread?.thread_id ?? thread?.id
+      const id = thread?.thread_id
       if (id) tags.add(popoutTag(BATON_FOCUS, id))
     }
     for (const mention of mentions.value || []) {

@@ -19,55 +19,18 @@ def _parse(config_content: str) -> dict:
     return json.loads(config_content)
 
 
-def test_claude_desktop_self_signed_https_injects_tls_bypass():
-    raw = ai_tools.get_claude_desktop_config(
-        SERVER_URL_HTTPS,
-        API_KEY,
-        self_signed_https=True,
-    )
-    cfg = _parse(raw)
+def test_claude_desktop_config_never_touches_tls_verification():
+    for server_url in (SERVER_URL_HTTPS, SERVER_URL_PROXIED, SERVER_URL_HTTP):
+        entry = _parse(ai_tools.get_claude_desktop_config(server_url, API_KEY))["mcpServers"]["giljo_hq"]
 
-    assert "mcpServers" in cfg
-    assert "giljo_hq" in cfg["mcpServers"]
-    entry = cfg["mcpServers"]["giljo_hq"]
-
-    assert entry["command"] == "npx"
-    assert entry["args"] == [
-        "mcp-remote",
-        f"{SERVER_URL_HTTPS}/mcp",
-        "--header",
-        "Authorization:${AUTH_HEADER}",
-    ]
-    assert entry["env"]["AUTH_HEADER"] == f"Bearer {API_KEY}"
-    assert entry["env"]["NODE_TLS_REJECT_UNAUTHORIZED"] == "0"
-
-
-def test_claude_desktop_proxied_https_omits_tls_bypass():
-    raw = ai_tools.get_claude_desktop_config(
-        SERVER_URL_PROXIED,
-        API_KEY,
-        self_signed_https=False,
-    )
-    cfg = _parse(raw)
-
-    entry = cfg["mcpServers"]["giljo_hq"]
-    assert entry["args"][1] == f"{SERVER_URL_PROXIED}/mcp"
-    assert entry["env"]["AUTH_HEADER"] == f"Bearer {API_KEY}"
-    assert "NODE_TLS_REJECT_UNAUTHORIZED" not in entry["env"]
-
-
-def test_claude_desktop_plain_http_omits_tls_bypass():
-    raw = ai_tools.get_claude_desktop_config(
-        SERVER_URL_HTTP,
-        API_KEY,
-        self_signed_https=False,
-    )
-    cfg = _parse(raw)
-
-    entry = cfg["mcpServers"]["giljo_hq"]
-    assert entry["args"][1] == f"{SERVER_URL_HTTP}/mcp"
-    assert entry["env"]["AUTH_HEADER"] == f"Bearer {API_KEY}"
-    assert "NODE_TLS_REJECT_UNAUTHORIZED" not in entry["env"]
+        assert entry["command"] == "npx"
+        assert entry["args"] == [
+            "mcp-remote",
+            f"{server_url}/mcp",
+            "--header",
+            "Authorization:${AUTH_HEADER}",
+        ]
+        assert entry["env"] == {"AUTH_HEADER": f"Bearer {API_KEY}"}
 
 
 def test_http_tool_instructions_claude_says_claude_code_cli():

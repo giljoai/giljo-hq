@@ -8,8 +8,6 @@ import json
 import logging
 from typing import Any
 
-from giljo_mcp.utils.log_sanitizer import sanitize
-
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +72,7 @@ async def broadcast_thread_message(
         },
     }
     _bound_content(event, content)
-    try:
-        await ws_manager.broadcast_event_to_tenant(tenant_key, event)
-    except Exception:  # noqa: BLE001 - WS failure must not affect the already-committed write
-        logger.warning("broadcast_thread_message failed for thread %s (non-fatal)", sanitize(thread_id), exc_info=True)
+    await ws_manager.broadcast_event_to_tenant(tenant_key, event)
 
 
 async def broadcast_thread_update(
@@ -107,7 +102,4 @@ async def broadcast_thread_update(
             "update_type": update_type,
         },
     }
-    try:
-        await ws_manager.broadcast_event_to_tenant(tenant_key, event)
-    except Exception:  # noqa: BLE001 - WS failure must not affect the already-committed write
-        logger.warning("broadcast_thread_update failed for thread %s (non-fatal)", sanitize(thread_id), exc_info=True)
+    await ws_manager.broadcast_event_to_tenant(tenant_key, event)

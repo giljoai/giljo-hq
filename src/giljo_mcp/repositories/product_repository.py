@@ -7,7 +7,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +26,15 @@ from giljo_mcp.models.user_approval import UserApproval
 
 
 logger = logging.getLogger(__name__)
+
+
+def _with_config_relations(stmt: Select) -> Select:
+    return stmt.options(
+        selectinload(Product.vision_documents),
+        selectinload(Product.tech_stack),
+        selectinload(Product.architecture),
+        selectinload(Product.test_config),
+    )
 
 
 class ProductRepository:
@@ -50,12 +59,7 @@ class ProductRepository:
         stmt = select(Product).where(and_(*conditions))
 
         if eager_load:
-            stmt = stmt.options(
-                selectinload(Product.vision_documents),
-                selectinload(Product.tech_stack),
-                selectinload(Product.architecture),
-                selectinload(Product.test_config),
-            )
+            stmt = _with_config_relations(stmt)
 
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
@@ -85,14 +89,7 @@ class ProductRepository:
     ) -> Product | None:
 
         def _apply_eager(stmt):
-            if eager_load:
-                return stmt.options(
-                    selectinload(Product.vision_documents),
-                    selectinload(Product.tech_stack),
-                    selectinload(Product.architecture),
-                    selectinload(Product.test_config),
-                )
-            return stmt
+            return _with_config_relations(stmt) if eager_load else stmt
 
         stmt = _apply_eager(
             select(Product).where(
@@ -108,13 +105,7 @@ class ProductRepository:
         if product is not None:
             return product
 
-        count_stmt = (
-            select(func.count())
-            .select_from(Product)
-            .where(and_(Product.tenant_key == tenant_key, Product.is_active, Product.deleted_at.is_(None)))
-        )
-        count = (await session.execute(count_stmt)).scalar_one()
-        if count != 1:
+        if await self.count_active_products(session, tenant_key) != 1:
             return None
 
         sole_stmt = _apply_eager(
@@ -164,12 +155,7 @@ class ProductRepository:
 
         stmt = select(Product).where(and_(*conditions))
         if not lean:
-            stmt = stmt.options(
-                selectinload(Product.vision_documents),
-                selectinload(Product.tech_stack),
-                selectinload(Product.architecture),
-                selectinload(Product.test_config),
-            )
+            stmt = _with_config_relations(stmt)
         stmt = stmt.order_by(Product.is_active.desc(), Product.created_at.desc())
         result = await session.execute(stmt)
         return list(result.scalars().all())

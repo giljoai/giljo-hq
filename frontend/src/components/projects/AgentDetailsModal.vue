@@ -23,10 +23,7 @@
         <div class="d-flex align-center gap-2 mb-2">
           <span
             class="agent-tinted-badge"
-            :style="{
-              backgroundColor: hexToRgba(getAgentDisplayNameColor(agent), 0.15),
-              color: getAgentDisplayNameColor(agent),
-            }"
+            :style="tintedStyle(getAgentDisplayNameColor(agent))"
           >
             {{ agent.agent_display_name }}
           </span>
@@ -80,7 +77,7 @@ import { ref, computed, watch, getCurrentInstance } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import api from '@/services/api'
 import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { hexToRgba, tintedStyle } from '@/utils/colorUtils'
 import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
@@ -148,7 +145,7 @@ const fetchTemplateData = async () => {
       templateId = props.agent.template_id
     } else {
       const response = await apiClient.templates.list({ is_active: true })
-      const templates = Array.isArray(response.data) ? response.data : (response.data?.templates || [])
+      const templates = response.data
 
       const searchTerms = [displayName, agentName].filter(Boolean).map(s => s.toLowerCase())
       const match = templates.find(t => {

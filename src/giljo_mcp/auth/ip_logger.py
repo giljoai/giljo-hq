@@ -6,6 +6,7 @@
 
 import logging
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -36,5 +37,6 @@ async def log_api_key_ip(db: AsyncSession, api_key_id: str, ip_address: str) -> 
         )
         await db.execute(stmt)
         await db.commit()
-    except Exception as e:  # noqa: BLE001 - API boundary: non-fatal IP logging
-        logger.warning("Failed to log IP for API key: %s", e)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("Failed to log IP for API key (non-blocking)", exc_info=True)

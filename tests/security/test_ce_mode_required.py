@@ -61,10 +61,6 @@ def _find_route(router, method: str, path_suffix: str):
 _CE_MODE_INVENTORY: list[tuple[str, str, str, str]] = [
     ("/api/v1/config", "GET", "/", "reads server-global config.yaml (full system-configuration dump)"),
     ("/api/v1/config", "GET", "/database", "reads .env DB_HOST/PORT/USER/NAME/PASSWORD"),
-    ("/api/v1/config", "GET", "/ssl", "reads server-global SSL paths on disk"),
-    ("/api/v1/config", "POST", "/ssl", "flips server-global features.ssl_enabled in config.yaml"),
-    ("/api/v1/config", "POST", "/ssl/cert/upload", "stores uploaded PEM cert+key + writes config.yaml paths"),
-    ("/api/v1/config", "POST", "/ssl/cert/reference", "references cert+key by server path + writes config.yaml"),
     ("/api/v1/config", "GET", "/network-info", "reports the host IP(s) + port the server actually responds on"),
     ("/api/v1/config", "GET", "/health/database", "pings server-global DB connection"),
 ]

@@ -21,8 +21,15 @@ export function useProductTabNavigation() {
   async function selectTab(productId) {
     const leaving = routeLeavesProduct(productId)
 
+    const detailRoute = route.name === 'ProductDetail' && route.params.id !== productId
+
     await productStore.switchTab(productId)
     productActivityStore.clearActivity(productId)
+
+    if (detailRoute) {
+      await router.push({ name: 'ProductDetail', params: { id: productId } })
+      return
+    }
 
     if (leaving) {
       await router.push({ name: 'Projects' })

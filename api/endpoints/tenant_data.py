@@ -12,6 +12,8 @@ import shutil
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.middleware.auth_rate_limiter import get_rate_limiter
+from api.middleware.auth_rate_limits import limit_for
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.http.url_resolver import get_public_base_url
 from giljo_mcp.models import User
@@ -24,6 +26,7 @@ router = APIRouter(tags=["tenant-data"])
 
 
 _EXPORT_FILENAME = "tenant_export.zip"
+_EXPORT_WINDOW_SECONDS = 900
 
 
 @router.post("/export", status_code=status.HTTP_200_OK)
@@ -35,6 +38,7 @@ async def export_tenant_data(
     """Export the authenticated user's tenant data as a downloadable ZIP.
 
     Returns a one-time download URL (15-minute TTL) plus per-model row counts.
+    At most 3 exports per client every 15 minutes; more returns 429.
     """
     from api.app_state import GILJO_MODE
 
@@ -43,6 +47,10 @@ async def export_tenant_data(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Data export requires an organization admin role.",
         )
+
+    await get_rate_limiter().check_rate_limit(
+        request, limit=limit_for("account_export"), window=_EXPORT_WINDOW_SECONDS, raise_on_limit=True
+    )
 
     tenant_key = current_user.tenant_key
     ws_manager = getattr(request.app.state, "websocket_manager", None)
@@ -71,7 +79,7 @@ async def export_tenant_data(
     staged_path = staging_dir / _EXPORT_FILENAME
     shutil.move(str(zip_path), str(staged_path))
 
-    await token_manager.mark_ready(token)
+    await token_manager.mark_ready(token, tenant_key=tenant_key)
 
     server_url = get_public_base_url(request)
     download_url = f"{server_url}/api/download/temp/{token}/{_EXPORT_FILENAME}"

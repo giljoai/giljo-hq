@@ -134,7 +134,7 @@ import { onMounted, shallowRef } from 'vue'
 import { LICENSE_NAME_FULL } from '@/i18n/licenseCopy'
 import { PRODUCT_NAME } from '@/branding'
 import configService from '@/services/configService'
-import { isNonCeModeValue } from '@/composables/useGiljoMode'
+import { isSaasModeValue } from '@/composables/useGiljoMode'
 
 const productName = PRODUCT_NAME
 
@@ -151,7 +151,7 @@ onMounted(async () => {
   } catch {
     // Config unavailable: keep the CE fallback copy.
   }
-  if (!isNonCeModeValue(mode)) return
+  if (!isSaasModeValue(mode)) return
   const sections = [
     [import.meta.glob('@/saas/components/policy/SaasDataHosting.vue'), saasDataHosting],
     [import.meta.glob('@/saas/components/policy/SaasSubprocessorList.vue'), saasSubprocessorList],

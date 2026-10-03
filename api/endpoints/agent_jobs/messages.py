@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.models import User
@@ -42,7 +43,7 @@ def _resolve_sender_display_name(from_agent: str, agent_lookup: dict[str, str]) 
 
 @router.get("/{job_id}/messages")
 async def get_job_messages(
-    job_id: str,
+    job_id: IdPath,
     limit: int = Query(50, ge=1, le=200, description="Maximum messages to retrieve (default 50, max 200)"),
     current_user: User = Depends(get_current_active_user),
     job_query_service: JobQueryService = Depends(get_job_query_service),

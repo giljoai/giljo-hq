@@ -224,10 +224,10 @@ class PostgreSQLTestHelper:
     @staticmethod
     async def _ensure_app_role_grants(conn, target_db: str) -> None:
         for role in APP_ROLES:
-            role_exists = bool(
-                (await conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role})).scalar()
-            )
-            if not role_exists:
+            has_createdb = (
+                await conn.execute(text("SELECT rolcreatedb FROM pg_roles WHERE rolname = :r"), {"r": role})
+            ).scalar()
+            if has_createdb is None:
                 continue
             await conn.execute(text(f'GRANT CONNECT ON DATABASE "{target_db}" TO "{role}"'))
             await conn.execute(text(f'GRANT ALL ON SCHEMA public TO "{role}"'))
@@ -235,14 +235,16 @@ class PostgreSQLTestHelper:
             await conn.execute(text(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{role}"'))
             await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{role}"'))
             await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "{role}"'))
+            if has_createdb:
+                continue
             try:
                 await conn.execute(text(f'ALTER ROLE "{role}" WITH CREATEDB'))
-            except Exception:
+            except Exception as exc:
                 logger.warning(
-                    "INF-9534: could not grant CREATEDB to role %r on %r "
-                    "(connecting role likely lacks CREATEROLE) -- DML grants were still applied.",
+                    "INF-9534: could not grant CREATEDB to role %r on %r: %s -- DML grants were still applied.",
                     role,
                     target_db,
+                    exc,
                 )
 
     @staticmethod

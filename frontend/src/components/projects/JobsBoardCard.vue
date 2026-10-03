@@ -71,7 +71,6 @@
         <span class="jb-meta-text">{{ metaLine }}</span>
         <JobsBoardMetaIcons
           :git-enabled="gitEnabled"
-          :serena-enabled="serenaEnabled"
           :integrations-resolved="integrationsResolved"
           :execution-mode="factualMode"
         />
@@ -282,10 +281,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  serenaEnabled: {
-    type: Boolean,
-    default: false,
-  },
   integrationsResolved: {
     type: Boolean,
     default: false,
@@ -308,8 +303,9 @@ const emit = defineEmits([
 const sectionLabel = computed(() => jobsSectionLabelFor(props.project, props.agents))
 const LIVE_LIFECYCLES = new Set([JOBS_SECTION_LABELS.PLANNING, JOBS_SECTION_LABELS.IMPLEMENTING])
 const lifecycleLive = computed(() => LIVE_LIFECYCLES.has(sectionLabel.value))
+const NEEDS_LABELS = [JOBS_SECTION_LABELS.NEEDS_DECISION, JOBS_SECTION_LABELS.NEEDS_ATTENTION]
 const needsInput = computed(() =>
-  sectionLabel.value === JOBS_SECTION_LABELS.NEEDS_INPUT ? needsInputOwner(props.agents) : null,
+  NEEDS_LABELS.includes(sectionLabel.value) ? needsInputOwner(props.agents) : null,
 )
 const edgeColor = computed(() =>
   needsInput.value ? needsInputColor(needsInput.value.kind) : jobsBoardLifecycleColor(sectionLabel.value),
@@ -329,7 +325,7 @@ const taxonomyStyle = computed(() =>
   ),
 )
 const needsYou = computed(
-  () => sectionLabel.value === JOBS_SECTION_LABELS.NEEDS_INPUT || sectionLabel.value === JOBS_SECTION_LABELS.STAGED,
+  () => NEEDS_LABELS.includes(sectionLabel.value) || sectionLabel.value === JOBS_SECTION_LABELS.STAGED,
 )
 function foldByRule() {
   return props.density === BOARD_DENSITIES.COMPACT

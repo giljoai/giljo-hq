@@ -219,6 +219,8 @@ class _RefusingCommThreadService:
 
     async def post_to_thread(self, **kwargs):
         self.calls += 1
+        if isinstance(self._response, Exception):
+            raise self._response
         return self._response
 
 
@@ -236,9 +238,13 @@ def _decision_fixture():
 
 @pytest.mark.asyncio
 async def test_a_declined_hub_notice_is_logged_not_swallowed(caplog):
+    from giljo_mcp.services.comm_baton_targets import HubTargetRefusedError
+
     service = UserApprovalService(db_manager=None, tenant_manager=TenantManager())
     service._comm_thread_service = _RefusingCommThreadService(
-        {"success": False, "error": "TARGET_IS_A_DISPLAY_NAME", "requested": "Relay"}
+        HubTargetRefusedError(
+            {"success": False, "error": "TARGET_IS_A_DISPLAY_NAME", "requested": "Relay", "hint": "use the id"}
+        )
     )
     execution, decided = _decision_fixture()
 

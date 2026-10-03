@@ -44,11 +44,6 @@ async def init_event_bus(state: APIState) -> None:
         logger.info("=" * 70)
         logger.info("EVENT BUS INITIALIZATION COMPLETE")
         logger.info("=" * 70)
-    except Exception as e:
-        logger.exception("=" * 70)
-        logger.exception("FAILED TO INITIALIZE EVENT BUS")
-        logger.exception("=" * 70)
-        logger.exception(f"Exception type: {type(e).__name__}")
-        logger.exception(f"Exception args: {e.args}")
-        logger.warning("Optional startup phase [event_bus] failed: %s — running in degraded mode", e)
+    except Exception:
+        logger.exception("Optional startup phase [event_bus] failed; live UI updates are off")
         state.event_bus = None

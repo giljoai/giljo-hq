@@ -1,5 +1,5 @@
 
-export const MAX_SEQUENCE_PROJECTS = 5
+export const MAX_SEQUENCE_PROJECTS = 10
 
 export const SEQUENCE_EXECUTION_MODES = [
   { value: 'multi_terminal', label: 'Multi-terminal (interactive)' },

@@ -5,7 +5,6 @@
 
 
 from .auth_service import AuthService
-from .config_service import ConfigService
 from .message_routing_service import MessageRoutingService
 from .mission_orchestration_service import MissionOrchestrationService
 from .notification_service import NotificationService
@@ -27,7 +26,6 @@ from .user_service import UserService
 
 __all__ = [
     "AuthService",
-    "ConfigService",
     "MessageRoutingService",
     "MissionOrchestrationService",
     "NotificationService",

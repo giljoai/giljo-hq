@@ -5,7 +5,7 @@
 
 
 import random
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -86,112 +86,6 @@ class TestGetOrchestratorInstructions:
 
         assert "mcp_tools_available" in result
         assert isinstance(result["mcp_tools_available"], list)
-
-    @pytest.mark.asyncio
-    async def test_serena_guidance_present_when_toggle_on(self, db_session: AsyncSession, test_product, test_project):
-        from giljo_mcp.services.settings_service import SettingsService
-
-        test_product.tenant_key = test_project.tenant_key
-        await db_session.commit()
-        await db_session.refresh(test_product)
-        test_project.product_id = test_product.id
-        await db_session.commit()
-        await db_session.refresh(test_project)
-
-        settings_svc = SettingsService(db_session, test_project.tenant_key)
-        await settings_svc.update_settings("integrations", {"serena_mcp": {"use_in_prompts": True}})
-
-        orchestrator_job = AgentJob(
-            job_id=str(uuid4()),
-            job_type="orchestrator",
-            tenant_key=test_project.tenant_key,
-            project_id=test_project.id,
-            mission="Orchestrate the project",
-            status="active",
-            job_metadata={},
-        )
-        db_session.add(orchestrator_job)
-        await db_session.commit()
-
-        orchestrator_execution = AgentExecution(
-            agent_id=str(uuid4()),
-            job_id=orchestrator_job.job_id,
-            tenant_key=test_project.tenant_key,
-            agent_display_name="orchestrator",
-            agent_name="orchestrator",
-            status="waiting",
-        )
-        db_session.add(orchestrator_execution)
-        await db_session.commit()
-
-        service = OrchestrationService(
-            db_manager=MagicMock(), tenant_manager=MagicMock(), websocket_manager=MagicMock()
-        )
-        service._test_session = db_session
-        service._mission._test_session = db_session
-        service._mission._orchestration._test_session = db_session
-
-        result = await service._mission.get_staging_instructions(
-            job_id=orchestrator_job.job_id,
-            tenant_key=test_project.tenant_key,
-        )
-
-        assert result["integrations"]["serena_mcp_enabled"] is True
-        assert "serena_guidance" in result
-        assert "Serena MCP" in result["serena_guidance"]
-        assert "STAGING DISCOVERY" in result["serena_guidance"]
-        assert "cover only the language(s) its LSP is configured for in this workspace" in result["serena_guidance"]
-        for tool in ("find_symbol", "get_symbols_overview", "find_referencing_symbols", "search_for_pattern"):
-            assert tool in result["mcp_tools_available"]
-
-    @pytest.mark.asyncio
-    async def test_serena_guidance_absent_when_toggle_off(self, db_session: AsyncSession, test_product, test_project):
-        test_product.tenant_key = test_project.tenant_key
-        await db_session.commit()
-        await db_session.refresh(test_product)
-        test_project.product_id = test_product.id
-        await db_session.commit()
-        await db_session.refresh(test_project)
-
-        orchestrator_job = AgentJob(
-            job_id=str(uuid4()),
-            job_type="orchestrator",
-            tenant_key=test_project.tenant_key,
-            project_id=test_project.id,
-            mission="Orchestrate the project",
-            status="active",
-            job_metadata={},
-        )
-        db_session.add(orchestrator_job)
-        await db_session.commit()
-
-        orchestrator_execution = AgentExecution(
-            agent_id=str(uuid4()),
-            job_id=orchestrator_job.job_id,
-            tenant_key=test_project.tenant_key,
-            agent_display_name="orchestrator",
-            agent_name="orchestrator",
-            status="waiting",
-        )
-        db_session.add(orchestrator_execution)
-        await db_session.commit()
-
-        service = OrchestrationService(
-            db_manager=MagicMock(), tenant_manager=MagicMock(), websocket_manager=MagicMock()
-        )
-        service._test_session = db_session
-        service._mission._test_session = db_session
-        service._mission._orchestration._test_session = db_session
-
-        result = await service._mission.get_staging_instructions(
-            job_id=orchestrator_job.job_id,
-            tenant_key=test_project.tenant_key,
-        )
-
-        assert result["integrations"]["serena_mcp_enabled"] is False
-        assert "serena_guidance" not in result
-        assert "find_symbol" not in result["mcp_tools_available"]
-        assert "get_symbols_overview" not in result["mcp_tools_available"]
 
     @pytest.mark.asyncio
     async def test_validates_job_id_required(self, db_session: AsyncSession, test_project):
@@ -348,7 +242,9 @@ class TestUpdateAgentMission:
         await db_session.commit()
 
         service = OrchestrationService(
-            db_manager=MagicMock(), tenant_manager=MagicMock(), websocket_manager=MagicMock()
+            db_manager=MagicMock(),
+            tenant_manager=MagicMock(),
+            websocket_manager=MagicMock(broadcast_to_tenant=AsyncMock()),
         )
         service._test_session = db_session
         service._mission._test_session = db_session

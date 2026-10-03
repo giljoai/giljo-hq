@@ -158,25 +158,27 @@ describe('JobsBoardCard Details drawer (FE-9682)', () => {
 
 describe('JobsBoardCard meta line icons and the retired Agent Lab (FE-9682)', () => {
   it('renders no AgentTipsDialog anywhere on the card', () => {
-    const wrapper = mountCard(staged, [orch, impl], { gitEnabled: true, serenaEnabled: true, integrationsResolved: true })
+    const wrapper = mountCard(staged, [orch, impl], { gitEnabled: true, integrationsResolved: true })
     expect(wrapper.find('[data-testid="agent-tips-stub"]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'AgentTipsDialog' }).exists()).toBe(false)
   })
 
-  it('Git, Serena and mode icons sit on the meta line, lit when on and dim when off', () => {
-    const wrapper = mountCard(staged, [orch, impl], { gitEnabled: true, serenaEnabled: false, integrationsResolved: true })
+  it('Git and mode icons sit on the meta line, lit when on and dim when off', () => {
+    const wrapper = mountCard(staged, [orch, impl], { gitEnabled: true, integrationsResolved: true })
     const meta = wrapper.find('[data-testid="jb-meta"]')
     const git = meta.find('[data-testid="git-status-icon"]')
-    const serena = meta.find('[data-testid="serena-status-icon"]')
     const mode = meta.find('[data-testid="agentic-tool-icon"]')
     expect(git.exists()).toBe(true)
-    expect(serena.exists()).toBe(true)
     expect(mode.exists()).toBe(true)
+    expect(meta.findAll('button')).toHaveLength(2)
     expect(git.classes()).toContain('jb-int--on')
-    expect(serena.classes()).toContain('jb-int--off')
     expect(mode.attributes('aria-label')).toMatch(/multi terminal/i)
     expect(meta.text()).toContain('Git integration enabled')
-    expect(meta.text()).toContain('Serena disabled')
+
+    const off = mountCard(staged, [orch, impl], { gitEnabled: false, integrationsResolved: true })
+    const offMeta = off.find('[data-testid="jb-meta"]')
+    expect(offMeta.find('[data-testid="git-status-icon"]').classes()).toContain('jb-int--off')
+    expect(offMeta.text()).toContain('Git disabled')
   })
 
   it('an unread integration status renders as pending, never as off', () => {

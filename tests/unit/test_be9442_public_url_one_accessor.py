@@ -14,8 +14,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-SLASHED = "https://app.giljo.ai/"
-UNSLASHED = "https://app.giljo.ai"
+SLASHED = "https://app.example.test/"
+UNSLASHED = "https://app.example.test"
 CE_DEFAULT = "http://localhost:7272"
 
 
@@ -156,10 +156,10 @@ class TestBootstrapSetupDownloadUrl:
             async def generate_token(self, **kwargs):
                 return "TOKEN123"
 
-            async def mark_ready(self, token):
+            async def mark_ready(self, token, *, tenant_key):
                 return None
 
-            async def mark_failed(self, token, message):  # pragma: no cover - not hit
+            async def mark_failed(self, token, message, *, tenant_key):  # pragma: no cover - not hit
                 return None
 
         class _FakeStaging:
@@ -214,7 +214,7 @@ class TestAccessorContract:
     def test_strips_repeated_slashes_and_surrounding_whitespace(self, monkeypatch):
         from giljo_mcp.http.url_resolver import get_public_url
 
-        monkeypatch.setenv("GILJO_PUBLIC_URL", "  https://app.giljo.ai//  ")
+        monkeypatch.setenv("GILJO_PUBLIC_URL", "  https://app.example.test//  ")
         assert get_public_url() == UNSLASHED
 
     def test_unset_returns_ce_default(self, monkeypatch):

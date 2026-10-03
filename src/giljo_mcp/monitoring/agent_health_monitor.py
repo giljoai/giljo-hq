@@ -256,7 +256,7 @@ class AgentHealthMonitor:
         result = await session.execute(
             select(AgentExecution)
             .options(joinedload(AgentExecution.job))
-            .where(AgentExecution.id == health_status.execution_id)
+            .where(AgentExecution.id == health_status.execution_id, AgentExecution.tenant_key == tenant_key)
         )
         execution = result.unique().scalar_one_or_none()
         if not execution:

@@ -47,6 +47,7 @@
 import { ref, onMounted } from 'vue'
 import setupService from '@/services/setupService'
 import configService from '@/services/configService'
+import { isCeModeValue } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
 
 const STORAGE_KEY = 'giljo_license_dismissed_at'
@@ -59,7 +60,7 @@ const productName = PRODUCT_NAME
 async function checkLicensing() {
   try {
     await configService.fetchConfig()
-    if (configService.getGiljoMode() !== 'ce') return
+    if (!isCeModeValue(configService.getGiljoMode())) return
 
     const data = await setupService.checkEnhancedStatus()
     const totalUsers = data.total_users_count || 0
@@ -77,8 +78,8 @@ async function checkLicensing() {
     }
 
     showDialog.value = true
-  } catch {
-    // Silently fail - don't block the app over licensing check
+  } catch (error) {
+    console.warn('[LicensingDialog] licensing check failed; reminder not shown:', error)
   }
 }
 

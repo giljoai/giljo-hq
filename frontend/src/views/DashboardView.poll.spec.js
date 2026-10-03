@@ -9,7 +9,6 @@ vi.mock('vue-router', () => ({
 vi.mock('@/services/setupService', () => ({
   default: {
     baseURL: '',
-    checkStatus: vi.fn().mockResolvedValue({ requires_setup: false }),
   },
 }))
 

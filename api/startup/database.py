@@ -6,6 +6,9 @@
 
 import logging
 import os
+from urllib.parse import urlsplit
+
+from sqlalchemy.exc import ProgrammingError
 
 from api.app_state import APIState
 from giljo_mcp.config_manager import get_config
@@ -16,12 +19,15 @@ from giljo_mcp.system_prompts import SystemPromptService
 
 logger = logging.getLogger(__name__)
 
+_DUPLICATE_SCHEMA_SQLSTATES = frozenset({"42P07", "42710"})
+
 
 def _worker_count() -> int:
+    raw = os.getenv("WEB_CONCURRENCY", "1")
     try:
-        return max(1, int(os.getenv("WEB_CONCURRENCY", "1")))
-    except (TypeError, ValueError):
-        return 1
+        return max(1, int(raw))
+    except ValueError as exc:
+        raise ValueError(f"WEB_CONCURRENCY must be a whole number, got {raw!r}") from exc
 
 
 def _broker_direct_connections(config) -> int:
@@ -34,11 +40,11 @@ def _broker_direct_connections(config) -> int:
 
 
 def _reserved_slots() -> int:
+    raw = os.getenv("GILJO_DB_RESERVED_SLOTS", "0")
     try:
-        return max(0, int(os.getenv("GILJO_DB_RESERVED_SLOTS", "0")))
-    except (TypeError, ValueError):
-        logger.warning("Ignoring non-numeric GILJO_DB_RESERVED_SLOTS=%r", os.getenv("GILJO_DB_RESERVED_SLOTS"))
-        return 0
+        return max(0, int(raw))
+    except ValueError as exc:
+        raise ValueError(f"GILJO_DB_RESERVED_SLOTS must be a whole number, got {raw!r}") from exc
 
 
 def check_connection_budget(
@@ -50,15 +56,24 @@ def check_connection_budget(
     reserved_slots=0,
     pgbouncer=False,
 ) -> None:
-    try:
-        per_worker_pool = int(pool_size) + int(max_overflow)
-        n_workers = int(workers)
-        budget = int(slot_budget)
-        broker = int(broker_per_worker)
-        reserved = int(reserved_slots)
-    except (TypeError, ValueError):
-        logger.debug("Skipping DB connection-budget check: non-numeric pool inputs")
-        return
+    numbers: dict[str, int] = {}
+    for name, value in (
+        ("pool_size", pool_size),
+        ("max_overflow", max_overflow),
+        ("workers", workers),
+        ("slot_budget", slot_budget),
+        ("broker_per_worker", broker_per_worker),
+        ("reserved_slots", reserved_slots),
+    ):
+        try:
+            numbers[name] = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"DB connection budget input {name} must be a whole number, got {value!r}") from exc
+    per_worker_pool = numbers["pool_size"] + numbers["max_overflow"]
+    n_workers = numbers["workers"]
+    budget = numbers["slot_budget"]
+    broker = numbers["broker_per_worker"]
+    reserved = numbers["reserved_slots"]
 
     if pgbouncer:
         direct = n_workers * broker + reserved
@@ -161,7 +176,8 @@ async def init_database(state: APIState) -> None:
         )
         raise ValueError("Database URL not configured. PostgreSQL is required.")
 
-    logger.info(f"Connecting to database: {db_url.split('@')[-1] if '@' in db_url else db_url}")
+    target = urlsplit(db_url)
+    logger.info("Connecting to database: %s:%s%s", target.hostname or "local socket", target.port or "", target.path)
 
     try:
         state.db_manager = DatabaseManager(
@@ -192,15 +208,13 @@ async def init_database(state: APIState) -> None:
             try:
                 await state.db_manager.create_tables_async()
                 logger.info("Database tables created/verified successfully")
-            except Exception as ct_exc:
-                err_str = str(ct_exc).lower()
-                if "already exists" in err_str or "duplicatetable" in err_str:
-                    logger.warning(
-                        "create_tables_async() saw already-existing schema (migrations are authoritative): %s",
-                        str(ct_exc).split("\n", 1)[0][:200],
-                    )
-                else:
+            except ProgrammingError as ct_exc:
+                if getattr(ct_exc.orig, "sqlstate", None) not in _DUPLICATE_SCHEMA_SQLSTATES:
                     raise
+                logger.warning(
+                    "create_tables_async() saw already-existing schema (migrations are authoritative): %s",
+                    str(ct_exc).split("\n", 1)[0][:200],
+                )
 
         state.system_prompt_service = SystemPromptService(state.db_manager)
         logger.info("System prompt service initialized")

@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 
-from typing import Any
+from typing import Any, Literal, get_args
 
 from sqlalchemy import (
     ARRAY,
@@ -25,6 +25,9 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from .base import Base, generate_uuid
+
+
+VisionDocumentType = Literal["vision", "architecture", "features", "setup", "api", "testing", "deployment", "custom"]
 
 
 VALID_TARGET_PLATFORMS = frozenset({"windows", "linux", "macos", "android", "ios", "web", "all"})
@@ -452,7 +455,7 @@ class VisionDocument(Base):
         Index("idx_vision_doc_product_active", "product_id", "is_active", "display_order"),
         CheckConstraint("storage_type = 'inline'", name="ck_vision_doc_storage_type"),
         CheckConstraint(
-            "document_type IN ('vision', 'architecture', 'features', 'setup', 'api', 'testing', 'deployment', 'custom')",
+            f"document_type IN ({', '.join(repr(t) for t in get_args(VisionDocumentType))})",
             name="ck_vision_doc_document_type",
         ),
         CheckConstraint(

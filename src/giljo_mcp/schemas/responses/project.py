@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProjectTypeInfo(BaseModel):
-    """Minimal project type info for embedding in project responses (Handover 0440c)."""
+    """Minimal project type info for embedding in project responses."""
 
     id: str
     abbreviation: str
@@ -75,6 +75,9 @@ class ProjectDetail(ProjectBase):
     staging_status: str | None = None
     implementation_launched_at: str | None = None
 
+    reviewed_at: str | None = None
+    review_pending: bool = False
+
     cancellation_reason: str | None = None
     early_termination: bool = False
 
@@ -92,8 +95,8 @@ class ProjectListItem(BaseModel):
 
     Intentionally NOT inheriting ``ProjectBase`` — this is a thin list
     projection with required (not Optional) timestamps and no
-    ``auto_checkin_*`` fields. CE-0038 / BE-1000d reviewed and kept this
-    standalone: inheriting ``ProjectBase`` would force ``auto_checkin_*`` into
+    ``auto_checkin_*`` fields. Kept standalone on purpose: inheriting
+    ``ProjectBase`` would force ``auto_checkin_*`` into
     the list shape (Pydantic v2 cannot drop an inherited field) and relax the
     required ``created_at``/``updated_at`` to optional. Drift against the
     ``crud.py`` list/deleted projection is prevented by the real-router guard
@@ -140,6 +143,9 @@ class ActiveProjectDetail(ProjectBase):
     implementation_launched_at: str | None = None
 
     staging_status: str | None = None
+
+    reviewed_at: str | None = None
+    review_pending: bool = False
 
     deleted_at: str | None = None
     agent_count: int = 0
@@ -209,7 +215,7 @@ class ProjectData(ProjectBase):
 
 
 class ProjectArchiveResult(BaseModel):
-    """Result of the archive lifecycle (BE-9384).
+    """Result of the archive lifecycle.
 
     ``project`` is the row as it stands after the terminal transition; the other
     fields report which of the optional lifecycle steps actually did something, so
@@ -268,17 +274,6 @@ class CanCloseResult(BaseModel):
     summary: str | None = None
     all_agents_finished: bool = False
     agent_statuses: dict[str, int] = Field(default_factory=dict)
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CloseoutPromptResult(BaseModel):
-    """Closeout prompt and checklist for project completion."""
-
-    prompt: str
-    checklist: list[str] = Field(default_factory=list)
-    project_name: str
-    agent_summary: str
 
     model_config = ConfigDict(from_attributes=True)
 

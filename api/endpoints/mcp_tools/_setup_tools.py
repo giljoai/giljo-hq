@@ -8,11 +8,13 @@ from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.exc import SQLAlchemyError
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
     _HARNESS_PARAM_DESCRIPTION,
     MCP_ID_MAX,
+    MCP_LIST_ITEMS_MAX,
     MCP_SHORT_TEXT_MAX,
     _call_tool,
     _resolve_preset_name,
@@ -70,31 +72,29 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
     title="Set Up GiljoAI",
     description=(
         "First-time setup: installs the /giljo command/skill and writes the Giljo HQ marker "
-        "block (primer + product binding) into your harness file (CLAUDE.md / AGENTS.md). Run "
-        "once after connecting; re-run whenever the skills are outdated. It no longer installs "
-        "agent templates and has no agent-install scope: every spawned agent receives "
-        "its full profile from the server in get_job_mission's agent_profile, so nothing needs "
-        "to live in your agents directory (a profile can still be downloaded as Markdown from "
-        "the Template Manager). Pass platform identifying your CLI tool "
-        "('claude_code'|'codex_cli'|'opencode'|'generic'). NAME YOUR OWN TOOL rather than "
-        "accepting the default: the wrong platform installs that platform's skill format into "
-        "its directories, which your tool never reads, and nothing errors. On a session with no "
-        "home directory (web sandbox / pure chat), pass harness to get the primer and guidance "
-        "returned inline instead of file-install instructions. Pass product_id to bind this "
-        "repository to a Giljo HQ product: the returned instructions include writing a per-repo "
-        "marker block into CLAUDE.md and AGENTS.md so future calls never hit a PRODUCT_AMBIGUOUS "
-        "rejection for this repo again. Omit it on a tenant with zero or multiple products -- the "
-        "response tells you what to do next (re-run once a product exists, or confirm with the "
-        "user which of several to bind). Every tool response carries `_meta.skills_version` (the "
-        "server's current bundle). When it is ahead of what was installed here, TELL the user "
-        "their Giljo skills are outdated and OFFER to re-run this tool -- NEVER rewrite their "
-        "local skill files without that ask; this call only ever installs on an explicit, "
-        "deliberate invocation."
+        "block (primer + product binding) into your harness file (CLAUDE.md / AGENTS.md). "
+        "Following the returned instructions replaces previously installed Giljo HQ "
+        "skills/commands and the Giljo-managed block in your instruction file; text outside "
+        "that block is untouched. Run once after connecting; re-run when skills are outdated. "
+        "It no longer installs agent templates: every spawned agent receives its profile from "
+        "get_job_mission's agent_profile. Pass platform naming your own tool "
+        "('claude_code'|'codex_cli'|'opencode'|'generic'), not the default: the wrong platform "
+        "installs skills where your tool never reads them, and nothing errors. With no home "
+        "directory (web sandbox / pure chat), pass harness to get the primer returned inline. "
+        "Pass product_id to bind this repository to a product via a per-repo marker block in "
+        "CLAUDE.md and AGENTS.md, so later calls never hit PRODUCT_AMBIGUOUS. Omit it on a "
+        "tenant with zero or several products; the response says what to do next. Every tool "
+        "response carries `_meta.skills_version`; when it is ahead of what was installed here, "
+        "tell the user their skills are outdated and offer to re-run this tool. Local skill "
+        "files are only rewritten after the user agrees."
     ),
-    annotations=_tool_hints("giljo_setup"),
+    annotations=_tool_hints("giljo_setup", destructive=True),
 )
 async def giljo_setup(
-    platform: Literal[EXPORT_PLATFORMS] = "claude_code",
+    platform: Annotated[
+        Literal[EXPORT_PLATFORMS],
+        Field(description="The coding tool you are running in; decides where skills are installed."),
+    ] = "claude_code",
     harness: Annotated[str, Field(max_length=MCP_ID_MAX, description=_HARNESS_PARAM_DESCRIPTION)] = "",
     product_id: Annotated[
         str,
@@ -179,25 +179,22 @@ async def giljo_setup(
         async with app_state.db_manager.get_session_async() as session:
             ack_service = TenantSkillsAckService(session, tenant_key)
             await ack_service.acknowledge(SKILLS_VERSION)
-    except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError, KeyError) as e:
-        logger.warning("giljo_setup skills ack write failed: %s: %s", type(e).__name__, e)
+    except SQLAlchemyError:
+        logger.warning("giljo_setup skills ack write failed", exc_info=True)
 
-    try:
-        from api.app_state import state as app_state
+    from api.app_state import state as app_state
 
-        ws_manager = getattr(app_state, "websocket_manager", None)
-        tenant_key = _base._resolve_tenant(ctx)
-        if ws_manager and tenant_key:
-            from giljo_mcp.events.schemas import EventFactory
+    ws_manager = getattr(app_state, "websocket_manager", None)
+    tenant_key = _base._resolve_tenant(ctx)
+    if ws_manager and tenant_key:
+        from giljo_mcp.events.schemas import EventFactory
 
-            event = EventFactory.tenant_envelope(
-                event_type="setup:bootstrap_complete",
-                tenant_key=tenant_key,
-                data={"platform": platform},
-            )
-            await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-    except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError, KeyError) as e:
-        logger.warning(f"setup:bootstrap_complete emission failed: {type(e).__name__}: {e}")
+        event = EventFactory.tenant_envelope(
+            event_type="setup:bootstrap_complete",
+            tenant_key=tenant_key,
+            data={"platform": platform},
+        )
+        await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
     return result
 
@@ -205,14 +202,14 @@ async def giljo_setup(
 
 
 class _TuningProposal(BaseModel):
-    """One reviewed context-tuning proposal (BE-9118 typed-boundary model).
+    """One reviewed context-tuning proposal.
 
     Replaces the former ``list[dict]`` proposals param. Structural + type validation
     (required section/drift_detected, proposed_value shape + per-string length cap,
     confidence enum) happens at the FastMCP arg-validation boundary as a clean
     422-style ToolError, instead of the aggregated ValueError string raised by
     ``giljo_mcp.tools.submit_tuning_review._validate_proposals``.
-    BE-9473: ``_validate_shape_and_size`` below also checks section MEMBERSHIP at
+    ``_validate_shape_and_size`` below also checks section MEMBERSHIP at
     the boundary now (an unknown section is rejected here, not passed through to
     that function). ``submit_tuning_review._validate_proposals`` -- a TOOL-layer
     function, not a service method -- stays as defense-in-depth for the non-MCP
@@ -221,7 +218,7 @@ class _TuningProposal(BaseModel):
     ``extra="allow"`` tolerates the informational keys the served tuning prompt
     includes so the model need not enumerate every one.
 
-    BE-9473 (F2): the length cap used to be a per-field validator that fired on
+    The length cap used to be a per-field validator that fired on
     ``proposed_value`` alone, with no visibility into ``section`` -- so a
     STRUCTURED section (tech_stack/architecture: multiple fields) sent as one
     oversized flat string was rejected for its length, and the real problem (wrong
@@ -303,13 +300,14 @@ class _TuningProposal(BaseModel):
         "context against recent project history. Approved proposals are written immediately -- no "
         "separate dashboard review step. See the proposals param for its exact per-item shape."
     ),
-    annotations=_tool_hints("apply_context_tuning"),
+    annotations=_tool_hints("apply_context_tuning", destructive=True),
 )
 async def apply_context_tuning(
-    product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
+    product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Product id.")],
     proposals: Annotated[
         list[_TuningProposal],
         Field(
+            max_length=MCP_LIST_ITEMS_MAX,
             description=(
                 "Per-section proposals. Each item: {section: str, drift_detected: bool "
                 "(required), proposed_value: str|dict|list (required when drift_detected=True), "
@@ -325,10 +323,13 @@ async def apply_context_tuning(
                 "sub-key inside a dict, not the whole submission). Every problem across every "
                 "proposal is reported together in one rejection. Updating a field that already "
                 "holds a value needs force=true -- see the force param."
-            )
+            ),
         ),
     ],
-    overall_summary: Annotated[str, Field(max_length=MCP_SHORT_TEXT_MAX)] = "",
+    overall_summary: Annotated[
+        str,
+        Field(max_length=MCP_SHORT_TEXT_MAX, description="Optional one-paragraph summary of the whole tuning pass."),
+    ] = "",
     force: Annotated[
         bool,
         Field(

@@ -89,7 +89,7 @@ export const useUserStore = defineStore('user', () => {
       await fetchCurrentUser()
       return true
     } catch (error) {
-      console.error('[UserStore] Login failed:', error)
+      console.error('[UserStore] Login failed:', error?.response?.status ?? error?.code)
       currentUser.value = null
       clearOrgFields()
       lastLoginErrorStatus.value = error?.response?.status ?? null

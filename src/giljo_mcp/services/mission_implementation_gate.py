@@ -16,6 +16,7 @@ from giljo_mcp.services.execution_mode_gate import (
     EXECUTION_MODE_NOT_SELECTED_MESSAGE,
     execution_mode_selected,
 )
+from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.services.sequence_run_service import active_chain_run
 
 
@@ -61,7 +62,7 @@ async def check_implementation_gate(
     if project and project.implementation_launched_at is None:
         if job.job_type == "orchestrator":
             chain_member = await active_chain_run(session, job.project_id, tenant_key) is not None
-            if chain_member and project.staging_status != "staging_complete":
+            if chain_member and project.staging_status != STAGING_COMPLETE:
                 return project, None
             return project, MissionResponse(
                 job_id=job_id,

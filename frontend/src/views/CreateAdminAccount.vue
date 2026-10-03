@@ -406,7 +406,7 @@ const createAdmin = async () => {
     setupService.invalidateStatusCache()
     router.push('/')
   } catch (error) {
-    console.error('[CREATE_ADMIN] Failed:', error)
+    console.error('[CREATE_ADMIN] Failed:', error?.response?.status ?? error?.code)
 
     if (error.response?.data?.detail) {
       errorMessage.value = error.response.data.detail

@@ -111,13 +111,13 @@ async def generate_download_token(
     zip_path, message = await staging.stage_slash_commands(staging_path, platform=platform)
 
     if not zip_path:
-        await token_manager.mark_failed(token, message)
+        await token_manager.mark_failed(token, message, tenant_key=tenant_key)
         logger.error(f"Failed to stage content for token {mask_token(token)}: {message}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to stage download content"
         )
 
-    await token_manager.mark_ready(token)
+    await token_manager.mark_ready(token, tenant_key=tenant_key)
 
     server_url = get_public_base_url(request)
     download_url = f"{server_url}/api/download/temp/{token}/{filename}"
@@ -237,20 +237,17 @@ async def download_temp_file(
 
         logger.info(f"Download served: {sanitize(filename)} ({len(content)} bytes) token={mask_token(token)}")
 
-        try:
-            ws_manager = request.app.state.websocket_manager
-            if ws_manager and tenant_key and filename in ("slash_commands.zip", "giljo_setup.zip"):
-                from giljo_mcp.events.schemas import EventFactory
+        ws_manager = getattr(request.app.state, "websocket_manager", None)
+        if ws_manager and tenant_key and filename in ("slash_commands.zip", "giljo_setup.zip"):
+            from giljo_mcp.events.schemas import EventFactory
 
-                event = EventFactory.setup_commands_installed(
-                    tenant_key=tenant_key,
-                    user_id="cli_download",
-                    tool_name="all",
-                    command_count=0,
-                )
-                await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-        except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
-            pass
+            event = EventFactory.setup_commands_installed(
+                tenant_key=tenant_key,
+                user_id="cli_download",
+                tool_name="all",
+                command_count=0,
+            )
+            await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
         return Response(
             content=content,

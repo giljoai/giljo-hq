@@ -71,7 +71,7 @@ describe('BE-9332 - orchestrator:prompt_generated renders the orchestrator card'
     await AGENT_EVENT_ROUTES['orchestrator:prompt_generated'].handler(EMITTED_PAYLOAD)
     expect(store.jobs.length).toBe(1)
 
-    // The project refetch (useAgentJobs.loadJobs -> GET /api/agent-jobs/ -> setJobs)
+    // The project refetch (GET /api/agent-jobs/ -> setJobs)
     // returns the SAME orchestrator as a persisted row. The live card and the persisted
     // row must reconcile to ONE entry — they agree on agent_id, which is what
     // normalizeJob derives unique_key from.

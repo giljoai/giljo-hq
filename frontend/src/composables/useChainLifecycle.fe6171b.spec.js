@@ -25,7 +25,6 @@ describe('useChainLifecycle — FE-6171b stageChain', () => {
     setActivePinia(createPinia())
     sequenceRunStore = useSequenceRunStore()
     sequenceRunStore._testSeedRuns([makeRun()])
-    sequenceRunStore._testSetActiveRun(makeRun())
   })
 
   it('PATCHes run locked=true, fetches staging prompt, does not throw', async () => {
@@ -72,7 +71,6 @@ describe('useChainLifecycle — FE-6171b unstageChain (UNLOCK, not dissolve)', (
     sequenceRunStore = useSequenceRunStore()
     const lockedRun = makeRun({ locked: true })
     sequenceRunStore._testSeedRuns([lockedRun])
-    sequenceRunStore._testSetActiveRun(lockedRun)
   })
 
   it('PATCHes run locked=false and returns the updated run', async () => {

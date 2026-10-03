@@ -2,14 +2,14 @@ import { computed, watch } from 'vue'
 
 import { useBannerDismissStore } from '@/stores/bannerDismissStore'
 
-export const approvalDismissKey = (approval) => (approval?.id ? `approval:${approval.id}` : null)
+const approvalDismissKey = (approval) => (approval?.id ? `approval:${approval.id}` : null)
 
-export const mentionDismissKey = (mention) =>
+const mentionDismissKey = (mention) =>
   mention?.thread_id ? `mention:${mention.thread_id}:${mention.message_ids?.[0] ?? ''}` : null
 
-export const askDismissKey = (ask) => (ask?.thread_id ? `ask:${ask.thread_id}` : null)
+const askDismissKey = (ask) => (ask?.thread_id ? `ask:${ask.thread_id}` : null)
 
-export const yourTurnDismissKey = (thread) =>
+const yourTurnDismissKey = (thread) =>
   thread?.thread_id ? `your-turn:${thread.thread_id}:${thread.last_message?.id ?? ''}` : null
 
 export function useBannerDismiss(sources) {

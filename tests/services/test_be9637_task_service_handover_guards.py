@@ -59,12 +59,13 @@ async def test_an_enum_status_is_unwrapped_to_its_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_unreadable_task_is_reported_as_not_a_handover() -> None:
+async def test_a_missing_task_is_reported_as_not_a_handover() -> None:
+    from giljo_mcp.exceptions import ResourceNotFoundError
 
-    async def _explodes(_task_id):
-        raise RuntimeError("no such task")
+    async def _missing(_task_id):
+        raise ResourceNotFoundError(message="no such task", context={})
 
-    assert await handover_state(_explodes, "t-1") == (False, None)
+    assert await handover_state(_missing, "t-1") == (False, None)
 
 
 def test_the_refusals_carry_their_codes_and_name_the_task() -> None:

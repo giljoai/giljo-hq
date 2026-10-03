@@ -90,7 +90,6 @@ const emit = defineEmits(['close', 'superseded'])
 
 const projectStore = useProjectStore()
 
-
 const candidates = ref([])
 const loadingCandidates = ref(false)
 const successorProjectId = ref(null)

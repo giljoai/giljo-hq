@@ -27,7 +27,6 @@ vi.mock('@/stores/websocket', () => ({
 function mountStep3(props = {}) {
   return mount(SetupStep3Commands, {
     props: {
-      selectedTools: ['claude_code'],
       connectedTools: ['claude_code'],
       ...props,
     },
@@ -89,7 +88,6 @@ describe('SetupStep3Commands', () => {
 
     it('shows tab bar with multiple connected tools', async () => {
       const wrapper = mountStep3({
-        selectedTools: ['claude_code', 'codex_cli'],
         connectedTools: ['claude_code', 'codex_cli'],
       })
       await flushPromises()
@@ -101,14 +99,13 @@ describe('SetupStep3Commands', () => {
     // (OpenCode has an mdi icon, Generic MCP client a logo) — it kept a stale 4-tool
     // TOOL_META fork that rendered a broken image + empty name for them.
     it('renders OpenCode (mdi icon, no broken image) when connected', async () => {
-      const wrapper = mountStep3({ selectedTools: ['opencode'], connectedTools: ['opencode'] })
+      const wrapper = mountStep3({ connectedTools: ['opencode'] })
       await flushPromises()
       expect(wrapper.text()).toContain('Ask your OpenCode to run:')
     })
 
     it('renders the generic MCP client with a resolvable name + logo when connected', async () => {
       const wrapper = mountStep3({
-        selectedTools: ['claude_code', 'generic'],
         connectedTools: ['claude_code', 'generic'],
       })
       await flushPromises()
@@ -346,7 +343,6 @@ describe('SetupStep3Commands', () => {
   describe('Tab switching', () => {
     it('switches active tool on tab click', async () => {
       const wrapper = mountStep3({
-        selectedTools: ['claude_code', 'codex_cli'],
         connectedTools: ['claude_code', 'codex_cli'],
       })
       await flushPromises()
@@ -362,7 +358,6 @@ describe('SetupStep3Commands', () => {
 
     it('emits can-proceed when one tool is fully installed in multi-tool setup', async () => {
       const wrapper = mountStep3({
-        selectedTools: ['claude_code', 'codex_cli'],
         connectedTools: ['claude_code', 'codex_cli'],
       })
       await flushPromises()

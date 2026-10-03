@@ -9,27 +9,18 @@ export function isSaasModeValue(mode) {
   return mode === 'saas' || mode === 'saas-production'
 }
 
-export function isNonCeModeValue(mode) {
-  return mode !== 'ce'
-}
-
 export function useGiljoMode() {
   function getMode() {
     return configService.getGiljoMode()
   }
 
   function isCeMode() {
-    return getMode() === 'ce'
+    return isCeModeValue(getMode())
   }
 
   function isSaasMode() {
-    const m = getMode()
-    return m === 'saas' || m === 'saas-production'
+    return isSaasModeValue(getMode())
   }
 
-  function isNonCeMode() {
-    return getMode() !== 'ce'
-  }
-
-  return { getMode, isCeMode, isSaasMode, isNonCeMode }
+  return { getMode, isCeMode, isSaasMode }
 }

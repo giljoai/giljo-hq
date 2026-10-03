@@ -13,16 +13,10 @@ from sqlalchemy.orm import joinedload
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models.products import Product
+from giljo_mcp.tools.context_tools._response_ceiling import estimate_tokens
 
 
 logger = logging.getLogger(__name__)
-
-
-def estimate_tokens(data: Any) -> int:
-    import json
-
-    text = json.dumps(data) if not isinstance(data, str) else data
-    return len(text) // 4
 
 
 async def _query(

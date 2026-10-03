@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
-from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -70,29 +69,22 @@ async def broadcast_conductor_created(
 ) -> None:
     if websocket_manager is None:
         return
-    try:
-        await websocket_manager.broadcast_to_tenant(
-            tenant_key=tenant_key,
-            event_type="agent:created",
-            data={
-                "project_id": None,
-                "execution_id": execution_id,
-                "agent_id": agent_id,
-                "job_id": job_id,
-                "agent_display_name": "orchestrator",
-                "agent_name": conductor_label or "Chain Conductor",
-                "status": "waiting",
-                "chain_conductor": True,
-                "run_id": run_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-            },
-        )
-    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-        logger.warning(
-            "Failed to broadcast agent:created for conductor %s: %s",
-            sanitize(agent_id),
-            ws_error,
-        )
+    await websocket_manager.broadcast_to_tenant(
+        tenant_key=tenant_key,
+        event_type="agent:created",
+        data={
+            "project_id": None,
+            "execution_id": execution_id,
+            "agent_id": agent_id,
+            "job_id": job_id,
+            "agent_display_name": "orchestrator",
+            "agent_name": conductor_label or "Chain Conductor",
+            "status": "waiting",
+            "chain_conductor": True,
+            "run_id": run_id,
+            "timestamp": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 def projectless_conductor_staging_directive(job_id: str) -> dict[str, Any]:

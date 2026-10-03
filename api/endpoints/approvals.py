@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.endpoints._boundary_types import IdPath
 from api.endpoints.dependencies import (
     get_comm_thread_service,
     get_db_manager,
@@ -86,7 +87,7 @@ async def list_approvals(
     Tenant isolation is enforced at the repository layer; cross-tenant rows
     are unreachable.
 
-    BE-9514: widened from a ``status='pending'``-only 422 to any
+    Widened from a ``status='pending'``-only 422 to any
     ``VALID_USER_APPROVAL_STATUSES`` value. Decided approvals previously had
     NO read surface at all -- ``status='decided'`` is the only way to verify
     ``decided_via``/``decided_by_user_id`` end to end (the dashboard inbox
@@ -133,7 +134,7 @@ async def list_approvals(
     status_code=status.HTTP_200_OK,
 )
 async def decide_approval(
-    approval_id: str,
+    approval_id: IdPath,
     payload: ApprovalDecideRequest,
     current_user: User = Depends(get_current_active_user),
     service: UserApprovalService = Depends(get_user_approval_service),

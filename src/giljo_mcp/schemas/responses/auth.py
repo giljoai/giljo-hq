@@ -48,7 +48,7 @@ class SetupStateInfo(BaseModel):
 
 
 class CredentialStatusResult(BaseModel):
-    """Durable connection-credential status for the current tenant (FE-9274).
+    """Durable connection-credential status for the current tenant.
 
     Computed on the fly from ``api_keys`` + ``oauth_refresh_tokens`` -- no new
     table, no migration. Backs the Connect surface's "Configured" state so it

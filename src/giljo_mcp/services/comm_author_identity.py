@@ -15,10 +15,9 @@ from giljo_mcp.harness_resolver import GENERIC_HARNESS
 from giljo_mcp.utils.identity import validate_from_agent
 
 
-_NO_AUTHOR_WARNING = (
-    "no author declared (neither from_agent nor as_user); attributed to 'orchestrator'. "
-    "An agent post must pass from_agent (its role/lane id); a post in the human user's "
-    "voice must pass as_user=true (BE-9379)."
+_NO_AUTHOR_MESSAGE = (
+    "A post needs an author: an agent passes from_agent (its role/lane id); a post in the "
+    "human user's voice passes as_user=true."
 )
 
 _LABEL_COLLISION_WARNING = (
@@ -36,6 +35,8 @@ def validate_post_author_input(from_agent: str | None, as_user: bool, max_len: i
             "agent or by the human user, never both.",
             context={"operation": "comm_thread.post"},
         )
+    if not from_agent and not as_user:
+        raise ValidationError(_NO_AUTHOR_MESSAGE, context={"operation": "comm_thread.post"})
     return from_agent
 
 
@@ -104,12 +105,7 @@ async def resolve_and_register_author(
             warning=None,
         )
     else:
-        identity = AuthorIdentity(
-            agent_id="orchestrator",
-            kind="agent",
-            display_name="orchestrator",
-            warning=_NO_AUTHOR_WARNING,
-        )
+        raise ValidationError(_NO_AUTHOR_MESSAGE, context={"operation": "comm_thread.post"})
 
     await repo.add_participant(
         session,

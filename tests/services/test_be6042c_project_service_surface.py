@@ -17,6 +17,7 @@ EXPECTED_PUBLIC_METHODS = frozenset(
         "get_project_type_by_label",
         "get_project",
         "list_projects",
+        "mark_project_reviewed",
         "count_projects",
         "board_counts",
         "get_project_type_by_id",

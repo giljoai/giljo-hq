@@ -66,7 +66,7 @@ class ProjectLaunchService:
 
             field_toggles, depth_config = await self._resolve_user_config(session, user_id, tenant_key)
 
-            existing = await self._find_existing_orchestrator(session, project_id, tenant_key)
+            existing = await self._lifecycle_repo.find_non_decommissioned_orchestrator(session, tenant_key, project_id)
             if existing:
                 return self._build_reuse_result(project, existing)
 
@@ -146,14 +146,6 @@ class ProjectLaunchService:
 
         return field_toggles, depth_config
 
-    async def _find_existing_orchestrator(
-        self,
-        session: AsyncSession,
-        project_id: str,
-        tenant_key: str,
-    ) -> AgentExecution | None:
-        return await self._lifecycle_repo.find_non_decommissioned_orchestrator(session, tenant_key, project_id)
-
     def _build_reuse_result(self, project: Project, existing: AgentExecution) -> ProjectLaunchResult:
         self._logger.info(
             f"[LAUNCH] Reusing existing orchestrator {existing.job_id} "
@@ -226,18 +218,15 @@ class ProjectLaunchService:
         )
 
         if websocket_manager:
-            try:
-                project_data = _build_ws_project_data(project)
-                project_data["staging_status"] = project.staging_status
-                project_data["orchestrator_job_id"] = orchestrator_job_id
-                await websocket_manager.broadcast_project_update(
-                    project_id=project.id,
-                    update_type="launched",
-                    project_data=project_data,
-                    tenant_key=project.tenant_key,
-                )
-            except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience
-                self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
+            project_data = _build_ws_project_data(project)
+            project_data["staging_status"] = project.staging_status
+            project_data["orchestrator_job_id"] = orchestrator_job_id
+            await websocket_manager.broadcast_project_update(
+                project_id=project.id,
+                update_type="launched",
+                project_data=project_data,
+                tenant_key=project.tenant_key,
+            )
 
         return ProjectLaunchResult(
             project_id=project.id,

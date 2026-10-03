@@ -5,16 +5,19 @@
 
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
-from giljo_mcp.exceptions import CloseoutRequiredError
+from giljo_mcp.exceptions import CloseoutRequiredError, ProjectStateError, ResourceNotFoundError
 from giljo_mcp.schemas.service_responses import ProjectArchiveResult
 from giljo_mcp.services.project_closeout_readiness import shape_readiness_blockers
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
+
+REVIEWABLE_STATUSES = frozenset({ProjectStatus.COMPLETED, ProjectStatus.TERMINATED})
 
 
 class ArchiveMixin:
@@ -75,6 +78,23 @@ class ArchiveMixin:
             deactivated=deactivated,
             closed_agents=closed_names or [],
         )
+
+    async def mark_project_reviewed(self, project_id: str, tenant_key: str | None = None) -> datetime:
+        resolved_tenant = tenant_key or self.tenant_manager.get_current_tenant()
+        async with self._get_session(resolved_tenant) as session:
+            project = await self._repo.get_by_id(session, resolved_tenant, project_id)
+            if project is None:
+                raise ResourceNotFoundError(
+                    message="Project not found or access denied", context={"project_id": project_id}
+                )
+            if project.status not in REVIEWABLE_STATUSES:
+                raise ProjectStateError(
+                    message=f"Only a finished project can be reviewed (status is '{project.status}')",
+                    context={"project_id": project_id, "status": project.status},
+                )
+            await self._repo.stamp_reviewed(session, resolved_tenant, project_id)
+            await session.refresh(project)
+            return project.reviewed_at
 
     async def _missing_closeout_blockers(self, project_id: str, tenant_key: str) -> list[dict[str, Any]] | None:
         async with self._get_session(tenant_key) as session:

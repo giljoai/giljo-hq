@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from giljo_mcp.models.sequence_runs import MAX_SEQUENCE_PROJECTS
+
 
 class SequenceRunProjectIds(BaseModel):
     """Validates sequence_runs.project_ids — ordered list of project_id strings."""
 
-    items: list[str] = Field(default_factory=list, max_length=5)
+    items: list[str] = Field(default_factory=list, max_length=MAX_SEQUENCE_PROJECTS)
 
     @field_validator("items")
     @classmethod
@@ -55,12 +57,12 @@ class SequenceRunProjectStatuses(BaseModel):
 class SequenceRunReviewedProjectIds(BaseModel):
     """Validates sequence_runs.reviewed_project_ids — list of reviewed member project_ids.
 
-    A reviewed set is a subset of the run's members (cap MAX_SEQUENCE_PROJECTS=5),
+    A reviewed set is a subset of the run's members (cap MAX_SEQUENCE_PROJECTS),
     so it is length-capped identically to project_ids. Items are project-id strings
-    (<= 36 chars). BE-9098.
+    (<= 36 chars).
     """
 
-    items: list[str] = Field(default_factory=list, max_length=5)
+    items: list[str] = Field(default_factory=list, max_length=MAX_SEQUENCE_PROJECTS)
 
     @field_validator("items")
     @classmethod
@@ -79,9 +81,9 @@ VALID_REVIEWED_VIA: frozenset[str] = frozenset({"ui", "harness"})
 class SequenceRunReviewedVia(BaseModel):
     """Validates sequence_runs.reviewed_via — {project_id -> "ui" | "harness"}.
 
-    Per-member review PROVENANCE (BE-9540), mirroring UserApproval.decided_via's
+    Per-member review PROVENANCE, mirroring UserApproval.decided_via's
     "which door" shape. Keys are a subset of reviewed_project_ids (cap
-    MAX_SEQUENCE_PROJECTS=5, same bound); values are membership-validated against
+    MAX_SEQUENCE_PROJECTS, same bound); values are membership-validated against
     VALID_REVIEWED_VIA. Field names match the actual DB key shape (arbitrary
     project_id strings as keys), so extra='allow' like SequenceRunProjectStatuses.
     """
@@ -90,8 +92,8 @@ class SequenceRunReviewedVia(BaseModel):
 
     @classmethod
     def validate_map(cls, data: dict) -> dict:
-        if len(data) > 5:
-            raise ValueError(f"reviewed_via has {len(data)} entries, exceeds cap of 5")
+        if len(data) > MAX_SEQUENCE_PROJECTS:
+            raise ValueError(f"reviewed_via has {len(data)} entries, exceeds cap of {MAX_SEQUENCE_PROJECTS}")
         for project_id, via in data.items():
             if not isinstance(project_id, str):
                 raise TypeError(f"reviewed_via keys must be strings, got {type(project_id).__name__}")

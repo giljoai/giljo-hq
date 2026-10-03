@@ -224,7 +224,7 @@ const props = defineProps({
 
 const route = useRoute()
 const userStore = useUserStore()
-const { isNonCeMode } = useGiljoMode()
+const { isSaasMode } = useGiljoMode()
 
 const username = ref('')
 const password = ref('')
@@ -430,7 +430,7 @@ onMounted(async () => {
   } catch {
     // Default to CE on config failure.
   }
-  if (isNonCeMode()) {
+  if (isSaasMode()) {
     const overrideLoaders = import.meta.glob('@/saas/components/DemoConsentScreen.vue')
     const [loader] = Object.values(overrideLoaders)
     if (loader) {

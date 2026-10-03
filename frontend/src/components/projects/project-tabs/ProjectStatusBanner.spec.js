@@ -50,6 +50,11 @@ describe('ProjectStatusBanner', () => {
     expect(wrapper.find('[data-testid="project-done-banner"]').exists()).toBe(true)
   })
 
+  it('decision banner title reads "Needs decision"', () => {
+    const wrapper = mountBanner({ orchestratorCloseoutBlocked: true })
+    expect(wrapper.find('.closeout-decision-title').text()).toBe('Needs decision')
+  })
+
   it('shows decision banner when orchestratorCloseoutBlocked is true', () => {
     const wrapper = mountBanner({ orchestratorCloseoutBlocked: true })
     expect(wrapper.find('[data-testid="closeout-decision-banner"]').exists()).toBe(true)

@@ -1281,38 +1281,5 @@ describe('SystemPromptTab.vue', () => {
       })
     })
 
-    // DoD 3. An older server omits the three FE-9408 fields; T is then unknowable and
-    // the indicator must not appear at all, silently.
-    describe('Older server without the provenance fields', () => {
-      it('hides the indicator and the fallback copy entirely, and logs nothing', async () => {
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-        try {
-          productStoreMock.effectiveProductId = PRODUCT_ID
-          productStoreMock.currentProduct = { id: PRODUCT_ID, name: 'Acme Widgets' }
-          apiMock.getOrchestratorPrompt.mockResolvedValue({
-            data: {
-              content: 'Custom orchestrator prompt...',
-              is_override: true,
-              scope: 'product',
-              updated_at: null,
-              updated_by: null,
-            },
-          })
-
-          wrapper = mountWithTooltipStub()
-          await flushPromises()
-
-          expect(wrapper.find('[data-test="serving-indicator"]').exists()).toBe(false)
-          expect(wrapper.find('[data-test="fallback-hint"]').exists()).toBe(false)
-          expect(errorSpy).not.toHaveBeenCalled()
-          expect(warnSpy).not.toHaveBeenCalled()
-        } finally {
-          errorSpy.mockRestore()
-          warnSpy.mockRestore()
-        }
-      })
-    })
   })
 })

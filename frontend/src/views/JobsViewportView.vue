@@ -11,24 +11,27 @@
           <p class="text-body-medium text-muted-a11y mt-1">
             Every project in flight<template v-if="allProducts"> across <strong>{{ productGroupsTotal }} {{ productGroupsTotal === 1 ? 'product' : 'products' }}</strong>, grouped by product</template><span v-else-if="productName"> for <strong>{{ productName }}</strong></span>, and what its agents are doing right now.
           </p>
+          <p class="text-body-small text-muted-a11y mt-1" data-testid="jobs-board-count-line">{{ countLine }}</p>
         </v-col>
       </v-row>
 
+      <p v-if="sequenceRunStore.error" class="text-body-medium mb-3" data-testid="jobs-board-chain-error">
+        <v-icon size="16" color="error" class="mr-1">mdi-alert-circle</v-icon>
+        Could not load the chains: {{ sequenceRunStore.error }}
+      </p>
+
       <JobsBoardToolbar
-        v-if="projects.length > 0 || chainRunIds.length > 0"
+        v-if="hasBoard"
         :side="side"
         :side-counts="sideCounts"
-        :filter="filter"
-        :filter-options="filterOptions"
+        :status-counts="statusCounts"
         :is-compact="isCompact"
-        :count-note="countNote"
         @select-side="selectSide"
-        @select-filter="(value) => (filter = value)"
         @select-density="setDensity"
       />
 
       <div
-        v-if="projects.length === 0 && chainRunIds.length === 0"
+        v-if="!hasBoard"
         class="jb-empty"
         data-testid="jobs-board-empty"
       >
@@ -66,32 +69,24 @@
             @steps="handleStepsClick"
             @agent-mission-edit="openMissionEdit"
           />
-          <div v-if="filterGroup(group.projects).length" class="jb-grid" data-testid="jobs-board-grid">
+          <div v-if="group.projects.length" class="jb-grid" data-testid="jobs-board-grid">
             <JobsBoardCard
-              v-for="project in filterGroup(group.projects)"
+              v-for="project in group.projects"
               :key="project.id"
-              :project="project"
-              :agents="agentsByProject[project.id] || []"
-              :now="now"
-              :headless-allowed="headlessAllowed"
-              :density="density"
-              :git-enabled="gitEnabled"
-              :serena-enabled="serenaEnabled"
-              :integrations-resolved="integrationsResolved"
-              :data-arrival="project.id === arrivalProjectId ? 'true' : undefined"
-              data-testid="jobs-board-card-wrap"
-              @open-detail="openDetail"
-              @open-hub="openHub"
-              @changed="fetchBoard"
-              @edit-description="openEditDialog"
-              @review="board.openReview"
-              @steps="handleStepsClick"
-              @agent-mission-edit="openMissionEdit"
-              @agent-messages="(agent, project) => handleMessages(agent, project.id)"
-              @agent-role="handleAgentRole"
-              @agent-job="handleAgentJob"
+              v-bind="cardShared(project)"
+              v-on="cardListeners"
             />
           </div>
+          <JobsBoardDoneGroup v-if="group.unreviewed.length" :count="group.unreviewed.length">
+            <div class="jb-grid">
+              <JobsBoardCard
+                v-for="project in group.unreviewed"
+                :key="project.id"
+                v-bind="cardShared(project)"
+                v-on="cardListeners"
+              />
+            </div>
+          </JobsBoardDoneGroup>
         </JobsBoardProductGroup>
       </template>
 
@@ -112,37 +107,28 @@
           @agent-role="handleAgentRole"
           @agent-job="handleAgentJob"
           @edit-description="openEditDialog"
-          @review="board.openReview"
           @steps="handleStepsClick"
           @agent-mission-edit="openMissionEdit"
         />
 
-        <div v-if="filteredProjects.length" class="jb-grid" data-testid="jobs-board-grid">
+        <div v-if="sideProjects.length" class="jb-grid" data-testid="jobs-board-grid">
           <JobsBoardCard
-            v-for="project in filteredProjects"
+            v-for="project in sideProjects"
             :key="project.id"
-            :project="project"
-            :agents="agentsByProject[project.id] || []"
-            :now="now"
-            :headless-allowed="headlessAllowed"
-            :density="density"
-            :git-enabled="gitEnabled"
-            :serena-enabled="serenaEnabled"
-            :integrations-resolved="integrationsResolved"
-            :data-arrival="project.id === arrivalProjectId ? 'true' : undefined"
-            data-testid="jobs-board-card-wrap"
-            @open-detail="openDetail"
-            @open-hub="openHub"
-            @changed="fetchBoard"
-            @edit-description="openEditDialog"
-            @review="board.openReview"
-            @steps="handleStepsClick"
-            @agent-mission-edit="openMissionEdit"
-            @agent-messages="(agent, project) => handleMessages(agent, project.id)"
-            @agent-role="handleAgentRole"
-            @agent-job="handleAgentJob"
+            v-bind="cardShared(project)"
+            v-on="cardListeners"
           />
         </div>
+        <JobsBoardDoneGroup v-if="sideUnreviewed.length" :count="sideUnreviewed.length">
+          <div class="jb-grid">
+            <JobsBoardCard
+              v-for="project in sideUnreviewed"
+              :key="project.id"
+              v-bind="cardShared(project)"
+              v-on="cardListeners"
+            />
+          </div>
+        </JobsBoardDoneGroup>
       </template>
     </template>
 
@@ -193,7 +179,6 @@
       :product-id="board.focusProject.product_id"
       :project-status="board.focusProject.status"
       :orchestrator-closeout-blocked="board.orchestratorCloseoutBlocked"
-      :orchestrator-job-id="board.orchestratorJobId"
       suppress-navigation
       @close="board.showCloseoutModal = false"
       @closeout="board.handleCloseoutComplete"
@@ -232,7 +217,7 @@ import { useProductStore } from '@/stores/products'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import { api } from '@/services/api'
-import { jobsSectionLabelFor, JOBS_SECTION_LABELS } from '@/utils/jobsSectionLabel'
+import { jobsSectionLabelFor, JOBS_SECTION_LABELS, withChainReview } from '@/utils/jobsSectionLabel'
 import { extractJobsFromResponse } from '@/composables/useAgentJobs'
 import { useJobActions } from '@/composables/useJobActions'
 import { useBoardDensity } from '@/composables/useBoardDensity'
@@ -240,6 +225,7 @@ import JobsBoardCard from '@/components/projects/JobsBoardCard.vue'
 import JobsBoardDetailModal from '@/components/projects/JobsBoardDetailModal.vue'
 import ChainGroup from '@/components/projects/chain/ChainGroup.vue'
 import ProjectCreateEditDialog from '@/components/projects/ProjectCreateEditDialog.vue'
+import JobsBoardDoneGroup from '@/components/projects/JobsBoardDoneGroup.vue'
 import JobsBoardProductGroup from '@/components/projects/JobsBoardProductGroup.vue'
 import JobsBoardToolbar from '@/components/projects/JobsBoardToolbar.vue'
 import { useJobsScopeStore } from '@/stores/jobsScope'
@@ -293,7 +279,7 @@ const router = useRouter()
 const { showToast } = useToast()
 const notificationStore = useNotificationStore()
 const board = useBoardCloseout({ agentsFor: (id) => agentsByProject.value[id] || [], refresh: () => fetchBoard() })
-const { gitEnabled, serenaEnabled, resolved: integrationsResolved } = useIntegrationStatus()
+const { gitEnabled, resolved: integrationsResolved } = useIntegrationStatus()
 const arrivalProjectId = computed(() => (typeof route.query.project === 'string' ? route.query.project : null))
 function chainCtxFor(projectId) {
   const run = chainRuns.value.find((r) => runMembers(r).includes(projectId))
@@ -350,6 +336,14 @@ const projects = computed(() =>
   projectStore.activeProjectsMeta.filter((project) => !chainMemberIds.value.has(project.id)),
 )
 
+const soloUnreviewed = computed(() =>
+  projectStore.unreviewedProjectsMeta.filter((project) => !chainMemberIds.value.has(project.id)),
+)
+const sideUnreviewed = computed(() => (side.value === 'implementation' ? soloUnreviewed.value : []))
+const hasBoard = computed(
+  () => projects.value.length > 0 || chainRunIds.value.length > 0 || soloUnreviewed.value.length > 0,
+)
+
 const highlightedRunId = computed(() => (typeof route.query.run === 'string' ? route.query.run : null))
 async function revealHighlightedRun() {
   if (!highlightedRunId.value) return
@@ -384,7 +378,10 @@ onUnmounted(() => {
 
 useJobsBoardLiveRefresh({
   wsStore: useWebSocketStore(),
-  isOnBoard: (pid) => projects.value.some((project) => project.id === pid) || chainMemberIds.value.has(pid),
+  isOnBoard: (pid) =>
+    projects.value.some((project) => project.id === pid) ||
+    soloUnreviewed.value.some((project) => project.id === pid) ||
+    chainMemberIds.value.has(pid),
   refreshAgents: (pid) => loadAgentsFor({ id: pid }),
   refreshBoard: (named) => refreshBoardLive(named),
 })
@@ -405,12 +402,24 @@ function sideOf(project) {
 function sideOfRun(run) {
   return CHAIN_IMPLEMENTATION_STATUSES.has(run?.status) ? 'implementation' : 'staging'
 }
-const sideCounts = computed(() => {
-  const counts = { staging: 0, implementation: 0 }
-  for (const project of projects.value) counts[sideOf(project)]++
-  for (const run of chainRuns.value) counts[sideOfRun(run)]++
-  return counts
-})
+function cardsOnSide(which, { withDone = true } = {}) {
+  const cards = new Map()
+  projects.value.filter((project) => sideOf(project) === which).forEach((p) => cards.set(p.id, p))
+  if (withDone && which === 'implementation') soloUnreviewed.value.forEach((p) => cards.set(p.id, p))
+  for (const run of chainRuns.value.filter((r) => sideOfRun(r) === which)) {
+    for (const id of runMembers(run)) {
+      const member = projectStore.projectById(id)
+      const needsReview =
+        run.project_statuses?.[id] === 'completed' && !sequenceRunStore.isReviewed(run.id, id)
+      cards.set(id, member ? withChainReview(member, needsReview) : null)
+    }
+  }
+  return cards
+}
+const sideCounts = computed(() => ({
+  staging: cardsOnSide('staging', { withDone: false }).size,
+  implementation: cardsOnSide('implementation', { withDone: false }).size,
+}))
 const side = ref('implementation')
 let sideChosen = false
 watch(
@@ -424,12 +433,13 @@ watch(
 function selectSide(value) {
   sideChosen = true
   side.value = value
-  filter.value = 'all'
 }
 const sideProjects = computed(() => projects.value.filter((project) => sideOf(project) === side.value))
 
 const chainMemberProjects = computed(() =>
-  projectStore.activeProjectsMeta.filter((project) => chainMemberIds.value.has(project.id)),
+  [...projectStore.activeProjectsMeta, ...projectStore.unreviewedProjectsMeta].filter((project) =>
+    chainMemberIds.value.has(project.id),
+  ),
 )
 const productsById = computed(() => {
   const map = { ...(productStore.productsById || {}) }
@@ -440,6 +450,7 @@ const productGroups = computed(() =>
   allProducts.value
     ? groupBoardByProduct({
         projects: projects.value,
+        unreviewed: sideUnreviewed.value,
         chainMembers: chainMemberProjects.value,
         runs: chainRuns.value,
         membersOf: runMembers,
@@ -451,69 +462,39 @@ const productGroups = computed(() =>
     : [],
 )
 const productGroupsTotal = computed(() => productGroups.value.length)
-function filterGroup(groupProjects) {
-  if (filter.value === 'all') return groupProjects
-  const wanted = FILTER_TO_LABEL[filter.value]
-  return groupProjects.filter((project) => sectionLabelOf(project) === wanted)
-}
 const sideChainRunIds = computed(() =>
   chainRuns.value.filter((run) => sideOfRun(run) === side.value).map((run) => run.id),
 )
-const countNote = computed(() =>
-  side.value === 'staging'
-    ? `${sideCounts.value.staging} waiting for a go · staged projects move to Implementation when you press Play`
-    : `${sideCounts.value.implementation} in flight · reviewed projects leave the board`,
-)
-
-const filter = ref('all')
-const filterOptions = computed(() => {
-  const counts = {
-    all: sideProjects.value.length,
-    activated: 0,
-    planning: 0,
-    'needs-input': 0,
-    implementing: 0,
-    staged: 0,
-    review: 0,
-  }
-  for (const project of sideProjects.value) {
-    const label = sectionLabelOf(project)
-    if (label === JOBS_SECTION_LABELS.NEEDS_INPUT) counts['needs-input']++
-    else if (label === JOBS_SECTION_LABELS.IMPLEMENTING) counts.implementing++
-    else if (label === JOBS_SECTION_LABELS.STAGED) counts.staged++
-    else if (label === JOBS_SECTION_LABELS.REVIEW) counts.review++
-    else if (label === JOBS_SECTION_LABELS.PLANNING) counts.planning++
-    else if (label === JOBS_SECTION_LABELS.ACTIVATED) counts.activated++
-  }
+const countLine = computed(() => {
   if (side.value === 'staging') {
-    return [
-      { value: 'all', label: 'All', count: counts.all },
-      { value: 'activated', label: 'Activated', count: counts.activated },
-      { value: 'planning', label: 'Planning', count: counts.planning },
-      { value: 'staged', label: 'Staged', count: counts.staged },
-    ]
+    return `${sideCounts.value.staging} waiting for a go · staged projects move to Implementation when you press Play`
   }
-  return [
-    { value: 'all', label: 'All', count: counts.all },
-    { value: 'needs-input', label: 'Needs input', count: counts['needs-input'] },
-    { value: 'implementing', label: 'Implementing', count: counts.implementing },
-    { value: 'review', label: 'Review', count: counts.review },
-  ]
+  const parts = [`${sideCounts.value.implementation} in flight`]
+  if (soloUnreviewed.value.length) parts.push(`${soloUnreviewed.value.length} done, not reviewed`)
+  return parts.join(' · ')
 })
 
-const FILTER_TO_LABEL = {
-  activated: JOBS_SECTION_LABELS.ACTIVATED,
-  planning: JOBS_SECTION_LABELS.PLANNING,
-  'needs-input': JOBS_SECTION_LABELS.NEEDS_INPUT,
-  implementing: JOBS_SECTION_LABELS.IMPLEMENTING,
-  staged: JOBS_SECTION_LABELS.STAGED,
-  review: JOBS_SECTION_LABELS.REVIEW,
+const STATUS_LINES = {
+  staging: [
+    { value: 'activated', label: 'Activated', section: JOBS_SECTION_LABELS.ACTIVATED },
+    { value: 'planning', label: 'Planning', section: JOBS_SECTION_LABELS.PLANNING },
+    { value: 'staged', label: 'Staged', section: JOBS_SECTION_LABELS.STAGED },
+  ],
+  implementation: [
+    { value: 'needs-decision', label: 'Needs decision', section: JOBS_SECTION_LABELS.NEEDS_DECISION },
+    { value: 'needs-attention', label: 'Needs attention', section: JOBS_SECTION_LABELS.NEEDS_ATTENTION },
+    { value: 'implementing', label: 'Implementing', section: JOBS_SECTION_LABELS.IMPLEMENTING },
+    { value: 'review', label: 'Review', section: JOBS_SECTION_LABELS.REVIEW },
+  ],
 }
-
-const filteredProjects = computed(() => {
-  if (filter.value === 'all') return sideProjects.value
-  const wanted = FILTER_TO_LABEL[filter.value]
-  return sideProjects.value.filter((project) => sectionLabelOf(project) === wanted)
+const visibleCards = computed(() => [...cardsOnSide(side.value).values()].filter(Boolean))
+const statusCounts = computed(() => {
+  const sections = visibleCards.value.map(sectionLabelOf)
+  return STATUS_LINES[side.value].map(({ value, label, section }) => ({
+    value,
+    label,
+    count: sections.filter((s) => s === section).length,
+  }))
 })
 
 const editingProject = ref(null)
@@ -541,6 +522,32 @@ const clearMissionOpen = ref(false)
 function onClearMissionConfirmed() {
   editDialogRef.value?.clearMissionData?.()
   clearMissionOpen.value = false
+}
+
+function cardShared(project) {
+  return {
+    project,
+    agents: agentsByProject.value[project.id] || [],
+    now: now.value,
+    headlessAllowed: headlessAllowed.value,
+    density: density.value,
+    gitEnabled: gitEnabled.value,
+    integrationsResolved: integrationsResolved.value,
+    'data-testid': 'jobs-board-card-wrap',
+    'data-arrival': project.id === arrivalProjectId.value ? 'true' : undefined,
+  }
+}
+const cardListeners = {
+  'open-detail': openDetail,
+  'open-hub': openHub,
+  changed: () => fetchBoard(),
+  'edit-description': openEditDialog,
+  review: (project) => board.openReview(project),
+  steps: handleStepsClick,
+  'agent-mission-edit': openMissionEdit,
+  'agent-messages': (agent, project) => handleMessages(agent, project.id),
+  'agent-role': handleAgentRole,
+  'agent-job': handleAgentJob,
 }
 
 const detailModalOpen = ref(false)
@@ -575,10 +582,13 @@ async function loadAgentsFor(project) {
   }
 }
 
+function boardIds() {
+  return [...projects.value, ...soloUnreviewed.value].map((project) => project.id)
+}
 async function loadBoard() {
   const scope = { allProducts: allProducts.value }
   await Promise.all([projectStore.fetchActiveProject(scope), sequenceRunStore.hydrate(undefined, scope)])
-  const ids = new Set([...projects.value.map((project) => project.id), ...chainMemberIds.value])
+  const ids = new Set([...boardIds(), ...chainMemberIds.value])
   await Promise.all([...ids].map((id) => loadAgentsFor({ id })))
 }
 const fetchBoard = coalesceAsync(loadBoard)
@@ -589,7 +599,7 @@ const reloadLive = coalesceAsync(async () => {
   liveNamed.clear()
   const scope = { allProducts: allProducts.value }
   await Promise.all([projectStore.fetchActiveProject(scope), sequenceRunStore.hydrate(undefined, scope)])
-  const onBoard = new Set([...projects.value.map((project) => project.id), ...chainMemberIds.value])
+  const onBoard = new Set([...boardIds(), ...chainMemberIds.value])
   const stale = [...onBoard].filter((id) => named.has(id) || !(id in agentsByProject.value))
   await Promise.all(stale.map((id) => loadAgentsFor({ id })))
 })

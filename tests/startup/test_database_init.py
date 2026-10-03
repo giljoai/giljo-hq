@@ -204,5 +204,6 @@ async def test_init_database_logs_connection_info():
 
         await init_database(state)
 
-        info_calls = [call.args[0] for call in mock_logger.info.call_args_list]
+        info_calls = [call.args[0] % call.args[1:] for call in mock_logger.info.call_args_list]
         assert any("localhost:5432/testdb" in msg for msg in info_calls)
+        assert not any("password" in msg for msg in info_calls)

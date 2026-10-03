@@ -111,20 +111,15 @@ async def test_tenant_isolation_error_propagates_out_of_the_tool(
         await _names(db_session, tenant_key, product)
 
 
-async def test_ordinary_runtime_error_still_falls_back_to_all_templates(
+async def test_ordinary_runtime_error_no_longer_falls_back_to_all_templates(
     db_session, tenant_key, product, assigned_roster, monkeypatch
 ):
-    assert await _names(db_session, tenant_key, product) == {assigned_roster[0].name}, (
-        "control failed: the assignment filter did not narrow the roster, so the "
-        "fallback assertion below would prove nothing"
-    )
+    assert await _names(db_session, tenant_key, product) == {assigned_roster[0].name}
 
     _raise_inside_guarded_block(monkeypatch, RuntimeError("transient connection reset"))
 
-    assert await _names(db_session, tenant_key, product) == {t.name for t in assigned_roster}, (
-        "an ordinary RuntimeError no longer falls back to showing all templates -- "
-        "narrowing the catch changed behaviour for the transient case it was written for"
-    )
+    with pytest.raises(RuntimeError):
+        await _names(db_session, tenant_key, product)
 
 
 

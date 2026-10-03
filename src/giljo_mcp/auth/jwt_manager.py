@@ -116,10 +116,7 @@ class JWTManager:
     @classmethod
     def verify_token_allow_expired(cls, token: str, grace_hours: int | None = None) -> dict | None:
         grace = grace_hours if grace_hours is not None else cls.REFRESH_GRACE_PERIOD_HOURS
-        try:
-            secret_key = cls._get_secret_key()
-        except RuntimeError:
-            return None
+        secret_key = cls._get_secret_key()
 
         try:
             payload = jwt.decode(token, secret_key, algorithms=[cls.ALGORITHM])

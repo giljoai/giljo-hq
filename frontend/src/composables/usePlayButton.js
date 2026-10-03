@@ -23,7 +23,6 @@ function _implementationFetchError(error, showToast) {
       `Couldn't copy implementation prompt (${statusLabel}). ` +
       'Make sure staging is complete and at least one agent has launched. Refresh the dashboard and try again.',
     type: 'error',
-    timeout: 7000,
   })
 }
 
@@ -34,7 +33,6 @@ export async function launchThenCopyImplementationPrompt({ projectId, executionM
     showToast({
       message: `Could not start implementation: ${parseErrorResponse(gateError).message || 'the server refused the launch.'}`,
       type: 'error',
-      timeout: 7000,
     })
     return false
   }
@@ -52,18 +50,18 @@ async function _copyImplementationPrompt({ projectId, executionMode, clipboardCo
   }
   const clipboardOk = await clipboardCopy(response?.data?.prompt)
   if (!clipboardOk) {
-    showToast({ message: CLIPBOARD_BLOCKED, type: 'error', timeout: 6000 })
+    showToast({ message: CLIPBOARD_BLOCKED, type: 'error' })
     return false
   }
   if (replay) {
-    showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success', timeout: 5000 })
+    showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success' })
     return true
   }
   const agentCount = response?.data?.agent_count ?? 0
   const message = isSubagentExecutionMode(executionMode)
     ? `Implementation prompt copied. ${agentCount + 1} jobs ready to launch (1 orchestrator, ${agentCount} specialists).`
     : `Orchestrator prompt copied. ${agentCount} specialists ready to launch.`
-  showToast({ message, type: 'success', timeout: 5000 })
+  showToast({ message, type: 'success' })
   return true
 }
 
@@ -168,11 +166,11 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
 
       await _copyPrompt(promptText)
       const role = _titleCaseRole(agent.agent_display_name)
-      showToast({ message: `${role} prompt copied. Paste in a fresh terminal to bring this specialist online.`, type: 'success', timeout: 3000 })
+      showToast({ message: `${role} prompt copied. Paste in a fresh terminal to bring this specialist online.`, type: 'success' })
     } catch (error) {
       console.error('[usePlayButton] Failed to prepare launch prompt:', error)
       const msg = parseErrorResponse(error).message || 'Failed to prepare launch prompt'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
+      showToast({ message: msg, type: 'error' })
     }
   }
 
@@ -184,7 +182,7 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
       await api.projects.launchImplementation(projectId)
     } catch (gateError) {
       const msg = parseErrorResponse(gateError).message || 'Could not start this project.'
-      showToast({ message: msg, type: 'error', timeout: 7000 })
+      showToast({ message: msg, type: 'error' })
       return
     }
 
@@ -198,10 +196,10 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
 
     const clipboardOk = await clipboardCopy(prompt)
     if (!clipboardOk) {
-      showToast({ message: CLIPBOARD_BLOCKED, type: 'error', timeout: 6000 })
+      showToast({ message: CLIPBOARD_BLOCKED, type: 'error' })
       return
     }
-    showToast({ message: successMessage, type: 'success', timeout: 5000 })
+    showToast({ message: successMessage, type: 'success' })
   }
 
   function _projectLaunched() {
@@ -232,10 +230,10 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
       const promptText = response.data?.prompt || ''
       if (!promptText) throw new Error('No prompt text returned')
       await _copyPrompt(promptText)
-      showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success', timeout: 3000 })
+      showToast({ message: 'Latest launch prompt copied. Paste it to reconnect.', type: 'success' })
     } catch (error) {
       console.error('[usePlayButton] Failed to re-issue launch prompt:', error)
-      showToast({ message: parseErrorResponse(error).message || 'Failed to re-issue the launch prompt', type: 'error', timeout: 5000 })
+      showToast({ message: parseErrorResponse(error).message || 'Failed to re-issue the launch prompt', type: 'error' })
     }
   }
 

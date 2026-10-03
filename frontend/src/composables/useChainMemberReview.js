@@ -25,7 +25,7 @@ export function useChainMemberReview({ chainCtx }) {
     sequenceRunStore.markReviewed(runId, reviewedPid)
     sequenceRunStore.markReviewedRemote(runId, reviewedPid).catch((err) => {
       const msg = parseErrorResponse(err).message || 'Could not save the review; it may reappear after refresh.'
-      showToast({ message: msg, type: 'error', timeout: 5000 })
+      showToast({ message: msg, type: 'error' })
     })
   }
 

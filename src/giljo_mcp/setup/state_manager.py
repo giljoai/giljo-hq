@@ -155,8 +155,6 @@ class SetupStateManager:
             import platform
 
             if platform.system() != "Windows":
-                from pathlib import Path
-
                 Path(self.state_file).chmod(0o600)
 
     def requires_migration(self) -> bool:

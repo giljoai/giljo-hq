@@ -62,9 +62,7 @@ vi.mock('@/services/api', () => ({ default: apiMock, api: apiMock }))
 vi.mock('@/services/setupService', () => ({
   default: {
     checkEnhancedStatus: vi.fn(() => Promise.resolve({ mode: modeState.value })),
-    getSerenaStatus: vi.fn(() => Promise.resolve({ enabled: false })),
     getGitSettings: vi.fn(() => Promise.resolve({ enabled: false })),
-    toggleSerena: vi.fn(() => Promise.resolve({ success: true, enabled: true })),
     toggleGit: vi.fn(() => Promise.resolve({ success: true, enabled: true })),
   },
 }))
@@ -75,9 +73,7 @@ const childStubs = {
   AgentExport: { template: '<div data-test="agent-export" />' },
   ContextPriorityConfig: { template: '<div data-test="context-priority" />' },
   McpIntegrationCard: { template: '<div data-test="mcp-card" />' },
-  SerenaIntegrationCard: { template: '<div data-test="serena-card" />' },
   GitIntegrationCard: { template: '<div data-test="git-card" />' },
-  CertTrustModal: { template: '<div data-test="cert-modal" />' },
 }
 
 describe('ToolsView — FE-9553 relocation and the four notification cards', () => {

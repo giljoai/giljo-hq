@@ -13,7 +13,7 @@ from pathlib import Path
 
 import structlog
 
-from .error_codes import ErrorCode, get_error_description
+from .error_codes import ErrorCode
 
 
 class _McpHeartbeatAccessFilter(logging.Filter):
@@ -73,7 +73,6 @@ __all__ = [
     "ErrorCode",
     "SafeRotatingFileHandler",
     "configure_logging",
-    "get_error_description",
 ]
 
 
@@ -113,8 +112,11 @@ def configure_logging(
     if environment is None:
         environment = os.getenv("ENVIRONMENT", "development")
 
-    level_str = os.getenv("LOG_LEVEL", log_level).upper()
-    level = getattr(logging, level_str, logging.INFO)
+    level_str = os.getenv("LOG_LEVEL", log_level).strip().upper()
+    levels = logging.getLevelNamesMapping()
+    if level_str not in levels:
+        raise ValueError(f"LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL; got {level_str!r}")
+    level = levels[level_str]
 
     logging.basicConfig(
         format="%(message)s",

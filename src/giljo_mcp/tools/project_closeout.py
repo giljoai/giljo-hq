@@ -45,6 +45,7 @@ from giljo_mcp.tools._memory_helpers import (
     normalize_no_code_changes,
     provided_session,
     refuse_if_superseded,
+    resolve_git_closeout_rule,
 )
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -121,65 +122,20 @@ async def _handle_force_close(
     return status_events
 
 
-async def _resolve_git_commits(
-    *,
-    session: AsyncSession,
+def _resolve_git_commits(
     project_id: str,
-    tenant_key: str,
     git_commits: list[dict[str, Any]] | None,
-    no_code_changes: str | None = None,
-) -> tuple[list[dict[str, Any]], str | None, str | None]:
-    git_integration_enabled = False
-    try:
-        from giljo_mcp.services.settings_service import SettingsService
-
-        settings_svc = SettingsService(session, tenant_key)
-        git_settings = await settings_svc.get_setting_value("integrations", "git_integration", {})
-        git_integration_enabled = git_settings.get("enabled", False)
-    except Exception as _exc:
-        logger.debug("Settings read skipped: %s", _exc)
-
-    git_warning: str | None = None
-    if git_integration_enabled and not git_commits and not no_code_changes:
-        git_warning = (
-            "Git integration is enabled in user settings, but no commits were provided "
-            "for this closeout. Project closed without commit history. If the project "
-            "directory is a git repo, the agent should have committed and passed git_commits; "
-            "if the project changed no code, pass no_code_changes='<why>' instead (never an "
-            "empty commit); if not a git repo, ask the user whether to git init future projects."
-        )
-        logger.warning(
-            "git_commits_missing_with_integration_enabled project_id=%s tenant_key=%s",
-            sanitize(project_id),
-            tenant_key,
-        )
-
-    agent_supplied_commits = git_commits is not None
-
+    no_code_changes: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
     if git_commits is not None:
         git_commits = validate_git_commits(git_commits)
-        logger.info(
-            "Using %d agent-supplied git commits for project %s",
-            len(git_commits),
-            sanitize(project_id),
-        )
-    else:
-        git_commits = []
-        logger.info(
-            "No agent-supplied git commits for project %s (server is passive)",
-            sanitize(project_id),
-        )
-
-    git_unavailable_reason: str | None = None
-    if not git_commits and not agent_supplied_commits and not no_code_changes:
-        git_unavailable_reason = "git not available — no agent-supplied commits. Project closed without commit history."
-        logger.info(
-            "git_unavailable_in_closeout project_id=%s tenant_key=%s",
-            sanitize(project_id),
-            tenant_key,
-        )
-
-    return git_commits, git_warning, git_unavailable_reason
+        logger.info("Using %d agent-supplied git commits for project %s", len(git_commits), sanitize(project_id))
+        return git_commits, None
+    logger.info("No agent-supplied git commits for project %s (server is passive)", sanitize(project_id))
+    if no_code_changes:
+        return [], None
+    logger.info("git_unavailable_in_closeout project_id=%s", sanitize(project_id))
+    return [], "git not available -- no agent-supplied commits. Project closed without commit history."
 
 
 def _validate_closeout_inputs(
@@ -411,14 +367,17 @@ async def close_project_and_update_memory(
             if repeat is not None:
                 return repeat
 
+            rejection, git_warning = await resolve_git_closeout_rule(
+                active_session,
+                tenant_key,
+                project_id=project_id,
+                git_commits=git_commits,
+                no_code_changes=no_code_changes,
+            )
+            if rejection is not None:
+                return rejection
             try:
-                git_commits, git_warning, git_unavailable_reason = await _resolve_git_commits(
-                    session=active_session,
-                    project_id=project_id,
-                    tenant_key=tenant_key,
-                    git_commits=git_commits,
-                    no_code_changes=no_code_changes,
-                )
+                git_commits, git_unavailable_reason = _resolve_git_commits(project_id, git_commits, no_code_changes)
             except GitCommitTitleRequiredError as exc:
                 return build_git_commit_title_required_rejection(exc, project_id)
 

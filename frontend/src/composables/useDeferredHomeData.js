@@ -1,11 +1,14 @@
 import { watch } from 'vue'
 import api from '@/services/api'
+import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
 import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
 
 export function useDeferredHomeData({ onboardingComplete, showIntegReminder, templates, totalSlots, productId }) {
-  const { gitEnabled, serenaEnabled, refresh: refreshIntegrationStatus } = useIntegrationStatus({
+  const { gitEnabled, refresh: refreshIntegrationStatus } = useIntegrationStatus({
     immediate: false,
   })
+  const { showToast } = useToast()
 
   let teamTemplatesLoaded = false
   async function loadTeamTemplates() {
@@ -25,13 +28,14 @@ export function useDeferredHomeData({ onboardingComplete, showIntegReminder, tem
     if (counted.status === 'fulfilled' && counted.value?.data?.max_slots) {
       totalSlots.value = counted.value.data.max_slots
     }
-    if (listed.status !== 'fulfilled') return
+    const failed = [listed, assigned].find((r) => r.status === 'rejected')
+    if (failed) {
+      showToast({ message: `Could not load your team: ${parseErrorResponse(failed.reason).message}`, type: 'error' })
+      return
+    }
 
     const enabled = new Map(
-      (assigned.status === 'fulfilled' ? assigned.value?.data?.assignments || [] : []).map((a) => [
-        a.template_id,
-        a.is_active,
-      ]),
+      (assigned.value?.data?.assignments || []).map((a) => [a.template_id, a.is_active]),
     )
     templates.value = (listed.value?.data || []).map((t) => ({
       ...t,
@@ -50,5 +54,5 @@ export function useDeferredHomeData({ onboardingComplete, showIntegReminder, tem
   watch(() => productId?.value, (id) => { if (id && onboardingComplete.value) loadTeamTemplates() })
   watch(showIntegReminder, (show) => { if (show) loadIntegrationStatusOnce() }, { immediate: true })
 
-  return { gitEnabled, serenaEnabled }
+  return { gitEnabled }
 }

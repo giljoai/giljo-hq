@@ -77,11 +77,14 @@ const error = ref(false)
 onMounted(() => settings.loadNotificationPrefs())
 
 async function save(key, value) {
+  const previous = settings[key]
+  settings[key] = value
   saving.value = true
   error.value = false
   try {
     await settings.updateNotificationPrefs({ [key]: value })
   } catch {
+    settings[key] = previous
     error.value = true
   } finally {
     saving.value = false

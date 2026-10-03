@@ -53,6 +53,7 @@ from giljo_mcp.services.mission_implementation_gate import (
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
+from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_staging_complete
 from giljo_mcp.services.protocol_survival import finalize_mission_wire_fields
 from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
@@ -178,36 +179,33 @@ class MissionService:
                         },
                     )
             if execution and status_changed and old_status is not None:
-                try:
-                    if self._websocket_manager:
-                        await self._websocket_manager.broadcast_to_tenant(
-                            tenant_key=tenant_key,
-                            event_type="agent:status_changed",
-                            data={
-                                "job_id": job_id,
-                                "project_id": str(job.project_id) if job.project_id else None,
-                                "chain_conductor": bool(
-                                    (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
-                                ),
-                                "agent_id": execution.agent_id,
-                                "agent_display_name": execution.agent_display_name,
-                                "agent_name": execution.agent_name,
-                                "old_status": old_status,
-                                "status": "working",
-                                "started_at": execution.started_at.isoformat() if execution.started_at else None,
-                                "duration_seconds": execution.duration_seconds,
-                                "working_started_at": execution.working_started_at.isoformat()
-                                if execution.working_started_at
-                                else None,
-                            },
-                        )
-
-                    self._logger.info(
-                        "[WEBSOCKET] Emitted status change events for get_agent_mission",
-                        extra={"job_id": sanitize(job_id), "agent_id": sanitize(execution.agent_id)},
+                if self._websocket_manager:
+                    await self._websocket_manager.broadcast_to_tenant(
+                        tenant_key=tenant_key,
+                        event_type="agent:status_changed",
+                        data={
+                            "job_id": job_id,
+                            "project_id": str(job.project_id) if job.project_id else None,
+                            "chain_conductor": bool(
+                                (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
+                            ),
+                            "agent_id": execution.agent_id,
+                            "agent_display_name": execution.agent_display_name,
+                            "agent_name": execution.agent_name,
+                            "old_status": old_status,
+                            "status": "working",
+                            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+                            "duration_seconds": execution.duration_seconds,
+                            "working_started_at": execution.working_started_at.isoformat()
+                            if execution.working_started_at
+                            else None,
+                        },
                     )
-                except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                    self._logger.warning(f"[WEBSOCKET] Failed to emit status events: {ws_error}")
+
+                self._logger.info(
+                    "[WEBSOCKET] Emitted status change events for get_agent_mission",
+                    extra={"job_id": sanitize(job_id), "agent_id": sanitize(execution.agent_id)},
+                )
 
             if not execution or not job:
                 raise ResourceNotFoundError(
@@ -242,11 +240,11 @@ class MissionService:
                 agent_profile=compose_agent_profile(bound_template),
             )
             proto = mission_response.full_protocol
-            mission_response.full_protocol = await inject_conductor_chain_drive(
+            proto = await inject_conductor_chain_drive(
                 self, proto, job, execution, project, tenant_key, preset=preset, detected_harness=detected_harness
             )
             mission_response.full_protocol = await compose_loop_directive(
-                mission_response.full_protocol, self._get_session, tenant_key, str(execution.agent_id), self._logger
+                proto, self._get_session, tenant_key, str(execution.agent_id), self._logger, preset
             )
 
             finalize_mission_wire_fields(mission_response, protocol_etag, section=section)
@@ -526,41 +524,35 @@ class MissionService:
                 await session.commit()
 
                 if self._websocket_manager:
-                    try:
-                        await self._websocket_manager.broadcast_to_tenant(
-                            tenant_key=tenant_key,
-                            event_type="job:mission_updated",
-                            data={
-                                "job_id": job_id,
-                                "job_type": job.job_type,
-                                "mission_length": len(mission),
-                                "project_id": str(job.project_id) if job.project_id else None,
-                            },
-                        )
-                        logger.info(
-                            f"[WEBSOCKET] Broadcasted job:mission_updated for {sanitize(job_id)}",
-                            extra={"job_id": sanitize(job_id), "tenant_key": sanitize(tenant_key)},
-                        )
-                    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
-                        logger.warning(f"[WEBSOCKET] Failed to broadcast job:mission_updated: {ws_error}")
+                    await self._websocket_manager.broadcast_to_tenant(
+                        tenant_key=tenant_key,
+                        event_type="job:mission_updated",
+                        data={
+                            "job_id": job_id,
+                            "job_type": job.job_type,
+                            "mission_length": len(mission),
+                            "project_id": str(job.project_id) if job.project_id else None,
+                        },
+                    )
+                    logger.info(
+                        f"[WEBSOCKET] Broadcasted job:mission_updated for {sanitize(job_id)}",
+                        extra={"job_id": sanitize(job_id), "tenant_key": sanitize(tenant_key)},
+                    )
 
                 if job.job_type == "orchestrator" and job.project_id:
                     agent_count = await self._repo.count_non_orchestrator_agents(session, tenant_key, job.project_id)
 
                     if agent_count > 0:
                         project = await self._repo.get_project_by_id(session, tenant_key, job.project_id)
-                        if project:
-                            from giljo_mcp.services.project_helpers import mark_staging_complete
-
-                            flipped = await mark_staging_complete(
-                                session,
-                                project,
-                                source="mission_service.update_agent_mission",
-                                websocket_manager=self._websocket_manager,
-                                agent_count=agent_count,
-                            )
-                            if flipped:
-                                await session.commit()
+                        if project and await mark_staging_complete(
+                            session,
+                            project,
+                            source="mission_service.update_agent_mission",
+                            websocket_manager=self._websocket_manager,
+                            agent_count=agent_count,
+                        ):
+                            await session.commit()
+                            await broadcast_deferred_events(session)
 
                 await self._mirror_chain_mission_for_conductor(session, job, tenant_key, mission)
                 await session.commit()

@@ -98,14 +98,29 @@ function mountDialog(propsData = {}) {
 
 
 describe('TemplateEditDialog — render', () => {
-  it('shows "Create Template" title when template.id is null', () => {
+  it('shows "Create new Template" title when template.id is null', () => {
     const wrapper = mountDialog()
-    expect(wrapper.text()).toContain('Create Template')
+    expect(wrapper.find('.dlg-title').text()).toBe('Create new Template')
+  })
+
+  it('create mode header has no icon or badge besides the close button', () => {
+    const wrapper = mountDialog()
+    const header = wrapper.find('.dlg-header')
+    expect(header.findAll('.v-icon, .mdi, [class*="badge"], [class*="pill"]').length).toBe(
+      header.findAll('.dlg-close .v-icon, .dlg-close .mdi').length,
+    )
+    expect(header.findAll('.dlg-title *').length).toBe(0)
+  })
+
+  it('create mode primary button reads Save', () => {
+    const wrapper = mountDialog()
+    const primary = wrapper.find('.dlg-footer [color="primary"]')
+    expect(primary.text()).toBe('Save')
   })
 
   it('shows "Edit Template" title when template.id is set', () => {
     const wrapper = mountDialog({ template: makeTemplate({ id: 42 }) })
-    expect(wrapper.text()).toContain('Edit Template')
+    expect(wrapper.find('.dlg-title').text()).toBe('Edit Template')
   })
 
   it('renders the Save button', () => {

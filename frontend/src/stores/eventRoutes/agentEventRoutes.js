@@ -3,6 +3,17 @@ import { useNotificationStore } from '../notifications'
 import { useApprovalsStore } from '../useApprovalsStore'
 
 
+function addAgentHealthNotice(title, text, payload, extra) {
+  const { agent_display_name, job_id, project_name, project_id, execution_id } = payload
+  const prefix = project_name ? `[${project_name}] ` : ''
+  useNotificationStore().addNotification({
+    type: 'agent_health',
+    title,
+    message: `${prefix}${agent_display_name} - ${text}`,
+    metadata: { job_id, agent_display_name, ...extra, project_id, project_name, execution_id },
+  })
+}
+
 export const AGENT_EVENT_ROUTES = {
   'agent:update': {
     handler: async (payload, { storeRegistry } = {}) => {
@@ -20,8 +31,7 @@ export const AGENT_EVENT_ROUTES = {
           const approvalsStore = useApprovalsStore()
           await approvalsStore.handleStatusEvent(payload)
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.debug('[agentEventRoutes] approvals handleStatusEvent failed:', err?.message)
+          console.warn('[agentEventRoutes] approvals refresh failed:', err)
         }
       }
     },
@@ -40,45 +50,22 @@ export const AGENT_EVENT_ROUTES = {
   'agent:removed': {
     handler: async (payload, { storeRegistry } = {}) => {
       const agentJobsStore = storeRegistry?.agentJobs?.() ?? useAgentJobsStore()
-      agentJobsStore.removeJob?.(payload?.agent_id || payload?.job_id)
+      agentJobsStore.removeJob(payload?.agent_id)
     },
   },
   'agent:mission_updated': { store: 'agentJobs', action: 'handleUpdated' },
   'job:mission_updated': { store: 'agentJobs', action: 'handleMissionLengthUpdated' },
   'agent:health_alert': {
     handler: async (payload) => {
-      const {
-        health_state,
-        agent_display_name,
-        issue_description,
-        job_id,
-        project_name,
-        project_id,
-        execution_id,
-      } = payload
-
+      const { health_state, issue_description } = payload
       if (health_state === 'critical' || health_state === 'timeout') {
-        const prefix = project_name ? `[${project_name}] ` : ''
-        const notificationStore = useNotificationStore()
-        notificationStore.addNotification({
-          type: 'agent_health',
-          title: 'Agent Health Alert',
-          message: `${prefix}${agent_display_name} - ${issue_description}`,
-          metadata: {
-            job_id,
-            agent_display_name,
-            health_state,
-            project_id,
-            project_name,
-            execution_id,
-          },
-        })
+        addAgentHealthNotice('Agent Health Alert', issue_description, payload, { health_state })
       }
     },
   },
   'agent:silent': {
     handler: async (payload, { storeRegistry } = {}) => {
-      const { agent_display_name, reason, job_id, project_name, project_id, execution_id } = payload
+      const { agent_display_name, reason, job_id, project_id, execution_id } = payload
 
       const agentJobsStore = storeRegistry?.agentJobs?.() ?? useAgentJobsStore()
       agentJobsStore.handleStatusChanged({
@@ -89,43 +76,14 @@ export const AGENT_EVENT_ROUTES = {
         execution_id,
       })
 
-      const prefix = project_name ? `[${project_name}] ` : ''
-      const notificationStore = useNotificationStore()
-      notificationStore.addNotification({
-        type: 'agent_health',
-        title: 'Agent Silent',
-        message: `${prefix}${agent_display_name} - ${reason || 'Agent stopped communicating'}`,
-        metadata: {
-          job_id,
-          agent_display_name,
-          reason,
-          project_id,
-          project_name,
-          execution_id,
-        },
-      })
+      addAgentHealthNotice('Agent Silent', reason || 'Agent stopped communicating', payload, { reason })
     },
   },
 
   'agent:auto_failed': {
     handler: async (payload) => {
-      const { agent_display_name, reason, job_id, project_name, project_id, execution_id } = payload
-
-      const prefix = project_name ? `[${project_name}] ` : ''
-      const notificationStore = useNotificationStore()
-      notificationStore.addNotification({
-        type: 'agent_health',
-        title: 'Agent Auto-Failed',
-        message: `${prefix}${agent_display_name} - ${reason || 'Agent auto-failed'}`,
-        metadata: {
-          job_id,
-          agent_display_name,
-          reason,
-          project_id,
-          project_name,
-          execution_id,
-        },
-      })
+      const { reason } = payload
+      addAgentHealthNotice('Agent Auto-Failed', reason || 'Agent auto-failed', payload, { reason })
     },
   },
 

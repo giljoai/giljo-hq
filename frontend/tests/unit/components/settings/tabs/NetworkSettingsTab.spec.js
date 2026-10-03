@@ -1,11 +1,9 @@
 /**
  * Test suite for NetworkSettingsTab.vue component
  *
- * FE-6239: Network settings UX simplification (follow-on to INF-6236).
- * - Read-only Host IP / Port rows (real responding address, not config external_host)
- * - HTTPS section: toggle gated until a cert is provisioned; bring-your-own-cert
- *   upload + reference-by-path; cert-obtain guide + rootCA trust walls moved to the
- *   user guide (single link); CORS section + Save button removed.
+ * Read-only Host IP / Port rows (real responding address, not config external_host),
+ * one line pointing at the user guide for HTTPS via a reverse proxy, and the cookie
+ * domain whitelist. Built-in HTTPS (toggle, certificate upload) is gone.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -25,7 +23,6 @@ describe('NetworkSettingsTab.vue', () => {
       props: {
         serverHostDisplay: '192.0.2.100',
         serverPort: 7272,
-        sslEnabled: false,
         loading: false,
         ...props,
       },
@@ -37,11 +34,8 @@ describe('NetworkSettingsTab.vue', () => {
 
   beforeEach(() => {
     vuetify = createVuetify({ components, directives })
-    // SSL status is loaded on mount via fetch; stub it so tests are deterministic.
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ ssl_enabled: false, has_certificate: false, cert_path: null }),
-    })
+    // The tab makes no request of its own; a spy proves it stays that way.
+    global.fetch = vi.fn()
   })
 
   afterEach(() => {
@@ -107,130 +101,40 @@ describe('NetworkSettingsTab.vue', () => {
     })
   })
 
-  describe('HTTPS section', () => {
-    it('renders the HTTPS status section', async () => {
+  describe('HTTPS pointer (the app serves plain HTTP; TLS comes from a reverse proxy)', () => {
+    it('shows one line pointing at a reverse proxy and the user guide', async () => {
       wrapper = mountTab()
       await wrapper.vm.$nextTick()
-      expect(wrapper.find('[data-test="https-status-section"]').exists()).toBe(true)
-      expect(wrapper.text()).toContain('HTTPS')
+      const line = wrapper.find('[data-test="https-guide-link"]')
+      expect(line.exists()).toBe(true)
+      expect(line.text()).toContain('Want HTTPS? Put a reverse proxy such as Caddy in front')
+      expect(line.text()).toContain('user guide')
     })
 
-    it('gates the toggle (disabled + hint) until a certificate is provisioned', async () => {
+    it('has no certificate, toggle or upload controls and makes no SSL request', async () => {
       wrapper = mountTab()
       await wrapper.vm.$nextTick()
-      // Loaded SSL status has no certificate -> hint visible, toggle disabled.
-      expect(wrapper.find('[data-test="ssl-needs-cert-hint"]').exists()).toBe(true)
-      const toggle = wrapper.find('[data-test="ssl-toggle"]')
-      expect(toggle.exists()).toBe(true)
-      expect(toggle.attributes('disabled')).toBeDefined()
-    })
-  })
-
-  describe('Bring-your-own-cert provisioning', () => {
-    it('renders the cert provisioning section with upload + path options', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('[data-test="cert-provision-section"]').exists()).toBe(true)
-      expect(wrapper.find('[data-test="cert-upload-btn"]').exists()).toBe(true)
-      expect(wrapper.find('[data-test="cert-ref-btn"]').exists()).toBe(true)
-      expect(wrapper.text()).toContain('GiljoAI does not create certificates')
+      for (const hook of [
+        'https-status-section',
+        'ssl-toggle',
+        'ssl-needs-cert-hint',
+        'cert-provision-section',
+        'cert-upload-btn',
+        'cert-ref-btn',
+        'cert-status',
+        'http-context-cue',
+      ]) {
+        expect(wrapper.find(`[data-test="${hook}"]`).exists()).toBe(false)
+      }
+      expect(wrapper.text()).not.toContain('HTTPS Encryption')
+      expect(global.fetch).not.toHaveBeenCalled()
     })
 
-    it('errors when uploading without both files (no silent no-op)', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      await wrapper.find('[data-test="cert-upload-btn"]').trigger('click')
-      await wrapper.vm.$nextTick()
-      expect(wrapper.text()).toContain('Select both a certificate')
-    })
-
-    it('errors when referencing without both paths', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      await wrapper.find('[data-test="cert-ref-btn"]').trigger('click')
-      await wrapper.vm.$nextTick()
-      expect(wrapper.text()).toContain('Enter both the certificate path and the key path')
-    })
-  })
-
-  describe('Removed surfaces (moved to the user guide / dropped)', () => {
-    it('no longer renders the cert-obtain accordion (mkcert/Let\'s Encrypt how-to)', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('[data-test="https-setup-toggle"]').exists()).toBe(false)
-      expect(wrapper.text()).not.toContain('How to set up trusted HTTPS certificates')
-    })
-
-    it('no longer renders the "Connect Another Machine" rootCA wall', async () => {
-      wrapper = mountTab({ sslEnabled: true })
-      await wrapper.vm.$nextTick()
-      expect(wrapper.text()).not.toContain('Connect Another Machine')
-      expect(wrapper.text()).not.toContain('rootCA.pem')
-    })
-
-    it('no longer renders the CORS section', async () => {
+    it('no longer renders the CORS section or the dead Save Changes button', async () => {
       wrapper = mountTab()
       await wrapper.vm.$nextTick()
       expect(wrapper.find('[data-test="cors-origins-section"]').exists()).toBe(false)
-      expect(wrapper.text()).not.toContain('CORS Allowed Origins')
-    })
-
-    it('no longer renders the dead Save Changes button', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
       expect(wrapper.find('[data-test="save-button"]').exists()).toBe(false)
-    })
-
-    it('links to the user guide for obtaining/trusting a certificate', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      const link = wrapper.find('[data-test="https-guide-link"]')
-      expect(link.exists()).toBe(true)
-      expect(link.text()).toContain('guide')
-    })
-
-    it('no longer shows the AI coding agent note (moved to the user guide)', async () => {
-      wrapper = mountTab({ sslEnabled: true })
-      await wrapper.vm.$nextTick()
-      expect(wrapper.text()).not.toContain('AI coding agent note')
-    })
-  })
-
-  describe('Provide-a-certificate section', () => {
-    it('renders Option A / Option B as collapsible panels (not a nested frame)', async () => {
-      wrapper = mountTab()
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('[data-test="cert-provision-panels"]').exists()).toBe(true)
-      expect(wrapper.find('[data-test="cert-upload-panel"]').exists()).toBe(true)
-      expect(wrapper.find('[data-test="cert-ref-panel"]').exists()).toBe(true)
-    })
-  })
-
-  describe('Certificate status in the HTTPS banner', () => {
-    it('shows expiry + covered hostnames when a certificate is present', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            ssl_enabled: true,
-            has_certificate: true,
-            cert_path: '/etc/giljo/certs/server.pem',
-            cert_not_after: '2027-03-01',
-            cert_sans: ['192.0.2.10', 'localhost'],
-            cert_expired: false,
-          }),
-      })
-      wrapper = mountTab({ sslEnabled: true })
-      await wrapper.vm.$nextTick()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      await wrapper.vm.$nextTick()
-
-      const status = wrapper.find('[data-test="cert-status"]')
-      expect(status.exists()).toBe(true)
-      expect(status.text()).toContain('2027-03-01')
-      expect(status.text()).toContain('localhost')
-      // the raw path is no longer shown as a standalone line; it lives in the title tooltip
-      expect(status.attributes('title')).toBe('/etc/giljo/certs/server.pem')
     })
   })
 

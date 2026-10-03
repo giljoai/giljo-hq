@@ -23,6 +23,12 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
   const showPurgeSingleDialog = ref(false)
   const showPurgeAllDialog = ref(false)
 
+  function reportFailure(error, logLine, notice) {
+    console.error(logLine, error)
+    showToast({ message: notice.fallbackMessage, type: 'error' })
+    notifyFailure(notificationStore, { ...notice, error })
+  }
+
   const purgingProjectId = ref(null)
   const purgingAllDeleted = ref(false)
 
@@ -38,12 +44,9 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
         showDeleteDialog.value = false
         projectToDelete.value = null
       } catch (error) {
-        console.error('Failed to delete project:', error)
-        showToast({ message: GENERIC_DELETE_FAILURE, type: 'error' })
-        notifyFailure(notificationStore, {
+        reportFailure(error, 'Failed to delete project:', {
           operation: 'project.delete',
           entityId: projectToDelete.value.id,
-          error,
           fallbackMessage: GENERIC_DELETE_FAILURE,
           title: 'Project not deleted',
         })
@@ -60,12 +63,9 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
         projectToCancel.value = null
         await reloadProjects()
       } catch (error) {
-        console.error('Failed to cancel project:', error)
-        showToast({ message: GENERIC_CANCEL_FAILURE, type: 'error' })
-        notifyFailure(notificationStore, {
+        reportFailure(error, 'Failed to cancel project:', {
           operation: 'project.cancel',
           entityId: projectToCancel.value.id,
-          error,
           fallbackMessage: GENERIC_CANCEL_FAILURE,
           title: 'Project not cancelled',
         })
@@ -78,12 +78,9 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
       await projectStore.restoreProject(project.id)
       showDeletedDialog.value = false
     } catch (error) {
-      console.error('Failed to restore project:', error)
-      showToast({ message: GENERIC_RESTORE_FAILURE, type: 'error' })
-      notifyFailure(notificationStore, {
+      reportFailure(error, 'Failed to restore project:', {
         operation: 'project.restore',
         entityId: project.id,
-        error,
         fallbackMessage: GENERIC_RESTORE_FAILURE,
         title: 'Project not restored',
       })
@@ -106,12 +103,9 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
         showDeletedDialog.value = false
       }
     } catch (error) {
-      console.error('Failed to purge deleted project:', error)
-      showToast({ message: GENERIC_PURGE_ONE_FAILURE, type: 'error' })
-      notifyFailure(notificationStore, {
+      reportFailure(error, 'Failed to purge deleted project:', {
         operation: 'project.purgeOne',
         entityId: project.id,
-        error,
         fallbackMessage: GENERIC_PURGE_ONE_FAILURE,
         title: 'Project not purged',
       })
@@ -132,11 +126,8 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
       await projectStore.purgeAllDeletedProjects()
       showDeletedDialog.value = false
     } catch (error) {
-      console.error('Failed to purge all deleted projects:', error)
-      showToast({ message: GENERIC_PURGE_ALL_FAILURE, type: 'error' })
-      notifyFailure(notificationStore, {
+      reportFailure(error, 'Failed to purge all deleted projects:', {
         operation: 'project.purgeAll',
-        error,
         fallbackMessage: GENERIC_PURGE_ALL_FAILURE,
         title: 'Projects not purged',
       })

@@ -7,16 +7,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from api.endpoints._boundary_types import ID_MAX, THREAD_PROJECT_TAGS_MAX, IdPath, IdQuery
 from api.endpoints._comm_ws import broadcast_thread_message, broadcast_thread_update
 from api.endpoints.dependencies import (
     get_comm_thread_service,
     get_message_routing_service,
 )
+from api.endpoints.mcp_tools._base import MCP_SHORT_TEXT_MAX
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.models import User
 from giljo_mcp.services.comm_thread_service import CommThreadService
@@ -29,7 +31,6 @@ router = APIRouter()
 
 _CONTENT_MAX = 20_000
 _SUBJECT_MAX = 255
-_ID_MAX = 64
 
 
 
@@ -37,17 +38,17 @@ _ID_MAX = 64
 class CreateThreadRequest(BaseModel):
     subject: str | None = Field(None, max_length=_SUBJECT_MAX)
     severity: str | None = Field(None, max_length=20)
-    product_id: str | None = Field(None, max_length=_ID_MAX)
-    project_id: str | None = Field(None, max_length=_ID_MAX)
+    product_id: str | None = Field(None, max_length=ID_MAX)
+    project_id: str | None = Field(None, max_length=ID_MAX)
 
 
 class UpdateThreadRequest(BaseModel):
-    """BE-9289b/FE-9530: operator edit of a thread. All fields optional — send any subset.
+    """Operator edit of a thread. All fields optional — send any subset.
 
     ``status`` is constrained to the settable lifecycle here as well as in the service,
     so a bad value is a 422 at the boundary rather than reaching the owning service.
 
-    FE-9530: ``product_id``/``clear_product`` retag the thread's product.
+    ``product_id``/``clear_product`` retag the thread's product.
     Retagging is the only way an existing thread that predates mandatory
     tagging gets one -- there is no bulk migration.
     ``project_ids`` is the plural project-tag set: omit to leave tags
@@ -56,14 +57,14 @@ class UpdateThreadRequest(BaseModel):
 
     subject: str | None = Field(None, max_length=_SUBJECT_MAX)
     status: Literal["open", "active", "resolved", "closed"] | None = Field(None)
-    product_id: str | None = Field(None, max_length=_ID_MAX)
+    product_id: str | None = Field(None, max_length=ID_MAX)
     clear_product: bool = False
-    project_ids: list[str] | None = Field(None, max_length=50)
+    project_ids: list[Annotated[str, Field(max_length=ID_MAX)]] | None = Field(None, max_length=THREAD_PROJECT_TAGS_MAX)
 
 
 class PostToThreadRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=_CONTENT_MAX)
-    to_participant: str | None = Field(None, max_length=_ID_MAX)
+    to_participant: str | None = Field(None, max_length=ID_MAX)
     set_status: Literal["open", "active", "resolved", "closed"] | None = None
     requires_action: bool = False
     loop_directive: bool = False
@@ -72,25 +73,26 @@ class PostToThreadRequest(BaseModel):
 
 
 class PassBatonRequest(BaseModel):
-    to: str = Field(..., min_length=1, max_length=_ID_MAX)
+    to: str = Field(..., min_length=1, max_length=ID_MAX)
 
 
 
 
 @router.get("")
 async def list_threads(
-    status: str | None = Query(None),
-    owner: str | None = Query(None),
-    product_id: str | None = Query(None),
-    project_id: str | None = Query(None),
+    status: IdQuery = None,
+    owner: IdQuery = None,
+    product_id: IdQuery = None,
+    project_id: IdQuery = None,
     limit: int | None = Query(
         50,
         ge=1,
         le=500,
-        description="Max threads to return (newest first). BE-6131b: mirrors the BE-6071 bound on /messages.",
+        description="Max threads to return (newest first).",
     ),
     before_id: str | None = Query(
         None,
+        max_length=ID_MAX,
         description="Keyset cursor: return threads older than this thread_id (for next page).",
     ),
     current_user: User = Depends(get_current_active_user),
@@ -129,7 +131,7 @@ async def get_attention(
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
-    """What is asking for the operator right now (FE-9586).
+    """What is asking for the operator right now.
 
     Returns ``{mentions, directed_action}``, each a list of ``{thread_id, chat_id}``.
 
@@ -156,7 +158,7 @@ async def get_attention(
 
 @router.get("/search")
 async def search_threads(
-    query: str = Query(..., min_length=1),
+    query: str = Query(..., min_length=1, max_length=MCP_SHORT_TEXT_MAX),
     limit: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
@@ -171,7 +173,7 @@ async def search_threads(
 
 @router.get("/chain-hub")
 async def get_chain_hub(
-    sequence_run_id: str = Query(..., min_length=1, max_length=_ID_MAX),
+    sequence_run_id: str = Query(..., min_length=1, max_length=ID_MAX),
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
@@ -185,8 +187,8 @@ async def get_chain_hub(
 
 @router.get("/deleted")
 async def list_deleted_threads(
-    product_id: str | None = Query(None),
-    project_id: str | None = Query(None),
+    product_id: IdQuery = None,
+    project_id: IdQuery = None,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
@@ -204,39 +206,40 @@ async def list_deleted_threads(
 
 @router.get("/{thread_id}")
 async def get_thread_history(
-    thread_id: str,
+    thread_id: IdPath,
     include_recipient_state: bool = Query(
         default=False,
-        description="FE-9012c (D3): also surface per-message recipient acted-on state "
+        description="Also surface per-message recipient acted-on state "
         "(recipients/acked_by/completed_by/pending_for) from the D4 junctions, for the "
         "Hub's in-thread waiting/read/sent filter. Off by default (byte-identical read).",
     ),
     after_message_id: str | None = Query(
         None,
-        max_length=_ID_MAX,
-        description="BE-9142: incremental cursor — return only messages AFTER this message id. "
+        max_length=ID_MAX,
+        description="Incremental cursor — return only messages AFTER this message id. "
         "Mutually exclusive with 'since'. Opt-in; omit for the full timeline.",
     ),
     since: str | None = Query(
         None,
-        description="BE-9142: ISO-8601 timestamp — return only messages created strictly after it. "
+        max_length=ID_MAX,
+        description="ISO-8601 timestamp — return only messages created strictly after it. "
         "Mutually exclusive with 'after_message_id'. Opt-in; omit for the full timeline.",
     ),
     tail: int | None = Query(
         None,
         ge=1,
         le=500,
-        description="BE-9142: return only the last N messages (1..500), applied after any cursor. "
-        "Opt-in; omit for the full timeline (byte-identical to the pre-BE-9142 read).",
+        description="Return only the last N messages (1..500), applied after any cursor. "
+        "Opt-in; omit for the full timeline.",
     ),
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
     """Message timeline for a thread. Returns {thread, count, messages}.
 
-    BE-9142: with none of ``after_message_id`` / ``since`` / ``tail`` the read is the
+    With none of ``after_message_id`` / ``since`` / ``tail`` the read is the
     full timeline (unchanged). Those three bound the read via the existing
-    ``CommThreadService.get_thread_history`` params (BE-6226) — no new mechanism, and
+    ``CommThreadService.get_thread_history`` params — no new mechanism, and
     the bound stays opt-in so existing REST consumers (the Hub UI) are unaffected.
     """
     return await service.get_thread_history(
@@ -251,7 +254,7 @@ async def get_thread_history(
 
 @router.get("/{thread_id}/participants")
 async def get_participants(
-    thread_id: str,
+    thread_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
@@ -296,7 +299,7 @@ async def create_thread(
 
 @router.post("/{thread_id}/post")
 async def post_to_thread(
-    thread_id: str,
+    thread_id: IdPath,
     body: PostToThreadRequest,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
@@ -304,7 +307,7 @@ async def post_to_thread(
 ) -> dict[str, Any]:
     """Append a message to a thread. Broadcasts thread_message + thread_update (on status change).
 
-    BE-9560: mirrors what the MCP boundary already does for a post, per operator ruling
+    Mirrors what the MCP boundary already does for a post, per operator ruling
     2026-09-02 -- answering a thread should mean answering. A directed reply
     (``to_participant`` set) hands the baton to that addressee, screened the same way
     an MCP auto-pass is; a broadcast reply clears the poster's own held baton (or the
@@ -327,8 +330,6 @@ async def post_to_thread(
         as_user=True,
         tenant_key=current_user.tenant_key,
     )
-    if result.get("success") is False:
-        return result
     if body.requires_action and body.to_participant:
         try:
             outcome = await routing_service.auto_block_for_thread_post(
@@ -394,12 +395,12 @@ async def post_to_thread(
 
 @router.patch("/{thread_id}")
 async def update_thread(
-    thread_id: str,
+    thread_id: IdPath,
     body: UpdateThreadRequest,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
-    """Rename a thread and/or set its status (BE-9289b). Broadcasts thread_update.
+    """Rename a thread and/or set its status. Broadcasts thread_update.
 
     Two things the operator could not do before: a thread could only be named at CREATE
     time, and status moved only as a side effect of an agent posting — which is why the
@@ -437,7 +438,7 @@ async def update_thread(
 
 @router.delete("/{thread_id}")
 async def delete_thread(
-    thread_id: str,
+    thread_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
@@ -463,7 +464,7 @@ async def delete_thread(
 
 @router.post("/{thread_id}/restore")
 async def restore_thread(
-    thread_id: str,
+    thread_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
@@ -491,7 +492,7 @@ async def restore_thread(
 
 @router.post("/{thread_id}/baton")
 async def pass_baton(
-    thread_id: str,
+    thread_id: IdPath,
     body: PassBatonRequest,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
@@ -503,8 +504,6 @@ async def pass_baton(
         from_agent=current_user.id,
         tenant_key=current_user.tenant_key,
     )
-    if result.get("success") is False:
-        return result
     from api.app_state import state
 
     if state.websocket_manager:
@@ -526,11 +525,11 @@ async def pass_baton(
 
 @router.post("/{thread_id}/read")
 async def mark_thread_read(
-    thread_id: str,
+    thread_id: IdPath,
     current_user: User = Depends(get_current_active_user),
     service: CommThreadService = Depends(get_comm_thread_service),
 ) -> dict[str, Any]:
-    """Record that the OPERATOR has read this thread (FE-9586).
+    """Record that the OPERATOR has read this thread.
 
     The dashboard had no way to say this. ``GET /{thread_id}`` is a pure read and
     the store's ``markThreadRead()`` only zeroed an in-memory counter, so

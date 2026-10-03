@@ -13,7 +13,7 @@ class TaskStatusResponse(BaseModel):
     Mirrors :class:`giljo_mcp.domain.task_status.TaskStatusMeta` plus the
     canonical ``value`` (the enum's string value).
 
-    The frontend (``TaskStatusBadge.vue`` / Phase 2 store) consumes this
+    The frontend (``TaskStatusBadge.vue`` and its store) consumes this
     shape verbatim and resolves ``color_token`` against the CSS custom
     properties declared in ``main.scss``.
     """

@@ -10,8 +10,8 @@ import {
 } from '@/utils/sequenceOrder'
 
 describe('sequenceOrder — constants', () => {
-  it('caps a sequence at 5 projects', () => {
-    expect(MAX_SEQUENCE_PROJECTS).toBe(5)
+  it('caps a sequence at 10 projects', () => {
+    expect(MAX_SEQUENCE_PROJECTS).toBe(10)
   })
 
   it('exposes multi_terminal as a valid execution mode (the default)', () => {

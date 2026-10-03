@@ -26,6 +26,7 @@ from giljo_mcp.services.next_action import project_next_action_for
 from giljo_mcp.services.not_picked_up import NOT_PICKED_UP_WHY, not_picked_up_job_ids
 from giljo_mcp.services.project_helpers import compute_completion_percent
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
+from giljo_mcp.services.silence_detector import stale_orchestrator_states
 from giljo_mcp.tenant import TenantManager
 
 
@@ -224,6 +225,12 @@ class WorkflowStatusService:
         thread_breakdown_map = await ops_repo.get_live_unread_counts_by_agent_and_thread(
             session, tenant_key, project_id, agent_ids
         )
+        silent_orchestrator = any(ex.status == "silent" and ex.job_type == "orchestrator" for ex in executions)
+        orchestrator_states = (
+            await stale_orchestrator_states(session, tenant_key, project_ids=[project_id])
+            if silent_orchestrator
+            else {}
+        )
 
         agent_details: list[AgentWorkflowDetail] = []
         for execution in executions:
@@ -250,6 +257,7 @@ class WorkflowStatusService:
                         skipped=counts.get("skipped", 0),
                     ),
                     not_picked_up=execution.status == "waiting" and execution.job_id in not_picked_up,
+                    orchestrator_state=orchestrator_states.get(execution.job_id),
                 )
             )
         return agent_details

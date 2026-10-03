@@ -26,6 +26,20 @@ def get_org_service(db: AsyncSession = Depends(get_db_session)) -> OrgService:
     return OrgService(db)
 
 
+async def require_member_management(current_user: User = Depends(get_current_active_user)) -> None:
+    from api import app_state
+
+    if not app_state.member_management_enabled():
+        logger.info(
+            "Blocked organization member mutation by %s: multi-user administration not available on this edition",
+            sanitize(current_user.username),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Adding additional users isn't available on this plan.",
+        )
+
+
 @router.get("/{org_id}/members", response_model=list[MemberResponse])
 async def list_members(
     org_id: str,
@@ -55,7 +69,12 @@ async def list_members(
     return await org_service.list_members(org_id)
 
 
-@router.post("/{org_id}/members", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{org_id}/members",
+    response_model=MemberResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_member_management)],
+)
 async def invite_member(
     org_id: str,
     invite_data: MemberInvite,
@@ -107,7 +126,11 @@ async def invite_member(
     return membership
 
 
-@router.put("/{org_id}/members/{user_id}", response_model=MemberResponse)
+@router.put(
+    "/{org_id}/members/{user_id}",
+    response_model=MemberResponse,
+    dependencies=[Depends(require_member_management)],
+)
 async def change_member_role(
     org_id: str,
     user_id: str,
@@ -156,7 +179,11 @@ async def change_member_role(
     return membership
 
 
-@router.delete("/{org_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{org_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_member_management)],
+)
 async def remove_member(
     org_id: str,
     user_id: str,
@@ -199,7 +226,7 @@ async def remove_member(
 transfer_router = APIRouter()
 
 
-@transfer_router.post("/{org_id}/transfer")
+@transfer_router.post("/{org_id}/transfer", dependencies=[Depends(require_member_management)])
 async def transfer_ownership(
     org_id: str,
     transfer_data: OwnershipTransfer,

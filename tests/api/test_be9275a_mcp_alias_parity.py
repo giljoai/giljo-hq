@@ -48,22 +48,23 @@ def test_fixture_inputs_are_present_and_well_formed():
     inputs = fixture["inputs"]
     assert inputs["server_url"] == "https://app.giljo.ai"
     assert inputs["api_key"] == "tk_test_api_key_0000000000000000"
-    assert inputs["self_signed_https"] is False
 
 
 def test_backend_generators_byte_equal_shared_fixture():
     fixture = _load_fixture()
     server_url = fixture["inputs"]["server_url"]
     api_key = fixture["inputs"]["api_key"]
-    self_signed_https = fixture["inputs"]["self_signed_https"]
 
     generated = {
         "claude_code": ai_tools.get_claude_code_config(server_url, api_key),
         "codex_cli": ai_tools.get_codex_config(server_url, api_key),
-        "claude_desktop": ai_tools.get_claude_desktop_config(server_url, api_key, self_signed_https),
+        "claude_desktop": ai_tools.get_claude_desktop_config(server_url, api_key),
         "claude_code_oauth": ai_tools.get_claude_code_oauth_config(server_url),
         "codex_oauth": ai_tools.get_codex_oauth_config(server_url),
         "claude_desktop_oauth": ai_tools.get_claude_desktop_oauth_config(),
+        "opencode_oauth": ai_tools.get_opencode_oauth_config(server_url),
+        "opencode": ai_tools.get_opencode_config(server_url, api_key),
+        "generic_mcp": ai_tools.get_generic_mcp_config(server_url, api_key),
     }
 
     expected = fixture["commands"]

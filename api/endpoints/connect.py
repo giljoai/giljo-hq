@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints._boundary_types import IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.schemas.responses.auth import CredentialStatusResult
@@ -35,11 +36,11 @@ async def get_connect_credential_status(
 
 @router.delete("/connections/{harness}", tags=["connect"])
 async def remove_tool_connection(
-    harness: str,
+    harness: IdPath,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Forget this tenant's stored connection for one tool (BE-9591).
+    """Forget this tenant's stored connection for one tool.
 
     Backs "Remove tool". ``connected_harnesses`` -- the only thing the Connect
     card and the setup wizard read -- derives entirely from ``mcp_sessions`` rows,

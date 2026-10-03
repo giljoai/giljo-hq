@@ -207,7 +207,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'completed'])
 
-
 const summary = ref('')
 const confirmed = ref(false)
 const completing = ref(false)

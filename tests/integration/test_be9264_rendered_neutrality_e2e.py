@@ -14,7 +14,6 @@ import pytest_asyncio
 
 from giljo_mcp.config.defaults import DEFAULT_FIELD_PRIORITY
 from giljo_mcp.models.products import Product
-from giljo_mcp.prompt_generation.serena_instructions import for_role
 from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.services.product_tuning_service import ProductTuningService
 from giljo_mcp.services.project_service import ProjectService
@@ -200,16 +199,6 @@ async def test_orchestrator_protocol_neutral_and_role1_present():
         assert "get_context" in render
         assert "ch5_reference" in claude_chapters
         assert claude_chapters["ch5_reference"]
-
-
-
-
-async def test_serena_instructions_neutral_and_conditional():
-    for role in ("orchestrator", "implementer", "tester", "analyzer", "reviewer", "documenter"):
-        text = for_role(role)
-        _assert_neutral(text, f"serena_instructions for_role('{role}')")
-        assert "if it is not registered" in text.lower() or "prefer them" in text.lower()
-        assert "python-only in this" not in text.lower()
 
 
 

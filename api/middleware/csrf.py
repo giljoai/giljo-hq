@@ -7,7 +7,7 @@
 import logging
 import secrets
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -163,33 +163,3 @@ class CSRFProtectionMiddleware:
 
 def get_csrf_token(request: Request) -> str:
     return request.cookies.get("csrf_token", "")
-
-
-class CSRFProtectionOptional:
-
-    def __init__(self, cookie_name: str = "csrf_token", header_name: str = "X-CSRF-Token"):
-        self.cookie_name = cookie_name
-        self.header_name = header_name
-
-    def __call__(self, func):
-
-        async def wrapper(*args, **kwargs):
-            request = kwargs.get("request") or (args[0] if args else None)
-
-            if not request or not isinstance(request, Request):
-                logger.error("CSRFProtectionOptional: Could not extract Request object")
-                return await func(*args, **kwargs)
-
-            request_token = request.headers.get(self.header_name)
-            cookie_token = request.cookies.get(self.cookie_name)
-
-            if not request_token or not cookie_token or request_token != cookie_token:
-                logger.warning(
-                    f"CSRF validation failed in decorator: "
-                    f"path={request.url.path}, IP={request.client.host if request.client else 'unknown'}"
-                )
-                raise HTTPException(status_code=403, detail="CSRF validation failed")
-
-            return await func(*args, **kwargs)
-
-        return wrapper

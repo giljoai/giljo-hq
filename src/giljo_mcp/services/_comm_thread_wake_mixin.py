@@ -29,7 +29,8 @@ TIMEOUT_ADVICE = (
 POST_ADVICE = (
     "Expect a response: park on get_my_turn(your agent_id, wait_seconds=45) to catch it -- "
     "without wait_seconds it returns at once and you are polling. Unless this post is a "
-    "dismissal or logically the final word."
+    "dismissal or logically the final word. If this hand-off leaves you nothing else to do, "
+    'set_agent_status(status="idle") so the board shows Monitoring; report_progress wakes you.'
 )
 
 LIVENESS_QUIET_AFTER_MINUTES = DEFAULT_SILENCE_THRESHOLD_MINUTES

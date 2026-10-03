@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from giljo_mcp.services.handover_validation import HANDOVER_TYPE_ABBR, require_handover_shape
+from giljo_mcp.exceptions import AuthorizationError, ResourceNotFoundError
+from giljo_mcp.services.handover_validation import DOOR_MCP, HANDOVER_TYPE_ABBR, require_handover_shape
 from giljo_mcp.services.taxonomy_ops import resolve_task_type_abbr
 
 
@@ -16,9 +17,9 @@ HANDOVER_NOT_CONVERTIBLE = "HANDOVER_NOT_CONVERTIBLE"
 PENDING_HANDOVER_NOT_ARCHIVABLE = "PENDING_HANDOVER_NOT_ARCHIVABLE"
 
 
-def resolve_create_task_type(task_type: str | None, description: str | None) -> str:
+def resolve_create_task_type(task_type: str | None, description: str | None, *, door: str) -> str:
     requested = resolve_task_type_abbr(task_type, operation="create_task")
-    if requested == HANDOVER_TYPE_ABBR:
+    if requested == HANDOVER_TYPE_ABBR and door == DOOR_MCP:
         require_handover_shape(description, operation="create_task")
     return requested
 
@@ -26,7 +27,7 @@ def resolve_create_task_type(task_type: str | None, description: str | None) -> 
 async def handover_state(get_task, task_id: str) -> tuple[bool, str | None]:
     try:
         task = await get_task(task_id)
-    except Exception:  # noqa: BLE001 - not-found/permission belong to the caller, not here
+    except (ResourceNotFoundError, AuthorizationError):
         return False, None
     abbreviation = getattr(getattr(task, "task_type", None), "abbreviation", None)
     status = getattr(task, "status", None)
@@ -68,11 +69,4 @@ async def require_handover_description_shape(get_task, task_id: str, description
         return
     is_handover, _status = await handover_state(get_task, task_id)
     if is_handover:
-        require_handover_shape(description, operation="update_task")
-
-
-def require_handover_description_shape_of(task: Any, description: str | None) -> None:
-    if description is None or description == getattr(task, "description", None):
-        return
-    if getattr(getattr(task, "task_type", None), "abbreviation", None) == HANDOVER_TYPE_ABBR:
         require_handover_shape(description, operation="update_task")

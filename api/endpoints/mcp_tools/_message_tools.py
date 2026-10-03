@@ -12,6 +12,7 @@ from pydantic import Field
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
+    MCP_ID_MAX,
     MCP_SHORT_TEXT_MAX,
     _call_tool,
     mcp,
@@ -38,9 +39,13 @@ from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 )
 async def request_approval(
     job_id: Annotated[
-        str, Field(description="Calling agent's job_id (UUID). Flips to status='awaiting_user' until decided.")
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description="Calling agent's job_id (UUID). Flips to status='awaiting_user' until decided.",
+        ),
     ],
-    project_id: Annotated[str, Field(description="Project UUID the approval belongs to.")],
+    project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project UUID the approval belongs to.")],
     reason: Annotated[
         str,
         Field(
@@ -86,7 +91,7 @@ async def request_approval(
         "no separate write path. Available by default; a tenant that has switched Settings to "
         "HITL mode is refused here and decides from the dashboard instead."
     ),
-    annotations=_tool_hints("decide_approval"),
+    annotations=_tool_hints("decide_approval", destructive=True),
 )
 async def decide_approval(
     approval_id: Annotated[str, Field(max_length=36, description="The pending approval's id (UUID).")],

@@ -112,7 +112,7 @@ class RoleChangeResponse(BaseModel):
 
 
 class ForceLogoutResponse(BaseModel):
-    """Response model for an admin force-logout (SEC-6011)."""
+    """Response model for an admin force-logout."""
 
     message: str
     user_id: str
@@ -130,7 +130,7 @@ class FieldPriorityConfig(BaseModel):
     """
     Request/Response model for field toggle configuration v3.0.
 
-    Handover 0820: Toggle-only system (removed priority integers).
+    Toggle-only system (removed priority integers).
     Each category is either enabled (true) or disabled (false).
 
     Valid categories: product_core, vision_documents, agent_templates,
@@ -189,22 +189,22 @@ class FieldPriorityConfig(BaseModel):
 
 class DepthConfig(BaseModel):
     """
-    Depth configuration for context extraction granularity (Handovers 0314, 0347d, 0347e).
+    Depth configuration for context extraction granularity.
 
     Controls HOW MUCH detail to extract from each context source.
     Orthogonal to priority system (which controls WHAT to fetch).
 
     Valid values per field:
-    - vision_documents: none, optional, light, medium, full (0347e)
+    - vision_documents: none, optional, light, medium, full
     - memory_last_n_projects: 1, 3, 5, 10
     - git_commits: 10, 25, 50, 100
-    - agent_templates: basic, full (0347d)
+    - agent_templates: basic, full
     - tech_stack_sections: required, all
     - architecture_depth: overview, detailed (stored, NOT applied -- see field description)
     """
 
     vision_documents: Literal["none", "optional", "light", "medium", "full"] = Field(
-        default="medium", description="Vision document depth level: none/optional/light/medium/full (Handover 0347e)"
+        default="medium", description="Vision document depth level: none/optional/light/medium/full"
     )
     memory_last_n_projects: Literal[1, 3, 5, 10] = Field(
         default=3, description="Number of recent projects to include in 360 memory"
@@ -268,8 +268,7 @@ async def list_users(
     List users within the current admin's tenant.
 
     Requires admin role. Returns only users whose ``tenant_key`` matches the admin's
-    tenant. Cross-tenant user administration is an ops-panel concern (INF-0002), not a
-    product concern — mode (CE/demo/SaaS) and role are orthogonal (SEC-0005a).
+    tenant, in every edition.
 
     Args:
         current_user: Current authenticated admin user
@@ -370,8 +369,8 @@ async def get_user(
     """
     Get user details by ID.
 
-    Admin can view any user across all tenants (per-user tenancy design).
-    Non-admin can only view themselves.
+    Admins can view any user in their own tenant. Other users can only view
+    themselves.
 
     Args:
         user_id: UUID of user to retrieve
@@ -546,7 +545,7 @@ async def force_logout_user(
     current_user: User = Depends(require_admin),
     user_service: UserService = Depends(get_user_service),
 ) -> ForceLogoutResponse:
-    """Force-log-out a user (SEC-6011 admin-forced-logout).
+    """Force-log-out a user.
 
     Requires admin role. Bumps the target user's forced-logout epoch so EVERY
     access token they currently hold is rejected on its next request; a fresh
@@ -653,7 +652,7 @@ async def get_field_priority_config(
     Returns the authenticated user's custom field toggle configuration if set,
     otherwise returns the system default v3.0 configuration.
 
-    Handover 0820: Toggle-only system (removed priority integers).
+    Toggle-only system (removed priority integers).
 
     Args:
         current_user: Current authenticated user
@@ -700,7 +699,7 @@ async def update_field_priority_config(
 
     Rejects git_history=true when system-level git_integration is disabled (422).
 
-    Handover 0820: Toggle-only system (removed priority integers).
+    Toggle-only system (removed priority integers).
 
     Args:
         config: New field toggle configuration (v3.0)
@@ -809,7 +808,7 @@ async def get_depth_config(
 
     Returns the authenticated user's depth configuration (or defaults).
 
-    Handover 0314: Context Management v2.0 - Depth Controls
+    Context Management v2.0 - Depth Controls
     - Controls HOW MUCH detail to extract from each context source
     - Orthogonal to priority system (which controls WHAT to fetch)
 
@@ -857,7 +856,7 @@ async def update_depth_config(
     Validates depth settings via Pydantic schema and saves to database.
     Emits WebSocket event for real-time UI synchronization.
 
-    Handover 0314: Context Management v2.0 - Depth Controls
+    Context Management v2.0 - Depth Controls
 
     Args:
         depth_request: New depth configuration
