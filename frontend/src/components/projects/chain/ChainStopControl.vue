@@ -1,15 +1,17 @@
 <template>
   <div class="chain-stop-control">
-    <v-btn
-      class="stop-chain-button"
-      variant="outlined"
-      :loading="stopping"
+    <button
+      type="button"
+      class="csc-btn"
+      :disabled="stopping"
+      :aria-busy="stopping ? 'true' : undefined"
       data-testid="stop-chain-btn"
       @click="emit('open')"
     >
-      <v-icon size="18" class="mr-1">mdi-stop-circle-outline</v-icon>
+      <v-progress-circular v-if="stopping" indeterminate size="12" width="2" />
+      <v-icon v-else size="16" aria-hidden="true">mdi-stop-circle-outline</v-icon>
       Stop chain
-    </v-btn>
+    </button>
 
     <BaseDialog
       :model-value="modelValue"
@@ -81,16 +83,37 @@ const effectsText = computed(() => effectSentences.value.join(' '))
 
 .chain-stop-control {
   display: inline-flex;
-  margin-left: auto;
 }
 
-.stop-chain-button {
+.csc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: $border-radius-default;
+  background: none;
+  box-shadow: inset 0 0 0 2px rgba($color-status-error, 0.75);
   color: $color-status-error;
-  // Outlined, never filled: a filled control would out-weigh the primary action on
-  // this screen, and the operator asked for red outlined.
-  border-color: $color-status-error;
-  letter-spacing: normal;
-  text-transform: none;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    background: rgba($color-status-error, 0.12);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $color-status-error;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
 }
 
 .stop-effects {

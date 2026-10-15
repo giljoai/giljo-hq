@@ -86,6 +86,7 @@ class AgentJobMetadata(BaseModel):
     tool: str | None = Field(default=None, max_length=_JOB_METADATA_STR_MAX)
     chain_conductor: bool | None = None
     run_id: str | None = None
+    predecessor_job_id: str | None = Field(default=None, max_length=_JOB_METADATA_STR_MAX)
     created_via: str | None = None
     created_at: str | None = None
     todo_steps: AgentJobTodoSteps | None = None
@@ -259,7 +260,7 @@ class NotificationPreferences(BaseModel):
 
     banner_lifecycle_enabled: bool = True
     banner_advisories_in_fold: bool = True
-    popout_scope: Literal["all", "actionable", "off"] = POPOUT_SCOPE_ALL
+    popout_scope: Literal["all", "actionable", "off"] = POPOUT_SCOPE_ACTIONABLE
 
 
 

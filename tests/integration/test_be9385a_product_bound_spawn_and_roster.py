@@ -161,7 +161,7 @@ async def test_spawn_allowlist_is_scoped_to_the_projects_product(spawn_client):
             },
         )
 
-    assert rejected.is_error, (
+    assert not rejected.is_error and _payload(rejected).get("error") == "INVALID_AGENT_NAME", (
         "spawn_job accepted an agent that is disabled for this project's product. "
         "The orchestrator can spawn an agent the product does not use, and which its "
         "export never installed."
@@ -213,7 +213,7 @@ async def test_spawn_allowlist_is_empty_for_a_product_that_enabled_nothing(spawn
             },
         )
 
-    assert result.is_error is True, "a product that has enabled nothing must not spawn an agent"
+    assert _payload(result).get("error") == "INVALID_AGENT_NAME", "a product that has enabled nothing must not spawn"
     assert "no agents assigned for this product" in _error_text(result).lower(), (
         "ruling 4: the refusal names the harness default instead of reading as a server "
         f"fault. got={_error_text(result)!r}"

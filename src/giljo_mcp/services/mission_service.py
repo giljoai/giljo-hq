@@ -54,6 +54,7 @@ from giljo_mcp.services.mission_implementation_gate import (
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
 from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_staging_complete
+from giljo_mcp.services.protocol_sections.team_context import JobLinks, job_dependency_link
 from giljo_mcp.services.protocol_survival import finalize_mission_wire_fields
 from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
@@ -133,7 +134,7 @@ class MissionService:
 
                 comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key) or {}
 
-                all_project_executions, mission_lookup, current_team_state = await self._fetch_team_context(
+                all_project_executions, mission_lookup, current_team_state, job_links = await self._fetch_team_context(
                     session, job, execution, job_id, tenant_key
                 )
 
@@ -231,6 +232,7 @@ class MissionService:
                 integrations=integrations,
                 chain_execution_mode=chain_execution_mode,
                 preset=preset,
+                job_links=job_links,
                 comm_thread_id=comm_thread.get("thread_id"),
                 comm_chat_id=comm_thread.get("chat_id"),
                 detected_harness=detected_harness,
@@ -347,11 +349,11 @@ class MissionService:
         execution: AgentExecution,
         job_id: str,
         tenant_key: str,
-    ) -> tuple[list[AgentExecution], dict[str, str], list[dict] | None]:
+    ) -> tuple[list[AgentExecution], dict[str, str], list[dict] | None, JobLinks]:
         current_team_state: list[dict] | None = None
 
         if not job.project_id:
-            return [execution], {job.job_id: job.mission}, None
+            return [execution], {job.job_id: job.mission}, None, {}
 
         rows = await self._repo.get_project_executions_with_jobs(session, tenant_key, job.project_id)
         all_project_executions = [row[0] for row in rows]
@@ -359,6 +361,7 @@ class MissionService:
         mission_lookup: dict[str, str] = {}
         for _, job_row in rows:
             mission_lookup[job_row.job_id] = job_row.mission
+        job_links = {job_row.job_id: job_dependency_link(job_row) for _, job_row in rows}
 
         current_team_state = []
         for exec_row, job_row in rows:
@@ -376,7 +379,7 @@ class MissionService:
             )
         current_team_state.sort(key=lambda x: x.get("phase") or 0)
 
-        return all_project_executions, mission_lookup, current_team_state
+        return all_project_executions, mission_lookup, current_team_state, job_links
 
     async def _resolve_mission_template(
         self,
@@ -449,6 +452,7 @@ class MissionService:
         identity_status: str = IDENTITY_RESOLVED,
         identity_source: str | None = None,
         agent_profile: dict | None = None,
+        job_links: JobLinks | None = None,
     ) -> MissionResponse:
         return assemble_mission_context(
             self._logger,
@@ -470,6 +474,7 @@ class MissionService:
             identity_status=identity_status,
             identity_source=identity_source,
             agent_profile=agent_profile,
+            job_links=job_links,
         )
 
     async def _resolve_comm_thread(self, session: AsyncSession, job: AgentJob, tenant_key: str) -> dict | None:

@@ -13,7 +13,7 @@ from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_sub_or
 from giljo_mcp.services.protocol_sections.orchestrator_body import (
     _SUBORCH_PHASE1_END,
     _SUBORCH_PHASE1_START,
-    slice_chain_mission_for_position,
+    find_chain_mission_block,
     trim_embedded_protocol_for_chain,
 )
 
@@ -37,7 +37,7 @@ _MISSION_3 = (
 
 
 def test_slice_returns_only_own_block() -> None:
-    sliced = slice_chain_mission_for_position(_MISSION_3, 2)
+    sliced = find_chain_mission_block(_MISSION_3, 2)
     assert sliced.startswith("### P_2 (bbbb):")
     assert "produces = endpoint_2.py" in sliced
     assert "P_1 (aaaa)" not in sliced
@@ -45,16 +45,16 @@ def test_slice_returns_only_own_block() -> None:
 
 
 def test_slice_first_and_last_positions() -> None:
-    first = slice_chain_mission_for_position(_MISSION_3, 1)
+    first = find_chain_mission_block(_MISSION_3, 1)
     assert first.startswith("### P_1 (aaaa):")
     assert "### P_2" not in first
-    last = slice_chain_mission_for_position(_MISSION_3, 3)
+    last = find_chain_mission_block(_MISSION_3, 3)
     assert last.startswith("### P_3 (cccc):")
     assert "must leave = router registered" in last
 
 
 def test_slice_ignores_body_references_to_other_projects() -> None:
-    first = slice_chain_mission_for_position(_MISSION_3, 1)
+    first = find_chain_mission_block(_MISSION_3, 1)
     assert (
         first
         == "### P_1 (aaaa):\nconsumes = the repo baseline\nproduces = endpoint_1.py\nmust leave = ThingService.do_1 callable"
@@ -63,28 +63,23 @@ def test_slice_ignores_body_references_to_other_projects() -> None:
 
 def test_slice_word_boundary_p2_not_p20() -> None:
     mission = "### P_2 (a):\nfoo\n\n### P_20 (b):\nbar"
-    assert slice_chain_mission_for_position(mission, 2) == "### P_2 (a):\nfoo"
-    assert slice_chain_mission_for_position(mission, 20) == "### P_20 (b):\nbar"
+    assert find_chain_mission_block(mission, 2) == "### P_2 (a):\nfoo"
+    assert find_chain_mission_block(mission, 20) == "### P_20 (b):\nbar"
 
 
 
 
-def test_slice_no_headers_ships_whole() -> None:
+def test_slice_no_headers_finds_no_block() -> None:
     freeform = "Do the thing. Consume the repo. Produce the endpoint. Leave it callable."
-    assert slice_chain_mission_for_position(freeform, 2) == freeform
+    assert find_chain_mission_block(freeform, 2) is None
 
 
-def test_slice_position_absent_ships_whole_and_warns(caplog) -> None:
-    import logging
-
-    with caplog.at_level(logging.WARNING):
-        out = slice_chain_mission_for_position(_MISSION_3, 5)
-    assert out == _MISSION_3
-    assert any("position 5" in r.message for r in caplog.records)
+def test_slice_position_absent_finds_no_block() -> None:
+    assert find_chain_mission_block(_MISSION_3, 5) is None
 
 
-def test_slice_empty_is_returned_as_is() -> None:
-    assert slice_chain_mission_for_position("", 1) == ""
+def test_slice_empty_finds_no_block() -> None:
+    assert find_chain_mission_block("", 1) is None
 
 
 

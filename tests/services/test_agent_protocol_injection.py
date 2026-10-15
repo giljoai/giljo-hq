@@ -77,7 +77,8 @@ class TestCombinedInjections:
 
     def test_git_only(self):
         protocol = _gen_protocol(execution_mode="claude_code_cli", git_integration_enabled=True)
-        assert "Git Commit" in protocol
+        assert "### Git (subagent mode): do NOT commit" in protocol
+        assert "Git Commit" not in protocol
         assert "/giljo" not in protocol
 
     def test_giljo_only(self):

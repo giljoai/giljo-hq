@@ -312,3 +312,67 @@ describe('TemplateEditDialog — model and effort hints (BE-9605b)', () => {
     expect(wrapper.find('[data-testid="effort-input"]').attributes('hint')).toBe(hint)
   })
 })
+
+
+const alertStub = {
+  template: `<div class="v-alert" v-bind="$attrs"><slot /></div>`,
+}
+
+describe('TemplateEditDialog — FE-9784 coordination warning', () => {
+  const mountWithAlert = (propsData) =>
+    mount(TemplateEditDialog, {
+      props: {
+        modelValue: true,
+        template: makeTemplate(),
+        saving: false,
+        generatedName: '',
+        roleOptions: defaultRoleOptions,
+        hasChanges: true,
+        ...propsData,
+      },
+      global: {
+        stubs: {
+          'v-dialog': dialogStub,
+          'v-select': selectStub,
+          'v-text-field': textFieldStub,
+          'v-textarea': textareaStub,
+          'v-tooltip': tooltipStub,
+          'v-alert': alertStub,
+          Teleport: true,
+        },
+      },
+    })
+
+  it('warns, above Role & Expertise, that edits can break agent coordination', () => {
+    const wrapper = mountWithAlert({ template: makeTemplate({ id: 'tpl-1', role: 'analyzer' }) })
+    const warning = wrapper.find('[data-testid="edit-coordination-warning"]')
+    expect(warning.exists()).toBe(true)
+    expect(warning.text()).toContain('can break agent coordination')
+
+    const html = wrapper.html()
+    expect(html.indexOf('edit-coordination-warning')).toBeLessThan(html.indexOf('template-editor'))
+  })
+
+  it('names Reset to Default and version history when a built-in exists to go back to', () => {
+    const wrapper = mountWithAlert({
+      template: makeTemplate({ id: 'tpl-1', role: 'analyzer', can_reset: true }),
+    })
+    const text = wrapper.find('[data-testid="edit-coordination-warning"]').text()
+    expect(text).toContain('Reset to Default restores the built-in')
+    expect(text).toContain('version history')
+  })
+
+  it('does not promise a built-in for an agent that has none', () => {
+    const wrapper = mountWithAlert({
+      template: makeTemplate({ id: 'tpl-2', role: 'analyzer', can_reset: false }),
+    })
+    const text = wrapper.find('[data-testid="edit-coordination-warning"]').text()
+    expect(text).toContain('can break agent coordination')
+    expect(text).not.toContain('Reset to Default')
+  })
+
+  it('stays quiet on a brand-new agent: there is nothing to break yet', () => {
+    const wrapper = mountWithAlert({ template: makeTemplate({ id: null }) })
+    expect(wrapper.find('[data-testid="edit-coordination-warning"]').exists()).toBe(false)
+  })
+})

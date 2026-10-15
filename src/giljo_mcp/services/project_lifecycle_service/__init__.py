@@ -28,9 +28,12 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
-from giljo_mcp.services.project_helpers import _build_ws_project_data, mark_chain_member_status
+from giljo_mcp.services.project_helpers import (
+    _build_ws_project_data,
+    broadcast_deferred_events,
+    mark_chain_member_status,
+)
 from giljo_mcp.services.project_lifecycle_service._orchestrator_fixture_mixin import OrchestratorFixtureMixin
-from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -118,6 +121,16 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
             raise BaseGiljoError(
                 message=f"Failed to activate project: {e!s}", context={"project_id": project_id}
             ) from e
+
+    async def activate_for_staging(self, project_id: str, tenant_key: str | None = None) -> None:
+        resolved_tenant = tenant_key or self.tenant_manager.get_current_tenant()
+        async with self._get_session(resolved_tenant) as session:
+            project = await self._repo.get_by_id(session, resolved_tenant, project_id)
+            if not project:
+                raise ResourceNotFoundError(message="Project not found", context={"project_id": project_id})
+            current_status = project.status
+        if current_status != ProjectStatus.ACTIVE:
+            await self.activate_project(project_id, tenant_key=resolved_tenant)
 
     async def deactivate_project(
         self,
@@ -226,6 +239,9 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
     async def unstage(self, project_id: str) -> dict:
         return await self._staging.unstage(project_id)
+
+    async def undo_staging(self, project_id: str) -> dict:
+        return await self._staging.undo_staging(project_id)
 
     async def mark_staged(
         self, project_id: str, execution_mode: str, tenant_key: str | None = None, db_session: Any | None = None
@@ -368,7 +384,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
         if commit:
             await session.commit()
-            await broadcast_deferred_sequence_updates(session)
+            await broadcast_deferred_events(session)
 
             if decommission_events:
                 await broadcast_agent_status_events(

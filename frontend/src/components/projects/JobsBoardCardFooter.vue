@@ -1,62 +1,64 @@
 <template>
-  <div class="jbf" :class="{ 'jbf--compact': compact }" :data-footer-state="footerState" :data-testid="compact ? 'jb-footer-compact' : 'jb-footer'">
-    <div
-      v-if="!compact && showStaging && footerState === 'ready'"
-      class="jbf-mode-row"
-      :class="{ 'jbf-mode-row--refused': modeRefused, 'jbf-mode-row--picked': executionModeSelected }"
-      data-testid="jbf-mode-row"
+  <div
+    class="jbf"
+    :class="{ 'jbf--compact': compact }"
+    :data-footer-state="footerState"
+    :data-run-state="runState || undefined"
+    :data-testid="compact ? 'jb-footer-compact' : 'jb-footer'"
+  >
+    <StagingControlArea
+      v-if="areaPhase && !compact"
+      variant="project"
+      :phase="areaPhase"
+      :mode="isExecutionModeLocked ? executionMode : executionPlatform"
+      :mode-locked="isExecutionModeLocked"
+      :stage-text="stageButtonText"
+      :stage-title="stageButtonTitle"
+      :stage-role="stageRole"
+      :stage-needs-mode="stageNeedsMode"
+      :stage-blocked="stageButtonDisabled"
+      :stage-busy="loadingStageProject"
+      :implement-ready="canImplement"
+      :implement-busy="launching"
+      :copying="copying"
+      secondary-label="Jobs detail"
+      @pick-mode="handleExecutionModeChange"
+      @stage="onStage"
+      @implement="onImplement"
+      @copy-prompt="onCopyPrompt"
+      @secondary="emit('open-detail', project)"
     >
-      <RunAsSwitch
-        :model-value="executionPlatform"
-        :locked="isExecutionModeLocked"
-        :refused="modeRefused"
-        data-testid="jbf-run-as"
-        @change="handleExecutionModeChange"
-      />
-      <HarnessChip :harness="detectedHarness" />
-      <span v-if="modeRefused" class="jbf-mode-refusal" role="alert" data-testid="jbf-mode-refusal">
-        Pick a mode before staging.
-      </span>
-    </div>
+      <template #trailing>
+        <v-btn
+          class="jb-icon-btn"
+          size="small"
+          variant="text"
+          icon
+          title="Go to this project's Hub thread"
+          aria-label="Go to this project's Hub thread"
+          data-testid="jb-btn-hub"
+          @click="emit('open-hub', project)"
+        >
+          <v-icon size="18">mdi-forum</v-icon>
+        </v-btn>
+      </template>
+    </StagingControlArea>
 
-    <div class="jbf-row">
-      <span
-        v-if="!compact && footerState === 'staged' && modeLabel"
-        class="jbf-mode-tag"
-        data-testid="jbf-mode-tag"
-      >
-        <v-icon size="12" aria-hidden="true">mdi-lock</v-icon>
-        {{ modeLabel }}
-      </span>
-
+    <div v-else class="jbf-row">
       <v-btn
-        v-if="showStaging && footerState === 'staged'"
+        v-if="compact && areaPhase === 'pickup'"
         class="jb-btn jb-btn-primary"
         size="small"
         variant="flat"
-        :disabled="!canImplement || launching"
-        :loading="launching"
-        data-testid="jbf-implement"
-        @click="onImplement"
+        :loading="copying"
+        data-testid="sca-copy-prompt"
+        @click="onCopyPrompt"
       >
-        <v-icon start size="16" aria-hidden="true">mdi-play</v-icon>
-        Implement
+        <v-icon start size="16" aria-hidden="true">mdi-content-copy</v-icon>
+        Copy prompt
       </v-btn>
 
-      <v-btn
-        v-if="showStaging && (footerState === 'ready' || footerState === 'staged')"
-        class="jb-btn"
-        :class="stageButtonClass"
-        size="small"
-        :variant="stageButtonVariant"
-        :loading="loadingStageProject"
-        :disabled="stageButtonDisabled"
-        :title="stageButtonTitle"
-        data-testid="jbf-stage"
-        @click="onStage"
-      >
-        {{ stageButtonText }}
-      </v-btn>
+      <span v-if="runState === 'quiet'" class="jbf-quiet" data-testid="jbf-quiet-chip">Quiet</span>
 
       <v-btn
         v-if="footerState === 'review'"
@@ -70,7 +72,7 @@
       </v-btn>
 
       <v-btn
-        v-if="!compact || footerState === 'implementing'"
+        v-if="!compact || (footerState === 'implementing' && areaPhase !== 'pickup')"
         class="jb-btn jb-btn-ghost"
         size="small"
         variant="text"
@@ -99,13 +101,15 @@
 </template>
 
 <script setup>
-import { computed, ref, watchEffect } from 'vue'
+import { computed, ref } from 'vue'
 import { useProjectStageControls } from '@/composables/useProjectStageControls'
-import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
+import { copyImplementationPrompt, startChainMemberThenCopyPrompt } from '@/composables/usePlayButton'
+import { useClipboard } from '@/composables/useClipboard'
+import { useToast } from '@/composables/useToast'
 import { JOBS_SECTION_LABELS } from '@/utils/jobsSectionLabel'
-import HarnessChip from '@/components/projects/project-tabs/HarnessChip.vue'
-import RunAsSwitch from '@/components/projects/RunAsSwitch.vue'
-
+import { needsInputOwner } from '@/utils/jobStatusWord'
+import { isOrchestrator } from '@/utils/agentDisplay'
+import StagingControlArea from '@/components/projects/StagingControlArea.vue'
 
 const props = defineProps({
   project: {
@@ -116,9 +120,17 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  agents: {
+    type: Array,
+    default: () => [],
+  },
   showStaging: {
     type: Boolean,
     default: true,
+  },
+  chainTurn: {
+    type: Boolean,
+    default: false,
   },
   compact: {
     type: Boolean,
@@ -128,18 +140,14 @@ const props = defineProps({
 
 const emit = defineEmits(['open-detail', 'open-hub', 'changed', 'review'])
 
-const harnessWanted = ref(false)
-
 const {
-  detectedHarness,
   canImplement,
   readyToLaunch,
   launched,
   executionPlatform,
   executionMode,
-  executionModeSelected,
   isExecutionModeLocked,
-  modeRefused,
+  stageNeedsMode,
   handleExecutionModeChange,
   isProjectStaging,
   isProjectStaged,
@@ -153,38 +161,45 @@ const {
 } = useProjectStageControls({
   project: () => props.project,
   seedState: true,
-  loadHarness: () => harnessWanted.value,
 })
 
 const FINISHED_LABELS = new Set([JOBS_SECTION_LABELS.COMPLETE, JOBS_SECTION_LABELS.STOPPED])
+const finished = computed(() => FINISHED_LABELS.has(props.sectionLabel))
 const footerState = computed(() => {
   if (props.sectionLabel === JOBS_SECTION_LABELS.REVIEW) return 'review'
-  if (FINISHED_LABELS.has(props.sectionLabel)) return 'implementing'
+  if (finished.value) return 'implementing'
   if (launched.value) return 'implementing'
   if (readyToLaunch.value) return 'staged'
   return 'ready'
 })
 
-watchEffect(() => {
-  harnessWanted.value = props.showStaging && footerState.value === 'ready'
+const NEEDS_KINDS = new Set(['decision', 'blocked'])
+const runState = computed(() => {
+  if (footerState.value === 'review' || finished.value) return null
+  if (!launched.value && !props.chainTurn) return null
+  const kind = needsInputOwner(props.agents)?.kind
+  if (NEEDS_KINDS.has(kind)) return 'needs'
+  if (kind === 'silent') return 'quiet'
+  const orchestrator = props.agents.find(isOrchestrator)
+  return !orchestrator || orchestrator.status === 'waiting' ? 'pickup' : 'running'
 })
 
-const modeLabel = computed(() => {
-  const mode = executionMode.value
-  if (!mode) return ''
-  return isSubagentExecutionMode(mode) ? 'Subagent' : 'Multi-Terminal'
+const areaPhase = computed(() => {
+  if (runState.value === 'pickup' && (props.showStaging || props.chainTurn)) return 'pickup'
+  if (!props.showStaging) return null
+  if (footerState.value === 'ready' || footerState.value === 'staged') return footerState.value
+  return null
 })
 
-const stageLook = computed(() => {
-  if (isProjectStaging.value || isProjectStaged.value) return 'ghost'
-  return canRestage.value ? 'secondary' : 'primary'
+const stageRole = computed(() => {
+  if (isProjectStaging.value || isProjectStaged.value) return 'quiet'
+  return canRestage.value ? 'secondary' : 'next'
 })
-const stageButtonClass = computed(() => `jb-btn-${stageLook.value}`)
-const stageButtonVariant = computed(
-  () => ({ primary: 'flat', secondary: 'outlined', ghost: 'text' })[stageLook.value],
-)
 
 const launching = ref(false)
+const copying = ref(false)
+const { copy: clipboardCopy } = useClipboard()
+const { showToast } = useToast()
 
 async function onStage() {
   await handleStageOrRestage()
@@ -200,6 +215,21 @@ async function onImplement() {
   }
   emit('changed', props.project)
 }
+
+async function onCopyPrompt() {
+  copying.value = true
+  try {
+    const projectId = props.project.id
+    if (props.chainTurn) {
+      await startChainMemberThenCopyPrompt({ projectId, clipboardCopy, showToast })
+      emit('changed', props.project)
+    } else {
+      await copyImplementationPrompt({ projectId, executionMode: executionMode.value, clipboardCopy, showToast })
+    }
+  } finally {
+    copying.value = false
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -211,38 +241,11 @@ async function onImplement() {
   gap: 8px;
 }
 
-.jbf-mode-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 2px 0;
-}
-
-.jbf-mode-refusal {
-  margin-left: auto;
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: $color-status-warning;
-}
-
 .jbf-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 7px;
-}
-
-.jbf-mode-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: $border-radius-pill;
-  background: rgba(var(--v-theme-on-surface), 0.08);
-  color: var(--text-secondary);
 }
 
 .jbf-spacer {
@@ -258,13 +261,16 @@ async function onImplement() {
 
 .jb-btn-primary {
   background: $color-brand-yellow;
-  color: $color-on-yellow-ink;
+  color: $color-background-primary;
 }
 
-.jb-btn-secondary {
-  color: $color-brand-yellow;
-  border-color: $color-brand-yellow;
-  border-width: 2px;
+.jbf-quiet {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: $border-radius-pill;
+  background: rgba($color-text-primary, 0.08);
+  color: $color-text-secondary;
 }
 
 .jb-btn-review {

@@ -4,7 +4,7 @@
       <header class="mb-6">
         <h1 class="text-headline-large font-weight-bold mb-2">Privacy Policy</h1>
         <p class="legal-meta mb-0">
-          Last updated: 2026-08-07 · GiljoAI LLC
+          Last updated: 2026-10-12 · GiljoAI LLC
         </p>
       </header>
 
@@ -25,6 +25,7 @@
           <li><strong>Product data</strong>: projects, tasks, agent missions, and messages you create inside the platform.</li>
           <li><strong>Operational logs</strong>: request logs, error traces, and audit events.</li>
           <li><strong>Browser metadata</strong>: IP address and user-agent, used for rate-limiting and security.</li>
+          <li><strong>Sign-in and connection records</strong>: for each account we keep the IP addresses, browser or agent type, and the first and last time you connected from each, to protect accounts and to detect an account being shared. We delete each record 90 days after it was last seen, and when your account is deleted.</li>
         </ul>
       </section>
 
@@ -77,6 +78,7 @@
           <li><strong>If you ask us to delete your account</strong>: you choose immediate deletion, or a 30-day grace period in which you can change your mind. An erasure request made under GDPR Article 17 is completed within the one-month period the law requires.</li>
           <li><strong>What deletion removes</strong>: your database records and your stored backup archives are both erased, and your subscription with our payment processor is cancelled as part of the same process.</li>
           <li><strong>Backups</strong>: we keep your 7 most recent daily archives, 4 weekly archives, and up to 5 manual archives; older ones are removed automatically. Our hosting provider also takes daily platform snapshots of the database, kept for about 6 days, and maintains a continuous point-in-time recovery archive covering up to approximately the last four weeks. Deleted data can persist in these provider-side backups until they age out on those schedules.</li>
+          <li><strong>Sign-in and connection records</strong>: each record is deleted 90 days after it was last seen, and all of them are deleted with your account.</li>
           <li><strong>Deletion receipts</strong>: retained for 7 years, then deleted. A receipt contains no personal data: a cryptographic hash of your tenant identifier, the timestamps of each deletion step, and the payment processor's cancellation confirmation, signed with HMAC-SHA256.</li>
         </ul>
       </section>

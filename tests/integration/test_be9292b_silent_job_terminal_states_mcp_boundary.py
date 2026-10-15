@@ -312,8 +312,8 @@ async def test_silent_job_with_stranded_todos_is_completion_blocked_naming_the_t
         )
 
     text = _content_text(result)
-    assert result.is_error, f"an incomplete TODO must still block complete_job on a silent job, got: {text!r}"
-    assert "COMPLETION_BLOCKED" in text, f"the rejection must carry the COMPLETION_BLOCKED code, got: {text!r}"
+    assert not result.is_error, f"BE-9738: the gate refusal is Tier-2 content, not isError: {text!r}"
+    assert '"error": "COMPLETION_BLOCKED"' in text, f"an incomplete TODO must still block a silent job: {text!r}"
     assert "Wire the guard into the service layer" in text, (
         f"the rejection must name the stranded TODO so the orchestrator can settle it, got: {text!r}"
     )
@@ -344,7 +344,7 @@ async def test_completion_blocked_names_report_progress_and_speaks_to_the_orches
         )
 
     text = _content_text(result)
-    assert result.is_error, f"an incomplete TODO must still block complete_job, got: {text!r}"
+    assert '"error": "COMPLETION_BLOCKED"' in text, f"an incomplete TODO must still block complete_job: {text!r}"
     assert "report_progress" in text, f"COMPLETION_BLOCKED must name the tool that settles the ledger, got: {text!r}"
     assert "replace" in text, (
         "replace=true is the load-bearing argument — without it the orchestrator cannot "

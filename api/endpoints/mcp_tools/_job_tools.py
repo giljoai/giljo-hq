@@ -12,6 +12,7 @@ from pydantic import Field
 from api.endpoints._boundary_types import LIST_ITEMS_MAX
 from api.endpoints.mcp_tools._base import (
     _HARNESS_PARAM_DESCRIPTION,
+    CONSTRAINT_NON_EMPTY,
     MCP_HEAVY_TOOL_META,
     MCP_ID_MAX,
     MCP_MISSION_MAX,
@@ -21,6 +22,7 @@ from api.endpoints.mcp_tools._base import (
     _detected_harness,
     _resolve_preset_name,
     mcp,
+    validation_rejection,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
@@ -292,9 +294,9 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
     title="Get Job Mission",
     description=(
         "Fetch agent-specific mission and context. Call immediately after receiving the thin "
-        "prompt from spawn_job -- your first action. The response carries your full agent_profile "
-        "(role, instructions, model and effort hints) -- act from it; do not look for installed "
-        "agent files. Idempotent. Pass protocol_etag from a prior "
+        "prompt from spawn_job -- your first action. The response carries your role instructions "
+        "(agent_identity) and agent_profile (role, model and effort hints) -- act from them; "
+        "do not look for installed agent files. Idempotent. Pass protocol_etag from a prior "
         "fetch to skip the unchanged identity+protocol block (response sets protocol_unchanged=true). "
         "Truncation recovery: pass section=<name from protocol_toc> to refetch ONE small section "
         "of full_protocol."
@@ -433,6 +435,15 @@ async def spawn_job(
     ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
+    if phase is not None and phase > 1 and not predecessor_job_id.strip():
+        return validation_rejection(
+            field="predecessor_job_id",
+            constraint=CONSTRAINT_NON_EMPTY,
+            message=(
+                "A job in phase 2 or later needs predecessor_job_id: pass the job_id of the "
+                "earlier-phase agent whose output this job uses."
+            ),
+        )
     kwargs: dict[str, Any] = {
         "agent_display_name": agent_display_name,
         "agent_name": agent_name,

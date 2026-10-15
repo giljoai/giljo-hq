@@ -7,6 +7,9 @@ MCP tools are **native tool calls** (like Read/Write/Bash/Glob), never HTTP, cur
 SDKs. Tool names below are bare; your MCP client may expose them under a prefix (e.g.
 `mcp__<server>__<tool>`) — call them by the names your harness lists.
 
+Claude Code only: MCP tool schemas are deferred. Load them in one call before step 1:
+  ToolSearch(query="select:mcp__giljo_hq__get_job_mission,mcp__giljo_hq__join_thread,mcp__giljo_hq__get_thread_history,mcp__giljo_hq__post_to_thread,mcp__giljo_hq__report_progress,mcp__giljo_hq__set_agent_status,mcp__giljo_hq__get_context,mcp__giljo_hq__complete_job", max_results=8)
+
 ## STARTUP (MANDATORY)
 
 1. Call `get_job_mission` with:
@@ -34,6 +37,9 @@ MCP tools are **native tool calls** (like Read/Write/Bash/Glob), never HTTP, cur
 SDKs. Tool names below are bare; your MCP client may expose them under a prefix (e.g.
 `mcp__<server>__<tool>`) — call them by the names your harness lists.
 
+Claude Code only: MCP tool schemas are deferred. Load them in one call before step 1:
+  ToolSearch(query="select:mcp__giljo_hq__get_job_mission,mcp__giljo_hq__join_thread,mcp__giljo_hq__get_thread_history,mcp__giljo_hq__post_to_thread,mcp__giljo_hq__report_progress,mcp__giljo_hq__set_agent_status,mcp__giljo_hq__get_context,mcp__giljo_hq__complete_job", max_results=8)
+
 ## STARTUP (MANDATORY)
 
 1. Call `get_job_mission` with:
@@ -60,6 +66,9 @@ MCP tools are **native tool calls** (like Read/Write/Bash/Glob), never HTTP, cur
 SDKs. Tool names below are bare; your MCP client may expose them under a prefix (e.g.
 `mcp__<server>__<tool>`) — call them by the names your harness lists.
 
+Claude Code only: MCP tool schemas are deferred. Load them in one call before step 1:
+  ToolSearch(query="select:mcp__giljo_hq__get_job_mission,mcp__giljo_hq__join_thread,mcp__giljo_hq__get_thread_history,mcp__giljo_hq__post_to_thread,mcp__giljo_hq__report_progress,mcp__giljo_hq__set_agent_status,mcp__giljo_hq__get_context,mcp__giljo_hq__complete_job", max_results=8)
+
 ## STARTUP (MANDATORY)
 
 1. Call `get_job_mission` with:
@@ -85,6 +94,9 @@ I am implementer (Agent implementer) for Project "Golden Project".
 MCP tools are **native tool calls** (like Read/Write/Bash/Glob), never HTTP, curl, or
 SDKs. Tool names below are bare; your MCP client may expose them under a prefix (e.g.
 `mcp__<server>__<tool>`) — call them by the names your harness lists.
+
+Claude Code only: MCP tool schemas are deferred. Load them in one call before step 1:
+  ToolSearch(query="select:mcp__giljo_hq__get_job_mission,mcp__giljo_hq__join_thread,mcp__giljo_hq__get_thread_history,mcp__giljo_hq__post_to_thread,mcp__giljo_hq__report_progress,mcp__giljo_hq__set_agent_status,mcp__giljo_hq__get_context,mcp__giljo_hq__complete_job", max_results=8)
 
 ## STARTUP (MANDATORY)
 

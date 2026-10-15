@@ -13,12 +13,17 @@ from api.endpoints._boundary_types import ID_MAX, IdPath
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import AuthorizationError, ProjectStateError, TemplateNotFoundError, ValidationError
 from giljo_mcp.models import AgentTemplate, User
-from giljo_mcp.services.template_service import USER_MANAGED_AGENT_LIMIT, TemplateService, factory_default_for
+from giljo_mcp.services.template_service import (
+    USER_MANAGED_AGENT_LIMIT,
+    TemplateService,
+    differs_from_builtin,
+    factory_default_for,
+)
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .dependencies import get_template_service
-from .models import TemplateCreate, TemplateResponse, TemplateUpdate
+from .models import TemplateCreate, TemplateFactoryDefaultResponse, TemplateResponse, TemplateUpdate
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +64,38 @@ def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
         created_by=template.created_by,
         is_system_role=_is_system_managed_role(template.role),
         can_reset=factory_default_for(template) is not None,
+        differs_from_builtin=differs_from_builtin(template),
+    )
+
+
+@router.get("/{template_id}/factory-default", response_model=TemplateFactoryDefaultResponse)
+async def get_template_factory_default(
+    template_id: IdPath,
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    template_service: TemplateService = Depends(get_template_service),
+) -> TemplateFactoryDefaultResponse:
+    """
+    The current built-in text one of your factory agents resets to.
+
+    Lets you compare an agent's instructions with the shipped built-in before
+    choosing "Use the new built-in". Returns 404 when the agent has no built-in
+    (an agent you created yourself).
+    """
+    from giljo_mcp.template_seeder import _seeded_user_instructions
+
+    template = await template_service.get_template_by_id(session, template_id, current_user.tenant_key)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+    default_def = factory_default_for(template)
+    if default_def is None:
+        raise HTTPException(status_code=404, detail="This agent has no built-in to compare with")
+
+    return TemplateFactoryDefaultResponse(
+        role=default_def["role"],
+        version=default_def.get("version", "1.0.0"),
+        user_instructions=_seeded_user_instructions(default_def),
     )
 
 
@@ -84,7 +121,7 @@ async def download_template_profile(
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
-    body = render_profile_markdown(compose_agent_profile(template))
+    body = render_profile_markdown(compose_agent_profile(template, with_instructions=True))
     filename = profile_markdown_filename(template.name)
     return Response(
         content=body,

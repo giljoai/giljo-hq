@@ -10,7 +10,7 @@ import {
 } from '@/utils/executionModeDefault'
 
 const POPOUT_SCOPE_CHOICES = ['all', 'actionable', 'off']
-const POPOUT_SCOPE_DEFAULT = 'all'
+const POPOUT_SCOPE_DEFAULT = 'actionable'
 
 const DEFAULT_NOTIFICATIONS = {
   position: 'bottom-right',
@@ -172,6 +172,12 @@ export const useSettingsStore = defineStore('settings', () => {
     return executionModeDefault.value
   }
 
+  let executionModeDefaultRead = null
+  function ensureExecutionModeDefault() {
+    executionModeDefaultRead ||= loadExecutionModeDefault()
+    return executionModeDefaultRead
+  }
+
   async function updateExecutionModeDefault(choice) {
     const response = await api.settings.updateExecutionModeDefault(choice)
     executionModeDefault.value = response.data.execution_mode_default
@@ -248,6 +254,7 @@ export const useSettingsStore = defineStore('settings', () => {
     notificationDuration,
 
     loadExecutionModeDefault,
+    ensureExecutionModeDefault,
     updateExecutionModeDefault,
     loadSettings,
     saveSettings,

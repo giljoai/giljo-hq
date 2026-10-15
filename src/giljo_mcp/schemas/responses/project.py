@@ -146,6 +146,7 @@ class ActiveProjectDetail(ProjectBase):
 
     reviewed_at: str | None = None
     review_pending: bool = False
+    closeout_summary: str | None = None
 
     deleted_at: str | None = None
     agent_count: int = 0

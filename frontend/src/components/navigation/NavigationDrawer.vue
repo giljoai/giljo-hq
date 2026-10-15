@@ -103,7 +103,7 @@
           <v-icon v-else>{{ item.icon }}</v-icon>
         </template>
         <template v-if="badgeCount(item) > 0" #append>
-          <span :style="hubUnreadBadgeStyle()" :data-testid="badgeTestId(item)">{{ badgeCount(item) > 99 ? '99+' : badgeCount(item) }}</span>
+          <span :style="hubUnreadBadgeStyle()" data-testid="nav-hub-unread-badge">{{ badgeCount(item) > 99 ? '99+' : badgeCount(item) }}</span>
         </template>
       </v-list-item>
     </v-list>
@@ -198,7 +198,6 @@ import { useUserStore } from '@/stores/user'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
-import { useGlobalActivityStore } from '@/stores/globalActivityStore'
 import { useToast } from '@/composables/useToast'
 import { useNavDrawerAccount } from '@/composables/useNavDrawerAccount'
 import { useNavConnectionStatus } from '@/composables/useNavConnectionStatus'
@@ -243,15 +242,9 @@ const productsStore = useProductStore()
 const userStore = useUserStore()
 const wsStore = useWebSocketStore()
 const commHub = useCommHubStore()
-const globalActivity = useGlobalActivityStore()
 function badgeCount(item) {
-  if (item.name === 'Hub') return commHub.totalUnread
-  if (item.name === 'Projects') {
-    return projectStore.projects.reduce((sum, p) => sum + globalActivity.getCount(p.id), 0)
-  }
-  return 0
+  return item.name === 'Hub' ? commHub.totalUnread : 0
 }
-const badgeTestId = (item) => (item.name === 'Hub' ? 'nav-hub-unread-badge' : 'nav-projects-activity-badge')
 const sequenceRunStore = useSequenceRunStore()
 const { showToast } = useToast()
 

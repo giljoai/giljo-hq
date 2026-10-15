@@ -10,6 +10,7 @@ import hashlib
 from typing import Any
 
 from giljo_mcp.models import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import is_orchestrator_placeholder_mission
 from giljo_mcp.platform_registry import (
     EXECUTION_MODE_TO_TOOL,
     HARNESS_CLI_TOOL_TYPES,
@@ -28,7 +29,9 @@ from giljo_mcp.services.protocol_builder import (
     _generate_agent_protocol,
     _generate_team_context_header,
 )
+from giljo_mcp.services.protocol_sections.team_context import JobLinks
 from giljo_mcp.services.protocol_survival import compute_next_required_actions
+from giljo_mcp.services.sequence_chain_context import chain_member_phase
 
 
 _EXECUTION_MODE_TO_TOOL = EXECUTION_MODE_TO_TOOL
@@ -49,8 +52,12 @@ This is a degradation, not a stop. Keep working your mission, and report it once
 report_progress (or post_to_thread) so whoever spawned you can {remedy}."""
 
 
+def served_agent_name(execution: AgentExecution) -> str:
+    return execution.agent_name or execution.agent_display_name or "agent"
+
+
 def compose_template_identity(identity_template: Any, execution: AgentExecution) -> str:
-    role_label = (identity_template.role or execution.agent_name or "agent").upper()
+    role_label = served_agent_name(execution).upper()
     identity_parts = [
         f"You are {role_label}. The following defines your expertise, "
         f"behavioral constraints, and success criteria. "
@@ -71,10 +78,10 @@ def compose_template_identity(identity_template: Any, execution: AgentExecution)
     return "\n\n".join(identity_parts)
 
 
-def compose_agent_profile(template: Any) -> dict[str, Any] | None:
+def compose_agent_profile(template: Any, *, with_instructions: bool = False) -> dict[str, Any] | None:
     if template is None:
         return None
-    return {
+    profile = {
         "template_id": getattr(template, "id", None),
         "name": getattr(template, "name", None),
         "role": getattr(template, "role", None),
@@ -82,10 +89,12 @@ def compose_agent_profile(template: Any) -> dict[str, Any] | None:
         "harness": getattr(template, "cli_tool", None) or "claude",
         "model": normalize_hint(getattr(template, "model", None)),
         "effort": normalize_hint(getattr(template, "effort", None)),
-        "instructions": getattr(template, "user_instructions", None) or "",
         "behavioral_rules": list(getattr(template, "behavioral_rules", None) or []),
         "success_criteria": list(getattr(template, "success_criteria", None) or []),
     }
+    if with_instructions:
+        profile["instructions"] = getattr(template, "user_instructions", None) or ""
+    return profile
 
 
 def compose_unresolved_identity(job: AgentJob, execution: AgentExecution) -> tuple[str, str]:
@@ -130,6 +139,17 @@ def _maybe_inject_ch6(
     return full_protocol + "\n" + _build_ch6_auto_checkin(interval, for_conductor=project is None)
 
 
+def _served_mission(job: AgentJob, project: Any) -> str:
+    if (
+        job.job_type == "orchestrator"
+        and is_orchestrator_placeholder_mission(job.mission)
+        and project
+        and project.mission
+    ):
+        return project.mission
+    return job.mission or ""
+
+
 def assemble_mission_context(
     logger,
     job: AgentJob,
@@ -150,6 +170,7 @@ def assemble_mission_context(
     identity_status: str = IDENTITY_RESOLVED,
     identity_source: str | None = None,
     agent_profile: dict[str, Any] | None = None,
+    job_links: JobLinks | None = None,
 ) -> MissionResponse:
     job_id = job.job_id
 
@@ -163,8 +184,9 @@ def assemble_mission_context(
         all_project_executions,
         mission_lookup=mission_lookup,
         include_team_table=not is_multi_terminal_specialist,
+        job_links=job_links,
     )
-    raw_mission = job.mission or ""
+    raw_mission = _served_mission(job, project)
     mission_framing = (
         "This is your assigned work order. Execute the following tasks "
         "within the scope and team structure defined below.\n\n"
@@ -183,7 +205,7 @@ def assemble_mission_context(
     full_protocol = _generate_agent_protocol(
         job_id=job_id,
         tenant_key=tenant_key,
-        agent_name=execution.agent_display_name,
+        agent_name=served_agent_name(execution),
         agent_id=str(execution.agent_id),
         execution_mode=agent_tool,
         git_integration_enabled=git_enabled,
@@ -208,6 +230,8 @@ def assemble_mission_context(
 
     if job.job_type != "orchestrator":
         phase_for_response = None
+    elif project is not None and chain_execution_mode:
+        phase_for_response = chain_member_phase(project)
     elif project is not None:
         phase_for_response = "implementation" if project.implementation_launched_at is not None else "staging"
     else:
@@ -222,7 +246,7 @@ def assemble_mission_context(
     return MissionResponse(
         job_id=job.job_id,
         agent_id=execution.agent_id,
-        agent_name=execution.agent_display_name,
+        agent_name=served_agent_name(execution),
         agent_display_name=execution.agent_display_name,
         agent_identity=served_identity,
         identity_status=identity_status,

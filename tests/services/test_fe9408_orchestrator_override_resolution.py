@@ -24,26 +24,18 @@ from giljo_mcp.system_prompts.identity_provenance import append_identity_source,
 from giljo_mcp.system_prompts.service import (
     SCOPE_DEFAULT,
     SCOPE_PRODUCT,
-    SCOPE_TENANT,
     SystemPromptService,
     read_orchestrator_override,
 )
 from giljo_mcp.template_seeder import compose_orchestrator_identity
 
 
-TENANT_TEXT = "TENANT-WIDE orchestrator seed for FE-9408 resolution."
+OTHER_PRODUCT_TEXT = "ANOTHER PRODUCT's orchestrator seed for FE-9408 resolution."
 PRODUCT_TEXT = "PRODUCT-SCOPED orchestrator seed for FE-9408 resolution."
 PRODUCT_NAME = "Acme Widgets"
 SAVED_AT = datetime(2026, 7, 16, 9, 30, tzinfo=UTC)
 
 
-
-
-def test_tenant_line_names_the_rung_and_the_date():
-    assert (
-        format_identity_source(SCOPE_TENANT, updated_at=SAVED_AT)
-        == "identity source: tenant-wide override, saved 2026-07-16"
-    )
 
 
 def test_product_line_names_the_product():
@@ -60,7 +52,9 @@ def test_default_line_says_built_in_and_claims_no_override():
 
 
 def test_an_unparseable_stored_date_drops_the_clause_instead_of_saying_saved_none():
-    assert format_identity_source(SCOPE_TENANT, updated_at=None) == "identity source: tenant-wide override"
+    assert (
+        format_identity_source(SCOPE_PRODUCT, updated_at=None, product_name=None) == "identity source: product override"
+    )
 
 
 def test_an_unreadable_product_name_drops_the_parenthetical_only():
@@ -86,7 +80,7 @@ def test_provenance_is_withheld_with_the_identity_it_describes():
     assert gate_identity_source("some identity", "identity source: built-in default") == (
         "identity source: built-in default"
     )
-    assert gate_identity_source(None, "identity source: tenant-wide override, saved 2026-07-16") is None
+    assert gate_identity_source(None, "identity source: product override, saved 2026-07-16") is None
     assert gate_identity_source("", "identity source: built-in default") is None
 
 
@@ -117,13 +111,16 @@ def _project_row(product_id: str | None):
     return SimpleNamespace(id="proj-fe9408", product_id=product_id, execution_mode="multi_terminal")
 
 
-async def _seed(db_manager, db_session, tenant_key, *, product_id=None, tenant=False, product=False):
+async def _seed(db_manager, db_session, tenant_key, *, product_id=None):
     service = SystemPromptService(db_manager=db_manager)
-    if tenant:
-        await service.update_orchestrator_prompt(
-            tenant_key=tenant_key, content=TENANT_TEXT, updated_by="admin", session=db_session
-        )
-    if product:
+    await service.update_orchestrator_prompt(
+        tenant_key=tenant_key,
+        content=OTHER_PRODUCT_TEXT,
+        updated_by="admin",
+        product_id=str(uuid.uuid4()),
+        session=db_session,
+    )
+    if product_id:
         await service.update_orchestrator_prompt(
             tenant_key=tenant_key,
             content=PRODUCT_TEXT,
@@ -136,9 +133,9 @@ async def _seed(db_manager, db_session, tenant_key, *, product_id=None, tenant=F
 
 @pytest.mark.asyncio
 class TestWidenedResolution:
-    async def test_product_rung_reports_its_date_and_its_product(self, db_manager, db_session, test_tenant_key):
+    async def test_product_source_reports_its_date_and_its_product(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         svc = _mission_service(db_manager, project_row=_project_row(product_id))
         resolved = await resolve_orchestrator_override(
@@ -150,21 +147,7 @@ class TestWidenedResolution:
         assert resolved.updated_at is not None
         assert resolved.product_id == product_id
 
-    async def test_tenant_rung_reports_its_date_and_no_product(self, db_manager, db_session, test_tenant_key):
-        product_id = str(uuid.uuid4())
-        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=False)
-
-        svc = _mission_service(db_manager, project_row=_project_row(product_id))
-        resolved = await resolve_orchestrator_override(
-            svc, db_session, _job(), _execution(), test_tenant_key, _project_row(product_id)
-        )
-
-        assert resolved.content == TENANT_TEXT
-        assert resolved.scope == SCOPE_TENANT
-        assert resolved.updated_at is not None
-        assert resolved.product_id is None
-
-    async def test_default_rung_reports_nothing_to_attribute(self, db_manager, db_session, test_tenant_key):
+    async def test_default_source_reports_nothing_to_attribute(self, db_manager, db_session, test_tenant_key):
         svc = _mission_service(db_manager, project_row=_project_row(str(uuid.uuid4())))
         resolved = await resolve_orchestrator_override(
             svc, db_session, _job(), _execution(), test_tenant_key, _project_row(None)
@@ -188,9 +171,9 @@ class TestWidenedResolution:
         assert resolved.updated_at is None
         assert resolved.product_id is None
 
-    async def test_the_staging_read_reports_the_same_rung(self, db_manager, db_session, test_tenant_key):
+    async def test_the_staging_read_reports_the_same_source(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         staging = await read_orchestrator_override(
             db_manager=db_manager, tenant_key=test_tenant_key, product_id=product_id, session=db_session
@@ -205,17 +188,17 @@ class TestWidenedResolution:
         assert staging.updated_at == mission.updated_at
         assert staging.product_id == mission.product_id == product_id
 
-    async def test_an_unusable_product_id_degrades_the_staging_read_to_the_tenant_rung(
+    async def test_an_unusable_product_id_degrades_the_staging_read_to_the_built_in_prompt(
         self, db_manager, db_session, test_tenant_key
     ):
-        await _seed(db_manager, db_session, test_tenant_key, tenant=True)
+        await _seed(db_manager, db_session, test_tenant_key)
 
         staging = await read_orchestrator_override(
             db_manager=db_manager, tenant_key=test_tenant_key, product_id="not-a-uuid", session=db_session
         )
 
-        assert staging.content == TENANT_TEXT
-        assert staging.scope == SCOPE_TENANT
+        assert staging.content is None
+        assert staging.scope == SCOPE_DEFAULT
 
     async def test_a_failed_product_name_lookup_costs_the_label_and_nothing_else(
         self, db_manager, db_session, test_tenant_key
@@ -246,7 +229,7 @@ class TestServedContentIsUnchanged:
 
     async def test_product_scope_is_composition_plus_one_line(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         identity, source, scope = await self._served(db_manager, db_session, test_tenant_key, product_id=product_id)
 
@@ -255,18 +238,6 @@ class TestServedContentIsUnchanged:
         )
         assert source.startswith(f"identity source: product override ({PRODUCT_NAME}), saved ")
         assert scope == SCOPE_PRODUCT
-
-    async def test_tenant_scope_is_composition_plus_one_line(self, db_manager, db_session, test_tenant_key):
-        product_id = str(uuid.uuid4())
-        await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True)
-
-        identity, source, scope = await self._served(db_manager, db_session, test_tenant_key, product_id=product_id)
-
-        assert (
-            identity == compose_orchestrator_identity(TENANT_TEXT, tool="multi_terminal", role=None) + f"\n\n{source}"
-        )
-        assert source.startswith("identity source: tenant-wide override, saved ")
-        assert scope == SCOPE_TENANT
 
     async def test_default_scope_is_composition_plus_one_line(self, db_manager, db_session, test_tenant_key):
         identity, source, scope = await self._served(

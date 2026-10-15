@@ -193,7 +193,8 @@ async def join_thread(
         "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
         "tool. Requires from_agent (or an explicit as_user=true for a post in the human "
         "user's voice). Broadcasts by default; see to_participant, set_status, and "
-        "pass_baton_to for DM, status, and atomic baton hand-off. Etiquette: make sure a "
+        "pass_baton_to for DM, status, and atomic baton hand-off. A post reopens a resolved "
+        "(not closed) thread. Etiquette: make sure a "
         "persona has join_thread'ed before you name it -- pass_baton_to refuses an id not "
         "registered on the thread, and a to_participant post to a never-joined id is stored "
         "but nobody is polling for it."
@@ -276,7 +277,7 @@ async def post_to_thread(
         Field(
             max_length=MCP_NAME_MAX,
             description="Rename this thread with this post. Empty = unchanged. REFUSED on a "
-            "project-bound thread (it's named after its project) -- rename the project instead. "
+            "project-bound thread (one with a project_id: it belongs to that project) -- rename the project instead. "
             "Applied BEFORE the post: a refused rename posts nothing.",
         ),
     ] = "",
@@ -363,6 +364,8 @@ async def post_to_thread(
             from_display_name=result.get("from_display_name"),
             from_kind=result.get("from_kind"),
         )
+    if result.get("thread_reopened"):
+        await broadcast_thread_metadata_update(ctx, thread_id, update_type="status")
     if rename_to:
         await broadcast_thread_metadata_update(ctx, thread_id, update_type="updated", include_subject=True)
     return result

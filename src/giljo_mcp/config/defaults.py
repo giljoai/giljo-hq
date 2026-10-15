@@ -44,7 +44,7 @@ DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
     "tuning_reminder_threshold": 10,
     "banner_lifecycle_enabled": True,
     "banner_advisories_in_fold": True,
-    "popout_scope": "all",
+    "popout_scope": "actionable",
 }
 
 TUNING_SECTION_TOGGLE_MAP: dict[str, str] = {

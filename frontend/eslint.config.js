@@ -204,6 +204,7 @@ export default [
       'src/components/memory/MemoryEntryRow.vue',
       'src/components/messages/BroadcastPanel.vue',
       'src/components/messages/MessageItem.vue',
+      'src/components/settings/tabs/SystemPromptTab.vue',
       'src/views/UserGuideView.vue',
     ],
     rules: {

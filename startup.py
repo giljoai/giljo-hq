@@ -715,10 +715,10 @@ def run_startup(
                 package_lock.exists() and package_lock.stat().st_mtime > node_modules_marker.stat().st_mtime
             )
             if needs_install:
-                print_info("Installing frontend dependencies (npm ci)...")
-                ci_result = subprocess.run([npm_cmd, "ci"], cwd=str(frontend_dir), check=False)
+                print_info("Installing frontend dependencies (npm ci --omit=dev)...")
+                ci_result = subprocess.run([npm_cmd, "ci", "--omit=dev"], cwd=str(frontend_dir), check=False)
                 if ci_result.returncode != 0:
-                    print_error("Frontend dependency install (npm ci) failed.")
+                    print_error("Frontend dependency install (npm ci --omit=dev) failed.")
                     print_error("Your install is incomplete. Re-run the installer to repair it:")
                     print_error("    Windows:      irm giljo.ai/install.ps1 | iex")
                     print_error("    Linux/macOS:  curl -fsSL giljo.ai/install.sh | bash")

@@ -46,32 +46,9 @@ class SubagentPromptBuilder(ExecutionPromptBuilderBase):
             "",
             self._spawn_syntax(),
             "",
-            "For EACH agent below, spawn it and give it this first instruction:",
-            "",
-            "```",
-            "You are {agent_name} (job_id: {job_id})",
-            "",
-            'First action: Call get_job_mission(job_id="{job_id}")',
-            "This returns your `mission` and `full_protocol`.",
-            "Follow `full_protocol` for all lifecycle behavior.",
-            "```",
+            "For EACH agent, spawn it and give it, as its first instruction, its launch prompt",
+            "from Launch Prompts below, verbatim.",
             "",
         ]
-
-        if agent_jobs:
-            first = agent_jobs[0]
-            lines.extend(
-                [
-                    "### Example: First Agent",
-                    "```",
-                    f"You are {first.agent_name} (job_id: {first.job_id})",
-                    "",
-                    f'First action: Call get_job_mission(job_id="{first.job_id}")',
-                    "This returns your `mission` and `full_protocol`.",
-                    "Follow `full_protocol` for all lifecycle behavior.",
-                    "```",
-                    "",
-                ]
-            )
 
         return lines

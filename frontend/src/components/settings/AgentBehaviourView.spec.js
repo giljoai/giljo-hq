@@ -97,7 +97,7 @@ describe('FE-9643b — the view hosts all five settings', () => {
   it('says how changes are saved, and offers no Save button', async () => {
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('Changes save as you make them')
+    expect(wrapper.text()).toContain('Changes save automatically')
     expect(wrapper.text()).toContain('How agents behave for this account')
     const labels = wrapper.findAll('button').map((b) => b.text())
     expect(labels.some((t) => /^save$/i.test(t.trim()))).toBe(false)

@@ -16,7 +16,7 @@
       </v-tooltip>
     </div>
     <p class="text-body-medium text-muted-a11y mb-4">
-      How agents behave for this account. Applies to every product. Changes save as you make them.
+      How agents behave for this account. Applies to every product. Changes save automatically.
     </p>
 
     <v-card variant="flat" class="smooth-border behaviour-card">

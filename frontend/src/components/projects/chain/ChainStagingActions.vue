@@ -1,66 +1,80 @@
 <template>
-  <div class="chain-staging-actions">
-    <v-btn
-      class="stage-button jb-btn jb-btn-secondary"
-      size="small"
-      variant="outlined"
-      :loading="staging"
-      :disabled="stageDisabled"
-      :title="stageTitle"
-      data-testid="stage-chain-btn"
-      @click="emit('stage')"
+  <div class="chain-staging-actions" data-testid="chain-staging-actions">
+    <StagingControlArea
+      v-if="controls.chainPhase !== 'running'"
+      variant="chain"
+      :phase="controls.chainPhase"
+      :mode="controls.chainMode"
+      :mode-locked="chainCtx.locked"
+      :stage-text="controls.chainStageText"
+      :stage-title="controls.chainStageTitle"
+      :stage-role="chainCtx.locked ? 'secondary' : 'next'"
+      :stage-needs-mode="controls.chainStageNeedsMode"
+      :stage-blocked="controls.chainStaging"
+      :stage-busy="controls.chainStaging"
+      :implement-ready="controls.chainImplementReady"
+      :implement-busy="controls.launching"
+      :copying="controls.copyingChainPrompt"
+      secondary-label="Deactivate chain"
+      :secondary-busy="controls.deactivating"
+      @pick-mode="controls.patchRunMode"
+      @stage="controls.handleChainStage"
+      @implement="controls.handleChainImplement"
+      @copy-prompt="controls.copyChainPrompt"
+      @secondary="controls.openDeactivateConfirm"
     >
-      {{ stageText }}
-    </v-btn>
+      <template v-if="controls.chainPhase === 'pickup'" #actions>
+        <ChainStopControl
+          :run="chainCtx.run"
+          :model-value="controls.showChainStopConfirm"
+          :stopping="controls.chainStopping"
+          @open="controls.openChainStopConfirm"
+          @confirm="controls.handleChainStop"
+          @cancel="controls.cancelChainStop"
+        />
+      </template>
+    </StagingControlArea>
 
-    <v-btn
-      class="launch-button jb-btn jb-btn-primary"
-      size="small"
-      variant="flat"
-      :disabled="!implementReady"
-      data-testid="implement-chain-btn"
-      @click="emit('implement')"
+
+    <BaseDialog
+      :model-value="controls.showDeactivateConfirm"
+      type="danger"
+      title="Deactivate chain?"
+      confirm-label="Deactivate chain"
+      size="sm"
+      :loading="controls.deactivating"
+      @confirm="controls.handleChainDeactivate"
+      @cancel="controls.cancelDeactivate"
+      @update:model-value="(open) => !open && controls.cancelDeactivate()"
     >
-      <v-icon start size="16" aria-hidden="true">mdi-play</v-icon>
-      Implement
-    </v-btn>
+      <p class="mb-3">
+        This returns all {{ chainCtx.counter.m }} linked projects to their <strong>original state</strong>
+        and deletes {{ agentCount }} {{ agentCount === 1 ? 'agent' : 'agents' }} and their jobs.
+      </p>
+      <v-alert type="warning" variant="tonal" density="compact">
+        Staging and missions are cleared. <strong>No audit log is kept</strong>; to end a running chain
+        and keep its work, use <strong>Stop chain</strong> instead. This cannot be undone.
+      </v-alert>
+    </BaseDialog>
   </div>
 </template>
 
 <script setup>
-defineProps({
-  stageText: { type: String, default: '' },
-  stageTitle: { type: String, default: '' },
-  stageDisabled: { type: Boolean, default: false },
-  staging: { type: Boolean, default: false },
-  implementReady: { type: Boolean, default: false },
-})
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import StagingControlArea from '@/components/projects/StagingControlArea.vue'
+import ChainStopControl from './ChainStopControl.vue'
 
-const emit = defineEmits(['stage', 'implement'])
+defineProps({
+  chainCtx: { type: Object, required: true },
+  controls: { type: Object, required: true },
+  agentCount: { type: Number, default: 0 },
+})
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/design-tokens' as *;
 
 .chain-staging-actions {
-  display: contents;
-}
-
-.jb-btn {
-  font-size: 0.76rem;
-  font-weight: 600;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.jb-btn-primary {
-  background: $color-brand-yellow;
-  color: $color-on-yellow-ink;
-}
-
-.jb-btn-secondary {
-  color: $color-brand-yellow;
-  border-color: $color-brand-yellow;
-  border-width: 2px;
+  margin-top: 16px;
 }
 </style>

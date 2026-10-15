@@ -86,6 +86,7 @@ def test_facade_and_core_methods_all_resolve_on_composed_class():
     for name in (
         "create_task_for_mcp",
         "update_task_for_mcp",
+        "promote_task_for_mcp",
         "list_tasks_for_mcp",
         "_list_tasks_for_mcp_impl",
         "_task_type_block",

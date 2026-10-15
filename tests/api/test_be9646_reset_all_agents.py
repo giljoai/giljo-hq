@@ -132,3 +132,64 @@ async def test_reset_all_touches_only_the_product_named(api_client, auth_headers
 
     after = await _roster(api_client, auth_headers, other_id)
     assert after[victim["name"]]["user_instructions"] == "Belongs to the other product."
+
+
+async def test_roster_flags_builtin_drift_and_serves_the_builtin_text(api_client, auth_headers) -> None:
+    product_id = await _make_product(api_client, auth_headers)
+    crew = await _roster(api_client, auth_headers, product_id)
+    tester = next(t for t in crew.values() if t["role"] == "tester")
+    assert tester["differs_from_builtin"] is False
+    assert tester["updated_at"] is None
+
+    shipped = await api_client.get(f"/api/v1/templates/{tester['id']}/factory-default", headers=auth_headers)
+    assert shipped.status_code == 200, shipped.text
+    assert shipped.json()["user_instructions"] == _shipped("tester")
+    assert shipped.json()["role"] == "tester"
+
+    edited = await api_client.put(
+        f"/api/v1/templates/{tester['id']}",
+        headers=auth_headers,
+        json={"user_instructions": "Our own tester rules."},
+    )
+    assert edited.status_code == 200, edited.text
+    after = (await _roster(api_client, auth_headers, product_id))[tester["name"]]
+    assert after["differs_from_builtin"] is True
+    assert after["updated_at"] is not None
+
+    mine = await _make_agent(api_client, auth_headers, product_id)
+    assert mine["differs_from_builtin"] is None
+    none = await api_client.get(f"/api/v1/templates/{mine['id']}/factory-default", headers=auth_headers)
+    assert none.status_code == 404
+
+
+async def test_reset_and_history_answer_under_the_single_port_spa_mount(api_client, auth_headers, tmp_path) -> None:
+    from api.app import _install_spa_fallback, app
+
+    product_id = await _make_product(api_client, auth_headers)
+    tester = next(t for t in (await _roster(api_client, auth_headers, product_id)).values() if t["role"] == "tester")
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>giljo-spa</title>")
+    saved_404 = app.exception_handlers.get(404)
+    _install_spa_fallback(app, dist)
+    app.middleware_stack = None
+    try:
+        reset = await api_client.post(f"/api/v1/templates/{tester['id']}/reset", headers=auth_headers)
+        assert reset.status_code == 200, reset.text
+        assert reset.json()["differs_from_builtin"] is False
+        assert reset.json()["updated_at"] is None
+        history = await api_client.get(f"/api/v1/templates/{tester['id']}/history", headers=auth_headers)
+        assert history.status_code == 200, history.text
+
+        slashed_reset = await api_client.post(f"/api/v1/templates/{tester['id']}/reset/", headers=auth_headers)
+        assert slashed_reset.status_code == 405
+        slashed_history = await api_client.get(f"/api/v1/templates/{tester['id']}/history/", headers=auth_headers)
+        assert slashed_history.status_code == 404
+    finally:
+        app.router.routes.pop()
+        if saved_404 is None:
+            app.exception_handlers.pop(404, None)
+        else:
+            app.exception_handlers[404] = saved_404
+        app.middleware_stack = None

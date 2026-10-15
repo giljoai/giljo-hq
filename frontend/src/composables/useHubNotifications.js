@@ -15,6 +15,7 @@ import { registerPopout } from '@/utils/popoutRegistry'
 import { useSettingsStore } from '@/stores/settings'
 
 import { useThreadPostAttention } from './useThreadPostAttention'
+import { useStoppedAgentSignals, ALL_SCOPE_ONLY_REASONS } from './useStoppedAgentSignals'
 
 const NOTIFICATION_ICON = '/icons/Giljo_Face_Avatar.png'
 
@@ -40,13 +41,17 @@ export function useHubNotifications() {
 
   ensureLoaded()
 
-  function openThread(threadId, { reason = BATON_FOCUS, messageId = null } = {}) {
-    if (!threadId) return
+  function focusWindow() {
     try {
       window.focus()
     } catch {
       // noop — focus can throw in some embeddings
     }
+  }
+
+  function openThread(threadId, { reason = BATON_FOCUS, messageId = null } = {}) {
+    if (!threadId) return
+    focusWindow()
     router.push(hubThreadRoute(threadId, { reason, messageId })).catch(() => {})
   }
 
@@ -72,17 +77,24 @@ export function useHubNotifications() {
     }
   }
 
-  function fireNotification(title, body, threadId, { reason, messageId } = {}) {
+  function fireNotification(title, body, entityId, { reason, messageId, onClick } = {}) {
     if (typeof Notification === 'undefined') return
 
-    if (useSettingsStore().popoutScope === 'off') return
+    const scope = useSettingsStore().popoutScope
+    if (scope === 'off') return
+    if (scope !== 'all' && ALL_SCOPE_ONLY_REASONS.has(reason)) return
 
     requestPermissionLazy()
     if (Notification.permission !== 'granted') return
     try {
-      const tag = popoutTag(reason, threadId)
+      const tag = popoutTag(reason, entityId, useUserStore().currentUser?.id)
       const n = new Notification(title, { body, icon: NOTIFICATION_ICON, tag })
-      n.onclick = () => openThread(threadId, { reason, messageId })
+      n.onclick = onClick
+        ? () => {
+            focusWindow()
+            onClick()
+          }
+        : () => openThread(entityId, { reason, messageId })
 
       registerPopout(tag, n)
     } catch {
@@ -205,6 +217,11 @@ export function useHubNotifications() {
     handleEvent('hub:thread_update', e.detail || {})
   }
 
+  const stoppedAgents = useStoppedAgentSignals({
+    fire: fireNotification,
+    navigate: (route) => router.push(route).catch(() => {}),
+  })
+
   if (typeof window !== 'undefined') {
     window.addEventListener('hub:thread_message', onThreadMessage)
     window.addEventListener('hub:thread_update', onThreadUpdate)
@@ -213,6 +230,7 @@ export function useHubNotifications() {
       onScopeDispose(() => {
         window.removeEventListener('hub:thread_message', onThreadMessage)
         window.removeEventListener('hub:thread_update', onThreadUpdate)
+        stoppedAgents.dispose()
       })
     }
   }

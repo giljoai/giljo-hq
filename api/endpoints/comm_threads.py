@@ -314,6 +314,9 @@ async def post_to_thread(
     shared 'all') instead of leaving it to a manual raised-hand control. See
     ``CommThreadService.post_to_thread`` for the exact contract and the guard against
     clearing a baton some other agent still holds.
+
+    Posting to a resolved thread reopens it (status becomes active) unless the post sets a
+    status itself; a closed thread stays closed.
     """
     result = await service.post_to_thread(
         thread_id=thread_id,
@@ -367,10 +370,10 @@ async def post_to_thread(
             to_participant=result.get("to_participant"),
         )
         baton_changed = bool(result.get("baton_passed") or result.get("baton_cleared"))
-        if body.set_status or baton_changed:
+        if body.set_status or baton_changed or result.get("thread_reopened"):
             history = await service.get_thread_history(thread_id=thread_id, tenant_key=current_user.tenant_key)
             t = history["thread"]
-            if body.set_status:
+            if body.set_status or result.get("thread_reopened"):
                 await broadcast_thread_update(
                     state.websocket_manager,
                     current_user.tenant_key,
@@ -407,7 +410,7 @@ async def update_thread(
     thread list is a wall of stale "Open".
 
     A rename is REFUSED on a project-bound thread (clean 400 with the reason, never a
-    500): that thread is named after its project and is kept with the project's 360
+    500): that thread belongs to its project and is kept with the project's 360
     memory. Status has no such restriction — resolving or closing a project thread is a
     normal operator action and says nothing about the project's identity.
     """

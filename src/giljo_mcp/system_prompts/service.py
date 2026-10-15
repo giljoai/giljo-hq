@@ -22,8 +22,11 @@ DEFAULT_ORCHESTRATOR_CONFIG_KEY = "system.orchestrator_prompt"
 MAX_PROMPT_BYTES = 150_000
 
 SCOPE_PRODUCT = "product"
-SCOPE_TENANT = "tenant"
 SCOPE_DEFAULT = "default"
+
+MODE_ADDITIONS = "additions"
+MODE_REPLACE = "replace"
+ADDITIONS_HEADING = "## Additional Instructions For This Account"
 
 
 def product_orchestrator_config_key(product_id: str) -> str:
@@ -49,6 +52,18 @@ def coerce_product_id(product_id: str | None) -> str | None:
         return None
 
 
+class ProductRequiredError(ValueError):
+
+    def __init__(self) -> None:
+        super().__init__("product_id is required: the orchestrator prompt is set per product.")
+
+
+def _require_product_id(normalized_product_id: str | None) -> str:
+    if not normalized_product_id:
+        raise ProductRequiredError
+    return normalized_product_id
+
+
 @dataclass(frozen=True)
 class ResolvedOverride:
 
@@ -56,6 +71,7 @@ class ResolvedOverride:
     scope: str = SCOPE_DEFAULT
     updated_at: datetime | None = None
     product_id: str | None = None
+    mode: str | None = None
 
 
 @dataclass
@@ -66,6 +82,12 @@ class PromptRecord:
     updated_at: datetime | None
     updated_by: str | None
     scope: str = SCOPE_DEFAULT
+    mode: str | None = None
+    additions: str | None = None
+
+
+def compose_seed_with_additions(seed: str, additions: str) -> str:
+    return f"{seed.strip()}\n\n{ADDITIONS_HEADING}\n\n{additions.strip()}"
 
 
 class SystemPromptService:
@@ -85,20 +107,26 @@ class SystemPromptService:
         normalized_product_id = _normalize_product_id(product_id)
 
         if session:
-            override, scope = await self._fetch_ladder(session, tenant_key, normalized_product_id)
+            override = await self._fetch_product_override(session, tenant_key, normalized_product_id)
         elif self.db_manager:
             async with self.db_manager.get_session_async() as db_session:
-                override, scope = await self._fetch_ladder(db_session, tenant_key, normalized_product_id)
+                override = await self._fetch_product_override(db_session, tenant_key, normalized_product_id)
         else:
-            override, scope = None, SCOPE_DEFAULT
+            override = None
 
         if override:
+            if override["mode"] == MODE_ADDITIONS:
+                content = compose_seed_with_additions(self._build_default_orchestrator_prompt(), override["additions"])
+            else:
+                content = override["content"]
             return PromptRecord(
-                content=override["content"],
+                content=content,
                 is_override=True,
                 updated_at=override.get("updated_at"),
                 updated_by=override.get("updated_by"),
-                scope=scope,
+                scope=SCOPE_PRODUCT,
+                mode=override["mode"],
+                additions=override.get("additions"),
             )
 
         return PromptRecord(
@@ -120,25 +148,79 @@ class SystemPromptService:
     ) -> PromptRecord:
         self._require_tenant_key(tenant_key)
         self._ensure_db_manager()
-        normalized_product_id = _normalize_product_id(product_id)
+        normalized_product_id = _require_product_id(_normalize_product_id(product_id))
         sanitized_content = content.strip()
         self._validate_content(sanitized_content)
 
-        payload = {
+        stored_value = {
             "content": sanitized_content,
             "updated_by": updated_by,
-            "updated_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
-        config_key = self._config_key(normalized_product_id)
+        return await self._save_rung(tenant_key, normalized_product_id, stored_value, session)
 
+    async def update_orchestrator_additions(
+        self,
+        *,
+        tenant_key: str,
+        additions: str,
+        updated_by: str,
+        product_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> PromptRecord:
+        self._require_tenant_key(tenant_key)
+        self._ensure_db_manager()
+        normalized_product_id = _require_product_id(_normalize_product_id(product_id))
+        sanitized = additions.strip()
+        self._validate_content(sanitized)
+
+        stored_value = {
+            "mode": MODE_ADDITIONS,
+            "additions": sanitized,
+            "updated_by": updated_by,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        return await self._save_rung(tenant_key, normalized_product_id, stored_value, session)
+
+    async def read_rung_additions(
+        self,
+        *,
+        tenant_key: str,
+        product_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> str | None:
+        self._require_tenant_key(tenant_key)
+        normalized_product_id = _normalize_product_id(product_id)
+        if normalized_product_id is None:
+            return None
+        config_key = product_orchestrator_config_key(normalized_product_id)
         if session:
-            await self._upsert_override(session, tenant_key, config_key, payload)
+            row = await self._fetch_override(session, tenant_key, config_key)
+        elif self.db_manager:
+            async with self.db_manager.get_session_async() as db_session:
+                row = await self._fetch_override(db_session, tenant_key, config_key)
+        else:
+            row = None
+        if row is None or row["mode"] != MODE_ADDITIONS:
+            return None
+        return row["additions"]
+
+    async def _save_rung(
+        self,
+        tenant_key: str,
+        normalized_product_id: str,
+        stored_value: dict,
+        session: AsyncSession | None,
+    ) -> PromptRecord:
+        config_key = product_orchestrator_config_key(normalized_product_id)
+        if session:
+            await self._upsert_override(session, tenant_key, config_key, stored_value)
             return await self.get_orchestrator_prompt(
                 tenant_key=tenant_key, product_id=normalized_product_id, session=session
             )
 
         async with self.db_manager.get_session_async() as db_session:
-            await self._upsert_override(db_session, tenant_key, config_key, payload)
+            await self._upsert_override(db_session, tenant_key, config_key, stored_value)
             return await self.get_orchestrator_prompt(
                 tenant_key=tenant_key, product_id=normalized_product_id, session=db_session
             )
@@ -152,8 +234,8 @@ class SystemPromptService:
     ) -> PromptRecord:
         self._require_tenant_key(tenant_key)
         self._ensure_db_manager()
-        normalized_product_id = _normalize_product_id(product_id)
-        config_key = self._config_key(normalized_product_id)
+        normalized_product_id = _require_product_id(_normalize_product_id(product_id))
+        config_key = product_orchestrator_config_key(normalized_product_id)
 
         if session:
             await self._delete_override(session, tenant_key, config_key)
@@ -167,44 +249,15 @@ class SystemPromptService:
                 tenant_key=tenant_key, product_id=normalized_product_id, session=db_session
             )
 
-    @staticmethod
-    def _config_key(normalized_product_id: str | None) -> str:
-        if normalized_product_id:
-            return product_orchestrator_config_key(normalized_product_id)
-        return DEFAULT_ORCHESTRATOR_CONFIG_KEY
-
-    async def _fetch_ladder(
+    async def _fetch_product_override(
         self,
         session: AsyncSession,
         tenant_key: str,
         normalized_product_id: str | None,
-    ) -> tuple[dict | None, str]:
-        if normalized_product_id:
-            product_override = await self._fetch_override(
-                session, tenant_key, product_orchestrator_config_key(normalized_product_id)
-            )
-            if product_override:
-                return product_override, SCOPE_PRODUCT
-
-        tenant_override = await self._fetch_override(session, tenant_key, DEFAULT_ORCHESTRATOR_CONFIG_KEY)
-        if tenant_override:
-            return tenant_override, SCOPE_TENANT
-
-        return None, SCOPE_DEFAULT
-
-    async def read_tenant_override_row(
-        self,
-        *,
-        tenant_key: str,
-        session: AsyncSession | None = None,
     ) -> dict | None:
-        self._require_tenant_key(tenant_key)
-        if session:
-            return await self._fetch_override(session, tenant_key, DEFAULT_ORCHESTRATOR_CONFIG_KEY)
-        if not self.db_manager:
+        if not normalized_product_id:
             return None
-        async with self.db_manager.get_session_async() as db_session:
-            return await self._fetch_override(db_session, tenant_key, DEFAULT_ORCHESTRATOR_CONFIG_KEY)
+        return await self._fetch_override(session, tenant_key, product_orchestrator_config_key(normalized_product_id))
 
     def default_orchestrator_content(self) -> str:
         return self._build_default_orchestrator_prompt()
@@ -236,9 +289,14 @@ class SystemPromptService:
             return None
 
         value = record.value or {}
-        content = value.get("content")
-        if not content:
-            return None
+        if value.get("mode") == MODE_ADDITIONS:
+            mode, content, additions = MODE_ADDITIONS, None, value.get("additions")
+            if not additions:
+                return None
+        else:
+            mode, content, additions = MODE_REPLACE, value.get("content"), None
+            if not content:
+                return None
 
         updated_at = value.get("updated_at")
         if isinstance(updated_at, str):
@@ -248,31 +306,25 @@ class SystemPromptService:
                 updated_at = None
 
         return {
+            "mode": mode,
             "content": content,
+            "additions": additions,
             "updated_by": value.get("updated_by"),
             "updated_at": updated_at,
         }
 
-    async def _upsert_override(self, session: AsyncSession, tenant_key: str, config_key: str, payload: dict) -> None:
-        stored_value = {
-            "content": payload["content"],
-            "updated_by": payload.get("updated_by"),
-            "updated_at": payload.get("updated_at").isoformat() if payload.get("updated_at") else None,
-        }
+    async def _upsert_override(
+        self, session: AsyncSession, tenant_key: str, config_key: str, stored_value: dict
+    ) -> None:
         now = datetime.now(UTC)
 
-        is_product_scoped = config_key != DEFAULT_ORCHESTRATOR_CONFIG_KEY
         stmt = pg_insert(Configuration).values(
             tenant_key=tenant_key,
             project_id=None,
             key=config_key,
             value=stored_value,
             category="system",
-            description=(
-                "Administrator override for orchestrator prompt (product-scoped)"
-                if is_product_scoped
-                else "Administrator override for orchestrator prompt"
-            ),
+            description="Administrator override for orchestrator prompt (product-scoped)",
             updated_at=now,
         )
         stmt = stmt.on_conflict_do_update(
@@ -321,4 +373,5 @@ async def read_orchestrator_override(
         scope=record.scope,
         updated_at=record.updated_at,
         product_id=normalized_product_id if record.scope == SCOPE_PRODUCT else None,
+        mode=record.mode,
     )

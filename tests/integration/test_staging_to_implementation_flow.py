@@ -150,6 +150,7 @@ class TestStagingToImplementationFlow:
         child_exec.status = "waiting"
         child_exec.started_at = datetime.now(UTC)
         child_exec.job = MagicMock()
+        child_exec.job.mission = "Implement the feature."
 
         project_result = MagicMock()
         project_result.scalar_one_or_none.return_value = project
@@ -221,6 +222,7 @@ class TestStagingToImplementationFlow:
         child_exec.status = "waiting"
         child_exec.started_at = datetime.now(UTC)
         child_exec.job = MagicMock()
+        child_exec.job.mission = "Implement the feature."
 
         project_result = MagicMock()
         project_result.scalar_one_or_none.return_value = project
@@ -323,6 +325,7 @@ class TestStagingToImplementationFlow:
         child_exec.status = "waiting"
         child_exec.started_at = datetime.now(UTC)
         child_exec.job = MagicMock()
+        child_exec.job.mission = "Implement the feature."
 
         project_result = MagicMock()
         project_result.scalar_one_or_none.return_value = project
@@ -402,6 +405,7 @@ class TestSmokeReplay4b57c639:
         child_exec.status = "waiting"
         child_exec.started_at = datetime(2026, 5, 5, 0, 9, 0, tzinfo=UTC)
         child_exec.job = MagicMock()
+        child_exec.job.mission = "Implement the feature."
 
         project_result = MagicMock()
         project_result.scalar_one_or_none.return_value = project
@@ -473,6 +477,7 @@ class TestSmokeReplay4b57c639:
         child_exec.status = "waiting"
         child_exec.started_at = datetime(2026, 5, 5, 0, 9, 0, tzinfo=UTC)
         child_exec.job = MagicMock()
+        child_exec.job.mission = "Implement the feature."
 
         project_result = MagicMock()
         project_result.scalar_one_or_none.return_value = project

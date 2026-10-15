@@ -34,6 +34,9 @@ TOKEN_TYPE_REFRESH = "refresh_token"
 TOKEN_TYPE_ACCESS_ROTATED = "access_token_rotated"
 ROTATION_GRACE_SECONDS = 30
 
+TOKEN_TYPE_ACCESS_DISPLACED = "access_token_displaced"
+SESSION_DISPLACED_ERROR_CODE = "SESSION_DISPLACED"
+
 REVOCATION_CACHE_TTL_POSITIVE = 60.0
 REVOCATION_CACHE_TTL_NEGATIVE = 5.0
 _REVOCATION_CACHE_MAX_ENTRIES = 4096
@@ -121,7 +124,9 @@ async def _revoke_access_jwt(
     return await _persist_access_jti_revocation(db_session, payload)
 
 
-async def _persist_access_jti_revocation(db_session: AsyncSession, payload: dict) -> bool:
+async def _persist_access_jti_revocation(
+    db_session: AsyncSession, payload: dict, *, token_type: str = TOKEN_TYPE_ACCESS
+) -> bool:
     jti = payload.get("jti")
     tenant_key = payload.get("tenant_key")
     if not jti or not tenant_key:
@@ -143,7 +148,7 @@ async def _persist_access_jti_revocation(db_session: AsyncSession, payload: dict
                         OAuthRevokedToken.jti == jti,
                         OAuthRevokedToken.tenant_key == tenant_key,
                     )
-                    .values(token_type=TOKEN_TYPE_ACCESS, revoked_at=datetime.now(UTC))
+                    .values(token_type=token_type, revoked_at=datetime.now(UTC))
                 )
                 await db_session.flush()
             _cache_put(tenant_key, jti, is_revoked=True)
@@ -153,7 +158,7 @@ async def _persist_access_jti_revocation(db_session: AsyncSession, payload: dict
         db_session.add(
             OAuthRevokedToken(
                 jti=jti,
-                token_type=TOKEN_TYPE_ACCESS,
+                token_type=token_type,
                 tenant_key=tenant_key,
             )
         )
@@ -167,6 +172,34 @@ async def revoke_dashboard_access_jwt(db_session: AsyncSession, *, token: str) -
     if payload is None:
         return False
     return await _persist_access_jti_revocation(db_session, payload)
+
+
+async def revoke_access_jti(
+    db_session: AsyncSession,
+    *,
+    tenant_key: str,
+    jti: str,
+    token_type: str = TOKEN_TYPE_ACCESS,
+) -> bool:
+    return await _persist_access_jti_revocation(
+        db_session, {"jti": jti, "tenant_key": tenant_key}, token_type=token_type
+    )
+
+
+async def get_access_token_revocation_type(
+    db_session: AsyncSession,
+    *,
+    tenant_key: str,
+    jti: str,
+) -> str | None:
+    with tenant_session_context(db_session, tenant_key):
+        result = await db_session.execute(
+            select(OAuthRevokedToken.token_type).where(
+                OAuthRevokedToken.jti == jti,
+                OAuthRevokedToken.tenant_key == tenant_key,
+            )
+        )
+    return result.scalar_one_or_none()
 
 
 async def rotate_access_token_jti(

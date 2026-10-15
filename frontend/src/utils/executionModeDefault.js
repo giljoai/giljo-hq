@@ -20,3 +20,8 @@ export const EXECUTION_MODE_DEFAULT_OPTIONS = [
 ]
 
 export const EXECUTION_MODE_DEFAULT_CHOICES = EXECUTION_MODE_DEFAULT_OPTIONS.map((o) => o.value)
+
+export function preselectedExecutionMode(accountDefault) {
+  if (accountDefault === EXECUTION_MODE_DEFAULT_ASK) return null
+  return EXECUTION_MODE_DEFAULT_CHOICES.includes(accountDefault) ? accountDefault : null
+}

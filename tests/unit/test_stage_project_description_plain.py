@@ -15,15 +15,15 @@ def _tool():
     return next(t for t in mcp._tool_manager.list_tools() if t.name == "stage_project")
 
 
-def test_description_states_gate_scope_and_restage_effect():
+def test_description_states_gate_scope_and_points_at_the_undo_tool():
     d = _tool().description
     assert "human approval gate" in d
     assert "private Giljo HQ workspace" in d
     assert "No outside service is contacted" in d
-    assert "launch_implementation" in d
-    assert "restage" in d
-    assert "clears the mission" in d
-    assert "retires the earlier orchestrator" in d
+    assert "unstage_project" in d
+    assert "restage_project" not in d
+    assert "cancel_project_staging" not in d
+    assert "action" not in d
 
 
 def test_description_has_no_all_caps_directives():

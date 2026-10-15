@@ -19,15 +19,21 @@
     </span>
 
     <span class="jb-summary-facts" data-testid="jb-summary-facts">
-      <template v-if="steps.hasSteps">
+      <v-tooltip v-if="emptyRun" location="bottom" open-delay="150">
+        <template #activator="{ props: tooltipProps }">
+          <span v-bind="tooltipProps" class="jb-summary-fact jb-summary-empty" tabindex="0">{{ EMPTY_RUN_LABEL }}</span>
+        </template>
+        <div class="jb-summary-hint">{{ EMPTY_RUN_HINT }}</div>
+      </v-tooltip>
+      <template v-else-if="steps.hasSteps">
         <span class="jb-summary-fact">{{ steps.completed }}<span class="jb-summary-sub">/{{ steps.total }}</span> steps</span>
         <span class="jb-summary-sep" aria-hidden="true">&middot;</span>
       </template>
       <template v-if="waiting > 0">
-        <span class="jb-summary-fact jb-summary-warn">{{ waiting }} waiting</span>
+        <span class="jb-summary-fact jb-summary-warn">{{ waiting }} unread</span>
         <span class="jb-summary-sep" aria-hidden="true">&middot;</span>
       </template>
-      <span class="jb-summary-fact">{{ duration }}</span>
+      <span v-if="!emptyRun" class="jb-summary-fact">{{ duration }}</span>
     </span>
 
     <span class="jb-summary-action" data-testid="jb-summary-action">
@@ -42,6 +48,7 @@ import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel } from '@/utils/agentDisplay'
 import { getStatusColor } from '@/utils/statusConfig'
 import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
+import { EMPTY_RUN_LABEL, EMPTY_RUN_HINT } from '@/utils/jobsBoardCardStats'
 
 defineProps({
   agents: {
@@ -59,6 +66,10 @@ defineProps({
   duration: {
     type: String,
     default: '',
+  },
+  emptyRun: {
+    type: Boolean,
+    default: false,
   },
 })
 </script>
@@ -115,6 +126,17 @@ defineProps({
 
 .jb-summary-warn {
   color: $color-text-highlight;
+}
+
+.jb-summary-empty {
+  color: $color-text-secondary;
+  font-style: italic;
+  cursor: help;
+}
+
+.jb-summary-hint {
+  max-width: 280px;
+  line-height: 1.45;
 }
 
 .jb-summary-sep {

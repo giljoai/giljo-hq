@@ -138,6 +138,7 @@ class ProjectResponse(ProjectBase):
 
     reviewed_at: datetime | None = None
     review_pending: bool = False
+    closeout_summary: str | None = None
 
     agent_count: int
     message_count: int

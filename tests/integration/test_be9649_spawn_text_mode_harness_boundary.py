@@ -274,7 +274,8 @@ async def test_claude_code_spawn_chapter_uses_the_generic_worker(boundary) -> No
 
     assert "YOUR PLATFORM: CLAUDE CODE CLI" in ch3, "precondition: the Claude Code chapter rendered"
     assert 'subagent_type="general-purpose"' in ch3, ch3
-    assert "First action: get_job_mission" in ch3, ch3
+    assert "agent_prompt spawn_job returned for that job, verbatim" in ch3, ch3
+    assert "First action: get_job_mission" not in ch3, ch3
     assert "subagent_type='{agent_name}'" not in ch3, ch3
     assert "subagent_type='implementer'" not in ch3, ch3
     assert "Subagent type not found" not in ch3, ch3

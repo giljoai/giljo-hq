@@ -167,8 +167,8 @@ class TestConvertEchoesBoundProduct:
 
         async with new_client() as session:
             result = await session.call_tool(
-                "update_task",
-                {"task_id": seeded.task_id, "convert_to_project": True},
+                "promote_task_to_project",
+                {"task_id": seeded.task_id},
             )
 
         assert result.is_error is False, _error_text(result)
@@ -187,8 +187,8 @@ class TestConvertEchoesBoundProduct:
 
         async with new_client() as session:
             result = await session.call_tool(
-                "update_task",
-                {"task_id": seeded.task_id, "convert_to_project": True},
+                "promote_task_to_project",
+                {"task_id": seeded.task_id},
             )
 
         assert result.is_error is False, _error_text(result)
@@ -205,13 +205,12 @@ class TestConvertEchoesBoundProduct:
 
         async with new_client() as session:
             tools = {tool.name: tool for tool in (await session.list_tools()).tools}
-            assert "product_id" not in tools["update_task"].input_schema.get("properties", {})
+            assert "product_id" not in tools["promote_task_to_project"].input_schema.get("properties", {})
 
             result = await session.call_tool(
-                "update_task",
+                "promote_task_to_project",
                 {
                     "task_id": seeded.task_id,
-                    "convert_to_project": True,
                     "product_id": seeded.active_product_id,
                 },
             )

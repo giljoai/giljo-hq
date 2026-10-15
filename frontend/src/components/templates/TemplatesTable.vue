@@ -11,7 +11,36 @@
     :item-class="(item) => (rowActive(item) ? '' : 'inactive-template')"
   >
     <template #item.name="{ item }">
-      <div class="font-weight-medium">{{ item.name }}</div>
+      <div class="d-flex align-center ga-2">
+        <span class="font-weight-medium">{{ item.name }}</span>
+        <button
+          v-if="proposalIds.has(item.id)"
+          type="button"
+          class="proposal-badge smooth-border"
+          :data-testid="`proposal-badge-${item.id}`"
+          :aria-label="`Review the change proposed for ${item.name}`"
+          @click.stop="$emit('open-proposal', item)"
+        >
+          <v-icon size="12">mdi-file-document-edit-outline</v-icon>
+          Change proposed
+        </button>
+        <v-tooltip v-if="builtinUpdated(item)" location="top" max-width="300">
+          <template #activator="{ props: markerProps }">
+            <button
+              v-bind="markerProps"
+              type="button"
+              class="builtin-updated-badge smooth-border"
+              :data-testid="`builtin-updated-${item.id}`"
+              :aria-label="`The built-in text for ${item.name} has been updated; compare and use it`"
+              @click.stop="$emit('open-builtin-diff', item)"
+            >
+              <v-icon size="12">mdi-update</v-icon>
+              Built-in updated
+            </button>
+          </template>
+          <span :data-testid="`builtin-updated-hover-${item.id}`">{{ BUILTIN_UPDATED_HOVER }}</span>
+        </v-tooltip>
+      </div>
     </template>
 
     <template #item.product_id="{ item }">
@@ -177,12 +206,15 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { format } from 'date-fns'
 import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
 import { tintedStyle } from '@/utils/colorUtils'
 import {
   templateUpdatedState,
   templateRowActive,
+  templateBuiltinUpdated,
+  BUILTIN_UPDATED_HOVER,
   TEMPLATE_TABLE_DEFAULT_SORT,
 } from './templateTableConfig'
 
@@ -227,7 +259,13 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  proposalTemplateIds: {
+    type: Array,
+    default: () => [],
+  },
 })
+
+const proposalIds = computed(() => new Set(props.proposalTemplateIds))
 
 const isForeignRow = (item) =>
   !item?._system && !!item?.product_id && item.product_id !== props.viewedProductId
@@ -241,6 +279,8 @@ defineEmits([
   'download-profile',
   'clear-filters',
   'edit-orchestrator-prompt',
+  'open-proposal',
+  'open-builtin-diff',
 ])
 
 
@@ -252,6 +292,8 @@ const formatDate = (date) => {
 }
 
 const updatedState = (item) => templateUpdatedState(item)
+
+const builtinUpdated = (item) => templateBuiltinUpdated(item)
 
 const rowActive = (item) => templateRowActive(item)
 </script>
@@ -269,6 +311,53 @@ const rowActive = (item) => templateRowActive(item)
 
 .product-chip {
   font-weight: 600;
+}
+
+/* BE-9755: tinted badge in the brand accent, text plus icon so it reads without colour. */
+.proposal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: none;
+  border-radius: $border-radius-default;
+  background: rgba($color-brand-yellow, 0.15);
+  color: $color-brand-yellow;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  --smooth-border-color: #{rgba($color-brand-yellow, 0.35)};
+
+  &:focus-visible {
+    outline: 2px solid $color-brand-yellow;
+    outline-offset: 2px;
+  }
+}
+
+/* BE-9785: quiet by design. The proposal badge above carries the accent because
+   it asks for a decision; this one only reports that a newer built-in exists. */
+.builtin-updated-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: none;
+  border-radius: $border-radius-default;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  color: $color-text-secondary;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  --smooth-border-color: #{rgba($color-text-muted, 0.35)};
+
+  &:hover {
+    color: var(--v-theme-on-surface);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $color-brand-yellow;
+    outline-offset: 2px;
+  }
 }
 
 .foreign-row-dash {

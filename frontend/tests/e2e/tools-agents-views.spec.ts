@@ -63,7 +63,7 @@ test.describe('Tools -> Agents view switcher (FE-9643b)', () => {
     // Orchestrator prompt: moved here from the account Danger Zone.
     await page.click('[data-testid="agents-view-prompt"]')
     await expect(page).toHaveURL(/view=prompt/)
-    await expect(page.getByText('System Orchestrator Prompt')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Orchestrator prompt', exact: true })).toBeVisible()
 
     // Back to Roster: the URL param drops and the filters return.
     await page.click('[data-testid="agents-view-roster"]')
@@ -79,6 +79,6 @@ test.describe('Tools -> Agents view switcher (FE-9643b)', () => {
     await page.click('[data-test="orchestrator-prompt-link"]')
 
     await expect(page).toHaveURL(/\/tools\?.*view=prompt/)
-    await expect(page.getByText('System Orchestrator Prompt')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Orchestrator prompt', exact: true })).toBeVisible()
   })
 })

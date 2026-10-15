@@ -152,6 +152,13 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     expect(wrapper.text()).toContain('Generate API Key')
   })
 
+  it('SaaS: Generic connector hint keeps the no-key promise', async () => {
+    const wrapper = await mountStep(['generic'], 'saas')
+    const block = wrapper.find('[data-testid="web-endpoint-block"]')
+    expect(block.text()).toContain('No key needed')
+    expect(block.text()).not.toContain('HTTPS')
+  })
+
   it('does NOT show the connector URL block for a CLI tool', async () => {
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="web-endpoint-block"]').exists()).toBe(false)
@@ -226,6 +233,14 @@ describe('SetupStep2Connect — CE: API-key-only gating (FE-6242)', () => {
     const wrapper = await mountStep(['claude_code'], 'ce')
     expect(wrapper.find('[data-testid="oauth-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(false)
+  })
+
+  it('CE: Generic connector hint says sign-in needs HTTPS instead of "No key needed"', async () => {
+    const wrapper = await mountStep(['generic'], 'ce')
+    const block = wrapper.find('[data-testid="web-endpoint-block"]')
+    expect(block.exists()).toBe(true)
+    expect(block.text()).not.toContain('No key needed')
+    expect(block.text()).toContain('HTTPS')
   })
 
   it('CE: shows the API-key flow immediately without toggling', async () => {

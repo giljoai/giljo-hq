@@ -114,6 +114,8 @@ from .tasks import (
     Task,
 )
 
+from .template_proposals import TemplateProposal
+
 from .templates import (
     AgentTemplate,
     TemplateArchive,
@@ -185,6 +187,7 @@ __all__ = [
     "Task",
     "TaxonomyType",
     "TemplateArchive",
+    "TemplateProposal",
     "TenantSkillsAck",
     "User",
     "UserApproval",

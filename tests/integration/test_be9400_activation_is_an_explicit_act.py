@@ -210,7 +210,7 @@ async def test_a_newly_created_agent_is_not_spawnable_until_the_user_switches_it
             },
         )
 
-    assert result.is_error is True, (
+    assert not result.is_error and _payload(result).get("error") == "INVALID_AGENT_NAME", (
         f"An agent the user created but never switched on for this product was "
         f"spawnable anyway: {created.name}. Creation activated it in the product."
     )

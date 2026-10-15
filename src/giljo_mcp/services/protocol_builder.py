@@ -139,6 +139,7 @@ def _build_orchestrator_protocol(
                 n_projects=len(order),
                 execution_mode=chain_ctx.execution_mode,
                 chain_mission=chain_ctx.chain_mission,
+                project_id=project_id,
             )
 
     if is_conductor_chain:

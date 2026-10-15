@@ -1,14 +1,13 @@
 /**
- * FE-9501b (Headless S3b) — the global activity pass.
+ * FE-9501b (D6) / FE-9751 — the cross-project approvals pass.
  *
- * D5: agent:created/status_changed/removed + job:progress_update are dropped by
- * PROJECT_SCOPED_EVENTS (defaultShouldRoute) for any project that isn't the open
- * tab, so an agent working elsewhere is invisible. routeGlobalActivityEvent is a
+ * agent:status_changed is dropped by PROJECT_SCOPED_EVENTS (defaultShouldRoute)
+ * for any project that isn't the open tab. routeGlobalApprovalEvent is a
  * SEPARATE, additive pass over the same raw events -- no project filtering, only
- * tenant -- that feeds globalActivityStore (count-only) and, for approval-bearing
- * agent:status_changed events, useApprovalsStore (D6's raised-hand data source).
+ * tenant -- that feeds useApprovalsStore for approval-bearing agent:status_changed
+ * events (D6's raised-hand data source). FE-9751: it keeps no activity count.
  *
- * These tests exercise routeGlobalActivityEvent directly (not the main
+ * These tests exercise routeGlobalApprovalEvent directly (not the main
  * routeWebsocketEvent/defaultShouldRoute pipeline), and separately assert that
  * pipeline's existing cross-project drop is completely untouched.
  *
@@ -17,61 +16,41 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-import { routeGlobalActivityEvent } from '@/stores/websocketEventRouter'
+import { routeGlobalApprovalEvent } from '@/stores/websocketEventRouter'
 
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({ currentUser: { tenant_key: 'tk_1' } }),
 }))
 
-describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
+describe('routeGlobalApprovalEvent (FE-9501b, D5)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('records activity for an agent:created event on a project that is not open', async () => {
-    const activityStore = { recordActivity: vi.fn() }
-    const storeRegistry = { globalActivity: () => activityStore }
-
-    const routed = await routeGlobalActivityEvent(
-      { type: 'agent:created', data: { project_id: 'proj-other', agent_id: 'a-1' } },
-      { storeRegistry },
-    )
-
-    expect(routed).toBe(true)
-    expect(activityStore.recordActivity).toHaveBeenCalledWith('proj-other')
-  })
-
-  it('records activity for agent:status_changed, agent:removed, and job:progress_update', async () => {
-    const activityStore = { recordActivity: vi.fn() }
-    const storeRegistry = { globalActivity: () => activityStore }
-
-    for (const type of ['agent:status_changed', 'agent:removed', 'job:progress_update']) {
-      await routeGlobalActivityEvent({ type, data: { project_id: 'proj-x' } }, { storeRegistry })
-    }
-
-    expect(activityStore.recordActivity).toHaveBeenCalledTimes(3)
-    expect(activityStore.recordActivity).toHaveBeenCalledWith('proj-x')
-  })
-
-  it('a burst of 50 non-approval events never calls approvalsStore -- count-only, never hydrate', async () => {
-    // D5's "COUNT, do not hydrate" requirement: recordActivity is a synchronous
-    // Map write (asserted by globalActivityStore.spec.js), so the only possible
-    // network-shaped call from this pass is approvalsStore.fetchPending (via
-    // handleStatusEvent), and that must only ever fire for a genuine
-    // user_approval_id/decided_option_id-bearing event -- never as a side effect
-    // of ordinary lifecycle chatter, however bursty.
+  it('keeps no activity count for lifecycle events on a project that is not open', async () => {
     const activityStore = { recordActivity: vi.fn() }
     const approvalsStore = { handleStatusEvent: vi.fn() }
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
+    for (const type of ['agent:created', 'agent:status_changed', 'agent:removed', 'job:progress_update']) {
+      await routeGlobalApprovalEvent({ type, data: { project_id: 'proj-x' } }, { storeRegistry })
+    }
+
+    expect(activityStore.recordActivity).not.toHaveBeenCalled()
+    expect(approvalsStore.handleStatusEvent).not.toHaveBeenCalled()
+  })
+
+  it('a burst of 50 non-approval events never calls approvalsStore -- never hydrate', async () => {
+    const approvalsStore = { handleStatusEvent: vi.fn() }
+    const storeRegistry = { approvals: () => approvalsStore }
+
     for (let i = 0; i < 50; i += 1) {
-      await routeGlobalActivityEvent(
+      await routeGlobalApprovalEvent(
         { type: 'job:progress_update', data: { project_id: 'proj-busy', progress: i } },
         { storeRegistry },
       )
     }
 
-    expect(activityStore.recordActivity).toHaveBeenCalledTimes(50)
     expect(approvalsStore.handleStatusEvent).not.toHaveBeenCalled()
   })
 
@@ -80,7 +59,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     const approvalsStore = { handleStatusEvent: vi.fn() }
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
-    const routed = await routeGlobalActivityEvent(
+    const routed = await routeGlobalApprovalEvent(
       { type: 'project:staging_complete', data: { project_id: 'proj-x' } },
       { storeRegistry },
     )
@@ -90,17 +69,20 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     expect(approvalsStore.handleStatusEvent).not.toHaveBeenCalled()
   })
 
-  it('drops a cross-tenant event (still tenant-scoped, just not project-scoped)', async () => {
-    const activityStore = { recordActivity: vi.fn() }
-    const storeRegistry = { globalActivity: () => activityStore }
+  it('drops a cross-tenant approval event (still tenant-scoped, just not project-scoped)', async () => {
+    const approvalsStore = { handleStatusEvent: vi.fn() }
+    const storeRegistry = { approvals: () => approvalsStore }
 
-    const routed = await routeGlobalActivityEvent(
-      { type: 'agent:created', data: { project_id: 'proj-x', tenant_key: 'tk_someone_else' } },
+    const routed = await routeGlobalApprovalEvent(
+      {
+        type: 'agent:status_changed',
+        data: { project_id: 'proj-x', tenant_key: 'tk_someone_else', user_approval_id: 'appr-1' },
+      },
       { storeRegistry },
     )
 
     expect(routed).toBe(false)
-    expect(activityStore.recordActivity).not.toHaveBeenCalled()
+    expect(approvalsStore.handleStatusEvent).not.toHaveBeenCalled()
   })
 
   it('forwards an awaiting_user agent:status_changed event to approvalsStore regardless of open project (D6)', async () => {
@@ -108,7 +90,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     const approvalsStore = { handleStatusEvent: vi.fn().mockResolvedValue() }
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
-    await routeGlobalActivityEvent(
+    await routeGlobalApprovalEvent(
       {
         type: 'agent:status_changed',
         data: {
@@ -124,6 +106,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     expect(approvalsStore.handleStatusEvent).toHaveBeenCalledWith(
       expect.objectContaining({ user_approval_id: 'appr-1', status: 'awaiting_user' }),
     )
+    expect(activityStore.recordActivity).not.toHaveBeenCalled()
   })
 
   it('forwards a decided_option_id agent:status_changed event too (clears the row app-wide)', async () => {
@@ -131,7 +114,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     const approvalsStore = { handleStatusEvent: vi.fn().mockResolvedValue() }
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
-    await routeGlobalActivityEvent(
+    await routeGlobalApprovalEvent(
       {
         type: 'agent:status_changed',
         data: { project_id: 'proj-x', user_approval_id: 'appr-1', decided_option_id: 'opt-a' },
@@ -149,7 +132,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     const approvalsStore = { handleStatusEvent: vi.fn() }
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
-    await routeGlobalActivityEvent(
+    await routeGlobalApprovalEvent(
       { type: 'agent:status_changed', data: { project_id: 'proj-x', status: 'working' } },
       { storeRegistry },
     )
@@ -163,7 +146,7 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
     const storeRegistry = { globalActivity: () => activityStore, approvals: () => approvalsStore }
 
     expect(() =>
-      routeGlobalActivityEvent(
+      routeGlobalApprovalEvent(
         {
           type: 'agent:status_changed',
           data: { project_id: 'proj-x', user_approval_id: 'appr-1', status: 'awaiting_user' },
@@ -177,12 +160,12 @@ describe('routeGlobalActivityEvent (FE-9501b, D5)', () => {
   })
 })
 
-describe('museum flag: routeGlobalActivityEvent never touches agentJobsStore (Handover 0462/0463, unrelaxed)', () => {
+describe('museum flag: routeGlobalApprovalEvent never touches agentJobsStore (Handover 0462/0463, unrelaxed)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('a cross-project agent:created event reaches globalActivity but never agentJobsStore', async () => {
+  it('a cross-project agent:created event never reaches agentJobsStore', async () => {
     const agentJobsStore = { handleCreated: vi.fn(), upsertJob: vi.fn() }
     const activityStore = { recordActivity: vi.fn() }
     const storeRegistry = {
@@ -190,12 +173,12 @@ describe('museum flag: routeGlobalActivityEvent never touches agentJobsStore (Ha
       globalActivity: () => activityStore,
     }
 
-    await routeGlobalActivityEvent(
+    await routeGlobalApprovalEvent(
       { type: 'agent:created', data: { project_id: 'proj-other', agent_id: 'a-1' } },
       { storeRegistry },
     )
 
-    expect(activityStore.recordActivity).toHaveBeenCalledWith('proj-other')
+    expect(activityStore.recordActivity).not.toHaveBeenCalled()
     expect(agentJobsStore.handleCreated).not.toHaveBeenCalled()
     expect(agentJobsStore.upsertJob).not.toHaveBeenCalled()
   })

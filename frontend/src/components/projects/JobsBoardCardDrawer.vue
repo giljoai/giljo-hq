@@ -33,13 +33,15 @@
         </span>
       </div>
       <p v-if="mission" class="jb-dsec-t jb-dsec-t--mono">{{ mission }}</p>
+      <p v-else-if="closeoutText" class="jb-dsec-t" data-testid="jb-mission-closeout">{{ closeoutText }}</p>
       <div v-else-if="missionState === 'writing'" class="jb-dsec-empty" data-testid="jb-mission-live">
         <span class="jb-dot jb-dot--writing" aria-hidden="true" />
         <span>Orchestrator is writing the mission in your harness.</span>
       </div>
       <div v-else class="jb-dsec-empty" data-testid="jb-mission-empty">
         <span class="jb-dot jb-dot--none" aria-hidden="true" />
-        <span v-if="chainMember">Written when the chain reaches this step.</span>
+        <span v-if="finished">No mission recorded.</span>
+        <span v-else-if="chainMember">Written when the chain reaches this step.</span>
         <span v-else>No mission yet. Press <b>Stage</b> and the orchestrator writes it.</span>
       </div>
     </section>
@@ -88,7 +90,8 @@
         </div>
       </div>
       <p v-else class="jb-dsec-t jb-dsec-t--empty" data-testid="jb-crew-empty">
-        <template v-if="chainMember">Chosen by the conductor when this step stages.</template>
+        <template v-if="finished">{{ EMPTY_RUN_LABEL }}.</template>
+        <template v-else-if="chainMember">Chosen by the conductor when this step stages.</template>
         <template v-else>Workers are chosen when the mission is written.</template>
       </p>
     </section>
@@ -96,10 +99,12 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel, getAgentRoleLabel, isOrchestrator } from '@/utils/agentDisplay'
 import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
+import { closeoutMissionText, EMPTY_RUN_LABEL } from '@/utils/jobsBoardCardStats'
 import LiveDots from './LiveDots.vue'
 
 const props = defineProps({
@@ -109,9 +114,12 @@ const props = defineProps({
   missionState: { type: String, default: 'none' },
   launched: { type: Boolean, default: false },
   chainMember: { type: Boolean, default: false },
+  finished: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['edit-description', 'agent-role', 'agent-mission-edit'])
+
+const closeoutText = computed(() => (props.finished ? closeoutMissionText(props.project) : ''))
 
 function isLive(agent) {
   return props.launched && isLiveStatusWord(jobStatusWord(agent))

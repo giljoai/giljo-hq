@@ -73,6 +73,7 @@ describe('ThreadList (Quiet Cards)', () => {
 
     const wrapper = mountList(pinia)
     await flushPromises()
+    await wrapper.find('[data-testid="thread-list-resolved-toggle"]').trigger('click')
 
     const byId = Object.fromEntries(
       wrapper.findAllComponents(ThreadCard).map((c) => [c.props('thread').thread_id, c.props('thread')]),

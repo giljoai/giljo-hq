@@ -23,7 +23,7 @@ _CSRF = "fe9553-csrf-token"
 _RULED_DEFAULTS: dict[str, Any] = {
     "banner_lifecycle_enabled": True,
     "banner_advisories_in_fold": True,
-    "popout_scope": "all",
+    "popout_scope": "actionable",
 }
 
 _LEGACY_KEYS = ("context_tuning_reminder", "tuning_reminder_threshold")
@@ -231,7 +231,9 @@ async def test_one_account_never_sees_anothers_preference(api_client, db_manager
     await api_client.put(_URL, json={"popout_scope": "off"}, headers=headers_a)
 
     resp_b = await api_client.get(_URL, headers=headers_b)
-    assert resp_b.json()["notification_preferences"]["popout_scope"] == "all", "account B saw account A's preference"
+    assert resp_b.json()["notification_preferences"]["popout_scope"] == _RULED_DEFAULTS["popout_scope"], (
+        "account B saw account A's preference"
+    )
 
     resp_a = await api_client.get(_URL, headers=headers_a)
     assert resp_a.json()["notification_preferences"]["popout_scope"] == "off"

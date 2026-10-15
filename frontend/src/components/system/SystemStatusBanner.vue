@@ -15,7 +15,7 @@
 
       <div class="banner-fold-rows">
         <YourTurnBannerRow
-          :threads="isBannerVisible('your-turn') ? visibleYourTurnThreads : []"
+          :threads="isBannerVisible('your-turn') ? openNextThreads : []"
           @open="openYourTurn"
           @dismiss="dismissYourTurn"
         />
@@ -31,6 +31,11 @@
           :directed-asks="isBannerVisible('thread-post') ? visibleDirectedAsks : []"
           @open="openThreadPost"
           @dismiss="dismissThreadPosts"
+        />
+
+        <TemplateProposalsBannerRow
+          :count="isBannerVisible('template-proposals') ? templateProposals.count : 0"
+          @open="router.push({ path: '/tools', query: { tab: 'agents' } })"
         />
 
         <LifecycleBannerRow
@@ -138,8 +143,8 @@ import {
 } from '@/composables/useTutorialState'
 import { useOnboardingReminders } from '@/composables/useOnboardingReminders'
 import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
-import { resolveNotificationRoute } from '@/components/navigation/notificationRouting'
-import { useYourTurnThreads } from '@/composables/useYourTurnThreads'
+import { resolveNotificationRoute, decisionRouteFor } from '@/components/navigation/notificationRouting'
+import { useYourTurnThreads, useYourTurnOpenNext } from '@/composables/useYourTurnThreads'
 import { hubThreadRoute } from '@/components/hub/hubThreadRoute'
 import { useApprovalsStore } from '@/stores/useApprovalsStore'
 import { useLifecycleBannerNav } from '@/composables/useLifecycleBannerNav'
@@ -154,6 +159,8 @@ import ThreadPostBannerRow from './ThreadPostBannerRow.vue'
 import LifecycleBannerRow from './LifecycleBannerRow.vue'
 import OnboardingNudgeRow from './OnboardingNudgeRow.vue'
 import BannerFoldControls from './BannerFoldControls.vue'
+import TemplateProposalsBannerRow from './TemplateProposalsBannerRow.vue'
+import { useTemplateProposalsStore } from '@/stores/templateProposalsStore'
 
 const router = useRouter()
 const notifStore = useNotificationStore()
@@ -353,14 +360,8 @@ const { yourTurnThreads, ensureThreadsLoaded } = useYourTurnThreads()
 
 watch(() => userStore.currentUser?.id, (id) => { if (id) ensureThreadsLoaded() }, { immediate: true })
 
-function openYourTurn() {
-  const threads = yourTurnThreads.value
-  if (threads.length === 1) {
-    router.push(hubThreadRoute(threads[0]))
-    return
-  }
-  router.push({ path: '/hub' })
-}
+const templateProposals = useTemplateProposalsStore()
+watch(() => userStore.currentUser?.id, (id) => { if (id) templateProposals.fetchCount().catch(() => {}) }, { immediate: true })
 
 const approvalsStore = useApprovalsStore()
 const pendingApprovals = computed(() => approvalsStore.pendingApprovals)
@@ -403,19 +404,16 @@ async function ensureApprovalsLoaded() {
 }
 onMounted(ensureApprovalsLoaded)
 
-function decisionRoute(projectId) {
-  return { name: 'JobsViewport', query: { project: projectId, decide: '1' } }
-}
 function openApprovals() {
   const approvals = pendingApprovals.value
   if (approvals.length === 1 && approvals[0]?.project_id) {
-    router.push(decisionRoute(approvals[0].project_id))
+    router.push(decisionRouteFor(approvals[0].project_id))
     return
   }
   const viewedProductId = productStore.effectiveProductId
   const inViewedProduct = approvals.find((a) => a.product_id === viewedProductId && a.project_id)
   if (inViewedProduct) {
-    router.push(decisionRoute(inViewedProduct.project_id))
+    router.push(decisionRouteFor(inViewedProduct.project_id))
     return
   }
   router.push({ path: '/projects' })
@@ -441,6 +439,8 @@ const {
   threadsLoaded: computed(() => commHub.threadList.length > 0),
 })
 
+const { openNextThreads, openYourTurn } = useYourTurnOpenNext({ router, threads: visibleYourTurnThreads })
+
 const { lifecycleBannerStore, openLifecycleBanner } = useLifecycleBannerNav(router)
 
 function openLifecycleRow(row) {
@@ -449,12 +449,13 @@ function openLifecycleRow(row) {
 }
 
 const { totalBannerCount, foldExpanded, visibleBannerKeys, isBannerVisible } = useBannerFold({
-  yourTurnCount: computed(() => visibleYourTurnThreads.value.length),
+  yourTurnCount: computed(() => openNextThreads.value.length),
   approvalCount: computed(() => visibleApprovals.value.length),
   threadPostCount: computed(
     () => visibleMentions.value.length + visibleDirectedAsks.value.length,
   ),
   lifecycleRows: computed(() => lifecycleBannerStore.rows),
+  templateProposalCount: computed(() => templateProposals.count),
   systemBanners: visibleBanners,
   showTutorial: showTutorialRow,
   showInteg: showIntegRow,

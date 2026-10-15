@@ -82,6 +82,7 @@ from api.endpoints.mcp_tools._project_tools import (  # noqa: F401  (re-export s
     update_project,
     update_project_mission,
 )
+from api.endpoints.mcp_tools._retired_arguments import retired_argument_rejection
 from api.endpoints.mcp_tools._setup_tools import (  # noqa: F401  (re-export surface)
     apply_context_tuning,
     get_giljo_guide,
@@ -91,6 +92,7 @@ from api.endpoints.mcp_tools._setup_tools import (  # noqa: F401  (re-export sur
 from api.endpoints.mcp_tools._task_tools import (  # noqa: F401  (re-export surface)
     create_task,
     list_tasks,
+    promote_task_to_project,
     update_task,
 )
 
@@ -283,6 +285,10 @@ def _argument_validation_result(name: str, arguments) -> CallToolResult | None:
     tool = mcp._tool_manager.get_tool(name)
     if tool is None:
         return None
+    retired = retired_argument_rejection(name, arguments)
+    if retired is not None:
+        logger.info("MCP tool '%s' refused retired argument: %s", sanitize(name), retired.get("field"))
+        return tool.fn_metadata.convert_result(retired)
     try:
         tool.fn_metadata.validate_arguments(arguments)
     except PydanticValidationError as exc:

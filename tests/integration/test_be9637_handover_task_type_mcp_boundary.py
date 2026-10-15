@@ -343,7 +343,7 @@ async def test_converting_a_handover_to_a_project_is_refused(task_boundary):
     handover = await _create_handover(client, product_id)
 
     async with client() as s:
-        result = await s.call_tool("update_task", {"task_id": handover["task_id"], "convert_to_project": True})
+        result = await s.call_tool("promote_task_to_project", {"task_id": handover["task_id"]})
 
     payload = _payload(result)
     assert payload["success"] is False, f"a handover was converted to a project: {payload}"
@@ -358,7 +358,7 @@ async def test_a_refused_conversion_leaves_the_handover_intact(task_boundary, db
     handover = await _create_handover(client, product_id)
 
     async with client() as s:
-        await s.call_tool("update_task", {"task_id": handover["task_id"], "convert_to_project": True})
+        await s.call_tool("promote_task_to_project", {"task_id": handover["task_id"]})
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         row = (await session.execute(select(Task).where(Task.id == handover["task_id"]))).scalar_one_or_none()
@@ -374,7 +374,7 @@ async def test_an_ordinary_task_still_converts(task_boundary):
                 {"title": "ordinary", "description": "d", "product_id": product_id},
             )
         )
-        result = await s.call_tool("update_task", {"task_id": task["task_id"], "convert_to_project": True})
+        result = await s.call_tool("promote_task_to_project", {"task_id": task["task_id"]})
 
     payload = _payload(result)
     assert payload.get("error") != "HANDOVER_NOT_CONVERTIBLE", (

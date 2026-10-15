@@ -1,22 +1,27 @@
 <template>
-  <div class="chain-mission-window smooth-border" data-testid="chain-mission-window">
-    <div class="chain-mission-window__label">
-      <span>Chain goal</span>
+  <div class="chain-mission">
+    <div v-if="mission || $slots.actions" class="chain-mission__row" data-testid="chain-mission-row">
+      <span v-if="mission" class="chain-mission__tag" data-testid="chain-mission-tag">
+        <v-icon size="14" class="mr-1">mdi-creation</v-icon>
+        Conductor Generated
+      </span>
+      <div v-if="$slots.actions" class="chain-mission__actions">
+        <slot name="actions" />
+      </div>
     </div>
-    <div class="chain-mission-window__body scrollbar-standard">
-      <EmptyState
-        v-if="!mission"
-        icon="mdi-file-document-outline"
-        title="No chain goal yet"
-        compact
-      />
-      <template v-else>
-        <span class="chain-mission-window__tag">
-          <v-icon size="14" class="mr-1">mdi-creation</v-icon>
-          Conductor Generated
-        </span>
-        <div class="chain-mission-window__content">{{ mission }}</div>
-      </template>
+    <div class="chain-mission-window smooth-border" data-testid="chain-mission-window">
+      <div class="chain-mission-window__label">
+        <span>Chain goal</span>
+      </div>
+      <div class="chain-mission-window__body scrollbar-standard">
+        <EmptyState
+          v-if="!mission"
+          icon="mdi-file-document-outline"
+          title="No chain goal yet"
+          compact
+        />
+        <div v-else class="chain-mission-window__content">{{ mission }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -35,13 +40,47 @@ defineProps({
 <style scoped lang="scss">
 @use '@/styles/design-tokens' as *;
 
+.chain-mission {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 16px;
+
+  // The badge left, the host's actions right; wraps on a narrow group.
+  &__row {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-bottom: 8px;
+  }
+
+  &__tag {
+    display: inline-flex;
+    align-items: center;
+    background: rgba($color-agent-orchestrator, 0.15);
+    color: $color-agent-orchestrator;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: $border-radius-default;
+  }
+
+  &__actions {
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto;
+  }
+}
+
 .chain-mission-window {
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   background: $elevation-raised;
   border-radius: $border-radius-rounded;
   padding: 16px 20px;
-  margin-bottom: 16px;
   max-height: 180px;
 
   &__label {
@@ -58,18 +97,6 @@ defineProps({
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-  }
-
-  &__tag {
-    display: inline-flex;
-    align-items: center;
-    background: rgba($color-agent-orchestrator, 0.15);
-    color: $color-agent-orchestrator;
-    font-size: 0.65rem;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: $border-radius-default;
-    margin-bottom: 8px;
   }
 
   &__content {

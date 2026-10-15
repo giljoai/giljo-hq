@@ -11,13 +11,14 @@
         <span class="jb-tax-pill" data-testid="jb-tax-pill" :style="taxonomyStyle">{{ project.taxonomy_alias }}</span>
         <v-tooltip location="bottom" open-delay="150">
           <template #activator="{ props: tooltipProps }">
-            <h2 v-bind="tooltipProps" class="jb-title" data-testid="jb-title">
+            <h2 v-bind="tooltipProps" class="jb-title" tabindex="0" data-testid="jb-title">
               {{ project.name }}
             </h2>
           </template>
           <div data-testid="jb-title-tooltip">{{ project.name }}</div>
         </v-tooltip>
         <button
+          v-if="!stagingLayout"
           type="button"
           class="jb-fold-btn"
           :aria-expanded="!folded"
@@ -112,6 +113,14 @@
           </span>
         </div>
       </div>
+      <div v-else-if="emptyRun" class="jb-stats jb-stats--empty" data-testid="jb-empty-run">
+        <v-tooltip location="bottom" open-delay="150">
+          <template #activator="{ props: tooltipProps }">
+            <span v-bind="tooltipProps" class="jb-stat-muted" tabindex="0">{{ EMPTY_RUN_LABEL }}</span>
+          </template>
+          <div class="jb-pill-hint">{{ EMPTY_RUN_HINT }}</div>
+        </v-tooltip>
+      </div>
       <div v-else class="jb-stats">
         <div class="jb-stat">
           <span class="jb-stat-k">Steps</span>
@@ -125,7 +134,7 @@
           <span class="jb-stat-v" data-testid="jb-stat-agents">{{ agents.length }}</span>
         </div>
         <div class="jb-stat">
-          <span class="jb-stat-k">Waiting</span>
+          <span class="jb-stat-k">Unread</span>
           <span class="jb-stat-v" :class="waiting > 0 ? 'jb-stat-warn' : 'jb-stat-muted'" data-testid="jb-stat-waiting">
             {{ waiting }}
           </span>
@@ -141,6 +150,7 @@
         :mission="missionText"
         :mission-state="missionState"
         :chain-member="!!chainCtx"
+        :finished="finished"
         @edit-description="(p) => emit('edit-description', p)"
       />
       <button
@@ -161,6 +171,7 @@
         :mission-state="missionState"
         :launched="!stagingLayout"
         :chain-member="!!chainCtx"
+        :finished="finished"
         @edit-description="(p) => emit('edit-description', p)"
         @agent-role="(a) => emit('agent-role', a)"
         @agent-mission-edit="(a) => emit('agent-mission-edit', a)"
@@ -189,7 +200,9 @@
       <JobsBoardCardFooter
         :project="project"
         :section-label="sectionLabel"
+        :agents="sortedAgents"
         :show-staging="showStaging"
+        :chain-turn="chainTurnHasCome"
         @open-detail="(p) => emit('open-detail', p)"
         @open-hub="(p) => emit('open-hub', p)"
         @changed="(p) => emit('changed', p)"
@@ -203,12 +216,15 @@
         :steps="steps"
         :waiting="waiting"
         :duration="durationLabel"
+        :empty-run="emptyRun"
       >
         <template #action>
           <JobsBoardCardFooter
             :project="project"
             :section-label="sectionLabel"
+            :agents="sortedAgents"
             :show-staging="showStaging"
+            :chain-turn="chainTurnHasCome"
             compact
             @open-detail="(p) => emit('open-detail', p)"
             @open-hub="(p) => emit('open-hub', p)"
@@ -231,12 +247,21 @@ import { needsInputOwner } from '@/utils/jobStatusWord'
 import { orderAgentsForDisplay } from '@/utils/agentDisplayOrder'
 import { taxonomyBadgeStyle, resolveTaxonomyColor } from '@/utils/taxonomyBadge'
 import { BOARD_DENSITIES } from '@/composables/useBoardDensity'
-import { aggregateSteps, aggregateWaiting, projectDurationSeconds, jobsBoardMetaLine } from '@/utils/jobsBoardCardStats'
+import {
+  aggregateSteps,
+  aggregateWaiting,
+  projectDurationSeconds,
+  jobsBoardMetaLine,
+  isEmptyAgentRun,
+  EMPTY_RUN_LABEL,
+  EMPTY_RUN_HINT,
+} from '@/utils/jobsBoardCardStats'
 import { formatDurationSeconds } from '@/utils/durationFormat'
 import { useClipboard } from '@/composables/useClipboard'
 import { usePlayButton } from '@/composables/usePlayButton'
 import { isProjectLaunched } from '@/composables/useProjectStageControls'
 import { useProjectStateStore } from '@/stores/projectStateStore'
+import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import JobsBoardAgentRow from '@/components/projects/JobsBoardAgentRow.vue'
 import JobsBoardCardFooter from '@/components/projects/JobsBoardCardFooter.vue'
 import JobsBoardCardSummary from '@/components/projects/JobsBoardCardSummary.vue'
@@ -330,12 +355,13 @@ const needsYou = computed(
 function foldByRule() {
   return props.density === BOARD_DENSITIES.COMPACT
 }
-const folded = ref(foldByRule())
+const foldChoice = ref(foldByRule())
 watch(() => props.density, () => {
-  folded.value = foldByRule()
+  foldChoice.value = foldByRule()
 })
+const folded = computed(() => foldChoice.value && !stagingLayout.value)
 function toggleFold() {
-  folded.value = !folded.value
+  foldChoice.value = !foldChoice.value
 }
 const STAGING_LABELS = new Set([JOBS_SECTION_LABELS.ACTIVATED, JOBS_SECTION_LABELS.PLANNING, JOBS_SECTION_LABELS.STAGED])
 const stagingLayout = computed(() => STAGING_LABELS.has(sectionLabel.value))
@@ -359,15 +385,25 @@ const orchestratorHarness = computed(() => props.agents.find(isOrchestrator)?.de
 const phaseCount = computed(
   () => new Set(props.agents.map((a) => a?.phase).filter((phase) => typeof phase === 'number')).size,
 )
+const finished = computed(() => props.project?.status === 'completed')
+const emptyRun = computed(() => isEmptyAgentRun(props.project, props.agents))
 const steps = computed(() => aggregateSteps(props.agents))
 const waiting = computed(() => aggregateWaiting(props.agents))
 const durationLabel = computed(() => formatDurationSeconds(projectDurationSeconds(props.project, props.now)))
 const metaLine = computed(() => jobsBoardMetaLine(props.project, sectionLabel.value, props.now))
 
 const projectStateStore = useProjectStateStore()
+const sequenceRunStore = useSequenceRunStore()
 const { copy: clipboardCopy } = useClipboard()
-const rowsInteractive = computed(() =>
-  isProjectLaunched(props.project, projectStateStore.getProjectState(props.project?.id)),
+const chainTurnHasCome = computed(
+  () =>
+    Boolean(props.chainCtx) &&
+    sequenceRunStore.isRunning(props.chainCtx?.runId) &&
+    sequenceRunStore.isProjectStartable(props.project?.id),
+)
+const rowsInteractive = computed(
+  () =>
+    isProjectLaunched(props.project, projectStateStore.getProjectState(props.project?.id)) || chainTurnHasCome.value,
 )
 const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, handleReplay, handlePlay } = usePlayButton(
   computed(() => props.project),
@@ -430,11 +466,16 @@ const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, h
   color: $color-brand-yellow;
   margin: 0;
   min-width: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   cursor: help;
+
+  &:focus-visible {
+    outline: 2px solid $color-brand-yellow;
+    outline-offset: 2px;
+    border-radius: $spacing-button-border-radius-small;
+  }
 }
 
 .jb-status-pill--hint {
@@ -475,10 +516,6 @@ const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, h
 
   .jb-pills {
     margin-bottom: 0;
-  }
-
-  .jb-title {
-    -webkit-line-clamp: 1;
   }
 
   &:hover {
@@ -622,6 +659,13 @@ const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, h
 
   &--3col {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  &--empty {
+    display: block;
+    text-align: center;
+    font-style: italic;
+    cursor: help;
   }
 }
 

@@ -19,11 +19,11 @@
 
     <div class="jb-srow" data-testid="jb-row-mission">
       <span class="jb-srow-k">Mission</span>
-      <span class="jb-srow-v" :class="{ 'jb-srow-v--placeholder': missionState === 'none' }">
+      <span class="jb-srow-v" :class="{ 'jb-srow-v--placeholder': missionState === 'none' && !closeoutText }">
         <span class="jb-dot" :class="`jb-dot--${missionState}`" data-testid="jb-mission-state" :data-state="missionState" aria-hidden="true" />
         <span v-if="missionState === 'writing'" class="jb-state-word">Orchestrator writing<LiveDots /></span>
         <span v-else-if="missionState === 'written'" class="jb-state-word">Written</span>
-        <span class="jb-ell">{{ missionLine }}</span>
+        <span class="jb-ell" :title="closeoutText || undefined">{{ missionLine }}</span>
       </span>
       <span class="jb-pen-gap" />
     </div>
@@ -34,20 +34,27 @@
 import { computed } from 'vue'
 import LiveDots from './LiveDots.vue'
 import { firstLine } from '@/utils/firstLine'
+import { closeoutMissionText } from '@/utils/jobsBoardCardStats'
 
 const props = defineProps({
   project: { type: Object, required: true },
   mission: { type: String, default: '' },
   missionState: { type: String, default: 'none' },
   chainMember: { type: Boolean, default: false },
+  finished: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['edit-description'])
 
 const descriptionLine = computed(() => firstLine(props.project?.description))
 
+const closeoutText = computed(() =>
+  props.finished && props.missionState === 'none' ? closeoutMissionText(props.project) : '',
+)
+
 const missionLine = computed(() => {
   if (props.missionState === 'none') {
+    if (props.finished) return firstLine(closeoutText.value) || 'No mission recorded.'
     return props.chainMember
       ? 'Written when the chain reaches this step.'
       : 'No mission yet. Press Stage and the orchestrator writes it.'

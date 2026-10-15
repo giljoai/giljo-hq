@@ -75,7 +75,12 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "stage_project": {
         "fn": "stage_project",
-        "params": ["action", "mission", "mode", "project_id"],
+        "params": ["mission", "mode", "project_id"],
+        "scope": "mcp:agent",
+    },
+    "unstage_project": {
+        "fn": "unstage_project",
+        "params": ["project_id"],
         "scope": "mcp:agent",
     },
     "get_implementation_prompt": {
@@ -103,11 +108,15 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["assigned_to", "description", "priority", "product_id", "task_type", "title"],
         "scope": "mcp:write",
     },
+    "promote_task_to_project": {
+        "fn": "promote_task_to_project",
+        "params": ["task_id", "title"],
+        "scope": "mcp:write",
+    },
     "update_task": {
         "fn": "update_task",
         "params": [
             "completion_notes",
-            "convert_to_project",
             "description",
             "hidden",
             "priority",
@@ -397,6 +406,11 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["force", "overall_summary", "product_id", "proposals"],
         "scope": "mcp:write",
     },
+    "propose_template_change": {
+        "fn": "propose_template_change",
+        "params": ["product_id", "proposed_text", "reason", "rung", "target_kind", "template_id_or_name"],
+        "scope": "mcp:write",
+    },
 }
 
 
@@ -420,7 +434,7 @@ def test_registered_tool_set_is_exactly_preserved():
         f"Tool registry drift. Missing: {sorted(expected_names - live_names)}; "
         f"Unexpected: {sorted(live_names - expected_names)}"
     )
-    assert len(live_names) == 49
+    assert len(live_names) == 52
 
 
 def test_every_tool_fn_params_and_scope_preserved():

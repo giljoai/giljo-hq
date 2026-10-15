@@ -50,7 +50,7 @@ Giljo HQ, a GiljoAI product, is a passive context server for AI coding tools. It
 
 GiljoAI sits at the intersection of product thinking and development. Whether you are a developer learning to define what you build before you build it, or a product manager turning a specification into working software, the platform gives you a structured path from vision to execution. The clearer your product definition, the more effective every agent session becomes.
 
-**Bring Your Own AI.** GiljoAI works with Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, or any MCP-compatible tool. Each connects with its own API key. You can run multiple tools simultaneously.
+**Bring Your Own AI.** GiljoAI works with Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, or any MCP-compatible tool. On Hosted, most tools connect with a one-click browser sign-in; terminal tools can also use an API key, which is what Community Edition's Connect tab gives you. You can run multiple tools simultaneously.
 
 <br>
 

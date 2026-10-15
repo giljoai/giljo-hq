@@ -832,23 +832,23 @@ re-verify before closeout.
 2. `complete_job(job_id="JID-golden", result={"summary": "...", "artifacts": [...]})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — you flip to `awaiting_user` and `complete_job` refuses until the user decides. Neither `set_agent_status` nor `report_progress` clears that state. Two doors clear it through one write: the ApprovalCard in the project's CloseoutModal (the dashboard shows only a passive "Needs decision" pill) or `decide_approval(approval_id, option_id)`. If the user answers verbally, call `decide_approval` with their option; if your tenant requires a dashboard decision it refuses, so point the user to the ApprovalCard. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
-4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
+4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag vocabulary: api, backend, bug-fix, chore, database, docs, feature, frontend, infrastructure, integration, migration, perf, refactor, security, test, ui-ux. Unknown tags are rejected.
 5. Tell user: "Project complete. Use `/giljo` to create follow-ups or look up existing project/task state."
 
 **IMPORTANT:** You MUST complete your own job (step 2) BEFORE closing the project (step 4). The server requires all agents including the orchestrator to be complete before project closeout.
 
 **If `complete_job()` is rejected:** Read the error. Common causes:
 - Unread messages remain → run get_thread_history(thread_id=<your coordination thread>, as_participant="AID-golden", unread_only=true, mark_read=true) and ACT on the posts — only genuine action-required posts block this gate, and acting on them (then retrying) is the ONLY way through; there is no bypass flag
-- TODO items incomplete �� review and update your TODO list, then retry
+- TODO items incomplete → review and update your TODO list, then retry
 
 ## ORCHESTRATOR CONSTRAINTS
 - **Git commit requirement does NOT apply *while you are delegating*.** When you SPAWN a
-  worker, IT commits its work and you coordinate — you do not commit on its behalf. But a job
-  you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
-  its work (git add the specific files; NEVER git add -A) before complete_job, exactly as the
-  worker protocol requires.
+  worker, IT commits its work and you coordinate — you do not commit on its behalf. A job you
+  SELF-ADOPT (only when your harness has no spawn mechanism at all)
+  carries that worker's commit duty: commit its work (git add the specific files;
+  NEVER git add -A) before complete_job, exactly as the worker protocol requires.
 - **Low on context?** Write a handover task (`create_task(task_type="HND", ...)`), then tell
   the user its serial so a fresh session can continue from it.
 - **You operate with the user's delegated authority.** Decide and document in
@@ -1375,23 +1375,23 @@ re-verify before closeout.
 2. `complete_job(job_id="JID-golden", result={"summary": "...", "artifacts": [...]})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{id}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — you flip to `awaiting_user` and `complete_job` refuses until the user decides. Neither `set_agent_status` nor `report_progress` clears that state. Two doors clear it through one write: the ApprovalCard in the project's CloseoutModal (the dashboard shows only a passive "Needs decision" pill) or `decide_approval(approval_id, option_id)`. If the user answers verbally, call `decide_approval` with their option; if your tenant requires a dashboard decision it refuses, so point the user to the ApprovalCard. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
-4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
+4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag vocabulary: api, backend, bug-fix, chore, database, docs, feature, frontend, infrastructure, integration, migration, perf, refactor, security, test, ui-ux. Unknown tags are rejected.
 5. Tell user: "Project complete. Use `/giljo` to create follow-ups or look up existing project/task state."
 
 **IMPORTANT:** You MUST complete your own job (step 2) BEFORE closing the project (step 4). The server requires all agents including the orchestrator to be complete before project closeout.
 
 **If `complete_job()` is rejected:** Read the error. Common causes:
 - Unread messages remain → run get_thread_history(thread_id=<your coordination thread>, as_participant="AID-golden", unread_only=true, mark_read=true) and ACT on the posts — only genuine action-required posts block this gate, and acting on them (then retrying) is the ONLY way through; there is no bypass flag
-- TODO items incomplete �� review and update your TODO list, then retry
+- TODO items incomplete → review and update your TODO list, then retry
 
 ## ORCHESTRATOR CONSTRAINTS
 - **Git commit requirement does NOT apply *while you are delegating*.** When you SPAWN a
-  worker, IT commits its work and you coordinate — you do not commit on its behalf. But a job
-  you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
-  its work (git add the specific files; NEVER git add -A) before complete_job, exactly as the
-  worker protocol requires.
+  worker, IT commits its work and you coordinate — you do not commit on its behalf. A job you
+  SELF-ADOPT (only when your harness has no spawn mechanism at all)
+  carries that worker's commit duty: commit its work (git add the specific files;
+  NEVER git add -A) before complete_job, exactly as the worker protocol requires.
 - **Low on context?** Write a handover task (`create_task(task_type="HND", ...)`), then tell
   the user its serial so a fresh session can continue from it.
 - **You operate with the user's delegated authority.** Decide and document in

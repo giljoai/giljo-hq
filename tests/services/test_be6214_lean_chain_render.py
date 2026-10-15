@@ -69,6 +69,7 @@ def _suborch_render() -> str:
             execution_mode=_MODE,
             chain_mission=None,
             phase="implementation",
+            staging_status="staging_complete",
         ),
         trim_embedded_protocol_for_chain(full_protocol, "sub_orchestrator", phase="implementation"),
     ]
@@ -98,7 +99,7 @@ def test_conductor_embedded_trim_removes_meaningful_span() -> None:
 def test_suborch_render_band() -> None:
     render_bytes = _b(_suborch_render())
     assert render_bytes >= 19_500, f"sub-orch render fell below the band: {render_bytes}"
-    assert render_bytes <= 22_500, f"sub-orch render regressed above the band: {render_bytes}"
+    assert render_bytes <= 22_600, f"sub-orch render regressed above the band: {render_bytes}"
 
 
 

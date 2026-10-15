@@ -1,32 +1,27 @@
 <template>
-  <span class="run-as" :class="{ 'run-as--refused': refused }" data-testid="run-as-switch">
-    <span class="run-as-k" data-testid="run-as-label">Run as</span>
-    <span class="run-as-seg" role="group" aria-label="Run as">
-      <v-tooltip v-for="choice in MODE_CHOICES" :key="choice.value" location="bottom" open-delay="150">
-        <template #activator="{ props: tooltipProps }">
-          <button
-            v-bind="tooltipProps"
-            type="button"
-            class="run-as-btn"
-            :aria-pressed="modelValue === choice.value"
-            :disabled="locked"
-            :data-testid="choice.testid"
-            @click="!locked && emit('change', choice.value)"
-          >
-            {{ choice.label }}
-          </button>
-        </template>
-        <span>{{ choice.tip }}</span>
-      </v-tooltip>
-    </span>
+  <span class="run-as-seg" role="group" :aria-labelledby="labelledBy || undefined" data-testid="run-as-switch">
+    <v-tooltip v-for="choice in MODE_CHOICES" :key="choice.value" location="bottom" open-delay="150">
+      <template #activator="{ props: tooltipProps }">
+        <button
+          v-bind="tooltipProps"
+          type="button"
+          class="run-as-btn"
+          :aria-pressed="modelValue === choice.value"
+          :data-testid="choice.testid"
+          @click="emit('change', choice.value)"
+        >
+          {{ choice.label }}
+        </button>
+      </template>
+      <span>{{ choice.tip }}</span>
+    </v-tooltip>
   </span>
 </template>
 
 <script setup>
 defineProps({
   modelValue: { type: String, default: null },
-  locked: { type: Boolean, default: false },
-  refused: { type: Boolean, default: false },
+  labelledBy: { type: String, default: '' },
 })
 
 const emit = defineEmits(['change'])
@@ -50,54 +45,42 @@ const MODE_CHOICES = [
 <style scoped lang="scss">
 @use '../../styles/design-tokens' as *;
 
-.run-as {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.run-as-k {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: $color-text-tertiary;
-}
-
 .run-as-seg {
-  display: inline-flex;
-  gap: 4px;
+  display: flex;
+  width: 100%;
+  padding: 2px;
+  gap: 2px;
+  border-radius: $border-radius-default;
+  box-shadow: inset 0 0 0 1px $color-border-secondary;
 }
 
 .run-as-btn {
-  padding: 5px 14px;
-  border-radius: $border-radius-pill;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 12px;
+  border-radius: $border-radius-sharp;
   border: 0;
   background: none;
   color: $color-text-secondary;
-  box-shadow: inset 0 0 0 1px $color-border-secondary;
   font: inherit;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   font-weight: 500;
   cursor: pointer;
 
-  &:hover:not(:disabled),
+  &:hover,
   &:focus-visible {
     color: $color-text-primary;
   }
 
+  &:focus-visible {
+    outline: 2px solid $color-brand-yellow;
+    outline-offset: 1px;
+  }
+
   &[aria-pressed='true'] {
-    background: rgba($color-brand-yellow, 0.12);
+    background: rgba($color-brand-yellow, 0.14);
     color: $color-brand-yellow;
-    box-shadow: none;
-  }
-
-  &:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .run-as--refused & {
-    box-shadow: inset 0 0 0 1px rgba($color-status-warning, 0.6);
+    font-weight: 600;
   }
 }
 </style>

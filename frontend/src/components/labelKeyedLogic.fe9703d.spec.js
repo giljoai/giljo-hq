@@ -6,7 +6,6 @@ import { createPinia } from 'pinia'
 
 vi.mock('@/composables/useProjectStageControls', () => ({
   useProjectStageControls: () => ({
-    detectedHarness: ref('claude-code'),
     canImplement: computed(() => false),
     readyToLaunch: computed(() => false),
     launched: computed(() => false),
@@ -14,7 +13,7 @@ vi.mock('@/composables/useProjectStageControls', () => ({
     executionMode: ref('subagent'),
     executionModeSelected: computed(() => true),
     isExecutionModeLocked: computed(() => true),
-    modeRefused: ref(false),
+    stageNeedsMode: computed(() => false),
     isProjectStaging: computed(() => false),
     isProjectStaged: computed(() => false),
     canRestage: computed(() => true),

@@ -170,9 +170,9 @@ class WebSocketManager:
                 logger.warning(
                     "websocket_send_failed error_code=%s client_id=%s tenant_key=%s event_type=%s error_message=%s",
                     ErrorCode.WS_MESSAGE_SEND_FAILED.value,
-                    client_id,
-                    tenant_key,
-                    event_type,
+                    sanitize(client_id),
+                    sanitize(tenant_key),
+                    sanitize(event_type),
                     str(e),
                 )
                 return (client_id, False)
@@ -206,20 +206,20 @@ class WebSocketManager:
                 logger.warning(
                     "websocket_broker_publish_failed error_code=%s tenant_key=%s event_type=%s error_message=%s",
                     ErrorCode.WS_BROADCAST_FAILED.value,
-                    tenant_key,
-                    event_type,
+                    sanitize(tenant_key),
+                    sanitize(event_type),
                     str(e),
                 )
 
         logger.info(
             f"WebSocket broadcast to tenant completed: {sent_count} sent, {failed_count} failed",
             extra={
-                "tenant_key": tenant_key,
-                "event_type": event_type,
+                "tenant_key": sanitize(tenant_key),
+                "event_type": sanitize(event_type),
                 "sent_count": sent_count,
                 "failed_count": failed_count,
                 "total_clients": len(target_client_ids),
-                "exclude_client": exclude_client,
+                "exclude_client": sanitize(exclude_client),
             },
         )
 

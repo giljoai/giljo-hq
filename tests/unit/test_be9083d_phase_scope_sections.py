@@ -57,6 +57,7 @@ def _suborch_render(*, phase: str, tool: str = "multi_terminal") -> str:
             execution_mode="multi_terminal",
             chain_mission=_CHAIN_MISSION,
             phase=phase,
+            staging_status="staging_complete",
         ),
         trim_embedded_protocol_for_chain(_solo_protocol(tool), "sub_orchestrator", phase=phase),
     ]

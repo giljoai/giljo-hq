@@ -79,7 +79,7 @@ The wizard has four steps shown in a progress bar:
 
 | Step | Label | What happens |
 |---|---|---|
-| 1 | Choose Tools | Pick one or more of the six AI coding tools you use (you can add the rest later) |
+| 1 | Choose Tools | Pick one or more of the four supported tools: Claude Code, Codex CLI, OpenCode, or Generic MCP client (you can add the rest later) |
 | 2 | Connect | The wizard walks you through your chosen tools one at a time, with a live status card that flips green the moment each one connects |
 | 3 | Install | Ask your tool to run `giljo_setup`, which installs the `/giljo` skill and writes the Giljo HQ marker block into your project's `CLAUDE.md` / `AGENTS.md` |
 | 4 | Launch | Confirm you are set up and jump to creating your first product |
@@ -525,11 +525,11 @@ Navigate to **Tools** via the left navigation. Five tabs are available:
 | **Agents** | Agent Template Manager: browse, create, edit, and activate agent templates; the **Behaviour** view holds the agent silence threshold and check-in cadence |
 | **Context** | Context configuration: choose what grounding context agents receive and how much |
 | **Notifications** | Notification position and duration |
-| **Startup** | Cards to reopen the **Setup Wizard**, open this **guide** (the "Learning" card), |
+| **Startup** | Two cards: **Setup Wizard** reopens the setup wizard, and **Learning** opens the welcome tour |
 
 ### Connecting Your AI Tools (Connect)
 
-The Connect tab is a single directory of your tools. A left rail headed **"YOUR TOOLS"** lists each one with a live status — **Connected**, **Waiting**, or **Not set up**. Click **"+ Add a tool"** to pick from the six supported tools and walk through the same one-at-a-time connect flow the Setup Wizard uses; each tool card lets you copy its connection command and, later, **Remove tool**.
+The Connect tab is a single directory of your tools. A left rail headed **"YOUR TOOLS"** lists each one with a live status — **Connected**, **Waiting**, or **Not set up**. Click **"+ Add a tool"** to pick from the four supported tools and walk through the same one-at-a-time connect flow the Setup Wizard uses; each tool card lets you copy its connection command and, later, **Remove tool**.
 
 The four directly supported tools are **Claude Code**, **Codex CLI**, **OpenCode**, and **Generic MCP client**. **Claude Desktop** and other chat clients are not in that pickable list — they connect either by adding GiljoAI as a connector (a one-click **browser sign-in**) or by pasting a JSON config into the client's own MCP settings.
 
@@ -545,7 +545,7 @@ GiljoAI notices what kind of tool connected — a command-line tool, a chat clie
 
 ### API Keys
 
-API keys live in the Connect tab. There is **no "create key" button** — a key is **generated automatically the first time you copy a tool's connection command**. You can hold **any number** of keys; each **expires after 90 days**. To retire one, use its **Revoke** action and confirm by typing **DELETE** in the dialog.
+API keys live in the Connect tab. Each tool card has a **Generate API Key** button. The new key is placed inside that tool's connection command, so you copy the command and the key together. If the tool already has a key, the button reads **Generate New Config** and makes a fresh one. You can hold **any number** of keys; each **expires after 90 days**. To retire one, use its **Revoke** action and confirm by typing **DELETE** in the dialog.
 
 ### Git Integration
 
@@ -567,7 +567,7 @@ Slots are counted by **role**, not by agent: three agents that all have the role
 
 - **Role** (required) — the agent's role, e.g. implementer, tester, reviewer.
 - **Custom Suffix (optional)** — appended to the display name (a live preview shows the result).
-- **Coding tool** — the tool this agent runs in (Claude, Codex, OpenCode, or Generic).
+- **Harness** — the coding tool this agent runs in, as a free-text name such as `claude` or `codex`. Leave it blank (or type `default`) to use the orchestrator's own harness.
 - **Model** and **Effort** — free-text hints passed to the agent's tool when it launches, e.g. a model name or "high". Both default to **`inherit`**, meaning "the same as the orchestrator". They are plain prose, not a validated list: a tool that cannot honour a value simply ignores it.
 - **Description** — a short summary.
 - **Role & Expertise** — describe the agent's specialization, expertise, and personality. This is the field that shapes how the agent behaves.
@@ -596,7 +596,7 @@ Beyond each agent's **Role & Expertise**, two tenant-level controls shape what a
 
 **Tune Context (per product).** Each product card has a **"Tune Context"** button. Pick the sections to refresh and it generates a prompt for you to run in your agent; the agent checks the stored context against the real codebase, and changes are applied **only after it confirms drift** — nothing is overwritten blindly.
 
-**System Orchestrator Prompt (advanced).** An admin can override the orchestrator's core instructions under **Account → Danger Zone → System Orchestrator Prompt**. You can customize this **per product**, or once for **all products** — a product-specific override wins for that product, anything without one falls back to your all-products prompt, and anything without either falls back to the packaged default. While a product is selected, a line above the editor names which of the three is actually governing it and, for a saved prompt, the date it was saved; the all-products tab gives the same detail about itself. Editing either can break orchestrator coordination, so a warning is shown and a **"Restore Default"** button is always available for each. Most users never need to touch either.
+**Orchestrator prompt (advanced).** An admin can add to the orchestrator's core instructions under **Tools → Agents → Orchestrator prompt**. The built-in prompt is shown read-only; whatever you write in **Your additions** is appended after it, so your orchestrators keep receiving the built-in improvements. You can add instructions **per product**, or once for **all products**: a product's own additions win for that product, anything without them falls back to your all-products additions, and anything without either runs on the built-in prompt alone. While a product is selected, a line above the editor names which of the three is actually governing it and, for saved additions, the date they were saved; the all-products view gives the same detail about itself. Editing either can break orchestrator coordination, so a warning is shown, and **Restore Default** (or **Remove product override** for a product) clears your additions. Most users never need to touch either.
 
 ### Notification Settings
 
@@ -754,7 +754,7 @@ Click "Mark all read" to clear the unread badge.
 
 ### Skills Drift Banner
 
-When the slash-command skills installed on your machine are older than the version your server provides, an admin-only banner appears (brand yellow). To clear it, run `/giljo_setup` in your AI coding tool — this acknowledges the current skills version. On Community Edition the banner also reminds you to `git pull` and restart the server for the latest server build. The banner resurfaces if a newer version ships later.
+When the slash-command skills installed on your machine are older than the version your server provides, an admin-only banner appears (brand yellow). To clear it, ask your AI coding tool to run the `giljo_setup` MCP tool. This installs the current skills and acknowledges their version. On Community Edition the banner also reminds you to `git pull` and restart the server for the latest server build. The banner resurfaces if a newer version ships later.
 
 ### About Dialog
 
@@ -820,7 +820,7 @@ Giljo HQ serves plain HTTP. HTTPS comes from a reverse proxy placed in front of 
 
 **What HTTPS adds:**
 
-- Browser sign-in (OAuth) from AI tools such as Claude Code, which refuse to send credentials to a non-HTTPS server (localhost is exempt).
+- Browser sign-in (OAuth) for AI tools you add to the server yourself, such as Claude Code or a web app connector. These tools refuse to send credentials to a non-HTTPS server (localhost is exempt). The Connect tab on Community Edition always gives you an API key command, which works over HTTP or HTTPS.
 - Operating-system desktop notifications when the tab is hidden (the in-app toast works without it).
 - Safe exposure beyond your LAN. Never put plain HTTP on the internet.
 

@@ -65,8 +65,8 @@ class CommThreadEditMixin:
             if cleaned_subject is not None:
                 if thread.project_id:
                     raise ValidationError(
-                        "This thread belongs to a project, so it takes its name from that project "
-                        "and is kept with the project's 360 memory — it cannot be renamed here. "
+                        "This thread belongs to a project and is kept with that project's 360 memory, "
+                        "so it cannot be renamed here. "
                         "Rename the project instead, or start a separate thread for this topic.",
                         context={
                             "operation": "comm_thread.update",

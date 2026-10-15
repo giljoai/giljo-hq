@@ -41,8 +41,8 @@ The server returns agent_name WITHOUT the prefix. You MUST prepend 'gil-'.
 
 WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
 returned carries this agent's model/effort hints when they are set, and
-get_job_mission returns its full agent_profile (role,
-description, instructions, behavioural rules, success criteria). There is no
+get_job_mission returns its role instructions in agent_identity and its
+agent_profile (role, model, effort, harness, rules, success criteria). There is no
 agent template file to install, look up, or keep in sync — so do NOT re-explain
 the role in instructions=, and do NOT hunt for a catalogue entry.
 
@@ -61,10 +61,9 @@ job and state once:
   """
     + MISSING_AGENT_TEMPLATES_NOTICE
     + """
-The instructions= parameter should contain ONLY:
-  - The job_id
-  - The MCP call: get_job_mission(job_id="...")
-The agent_profile in that response handles everything else.
+The instructions= parameter should contain ONLY the agent_prompt spawn_job
+returned for that job, verbatim (it carries the job_id and the get_job_mission call).
+The agent_identity and agent_profile in that response handle everything else.
 
 DO NOT invoke spawn_agent() during staging - this is planning reference only
 """,
@@ -75,14 +74,15 @@ _CH3_CLAUDE = (
     """Claude Code CLI Note:
   - Task(subagent_type="general-purpose") for every agent: Claude Code's generic worker
   - agent_name binds the DB record to the job; the role arrives from the server
-  - The Task instructions open with the agent's name and job_id, then get_job_mission""",
+  - The Task instructions are the agent_prompt spawn_job returned for that job, verbatim""",
     """── YOUR PLATFORM: CLAUDE CODE CLI ─────────────────────────────────────────
 Task tool syntax (IMPLEMENTATION PHASE ONLY - not during staging):
   Task(subagent_type="general-purpose",
-       instructions="You are {agent_name} (job_id: {job_id}). First action: get_job_mission(job_id='{job_id}').")
+       instructions="<the agent_prompt spawn_job returned for that job, verbatim>")
 
 WHERE THE ROLE COMES FROM: the server, not your disk. get_job_mission returns the
-agent's full agent_profile (role, instructions, model/effort hints). There is no
+agent's role instructions in agent_identity and its agent_profile (role, model,
+effort, harness). There is no
 agent file to install or look up: spawn Claude Code's generic worker and let it
 fetch its own mission. agent_name only labels the job record.
 
@@ -92,7 +92,7 @@ Example:
 
   Later in implementation:
   Task(subagent_type="general-purpose",
-       instructions="You are implementer (job_id: <job_id>). First action: get_job_mission(job_id='<job_id>').")
+       instructions="<the agent_prompt that spawn_job call returned, verbatim>")
 
 DO NOT invoke Task() during staging - this is planning reference only
 """,

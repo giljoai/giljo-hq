@@ -55,7 +55,6 @@ def build_conductor_staging_response(
         "project_id": None,
         "product_id": product_id,
         "run_id": chain_ctx.run_id,
-        "tenant_key": tenant_key,
         "id_glossary": {
             "job_id": "Your OWN conductor job: update_job_mission (chain mission), complete_job (staging-end)",
             "agent_id": "Use for: post_to_thread(from_agent), get_thread_history(as_participant) on the Hub thread you create",

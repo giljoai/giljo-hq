@@ -61,6 +61,7 @@ def _to_project_response(
         implementation_launched_at=getattr(proj, "implementation_launched_at", None),
         reviewed_at=getattr(proj, "reviewed_at", None),
         review_pending=getattr(proj, "review_pending", False),
+        closeout_summary=getattr(proj, "closeout_summary", None),
         agent_count=agent_count if agent_count is not None else getattr(proj, "agent_count", 0),
         message_count=message_count if message_count is not None else getattr(proj, "message_count", 0),
         execution_mode=proj.execution_mode,

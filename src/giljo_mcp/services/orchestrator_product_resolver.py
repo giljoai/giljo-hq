@@ -39,7 +39,7 @@ async def _resolve_product_id(
         return coerce_product_id(getattr(head, "product_id", None) if head is not None else None)
     except Exception:  # noqa: BLE001 - best-effort; identity delivery must not fail on this
         service._logger.warning(
-            "[BE-9385d] orchestrator product resolution failed (non-fatal); using tenant rung",
+            "[BE-9385d] orchestrator product resolution failed (non-fatal); using the built-in prompt",
             extra={"job_id": getattr(job, "job_id", None)},
         )
         return None
@@ -67,6 +67,7 @@ async def resolve_orchestrator_override(
             scope=record.scope,
             updated_at=record.updated_at,
             product_id=product_id if record.scope == SCOPE_PRODUCT else None,
+            mode=record.mode,
         )
     except Exception:  # noqa: BLE001
         service._logger.warning(
@@ -94,6 +95,7 @@ async def compose_identity_with_provenance(
         resolved.scope,
         updated_at=resolved.updated_at,
         product_name=await resolve_product_name(service, session, tenant_key, resolved.product_id),
+        mode=resolved.mode,
     )
     composed = compose_orchestrator_identity(resolved.content, tool=tool, role=role)
     return append_identity_source(composed, identity_source), identity_source, resolved.scope

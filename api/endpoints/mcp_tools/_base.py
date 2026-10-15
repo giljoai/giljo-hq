@@ -52,11 +52,7 @@ _SANITIZED_TOOL_ERROR = (
 
 _NOT_FOUND_TOOL_ERROR = "The requested resource was not found, or you do not have access to it."
 
-_CLEAN_VALIDATION_ERRORS: tuple[type[Exception], ...] = (
-    ValueError,
-    TypeError,
-    MemoryEntryWriteValidationError,
-)
+_CLEAN_VALIDATION_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError)
 
 _SQL_LEAK_SIGNATURE = re.compile(
     r"\[SQL:"
@@ -226,6 +222,7 @@ TOOL_DISPATCH: dict[str, ToolResolver] = {
         websocket_manager=acc._websocket_manager,
     ),
     "update_task": lambda acc: acc._task_service.update_task_for_mcp,
+    "promote_task_to_project": lambda acc: acc._task_service.promote_task_for_mcp,
     "list_tasks": lambda acc: acc._task_service.list_tasks_for_mcp,
     "update_roadmap_metadata": lambda acc: acc._roadmap_service.upsert_metadata,
     "get_roadmap": lambda acc: acc._roadmap_service.get_roadmap,
@@ -316,8 +313,10 @@ def _held_tool_ceiling_response(method_name: str) -> dict[str, Any]:
 
 
 
-def _missing_commit_identifier_response(exc: GitCommitShaRequiredError, method_name: str) -> dict[str, Any]:
-    logger.info("MCP tool '%s' refused a commit with no identifier", method_name)
+def _memory_write_rejection(
+    exc: GitCommitShaRequiredError | MemoryEntryWriteValidationError, method_name: str
+) -> dict[str, Any]:
+    logger.info("MCP tool '%s' refused a memory write: %s (%s)", method_name, exc.field, exc.constraint)
     return validation_rejection(field=exc.field, constraint=exc.constraint, message=str(exc))
 
 
@@ -343,8 +342,8 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     except CursorRejectedError as exc:
         logger.info("MCP tool '%s' refused a continuation cursor: %s", method_name, exc.code)
         return {"success": False, "error": exc.code, "message": str(exc)}
-    except GitCommitShaRequiredError as exc:
-        return _missing_commit_identifier_response(exc, method_name)
+    except (GitCommitShaRequiredError, MemoryEntryWriteValidationError) as exc:
+        return _memory_write_rejection(exc, method_name)
     except CodedRefusalError as exc:
         logger.info("MCP tool '%s' refused with %s", method_name, exc.code)
         return exc.as_refusal()
@@ -372,25 +371,23 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
 
     from api.app_state import state as app_state
-    from api.endpoints.mcp_tools._silence_scope import stale_board_line
+    from api.endpoints.mcp_tools._silence_scope import clear_silence_for_call, posthook_key, stale_board_line
 
     job_id = kwargs.get("job_id")
     if job_id and app_state.db_manager is None:
         logger.warning("post-hooks skipped for job_id=%s: db_manager not initialised", job_id)
-    elif job_id and should_run("mcp_posthooks", job_id, _POSTHOOK_DEBOUNCE_SECONDS):
+    elif job_id and should_run("mcp_posthooks", posthook_key(method_name, job_id), _POSTHOOK_DEBOUNCE_SECONDS):
         from sqlalchemy.exc import SQLAlchemyError
 
         from giljo_mcp.services.heartbeat import touch_heartbeat
-        from giljo_mcp.services.silence_detector import auto_clear_silent
 
         ws_manager = getattr(app_state, "websocket_manager", None)
         try:
             async with app_state.db_manager.get_session_async() as db:
-                if method_name in SILENCE_CLEARING_TOOLS:
-                    try:
-                        await auto_clear_silent(db, job_id, ws_manager, tenant_key=tenant_key)
-                    except SQLAlchemyError:
-                        logger.warning("auto_clear_silent failed for job_id=%s (non-blocking)", job_id, exc_info=True)
+                try:
+                    await clear_silence_for_call(db, method_name, job_id, ws_manager, tenant_key)
+                except SQLAlchemyError:
+                    logger.warning("auto_clear_silent failed for job_id=%s (non-blocking)", job_id, exc_info=True)
 
                 try:
                     await touch_heartbeat(db, job_id, tenant_key=tenant_key)

@@ -55,6 +55,12 @@ async def staging_client(monkeypatch):
             type(self).mission_writes.append((project_id, mission))
             return {"status": "ok"}
 
+        class _project_service:  # noqa: N801 -- stand-in for the accessor's service attribute
+            class lifecycle:  # noqa: N801
+                @staticmethod
+                async def activate_for_staging(project_id: str, tenant_key: str | None = None) -> None:
+                    return None
+
         async def _resolve_stage_mode_default(self, tenant_key: str) -> str:
             return self.account_default
 
@@ -148,24 +154,20 @@ async def test_the_refusal_short_circuits_before_the_staging_transaction(staging
     )
 
 
-async def test_a_reverse_gear_action_is_never_asked_for_a_mode(staging_client):
+async def test_a_retired_action_is_answered_before_any_mode_question(staging_client):
     new_client, accessor = staging_client
     accessor.account_default = ""
-
-    called: dict = {}
-
-    async def _reverse(project_id: str, action: str):
-        called["action"] = action
-        return {"status": action}
-
-    accessor._stage_project_reverse_gear = _reverse
+    type(accessor).session_opened = False
 
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": "p-1", "action": "unstage"})
 
     assert result.is_error is False, _error_text(result)
-    assert called["action"] == "unstage"
-    assert _payload(result)["status"] == "unstage"
+    payload = _payload(result)
+    assert payload["error"] == "VALIDATION_ERROR"
+    assert payload["field"] == "action"
+    assert "unstage_project" in payload["message"]
+    assert accessor.session_opened is False
 
 
 async def test_a_mission_passed_at_staging_goes_through_the_single_writer(staging_client):

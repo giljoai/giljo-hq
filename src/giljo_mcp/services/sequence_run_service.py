@@ -285,7 +285,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
             self._logger.info(
                 "Updated sequence_run %s (tenant=%s, status=%s, index=%s)",
                 sanitize(run_id),
-                effective_tenant_key,
+                sanitize(effective_tenant_key),
                 sanitize(run.status),
                 sanitize(run.current_index),
             )

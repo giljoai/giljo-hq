@@ -83,7 +83,7 @@ def _make_project() -> SimpleNamespace:
 class TestRenderFromFlagAlone:
     def test_worker_commit_block_renders_when_flag_true(self):
         git_block, _ = _build_conditional_blocks(
-            git_integration_enabled=True, execution_mode="subagent", tool="claude-code"
+            git_integration_enabled=True, execution_mode="multi_terminal", tool="multi_terminal"
         )
         assert "Git Commit (REQUIRED" in git_block
         assert "never use `git add -A`" in git_block
@@ -98,7 +98,7 @@ class TestRenderFromFlagAlone:
         builder = _MinimalBuilder()
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=True)
         assert "Git Closeout Commit" in prompt
-        assert "Committer of last resort" in prompt
+        assert "You are the committer" in prompt
         assert "git status --short" in prompt
         assert 'git commit -m "BE-9103: ' in prompt
 
@@ -113,7 +113,7 @@ class TestRenderFromFlagAlone:
         builder = _MinimalBuilder()
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=False)
         assert "Git Closeout Commit" not in prompt
-        assert "Committer of last resort" not in prompt
+        assert "You are the committer" not in prompt
 
 
 

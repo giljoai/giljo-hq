@@ -429,9 +429,11 @@ async def purge_tenant_rows(db_manager: DatabaseManager, tenant_key: str) -> Non
     from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.models.sequence_runs import SequenceRun
+    from giljo_mcp.models.tasks import Message
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         for model in (
+            Message,
             AgentExecution,
             AgentJob,
             AgentTemplate,

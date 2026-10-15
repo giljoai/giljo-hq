@@ -35,6 +35,17 @@
           data-testid="thread-card-hand"
         >mdi-hand-back-right-outline</v-icon>
 
+        <template v-if="hasProject">
+          <span
+            v-if="thread._projectAlias"
+            class="thread-card__project-badge"
+            :style="projectBadgeStyle"
+            data-testid="thread-card-project-badge"
+          >{{ thread._projectAlias }}</span>
+          <span v-else class="thread-card__kind" data-testid="thread-card-project-label">Project</span>
+        </template>
+        <span v-else class="thread-card__kind" data-testid="thread-card-general">General</span>
+
         <span
           class="thread-card__title"
           :class="{ 'thread-card__title--unnamed': isUnnamed }"
@@ -44,6 +55,16 @@
         </span>
 
         <div class="thread-card__actions" data-testid="thread-card-actions">
+          <button
+            type="button"
+            class="thread-card__action"
+            :title="resolveControl.label"
+            :aria-label="resolveControl.label"
+            data-testid="thread-card-resolve"
+            @click.stop="$emit('toggle-resolved', thread)"
+          >
+            <v-icon size="15">{{ resolveControl.icon }}</v-icon>
+          </button>
           <button
             v-if="!locked"
             type="button"
@@ -157,19 +178,23 @@
 import { ref, computed, nextTick } from 'vue'
 import { getAgentColor } from '@/config/agentColors'
 import { tintedStyle } from '@/utils/colorUtils'
+import { taxonomyBadgeStyle } from '@/utils/taxonomyBadge'
 import { useProductStore } from '@/stores/products'
 import { BOUND_THREAD_MARKER_SUBJECT } from '@/composables/useProjectBoundThread'
 import AgentPill from '@/components/hub/AgentPill.vue'
 import ThreadDates from '@/components/hub/ThreadDates.vue'
+import { threadResolveControl } from '@/components/hub/useThreadResolve'
 
 const props = defineProps({
   thread: { type: Object, required: true },
   selected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open', 'rename', 'copy', 'delete', 'lock-info'])
+const emit = defineEmits(['open', 'rename', 'copy', 'delete', 'lock-info', 'toggle-resolved'])
 
 const locked = computed(() => props.thread.project_id != null)
+const hasProject = locked
+const projectBadgeStyle = computed(() => taxonomyBadgeStyle(props.thread._projectColor))
 
 const productStore = useProductStore()
 const productChipLabel = computed(() => {
@@ -231,6 +256,7 @@ const statusTitle = computed(() => STATUS_MEANINGS[String(props.thread.status ||
 
 const attention = computed(() => !!props.thread._yourTurn)
 const isIdle = computed(() => isTerminal.value)
+const resolveControl = computed(() => threadResolveControl(props.thread.status))
 
 
 const renaming = ref(false)
@@ -315,9 +341,9 @@ function cancelRename() {
     // Padding rather than a width on `__title`: it keeps the actions out of flow, so
     // the no-layout-shift property still holds (the fading `__time` occupies the same
     // reserved strip), while the title now runs out of room BEFORE the buttons start.
-    // 3 buttons x 26px + 2 gaps x 4px + the 20px right offset. (FE-9593: the relative
+    // 4 buttons x 26px + 3 gaps x 4px + the 20px right offset. (FE-9593: the relative
     // time that used to share this strip is gone; the strip stays reserved for them.)
-    padding-right: 106px;
+    padding-right: 136px;
   }
 
   &__hand {
@@ -332,6 +358,22 @@ function cancelRename() {
     font-weight: 700;
     color: $color-brand-yellow;
     letter-spacing: 0.01em;
+  }
+
+  &__project-badge {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: $border-radius-sharp;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8125rem; // 13
+    font-weight: 600;
+  }
+
+  &__kind {
+    flex: none;
+    font-size: 0.75rem; // 12
+    font-weight: 600;
+    color: var(--text-muted);
   }
 
   &__title {

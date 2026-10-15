@@ -89,7 +89,7 @@ def _payload(result):
     return json.loads(result.content[0].text)
 
 
-async def test_staged_with_no_agents_suggests_unstage_not_cancel(diagnose_client):
+async def test_staged_with_no_agents_suggests_unstage_or_abandon(diagnose_client):
     new_client, make_project = diagnose_client
     project_id = await make_project(staging_status="staged")
 
@@ -100,13 +100,16 @@ async def test_staged_with_no_agents_suggests_unstage_not_cancel(diagnose_client
     payload = _payload(result)
     assert "no_agents_spawned" in payload["stuck_conditions"]
     joined = " ".join(payload["suggested_actions"])
-    assert "unstage" in joined
-    assert "cancel_staging" not in joined
+    assert "unstage_project" in joined
+    assert "status='cancelled'" in joined
+    assert "restage_project" not in joined
+    assert "cancel_project_staging" not in joined
 
 
-async def test_staging_with_no_agents_suggests_restage_or_cancel(diagnose_client):
+@pytest.mark.parametrize("status", [ProjectStatus.INACTIVE, ProjectStatus.ACTIVE])
+async def test_staging_with_no_agents_suggests_unstage_or_abandon(diagnose_client, status):
     new_client, make_project = diagnose_client
-    project_id = await make_project(staging_status="staging")
+    project_id = await make_project(staging_status="staging", status=status)
 
     async with new_client() as session:
         result = await session.call_tool("diagnose_project_state", {"project_id": project_id})
@@ -115,20 +118,7 @@ async def test_staging_with_no_agents_suggests_restage_or_cancel(diagnose_client
     payload = _payload(result)
     assert "no_agents_spawned" in payload["stuck_conditions"]
     joined = " ".join(payload["suggested_actions"])
-    assert "restage" in joined
-    assert "cancel_staging" in joined
-
-
-async def test_staging_but_not_inactive_omits_cancel_staging(diagnose_client):
-    new_client, make_project = diagnose_client
-    project_id = await make_project(staging_status="staging", status=ProjectStatus.ACTIVE)
-
-    async with new_client() as session:
-        result = await session.call_tool("diagnose_project_state", {"project_id": project_id})
-
-    assert result.is_error is False, result
-    payload = _payload(result)
-    assert "no_agents_spawned" in payload["stuck_conditions"]
-    joined = " ".join(payload["suggested_actions"])
-    assert "restage" in joined
-    assert "cancel_staging" not in joined
+    assert "unstage_project" in joined
+    assert "status='cancelled'" in joined
+    assert "restage_project" not in joined
+    assert "cancel_project_staging" not in joined

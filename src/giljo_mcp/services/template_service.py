@@ -7,6 +7,7 @@
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
@@ -49,6 +50,15 @@ def factory_default_for(template: AgentTemplate) -> dict | None:
     if not (template.user_instructions or "").strip():
         return by_role.get(template.role)
     return None
+
+
+def differs_from_builtin(template: AgentTemplate) -> bool | None:
+    from giljo_mcp.template_seeder import _seeded_user_instructions
+
+    default_def = factory_default_for(template)
+    if default_def is None:
+        return None
+    return template.user_instructions != _seeded_user_instructions(default_def)
 
 
 USER_MANAGED_AGENT_LIMIT = 15
@@ -325,6 +335,10 @@ class TemplateService:
         default_def = factory_default_for(template)
         template.user_instructions = default_def["user_instructions"] if default_def else None
         template.tags = ["default", "tenant"] if default_def else []
+        if default_def:
+            template.version = default_def.get("version", "1.0.0")
+            template.updated_at = None
+            flag_modified(template, "updated_at")
         template.behavioral_rules = validate_behavioral_rules(
             default_def.get("behavioral_rules", []) if default_def else []
         )

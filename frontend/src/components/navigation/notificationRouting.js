@@ -34,6 +34,10 @@ export function projectRouteFor(notification) {
   return route
 }
 
+export function decisionRouteFor(projectId) {
+  return { name: 'JobsViewport', query: { project: projectId, decide: '1' } }
+}
+
 export function resolveNotificationRoute(notification) {
   if (STAY_ON_PAGE_TYPES.has(notification?.type)) return null
   const routeFactory = TYPE_ROUTE_MAP[notification?.type]

@@ -5,15 +5,21 @@ import { useChainLifecycle } from '@/composables/useChainLifecycle'
 import { useChainImplementation } from '@/composables/useChainImplementation'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
+import { useSettingsStore } from '@/stores/settings'
 import { buildChainScreenControls } from '@/components/projects/chainScreenVisibility.js'
 import { parseErrorResponse } from '@/utils/errorMessages'
+import { preselectedExecutionMode } from '@/utils/executionModeDefault'
 
 function errorText(err, fallback) {
   return parseErrorResponse(err).message || fallback
 }
 
-export function useChainGroupControls({ chainCtx }) {
+const CHAIN_PROMPT_COPIED = 'Chain prompt copied. Paste it into your conductor session.'
+
+export function useChainGroupControls({ chainCtx, agentsByProject = () => ({}) }) {
   const sequenceRunStore = useSequenceRunStore()
+  const settingsStore = useSettingsStore()
+  settingsStore.ensureExecutionModeDefault()
   const { stageChain, unstageChain } = useChainLifecycle()
   const { launchChainHead } = useChainImplementation()
   const { copy } = useClipboard()
@@ -30,13 +36,28 @@ export function useChainGroupControls({ chainCtx }) {
     buildChainScreenControls(chainCtx.value, sequenceRunStore.isRunning(chainCtx.value?.runId)),
   )
 
-  const chainStageText = computed(() => (chainCtx.value?.locked ? 'Unstage Chain' : 'Stage Chain'))
-  const chainStageDisabled = computed(() => chainStaging.value || !chainCtx.value?.run?.execution_mode)
+  const chainMode = computed(() => {
+    const ctx = chainCtx.value
+    if (!ctx) return null
+    if (ctx.run?.execution_mode) return ctx.run.execution_mode
+    return ctx.locked ? null : preselectedExecutionMode(settingsStore.executionModeDefault)
+  })
+
+  const chainStageText = computed(() => (chainCtx.value?.locked ? 'Unstage chain' : 'Stage chain'))
+  const chainStageNeedsMode = computed(() => Boolean(chainCtx.value && !chainCtx.value.locked && !chainMode.value))
   const chainStageTitle = computed(() => {
     if (!chainCtx.value) return ''
     if (chainCtx.value.locked) return 'Unlock the chain to edit descriptions, order, and mode'
-    if (!chainCtx.value.run?.execution_mode) return 'Select an execution mode first'
     return 'Lock the chain and copy the staging prompt'
+  })
+
+  const chainPhase = computed(() => {
+    const ctx = chainCtx.value
+    if (!ctx) return null
+    if (!chainScreenControls.value.showStopChain) return ctx.locked ? 'staged' : 'ready'
+    const byProject = agentsByProject() || {}
+    const agents = (ctx.tabs || []).flatMap((tab) => byProject[tab.projectId] || [])
+    return agents.every((agent) => agent?.status === 'waiting') ? 'pickup' : 'running'
   })
 
   const chainImplementReady = computed(() => {
@@ -46,13 +67,6 @@ export function useChainGroupControls({ chainCtx }) {
     if (!(run?.chain_mission ?? '').trim()) return false
     return run?.status === 'pending' || run?.status === 'staged'
   })
-
-  const showCopyMasterPrompt = computed(
-    () =>
-      chainCtx.value?.locked === true &&
-      chainCtx.value?.run?.execution_mode === 'multi_terminal' &&
-      !chainScreenControls.value.showStopChain,
-  )
 
   async function patchRunMode(mode) {
     if (!chainCtx.value || chainCtx.value.locked) return
@@ -70,6 +84,9 @@ export function useChainGroupControls({ chainCtx }) {
       if (chainCtx.value.locked) {
         await unstageChain(chainCtx.value.run)
       } else {
+        if (!chainCtx.value.run?.execution_mode && chainMode.value) {
+          await sequenceRunStore.patchRun(chainCtx.value.runId, { execution_mode: chainMode.value })
+        }
         await stageChain(chainCtx.value.run)
       }
     } finally {
@@ -84,7 +101,9 @@ export function useChainGroupControls({ chainCtx }) {
     const headPid = run?.resolved_order?.[0] || run?.project_ids?.[0] || ctx.tabs?.[0]?.projectId || null
     launching.value = true
     try {
-      return await launchChainHead(headPid)
+      const started = await launchChainHead(headPid)
+      if (started) await copyChainPrompt()
+      return started
     } finally {
       launching.value = false
     }
@@ -105,14 +124,16 @@ export function useChainGroupControls({ chainCtx }) {
     }
   }
 
-  function copyMasterPrompt() {
+  const copyingChainPrompt = ref(false)
+  async function copyChainPrompt() {
     const runId = chainCtx.value?.runId
-    if (!runId) return Promise.resolve()
-    return copyPrompt(
-      () => api.prompts.chainImplementation(runId),
-      'Master prompt copied. Paste it into one terminal to drive the chain.',
-      'Could not build the master prompt.',
-    )
+    if (!runId) return
+    copyingChainPrompt.value = true
+    try {
+      await copyPrompt(() => api.prompts.chainImplementation(runId), CHAIN_PROMPT_COPIED, 'Could not build the chain prompt.')
+    } finally {
+      copyingChainPrompt.value = false
+    }
   }
 
   function copyMemberFallbackPrompt(projectId) {
@@ -174,15 +195,17 @@ export function useChainGroupControls({ chainCtx }) {
     chainScreenControls,
     chainStaging,
     launching,
+    chainMode,
+    chainPhase,
     chainStageText,
-    chainStageDisabled,
+    chainStageNeedsMode,
     chainStageTitle,
     chainImplementReady,
-    showCopyMasterPrompt,
     patchRunMode,
     handleChainStage,
     handleChainImplement,
-    copyMasterPrompt,
+    copyChainPrompt,
+    copyingChainPrompt,
     copyMemberFallbackPrompt,
     chainStopping,
     showChainStopConfirm,

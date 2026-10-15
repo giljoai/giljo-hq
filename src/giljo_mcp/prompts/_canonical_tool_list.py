@@ -45,3 +45,20 @@ def render_toolsearch_query() -> str:
 
 def render_toolsearch_call_one_line() -> str:
     return f'ToolSearch(query="{render_toolsearch_query()}", max_results=25)'
+
+
+CANONICAL_WORKER_TOOLS: tuple[str, ...] = (
+    f"{_PREFIX}get_job_mission",
+    f"{_PREFIX}join_thread",
+    f"{_PREFIX}get_thread_history",
+    f"{_PREFIX}post_to_thread",
+    f"{_PREFIX}report_progress",
+    f"{_PREFIX}set_agent_status",
+    f"{_PREFIX}get_context",
+    f"{_PREFIX}complete_job",
+)
+
+
+def render_worker_toolsearch_call() -> str:
+    tools = ",".join(CANONICAL_WORKER_TOOLS)
+    return f'ToolSearch(query="select:{tools}", max_results={len(CANONICAL_WORKER_TOOLS)})'

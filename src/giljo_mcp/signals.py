@@ -19,6 +19,8 @@ SIGNAL_UNSCOPED_WRITE = "tenant_guard.unscoped_write"
 
 SIGNAL_POST_AUTH_GATE_FAILED = "mcp_auth.post_auth_gate_failed"
 
+SIGNAL_ACCOUNT_ACCESS_OBSERVED = "auth.account_access_observed"
+
 _observers: dict[str, list[SignalObserver]] = {}
 
 

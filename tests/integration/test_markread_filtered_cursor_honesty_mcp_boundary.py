@@ -202,8 +202,7 @@ async def test_filtered_drain_unblocks_complete_job_over_the_wire(markread_mcp_c
     tid, _action_required = await _seed_thread(new_client, project_id, agent_id)
 
     blocked = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "should block"}})
-    assert blocked.is_error is True
-    assert "COMPLETION_BLOCKED" in _error_text(blocked)
+    assert not blocked.is_error and _payload(blocked).get("error") == "COMPLETION_BLOCKED"
 
     drained = await _call(new_client, "get_thread_history", _filtered_drain_args(tid, agent_id))
     assert drained.is_error is False, _error_text(drained)
@@ -219,7 +218,7 @@ async def test_completion_blocked_guidance_names_the_thread_and_the_unfiltered_r
     tid, _action_required = await _seed_thread(new_client, project_id, agent_id)
 
     blocked = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "should block"}})
-    assert blocked.is_error is True
+    assert not blocked.is_error and _payload(blocked).get("error") == "COMPLETION_BLOCKED"
     text = _error_text(blocked)
 
     assert tid in text, "COMPLETION_BLOCKED must name the thread carrying the blocking posts"

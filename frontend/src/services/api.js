@@ -5,8 +5,8 @@ import { sequenceRunsApi } from './sequenceRunsApi.js'
 import { executionModeDefaultApi, handoverTemplateApi } from './settingsApi.js'
 import { notificationPrefsApi } from './notificationPrefsApi.js'
 import { promptsApi } from './promptsApi.js'
-import { templatesApi, assignmentsApi } from './agentsApi.js'
-import { handleAuthFailure, normalizeRejection } from './apiFailureHandling.js'
+import { templatesApi, assignmentsApi, templateProposalsApi } from './agentsApi.js'
+import { handleAuthFailure, noteSignOutReason, normalizeRejection } from './apiFailureHandling.js'
 
 const apiClient = axios.create({
   baseURL: API_CONFIG.REST_API.baseURL,
@@ -156,8 +156,9 @@ apiClient.interceptors.response.use(
         isRefreshing = false
         onRefreshed()
         return apiClient(originalRequest)
-      } catch {
+      } catch (refreshError) {
         isRefreshing = false
+        noteSignOutReason(refreshError)
         onRefreshFailed()
         return handleAuthFailure(error)
       }
@@ -231,6 +232,11 @@ export function __resetRequestDedupe() {
 }
 
 const seriesProductIdParam = (productId) => (productId ? { product_id: productId } : {})
+
+const requireProductId = (productId) => {
+  if (!productId) throw new Error('A product id is required for orchestrator prompt calls')
+  return productId
+}
 
 export const api = {
   products: {
@@ -441,6 +447,7 @@ export const api = {
 
   templates: templatesApi,
   assignments: assignmentsApi,
+  templateProposals: templateProposalsApi,
 
   auth: {
     login: (username, password) => apiClient.post('/api/auth/login', { username, password }),
@@ -511,11 +518,11 @@ export const api = {
   system: {
     getOrchestratorPrompt: (productId = null) =>
       apiClient.get('/api/v1/system/orchestrator-prompt', { params: { product_id: productId } }),
-    updateOrchestratorPrompt: (content, productId = null) =>
-      apiClient.put('/api/v1/system/orchestrator-prompt', { content, product_id: productId }),
-    resetOrchestratorPrompt: (productId = null) =>
+    updateOrchestratorPrompt: (additions, productId) =>
+      apiClient.put('/api/v1/system/orchestrator-prompt', { additions, product_id: requireProductId(productId) }),
+    resetOrchestratorPrompt: (productId) =>
       apiClient.post('/api/v1/system/orchestrator-prompt/reset', null, {
-        params: { product_id: productId },
+        params: { product_id: requireProductId(productId) },
       }),
   },
 

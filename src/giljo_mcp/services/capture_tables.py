@@ -15,6 +15,8 @@ ARTIFACT_SCHEMA_VERSION = "2.0"
 
 EXPORT_EXCLUDE: frozenset[str] = frozenset(
     {
+        "account_access_log",
+        "browser_sessions",
         "download_tokens",
         "email_change_tokens",
         "mcp_sessions",

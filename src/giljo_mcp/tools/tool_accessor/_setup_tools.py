@@ -134,3 +134,29 @@ class SetupMiscMixin:
             db_manager=self.db_manager,
             websocket_manager=self._websocket_manager,
         )
+
+
+    async def propose_template_change(
+        self,
+        tenant_key: str,
+        target_kind: str,
+        proposed_text: str,
+        reason: str,
+        template_id_or_name: str = "",
+        product_id: str = "",
+        rung: str = "",
+        proposed_by: str | None = None,
+    ) -> dict[str, Any]:
+        from giljo_mcp.services.template_proposal_service import TemplateProposalService
+
+        service = TemplateProposalService(self.db_manager, session=self._test_session)
+        return await service.propose(
+            tenant_key=tenant_key,
+            target_kind=target_kind,
+            proposed_text=proposed_text,
+            reason=reason,
+            template_id_or_name=template_id_or_name,
+            product_id=product_id,
+            rung=rung,
+            proposed_by=proposed_by,
+        )

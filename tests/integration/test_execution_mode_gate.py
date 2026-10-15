@@ -187,7 +187,9 @@ async def test_spawn_job_refuses_null_execution_mode_at_mcp_boundary(gate_mcp_cl
             },
         )
 
-    assert result.is_error is True, "spawn_job MUST refuse a NULL-execution_mode project"
+    assert not result.is_error and _payload(result).get("error") == "EXECUTION_MODE_NOT_SELECTED", (
+        "spawn_job MUST refuse a NULL-execution_mode project (BE-9738: as Tier-2 content)"
+    )
     err = _error_text(result).lower()
     assert "execution mode" in err, f"expected an execution-mode gate message, got: {err!r}"
 
