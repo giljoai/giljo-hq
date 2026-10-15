@@ -159,6 +159,32 @@ export function useTemplateData(search, filterRole, filterStatus, productId, sho
     }
   }
 
+  const builtinDiff = ref(null)
+
+  const openBuiltinDiff = async (template) => {
+    try {
+      const { data } = await api.templates.factoryDefault(template.id)
+      builtinDiff.value = {
+        template,
+        template_name: template.name,
+        current_text: template.user_instructions || '',
+        builtin_text: data.user_instructions,
+        builtin_version: data.version,
+      }
+    } catch (error) {
+      showToast({
+        message: `Could not load the built-in text: ${parseErrorResponse(error).message}`,
+        type: 'error',
+      })
+    }
+  }
+
+  const closeBuiltinDiff = () => {
+    const template = builtinDiff.value?.template || null
+    builtinDiff.value = null
+    return template
+  }
+
   return {
     templates,
     loading,
@@ -178,5 +204,8 @@ export function useTemplateData(search, filterRole, filterStatus, productId, sho
     resetEditingTemplate,
     importingDefaults,
     importDefaults,
+    builtinDiff,
+    openBuiltinDiff,
+    closeBuiltinDiff,
   }
 }

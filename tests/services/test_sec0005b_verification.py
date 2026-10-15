@@ -21,6 +21,8 @@ from giljo_mcp.template_seeder import (
 )
 
 
+SHARED_PRODUCT_ID = "5ec5b000-0000-4000-8000-000000000001"
+
 
 
 @pytest.mark.asyncio
@@ -30,17 +32,19 @@ class TestPropertyATenantIsolation:
         service = SystemPromptService(db_manager=db_manager)
         tenant_a = "tk_sec5b_verify_iso_a"
         tenant_b = "tk_sec5b_verify_iso_b"
+        product_id = SHARED_PRODUCT_ID
 
         await service.update_orchestrator_prompt(
             tenant_key=tenant_a,
             content="Tenant A custom prompt",
             updated_by="admin@a",
+            product_id=product_id,
             session=db_session,
         )
         await db_session.commit()
 
-        a_result = await service.get_orchestrator_prompt(tenant_key=tenant_a, session=db_session)
-        b_result = await service.get_orchestrator_prompt(tenant_key=tenant_b, session=db_session)
+        a_result = await service.get_orchestrator_prompt(tenant_key=tenant_a, product_id=product_id, session=db_session)
+        b_result = await service.get_orchestrator_prompt(tenant_key=tenant_b, product_id=product_id, session=db_session)
 
         assert a_result.is_override is True
         assert a_result.content == "Tenant A custom prompt"
@@ -51,22 +55,24 @@ class TestPropertyATenantIsolation:
         service = SystemPromptService(db_manager=db_manager)
         tenant_a = "tk_sec5b_verify_reset_a"
         tenant_b = "tk_sec5b_verify_reset_b"
+        product_id = SHARED_PRODUCT_ID
 
         await service.update_orchestrator_prompt(
             tenant_key=tenant_a,
             content="A override",
             updated_by="admin@a",
+            product_id=product_id,
             session=db_session,
         )
         await db_session.commit()
 
-        b_before = await service.get_orchestrator_prompt(tenant_key=tenant_b, session=db_session)
+        b_before = await service.get_orchestrator_prompt(tenant_key=tenant_b, product_id=product_id, session=db_session)
 
-        await service.reset_orchestrator_prompt(tenant_key=tenant_a, session=db_session)
+        await service.reset_orchestrator_prompt(tenant_key=tenant_a, product_id=product_id, session=db_session)
         await db_session.commit()
 
-        a_after = await service.get_orchestrator_prompt(tenant_key=tenant_a, session=db_session)
-        b_after = await service.get_orchestrator_prompt(tenant_key=tenant_b, session=db_session)
+        a_after = await service.get_orchestrator_prompt(tenant_key=tenant_a, product_id=product_id, session=db_session)
+        b_after = await service.get_orchestrator_prompt(tenant_key=tenant_b, product_id=product_id, session=db_session)
 
         assert a_after.is_override is False
         assert b_after.is_override is False

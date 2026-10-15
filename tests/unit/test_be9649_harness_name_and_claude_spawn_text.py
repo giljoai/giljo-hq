@@ -118,8 +118,8 @@ class _Job:
 def test_claude_implementation_spawning_section_uses_the_generic_worker() -> None:
     text = "\n".join(ClaudePromptBuilder._build_spawning_section(None, [_Job()]))
     assert 'subagent_type="general-purpose"' in text, text
-    assert "You are implementer-backend (job_id: job-42)" in text, text
-    assert 'First action: Call mcp__giljo_hq__get_job_mission(job_id="job-42")' in text, text
+    assert "launch prompt from Launch Prompts below, verbatim" in text, text
+    assert "You are implementer-backend (job_id: job-42)" not in text, text
     assert 'subagent_type="implementer-backend"' not in text, text
     assert 'subagent_type="{agent_name}"' not in text, text
     assert "not agent_display_name" not in text, text

@@ -89,3 +89,20 @@ def register_mcp_subscription_gate(*, giljo_mode: str) -> None:
             "(SEC-9131 fail-loud): /mcp billing enforcement must never be silently absent."
         )
         raise
+
+
+async def install_access_log(state, *, giljo_mode: str) -> None:
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
+        return
+    from api.startup.background_jobs_gate import should_run_background_jobs
+
+    try:
+        access_log = importlib.import_module("giljo_mcp.saas.auth.access_log")
+        access_log.install(state.db_manager.AsyncSessionLocal)
+        if should_run_background_jobs():
+            state.access_log_purge_task = await access_log.start_access_log_purge(state.db_manager.AsyncSessionLocal)
+        logger.info("Access log recorder installed")
+    except Exception as e:  # noqa: BLE001 - optional startup phase: degrade and report, never abort boot
+        logger.warning("Optional startup phase [access_log] failed: %s — running without the access log", e)
+        state.degraded_services.append("access_log")

@@ -12,7 +12,7 @@ from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.domain.project_status import ProjectStatus
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, orchestrator_placeholder_mission
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
@@ -308,7 +308,7 @@ class ProjectLifecycleRepository:
             job_id=job_id,
             tenant_key=tenant_key,
             project_id=project.id,
-            mission=f"Orchestrator for project: {project.name}",
+            mission=orchestrator_placeholder_mission(project.name),
             job_type="orchestrator",
             status="active",
             job_metadata=validate_agent_job_metadata(

@@ -1,6 +1,6 @@
 
 const PREFIX = 'giljo-hub'
 
-export function popoutTag(reason, threadId) {
-  return `${PREFIX}:${reason || 'baton'}:${threadId || 'unknown'}`
+export function popoutTag(reason, entityId, userId) {
+  return `${PREFIX}:${reason || 'baton'}:${entityId || 'unknown'}:${userId || 'anyone'}`
 }

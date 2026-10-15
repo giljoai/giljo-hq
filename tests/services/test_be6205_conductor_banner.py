@@ -111,6 +111,7 @@ class _FakeProject:
         self.execution_mode = execution_mode
         self.auto_checkin_interval = 10
         self.implementation_launched_at = None
+        self.mission = ""
 
 
 def _assemble(svc, *, job, execution, chain_mode, project):

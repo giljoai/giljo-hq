@@ -16,6 +16,11 @@ export const useProjectTabsStore = defineStore('projectTabs', {
       this.isLaunched = Boolean(isLaunched)
     },
 
+    noteUserImplement(project) {
+      this.currentProject = project || null
+      this.isLaunched = Boolean(project)
+    },
+
     $reset() {
       this.currentProject = null
       this.isLaunched = false

@@ -15,6 +15,7 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import (
     AlreadyExistsError,
     DatabaseError,
+    GateRefusalError,
     ProjectStateError,
     ResourceNotFoundError,
     ValidationError,
@@ -140,6 +141,8 @@ class JobLifecycleService:
                 }
                 if context_chunks:
                     metadata_dict["context_chunks"] = context_chunks
+                if predecessor_job_id:
+                    metadata_dict["predecessor_job_id"] = str(predecessor_job_id)
 
                 mission, resolved_template_id, spawn_template = await self._resolve_spawn_template(
                     session, project, agent_name, mission, tenant_key, agent_display_name
@@ -354,8 +357,9 @@ class JobLifecycleService:
                     )
                 else:
                     message = f"Invalid agent_name '{agent_name}'. Must be one of: {valid_agent_names}"
-                raise ValidationError(
+                raise GateRefusalError(
                     message=message,
+                    error_code="INVALID_AGENT_NAME",
                     context={
                         "agent_name": agent_name,
                         "agent_display_name": agent_display_name,

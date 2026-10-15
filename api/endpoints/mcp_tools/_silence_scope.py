@@ -39,6 +39,43 @@ NON_SILENCE_CLEARING_TOOLS: frozenset[str] = frozenset(
 )
 
 
+ORCHESTRATOR_ACTIVITY_TOOLS: frozenset[str] = frozenset({"get_agent_result", "close_job"})
+
+
+def posthook_key(method_name: str, job_id: str) -> str:
+    return f"orchestrator-of:{job_id}" if method_name in ORCHESTRATOR_ACTIVITY_TOOLS else job_id
+
+
+async def clear_silence_for_call(session: Any, method_name: str, job_id: str, ws_manager: Any, tenant_key: str) -> None:
+    from giljo_mcp.services.silence_detector import auto_clear_silent
+
+    if method_name in SILENCE_CLEARING_TOOLS:
+        await auto_clear_silent(session, job_id, ws_manager, tenant_key=tenant_key)
+    elif method_name in ORCHESTRATOR_ACTIVITY_TOOLS:
+        for orchestrator_job_id in await _project_orchestrator_job_ids(session, tenant_key, job_id):
+            await auto_clear_silent(session, orchestrator_job_id, ws_manager, tenant_key=tenant_key)
+
+
+async def _project_orchestrator_job_ids(session: Any, tenant_key: str, job_id: str) -> list[str]:
+    from sqlalchemy import select
+    from sqlalchemy.orm import aliased
+
+    from giljo_mcp.models.agent_identity import AgentJob
+
+    owner = aliased(AgentJob)
+    project_of_job = (
+        select(owner.project_id).where(owner.job_id == job_id, owner.tenant_key == tenant_key).scalar_subquery()
+    )
+    rows = await session.execute(
+        select(AgentJob.job_id, AgentJob.job_metadata["chain_conductor"].as_boolean()).where(
+            AgentJob.tenant_key == tenant_key,
+            AgentJob.job_type == "orchestrator",
+            AgentJob.project_id == project_of_job,
+        )
+    )
+    return [orchestrator_job_id for orchestrator_job_id, conductor in rows.all() if not conductor]
+
+
 _BOARD_LINE_TTL_SECONDS = 30.0
 _BOARD_LINE_MAX_KEYS = 2048
 _BOARD_LINES: OrderedDict[tuple[str, str], tuple[float, str | None]] = OrderedDict()
@@ -64,9 +101,9 @@ async def _read_board_line(tenant_key: str, project_id: str | None, job_id: str 
     except SQLAlchemyError:
         logger.warning("board line read failed (non-blocking)", exc_info=True)
         return None
-    if not states:
+    state = states.get(job_id) if job_id else next(iter(states.values()), None)
+    if state is None:
         return None
-    state = next(iter(states.values()))
     todos = f", to-dos {state.todos_done}/{state.todos_total}" if state.todos_total else ""
     return (
         f"Orchestrator entry for this project stale {state.stale_minutes} min{todos}; the board shows "
@@ -76,7 +113,7 @@ async def _read_board_line(tenant_key: str, project_id: str | None, job_id: str 
 
 
 async def stale_board_line(tenant_key: str, method_name: str, arguments: dict[str, Any]) -> str | None:
-    if method_name in SILENCE_CLEARING_TOOLS:
+    if method_name in SILENCE_CLEARING_TOOLS or method_name in ORCHESTRATOR_ACTIVITY_TOOLS:
         _forget_tenant(tenant_key)
         return None
     project_id = arguments.get("project_id") if isinstance(arguments.get("project_id"), str) else None

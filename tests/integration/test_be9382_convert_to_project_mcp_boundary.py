@@ -201,8 +201,8 @@ class TestConvertToProjectMcpBoundary:
 
         async with new_client() as session:
             result = await session.call_tool(
-                "update_task",
-                {"task_id": seeded.task_id, "convert_to_project": True},
+                "promote_task_to_project",
+                {"task_id": seeded.task_id},
             )
 
         assert result.is_error is False, _error_text(result)
@@ -259,12 +259,8 @@ class TestConvertToProjectMcpBoundary:
 
         async with new_client() as session:
             result = await session.call_tool(
-                "update_task",
-                {
-                    "task_id": seeded.task_id,
-                    "convert_to_project": True,
-                    "title": "Rebuild the rate limiter",
-                },
+                "promote_task_to_project",
+                {"task_id": seeded.task_id, "title": "Rebuild the rate limiter"},
             )
 
         assert result.is_error is False, _error_text(result)
@@ -274,54 +270,6 @@ class TestConvertToProjectMcpBoundary:
         name = (await db_session.execute(select(Project.name).where(Project.id == payload["project_id"]))).scalar_one()
         assert name == "Rebuild the rate limiter"
 
-    @pytest.mark.parametrize(
-        "conflicting",
-        [
-            {"status": "completed"},
-            {"completion_notes": "done enough"},
-            {"priority": "low"},
-            {"hidden": "true"},
-        ],
-    )
-    async def test_conflicting_field_is_a_structured_rejection_that_writes_nothing(
-        self, convert_client, db_session, conflicting
-    ):
-        new_client, resolved, tenant_key = convert_client
-        seeded = await _seed_promotable_task(db_session, tenant_key)
-        resolved.user_id = seeded.user_id
-
-        async with new_client() as session:
-            result = await session.call_tool(
-                "update_task",
-                {"task_id": seeded.task_id, "convert_to_project": True, **conflicting},
-            )
-
-        assert result.is_error is False, _error_text(result)
-        payload = _payload(result)
-        assert payload["success"] is False, payload
-        assert payload["error"] == "CONVERT_FIELD_CONFLICT", payload
-        assert set(payload["conflicting_fields"]) == set(conflicting), payload
-
-        row = (
-            await db_session.execute(
-                select(Task.status, Task.priority, Task.hidden, Task.converted_to_project_id).where(
-                    Task.id == seeded.task_id
-                )
-            )
-        ).one_or_none()
-        assert row is not None, "a refused convert must not delete the task"
-        assert row.status == "pending"
-        assert row.priority == "high"
-        assert bool(row.hidden) is False
-        assert row.converted_to_project_id is None
-
-        project_count = (
-            await db_session.execute(
-                select(Project.id).where(Project.tenant_key == tenant_key, Project.product_id == seeded.product_id)
-            )
-        ).all()
-        assert project_count == [], "a refused convert must not create a project"
-
     async def test_convert_without_authenticated_user_is_a_structured_rejection(self, convert_client, db_session):
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_promotable_task(db_session, tenant_key)
@@ -329,8 +277,8 @@ class TestConvertToProjectMcpBoundary:
 
         async with new_client() as session:
             result = await session.call_tool(
-                "update_task",
-                {"task_id": seeded.task_id, "convert_to_project": True},
+                "promote_task_to_project",
+                {"task_id": seeded.task_id},
             )
 
         assert result.is_error is False, _error_text(result)

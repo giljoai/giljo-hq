@@ -261,6 +261,29 @@ class ProjectEnrichmentReadsMixin:
             grouped.setdefault(entry.project_id, []).append(entry)
         return grouped
 
+    async def get_latest_closeout_summaries(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_ids: list[str],
+    ) -> dict[str, str]:
+        if not project_ids:
+            return {}
+        query = (
+            select(ProductMemoryEntry.project_id, ProductMemoryEntry.summary)
+            .where(
+                ProductMemoryEntry.project_id.in_(project_ids),
+                ProductMemoryEntry.tenant_key == tenant_key,
+                ProductMemoryEntry.entry_type.in_(("project_closeout", "project_completion")),
+                ProductMemoryEntry.deleted_by_user.is_(False),
+                ProductMemoryEntry.summary.is_not(None),
+            )
+            .distinct(ProductMemoryEntry.project_id)
+            .order_by(ProductMemoryEntry.project_id, ProductMemoryEntry.sequence.desc())
+        )
+        result = await session.execute(query)
+        return dict(result.tuples().all())
+
 
     async def get_agent_status_counts(
         self,

@@ -1,11 +1,6 @@
 /**
- * NavigationDrawer.vue — FE-9501b (D5: the "Projects" nav badge)
- *
- * The activity surface for a project you do not have open, visible from ANY
- * page (NavigationDrawer is mounted app-wide in DefaultLayout). Reuses the
- * existing Hub-unread-badge shape/style. Ruling 14: visualization only -- the
- * badge itself never navigates; the item's pre-existing router-link is the
- * only navigation, and only on a click.
+ * NavigationDrawer.vue — FE-9751: the "Projects" nav item carries no activity
+ * badge (it never reset and duplicated the banners); the Hub unread badge stays.
  *
  * FE-9366: the badge lives in v-list-item's #append named slot, which
  * tests/setup.js's flat VListItem stub renders NOTHING for (it only forwards
@@ -19,7 +14,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import { useGlobalActivityStore } from '@/stores/globalActivityStore'
 import { withRealVuetify } from '../../helpers/realVuetify.js'
 
 vi.mock('@/services/configService', () => ({
@@ -47,7 +41,7 @@ vi.mock('@/services/setupService', () => ({
 // projects with activity from a product you aren't looking at). Tests set
 // h.projectIds to whatever project ids should count as "in the current
 // product" before recording activity.
-const h = vi.hoisted(() => ({ projectIds: [] }))
+const h = vi.hoisted(() => ({ projectIds: [], hubUnread: 0 }))
 vi.mock('@/stores/projects', () => ({
   useProjectStore: () => ({
     projects: h.projectIds.map((id) => ({ id })),
@@ -79,14 +73,15 @@ vi.mock('@/stores/websocket', () => ({
 }))
 
 vi.mock('@/stores/commHubStore', () => ({
-  useCommHubStore: () => ({ yourTurnCount: 0, totalUnread: 0 }),
+  useCommHubStore: () => ({ yourTurnCount: 0, totalUnread: h.hubUnread }),
 }))
 
 vi.mock('axios', () => ({
   default: { post: vi.fn(() => Promise.resolve({ data: {} })) },
 }))
 
-vi.mock('@/stores/websocketEventRouter', () => ({
+vi.mock('@/stores/websocketEventRouter', async (importOriginal) => ({
+  ...(await importOriginal()),
   registerReconnectResync: vi.fn(() => () => {}),
 }))
 
@@ -126,6 +121,7 @@ vi.mock('@/composables/useApiUrl', () => ({
   getApiBaseUrl: () => 'http://localhost:8000',
 }))
 
+import { routeGlobalApprovalEvent } from '@/stores/websocketEventRouter'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
 
 const testRouter = createRouter({
@@ -176,7 +172,7 @@ async function mountDrawer(piniaInstance) {
   return { wrapper, restore: real.restore }
 }
 
-describe('NavigationDrawer.vue — FE-9501b Projects activity badge', () => {
+describe('NavigationDrawer.vue — FE-9751 no Projects activity badge', () => {
   let pinia
   let restoreStubs
 
@@ -185,6 +181,7 @@ describe('NavigationDrawer.vue — FE-9501b Projects activity badge', () => {
     setActivePinia(pinia)
     vi.clearAllMocks()
     h.projectIds = []
+    h.hubUnread = 0
   })
 
   afterEach(() => {
@@ -192,7 +189,7 @@ describe('NavigationDrawer.vue — FE-9501b Projects activity badge', () => {
     restoreStubs = null
   })
 
-  it('renders no badge when there is no activity on unopened projects', async () => {
+  it('renders no Projects badge when there is no activity', async () => {
     const { wrapper, restore } = await mountDrawer(pinia)
     restoreStubs = restore
     await flushPromises()
@@ -200,82 +197,31 @@ describe('NavigationDrawer.vue — FE-9501b Projects activity badge', () => {
     expect(wrapper.find('[data-testid="nav-projects-activity-badge"]').exists()).toBe(false)
   })
 
-  it('renders the count once globalActivityStore records activity for a project in the viewed product', async () => {
-    h.projectIds = ['proj-other']
-    const { wrapper, restore } = await mountDrawer(pinia)
-    restoreStubs = restore
-    await flushPromises()
-
-    useGlobalActivityStore().recordActivity('proj-other')
-    await wrapper.vm.$nextTick()
-
-    const badge = wrapper.find('[data-testid="nav-projects-activity-badge"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('1')
-  })
-
-  it('sums activity across multiple unopened projects into one badge', async () => {
+  it('renders no Projects badge after agent and job events arrive for the viewed product', async () => {
     h.projectIds = ['proj-a', 'proj-b']
     const { wrapper, restore } = await mountDrawer(pinia)
     restoreStubs = restore
     await flushPromises()
 
-    const activity = useGlobalActivityStore()
-    activity.recordActivity('proj-a')
-    activity.recordActivity('proj-b')
-    activity.recordActivity('proj-b')
+    for (const type of ['agent:created', 'agent:status_changed', 'agent:removed', 'job:progress_update']) {
+      routeGlobalApprovalEvent({ type, data: { project_id: 'proj-a' } })
+      routeGlobalApprovalEvent({ type, data: { project_id: 'proj-b' } })
+    }
     await wrapper.vm.$nextTick()
+    await flushPromises()
 
-    expect(wrapper.find('[data-testid="nav-projects-activity-badge"]').text()).toBe('3')
+    expect(wrapper.find('[data-testid="nav-projects-activity-badge"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/projects"]').exists()).toBe(true)
   })
 
-  it('caps the displayed count at 99+', async () => {
-    h.projectIds = ['proj-a']
+  it('keeps the Hub unread badge when the Hub has unread threads', async () => {
+    h.hubUnread = 4
     const { wrapper, restore } = await mountDrawer(pinia)
     restoreStubs = restore
     await flushPromises()
 
-    const activity = useGlobalActivityStore()
-    for (let i = 0; i < 150; i += 1) activity.recordActivity('proj-a')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.find('[data-testid="nav-projects-activity-badge"]').text()).toBe('99+')
-  })
-
-  it('recording activity never navigates away from the current route', async () => {
-    h.projectIds = ['proj-other']
-    const { wrapper, restore } = await mountDrawer(pinia)
-    restoreStubs = restore
-    await flushPromises()
-    expect(testRouter.currentRoute.value.path).toBe('/home')
-
-    useGlobalActivityStore().recordActivity('proj-other')
-    await wrapper.vm.$nextTick()
-    await flushPromises()
-
-    // A pure store write must never move the route by itself -- only a click
-    // on the (pre-existing, untouched) router-link does that.
-    expect(testRouter.currentRoute.value.path).toBe('/home')
-  })
-
-  it('FE-9502d: does NOT count activity for a project belonging to a different (background) product', async () => {
-    // The viewed product's project list contains only proj-mine; activity on
-    // proj-other-product (a project the current fetch never scoped in,
-    // because it belongs to a product that isn't viewed) must not inflate a
-    // nav item that only ever lists proj-mine. That remainder surfaces on the
-    // ProductTabStrip badge instead (productActivityStore, FE-9502d) -- not
-    // silently dropped, just not counted HERE.
-    h.projectIds = ['proj-mine']
-    const { wrapper, restore } = await mountDrawer(pinia)
-    restoreStubs = restore
-    await flushPromises()
-
-    const activity = useGlobalActivityStore()
-    activity.recordActivity('proj-mine')
-    activity.recordActivity('proj-other-product')
-    activity.recordActivity('proj-other-product')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.find('[data-testid="nav-projects-activity-badge"]').text()).toBe('1')
+    const badge = wrapper.find('[data-testid="nav-hub-unread-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('4')
   })
 })

@@ -133,7 +133,7 @@ async def test_spawn_job_does_not_bind_trashed_template_identity(spawn_boundary_
             },
         )
 
-    assert result.is_error is True, (
+    assert not result.is_error and _payload(result).get("error") == "INVALID_AGENT_NAME", (
         "spawn_job accepted a TRASHED agent name. The user deleted this agent, so the spawn "
         f"must be rejected rather than silently producing an agent with no identity. Got: {_payload(result)!r}"
     )

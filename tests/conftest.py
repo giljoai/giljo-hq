@@ -152,9 +152,12 @@ async def _purge_committed_test_orgs(db_manager):
 
 
 @pytest.fixture
-def real_auth_rate_limiter():
+def real_auth_rate_limiter(monkeypatch):
+    from api.middleware import auth_rate_limiter as _arl
     from api.middleware.auth_rate_limits import set_test_bypass
 
+    frozen = float((int(_arl.time.time()) // 60) * 60)
+    monkeypatch.setattr(_arl.time, "time", lambda: frozen)
     set_test_bypass(False)
     try:
         yield

@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import GateRefusalError
 from giljo_mcp.models import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
@@ -28,15 +28,16 @@ from giljo_mcp.services.project_helpers import (
     mark_staging_complete,
     stamp_launch,
 )
+from giljo_mcp.services.protocol_sections.orchestrator_body import CHAIN_DRIVER_MODEL
 
 
 logger = logging.getLogger(__name__)
 
 
 _CHAIN_SUBORCH_STAGING_END_NEXT_ACTION = (
-    "Staging is complete. Your CHAIN ORCHESTRATOR opens your implementation gate "
-    "automatically -- do NOT wait for a human and do NOT return to the dashboard. "
-    "Call get_job_mission ONCE now: your gate is already OPEN, so this first call "
+    "Staging is complete and your implementation gate is already open. "
+    f"{CHAIN_DRIVER_MODEL} Do NOT wait for a human. "
+    "Call get_job_mission ONCE now: this first call "
     "normally returns your implementation protocol -- continue straight into it. "
     "ONLY if that first call does NOT yet return the implementation protocol, sleep "
     "~30s and retry, repeating until it does. Do NOT write the project closeout from "
@@ -108,7 +109,7 @@ async def guard_conductor_chain_incomplete(
     if not remaining:
         return
 
-    raise ValidationError(
+    raise GateRefusalError(
         message=(
             f"You are the CONDUCTOR of chain run {run['id']} with "
             f"{len(remaining)} project(s) still incomplete. Do NOT complete_job yet. "
@@ -150,13 +151,13 @@ async def finalize_conductor_chain(
     )
 
 
-def is_staging_phase_orchestrator(job: Any, project: Any) -> bool:
+def is_staging_phase_orchestrator(job: Any, project: Any, *, staging_end: bool = False) -> bool:
     if job is None or project is None or getattr(job, "job_type", None) != "orchestrator":
         return False
     if getattr(project, "staging_status", None) not in ("staging", "staged", STAGING_COMPLETE):
         return False
     launched = getattr(project, "implementation_launched_at", None) is not None
-    return not (launched and project.staging_status == STAGING_COMPLETE)
+    return staging_end or not (launched and project.staging_status == STAGING_COMPLETE)
 
 
 async def is_staging_end_orchestrator_call(
@@ -191,6 +192,7 @@ async def is_staging_end_orchestrator_call(
         project is not None
         and project.implementation_launched_at is not None
         and project.staging_status == STAGING_COMPLETE
+        and not await opened_chain_member_still_staging(session, execution, project, tenant_key)
     ):
         return False, project
 
@@ -212,6 +214,21 @@ async def _finale_deliverables_recorded(session: AsyncSession, tenant_key: str, 
     from giljo_mcp.services.sequence_run_service import active_chain_run
 
     return await active_chain_run(session, project_id, tenant_key) is None
+
+
+async def opened_chain_member_still_staging(
+    session: AsyncSession, execution: AgentExecution, project: Project, tenant_key: str
+) -> bool:
+    if execution.result is not None:
+        return False
+    from giljo_mcp.services.sequence_run_service import active_chain_run
+
+    if await active_chain_run(session, project.id, tenant_key) is None:
+        return False
+    total, in_flight = await MissionRepository().count_non_orchestrator_agents_by_liveness(
+        session, tenant_key, project.id
+    )
+    return total == 0 or in_flight > 0
 
 
 async def is_conductor_staging_end(
@@ -273,7 +290,7 @@ async def handle_staging_end(
     mission_repo = MissionRepository()
     non_orchestrator_count = await mission_repo.count_non_orchestrator_agents(session, tenant_key, job.project_id)
     if non_orchestrator_count == 0:
-        raise ValidationError(
+        raise GateRefusalError(
             message=(
                 "COMPLETION_BLOCKED: staging cannot end without at least one spawned "
                 "specialist agent. Spawn a single implementer for trivial work (a 4-line "

@@ -26,31 +26,6 @@
         </v-col>
       </v-row>
 
-      <div class="tab-pills hub-view__tabs main-window-reveal main-window-delay-2" role="tablist">
-          <button
-            type="button"
-            class="pill-btn"
-            :class="{ active: activeTab === 'town' }"
-            role="tab"
-            :aria-selected="activeTab === 'town' ? 'true' : 'false'"
-            data-testid="hub-tab-town"
-            @click="activeTab = 'town'"
-          >
-            General
-          </button>
-          <button
-            type="button"
-            class="pill-btn"
-            :class="{ active: activeTab === 'project' }"
-            role="tab"
-            :aria-selected="activeTab === 'project' ? 'true' : 'false'"
-            data-testid="hub-tab-project"
-            @click="activeTab = 'project'"
-          >
-            Projects
-          </button>
-        </div>
-
         <div class="filter-bar main-window-reveal main-window-delay-2">
           <v-text-field
             v-model="search"
@@ -108,7 +83,7 @@
         </div>
 
         <button
-          v-if="activeTab === 'town' && attentionThread"
+          v-if="attentionThread"
           type="button"
           class="hub-view__attention smooth-border"
           data-testid="hub-attention-strip"
@@ -125,7 +100,6 @@
 
         <ThreadList
           class="hub-view__thread-list"
-          :scope="activeTab"
           :search="search"
           :sort="sort"
           @select="onThreadSelect"
@@ -134,17 +108,19 @@
     </template>
 
     <template v-else>
-      <HubThreadToolbar v-model="messageSearch" @back="backToList" />
-      <div class="hub-view__main">
+      <div class="hub-view__thread" data-testid="hub-thread-view">
+        <HubThreadToolbar v-model="messageSearch" @back="backToList" />
+        <div class="hub-view__main">
           <HubThreadHeader />
 
-        <ThreadTimeline
-          class="hub-view__timeline"
-          :search="messageSearch"
-          :focus-message-id="focusMessageId"
-          :focus-reason="focusReason"
-        />
-        <HubComposer class="hub-view__composer" />
+          <ThreadTimeline
+            class="hub-view__timeline"
+            :search="messageSearch"
+            :focus-message-id="focusMessageId"
+            :focus-reason="focusReason"
+          />
+          <HubComposer class="hub-view__composer" />
+        </div>
       </div>
     </template>
 
@@ -204,8 +180,6 @@ const showDeletedThreads = ref(false)
 const deletedThreads = ref([])
 const restoringId = ref(null)
 
-const activeTab = ref('project')
-
 const search = ref('')
 const sort = ref('activity')
 const sortOptions = [
@@ -239,7 +213,7 @@ const attentionThread = computed(() => {
   const me = userStore.currentUser?.id
   if (!me) return null
   return (
-    commHub.townSquareThreadList.find(
+    commHub.threadList.find(
       (t) => t.next_action_owner === me && !TERMINAL.has(String(t.status || '').toLowerCase()),
     ) || null
   )
@@ -282,14 +256,9 @@ function openAttentionThread() {
 }
 
 async function applyThreadDeepLink() {
-  if (route.query.tab === 'project' || route.query.tab === 'town') {
-    activeTab.value = route.query.tab
-  }
   const deepLinkThreadId = route.query.thread
   if (!deepLinkThreadId) return
   await onThreadSelect(deepLinkThreadId)
-  const t = commHub.threadsById.get(deepLinkThreadId)
-  if (t) activeTab.value = t.project_id != null ? 'project' : 'town'
 }
 
 watch(() => route.query.thread, (threadId) => { if (threadId) applyThreadDeepLink() })
@@ -350,6 +319,8 @@ async function onRestoreThread(thread) {
 
 @use '../styles/list-filter-bar' as filterBar;
 
+$hub-thread-max-width: 1200px;
+
 .hub-view {
   // FE-9365c: a normal scrolling page, matching Products/Projects. The old
   // `height: calc(100vh - 64px); overflow: hidden` existed to make a two-pane split
@@ -375,13 +346,6 @@ async function onRestoreThread(thread) {
   &__column {
     max-width: 1120px;
     margin-inline: auto;
-  }
-
-  // General / Projects on their OWN row between the subtitle and the filter bar.
-  &__tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 16px;
   }
 
   // FE-9439: the back link, the in-thread search and the hand toggle moved to
@@ -423,6 +387,12 @@ async function onRestoreThread(thread) {
     flex: none;
     font-weight: 600;
     color: $color-brand-yellow;
+  }
+
+  // FE-9743: the whole open thread shares this one cap and stays left-aligned in the
+  // page gutter; below it nothing changes.
+  &__thread {
+    max-width: $hub-thread-max-width;
   }
 
   &__main {

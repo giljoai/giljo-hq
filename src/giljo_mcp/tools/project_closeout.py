@@ -28,8 +28,8 @@ from giljo_mcp.services.product_memory_service import (
 )
 from giljo_mcp.services.project_closeout_readiness import shape_readiness_blockers
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
+from giljo_mcp.services.project_helpers import broadcast_deferred_events
 from giljo_mcp.services.protocol_sections.closeout_sequence import build_required_sequence
-from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
 from giljo_mcp.tools._closeout_metrics import (
@@ -418,7 +418,7 @@ async def close_project_and_update_memory(
             )
 
         if owns_session:
-            await broadcast_deferred_sequence_updates(active_session)
+            await broadcast_deferred_events(active_session)
         await broadcast_agent_status_events(
             ws,
             tenant_key=tenant_key,

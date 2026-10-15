@@ -20,7 +20,7 @@ from giljo_mcp.domain.todo_kinds import (
     TODO_KIND_SELF_CLOSEOUT,
     classify_todo_kind,
 )
-from giljo_mcp.exceptions import OrchestrationError, ResourceNotFoundError, ValidationError
+from giljo_mcp.exceptions import GateRefusalError, OrchestrationError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
@@ -318,10 +318,11 @@ class JobCompletionService:
             )
             pending_approval = (await session.execute(pending_stmt)).scalar_one_or_none()
             approval_id = pending_approval.id if pending_approval is not None else None
-            raise ValidationError(
+            raise GateRefusalError(
                 message=(
                     "COMPLETION_BLOCKED: Agent is awaiting user approval. "
-                    "Resolve via POST /api/approvals/{id}/decide before calling complete_job()."
+                    "Resolve it with decide_approval(approval_id, option_id) or the dashboard "
+                    "(POST /api/approvals/{id}/decide) before calling complete_job()."
                 ),
                 error_code="AWAITING_USER_APPROVAL",
                 context={
@@ -352,7 +353,7 @@ class JobCompletionService:
 
         incomplete_todos = await repo.get_incomplete_todos(session, tenant_key, job_id)
 
-        is_staging_orchestrator = is_staging_phase_orchestrator(job, project)
+        is_staging_orchestrator = is_staging_phase_orchestrator(job, project, staging_end=not is_closeout_phase)
         if is_staging_orchestrator and incomplete_todos:
             self._logger.info(
                 "[STAGING] Bypassing incomplete-TODOs gate for staging-phase orchestrator "
@@ -594,8 +595,8 @@ class JobCompletionService:
                 build_next_action(
                     tool="write_project_closeout",
                     why=(
-                        "Call write_project_closeout() to write the project closeout (orchestrators "
-                        "coordinate, they do not commit code)."
+                        "Call write_project_closeout() to write the project closeout (pass the "
+                        "commits you or your workers made)."
                     ),
                 ),
             )

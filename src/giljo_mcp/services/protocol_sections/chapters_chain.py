@@ -13,7 +13,12 @@ from giljo_mcp.services.protocol_sections.chapters_chain_suborch import (  # noq
     _build_ch_sub_orchestrator,
     _render_ch_sub_orchestrator,
 )
-from giljo_mcp.services.protocol_sections.orchestrator_body import LAUNCH_PROMPT_RULE, render_capability_ladder
+from giljo_mcp.services.protocol_sections.orchestrator_body import (
+    CHAIN_DRIVER_MODEL,
+    LAUNCH_PROMPT_RULE,
+    render_capability_ladder,
+    render_chain_driver_model,
+)
 
 
 _CH_BORDER = "════════════════════════════════════════════════════════════════════════════"
@@ -31,7 +36,8 @@ def _ch_capability_preset(mode: str, preset: Platform) -> str:
         "THIS session — for each project P_i in run order: get_job_mission -> drive its agents ->\n"
         "complete_job -> advance to P_(i+1) ONLY after ready_to_advance is True. EXECUTION MODE =\n"
         f"{mode} still governs how each project spawns its WORKERS. One project at a time; never\n"
-        "batch-start the tail. There is NO per-project gate and nothing to unlock."
+        "batch-start the tail. There is NO per-project gate and nothing to unlock.\n"
+        f"{CHAIN_DRIVER_MODEL}"
     )
     fallback = (
         "If your harness supports in-process subagents, you MAY instead spawn ONE subagent per\n"
@@ -89,9 +95,9 @@ runs; do not re-probe your harness and do not change modes.
 
 3. NO PER-PROJECT GATE — your fresh-terminal spawn IS each project's release. A
    spawned sub-orchestrator reads its mission immediately and runs FREE; you never
-   make it wait for a "go" (§14). There is nothing to unlock. You control only
-   SEQUENCE — when to spawn the NEXT project, after the current one reports done
-   with a commit. One project at a time; never batch-spawn the tail.
+   make it wait for a "go" (§14). There is nothing to unlock. One project at a time;
+   never batch-spawn the tail.
+{render_chain_driver_model("   ")}
 
 4. FAIL LOUD (no silent downgrade) — if this harness genuinely CANNOT open the
    fresh terminal a sub-orchestrator needs (headless: no $DISPLAY and no
@@ -244,8 +250,8 @@ There are TWO valid GO doors and the choice between them is the USER'S, not your
 (they say go in chat) or from the dashboard (they press "Implement Chain"). So ASK THE USER which
 one they want when you report the staged plan, then WAIT — do not answer it for them and do not
 self-advance. ONLY AFTER the user's GO do you proceed: a fresh conductor session drives the chain
-(CH_CHAIN_DRIVE), spawning each project's sub-orchestrator one at a time (each runs free; the
-conductor crosses nothing).
+(CH_CHAIN_DRIVE), spawning each project's sub-orchestrator one at a time. If the user picks the
+dashboard, they start each project from its card and no conductor session drives.
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -414,7 +420,7 @@ mode (only what surfaces to the user differs, never how agents communicate).{nud
 ⚠ TOOLS ONLY — NO raw HTTP. Drive the chain with MCP tools (spawn_job, get_workflow_status,
 get_thread_history, post_to_thread, set_agent_status, write_memory_entry, complete_job). Do
 NOT hand-edit the run over an HTTP client or SDK — the server advances the run for you at each
-sub-orch's staging-end (STEP B).
+sub-orch's closeout (STEP B).
 
 ── CONDUCTOR PRECEDENCE ─────────────────────────────────────────────────────
 The solo PHASE 3 instruction to "complete_job your
@@ -434,8 +440,9 @@ order, do these IN ORDER:
 {step_a}
 
   STEP B — WAIT FOR P_i's CLOSEOUT, THEN ADVANCE:
-    {driver} The server advances the run's current_index + marks P_i
-    "planning" at the sub-orch's OWN staging-end, so you cross nothing to progress. {wake}
+    {driver} The server marks P_i "planning" at the sub-orch's OWN staging-end
+    and, when P_i closes out, advances the chain and opens P_(i+1)'s gate, so you cross
+    nothing to progress. {wake}
       1. get_thread_history(thread_id=<Hub>, as_participant="{conductor_id_str}",
          unread_only=true, mark_read=true) -- resolve <Hub> ONCE via
          get_context(categories=["chain"]) -> hub_thread_id and reuse it. This ONE poll is BOTH your USER-

@@ -171,8 +171,8 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
     message_id = _payload(post)["message_id"]
 
     blocked = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "should block"}})
-    assert blocked.is_error is True, "an undrained action-required post must block complete_job"
-    assert "COMPLETION_BLOCKED" in _error_text(blocked)
+    assert not blocked.is_error, "BE-9738: the gate refusal is Tier-2 content, not isError"
+    assert _payload(blocked).get("error") == "COMPLETION_BLOCKED", "an undrained action-required post must block"
 
     drained = await _call(
         new_client,

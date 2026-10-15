@@ -15,9 +15,8 @@
  * there was no classifier at all, and every sink was wired independently, so a
  * single `thread_message` could land on five surfaces with nothing arbitrating.
  *
- * routeNotificationSignal is a FOURTH independent pass over the same raw WS
- * events, alongside routeGlobalActivityEvent (FE-9501b) and
- * routeProductActivityEvent (FE-9502d). Same reason those two are not just
+ * routeNotificationSignal is an independent pass over the same raw WS events,
+ * alongside routeGlobalApprovalEvent. Same reason that one is not just
  * another EVENT_MAP entry: it needs every event regardless of which project or
  * product is open, and it writes only to surface state.
  *

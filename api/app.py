@@ -205,6 +205,7 @@ async def lifespan(app: FastAPI):
     assert_multiworker_prerequisites(state, giljo_mode=GILJO_MODE)
 
     from api.startup.saas_enforcement_gate import (
+        install_access_log,
         register_mcp_subscription_gate,
         register_saas_tenant_scoped_models,
         require_public_base_url,
@@ -261,6 +262,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Optional startup phase [backup_scheduler] failed: %s — running without backup scheduler", e)
             state.degraded_services.append("backup_scheduler")
+
+    await install_access_log(state, giljo_mode=GILJO_MODE)
 
     if GILJO_MODE == "saas":
         try:
@@ -441,5 +444,13 @@ from api.endpoints.mcp_sdk_server import get_mcp_asgi_app
 from api.mcp_dispatcher import McpDispatcher
 
 
+def _wrap_saas_edge(inner):
+    if GILJO_MODE == "saas":
+        import importlib
+
+        return importlib.import_module("api.saas_middleware.founder_forwarder").wrap_with_founder_forwarder(inner)
+    return inner
+
+
 _fastapi_app = create_app()
-app = McpDispatcher(_fastapi_app, get_mcp_asgi_app())
+app = _wrap_saas_edge(McpDispatcher(_fastapi_app, get_mcp_asgi_app()))

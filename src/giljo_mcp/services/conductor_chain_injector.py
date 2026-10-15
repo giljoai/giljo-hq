@@ -84,6 +84,8 @@ async def inject_conductor_chain_drive(
                         execution_mode=chain_ctx.execution_mode,
                         chain_mission=chain_ctx.chain_mission,
                         phase=phase,
+                        project_id=pid,
+                        staging_status=getattr(project, "staging_status", None),
                     ),
                     trim_embedded_protocol_for_chain(full_protocol, "sub_orchestrator", phase=phase),
                 ]

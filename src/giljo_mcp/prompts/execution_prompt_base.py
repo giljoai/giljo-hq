@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from giljo_mcp.prompts.spawn_prompt import build_agent_prompt
+from giljo_mcp.services.protocol_sections.team_context import summarize_mission
+
 
 class ExecutionPromptBuilderBase:
 
@@ -18,6 +21,7 @@ class ExecutionPromptBuilderBase:
             self._build_context_recap(orchestrator_id, project, agent_jobs),
             self._build_agent_list(orchestrator_id, project, agent_jobs),
             self._build_spawning_section(agent_jobs),
+            self._build_launch_prompts_section(project, agent_jobs),
             self._build_monitoring_section(project),
             self._build_context_refresh_section(orchestrator_id),
             *self._build_extra_sections(orchestrator_id, project, agent_jobs),
@@ -89,8 +93,7 @@ class ExecutionPromptBuilderBase:
         agent_spawn_lines = []
         if agent_jobs:
             for idx, agent in enumerate(agent_jobs, 1):
-                mission = getattr(agent.job, "mission", None) or "(No mission assigned)"
-                mission_summary = mission[:100] + "..." if len(mission) > 100 else mission
+                mission_summary = summarize_mission(getattr(agent.job, "mission", None), 100) or "(No mission assigned)"
 
                 agent_spawn_lines.extend(
                     [
@@ -143,6 +146,27 @@ class ExecutionPromptBuilderBase:
     def _build_spawning_section(self, agent_jobs: list) -> list[str]:
         raise NotImplementedError("Subclasses must implement _build_spawning_section")
 
+    def _build_launch_prompts_section(self, project, agent_jobs: list) -> list[str]:
+        if not agent_jobs:
+            return []
+        lines = [
+            "## Launch Prompts (one per agent, verbatim)",
+            "",
+            "Each agent's FIRST message is its launch prompt below: the same text spawn_job",
+            "returned as `agent_prompt`. Pass it verbatim; a work order may add to it, never replace it.",
+            "",
+        ]
+        for agent in agent_jobs:
+            prompt = build_agent_prompt(
+                agent.agent_name,
+                agent.agent_display_name,
+                project.name,
+                agent.job_id,
+                getattr(agent, "launch_template", None),
+            )
+            lines.extend([f"### {agent.agent_name} (job_id: {agent.job_id})", "```", prompt.rstrip("\n"), "```", ""])
+        return lines
+
     def _build_monitoring_section(self, project) -> list[str]:
         return [
             "## Monitoring Agent Progress",
@@ -175,9 +199,9 @@ class ExecutionPromptBuilderBase:
         tag = getattr(project, "taxonomy_alias", None) or project.name
         return [
             "### Git Closeout Commit",
-            "**Committer of last resort:** BEFORE closeout, check the working tree "
-            "(`git status --short`). If it is DIRTY with this project's work — a worker that "
-            "did not commit, or your own residue — commit those files "
+            "**You are the committer:** your workers do not commit; each lists its changed "
+            "files in its complete_job `artifacts`. BEFORE closeout, check the working tree "
+            "(`git status --short`) and commit this project's work once "
             "(`git add <the specific changed files>`; NEVER `git add -A`):",
             "```bash",
             f'git commit -m "{tag}: <what these changes do>"',

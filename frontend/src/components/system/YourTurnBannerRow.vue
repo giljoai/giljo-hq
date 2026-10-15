@@ -53,7 +53,7 @@ const props = defineProps({
 defineEmits(['open', 'dismiss'])
 
 const message = computed(() => {
-  if (props.threads.length > 1) return 'Multiple chat threads are waiting for you'
+  if (props.threads.length > 1) return `${props.threads.length} threads are waiting for you`
   const thread = props.threads[0]
   const author = thread?.last_message?.author
   return author
@@ -61,7 +61,7 @@ const message = computed(() => {
     : `Waiting on you in "${threadDisplayName(thread)}"`
 })
 
-const cta = computed(() => (props.threads.length > 1 ? 'Open Message Hub' : 'Open thread'))
+const cta = computed(() => (props.threads.length > 1 ? 'Open next' : 'Open thread'))
 </script>
 
 <style scoped lang="scss">

@@ -17,8 +17,8 @@ from tests.api.test_fe9629_chain_member_play_prompt import _seed_chain
 pytestmark = pytest.mark.asyncio
 
 _GOLDEN_PREAMBLE = (
-    "You are a member of a chain run by a conductor. This is a fallback prompt for this project only. "
-    "Do not advance the chain yourself; the conductor decides the next step."
+    "This is a recovery prompt for one project in a linked chain. Use it to restart this "
+    "project's orchestrator only; it does not move the chain forward."
 )
 
 
@@ -49,9 +49,7 @@ async def test_fallback_prompt_is_preamble_plus_the_shared_member_bootstrap(api_
         harness_is_claude=True,
     )
     prompt = resp.json()["prompt"]
-    assert prompt.startswith(
-        "You are a member of a chain run by a conductor. This is a fallback prompt for this project only."
-    )
+    assert prompt.startswith("This is a recovery prompt for one project in a linked chain.")
     assert prompt == f"{_GOLDEN_PREAMBLE}\n\n{member_bootstrap}"
 
 

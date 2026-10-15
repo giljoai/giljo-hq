@@ -208,7 +208,7 @@ describe('FE-9553 M2 ruling 4(c): tag for dedupe', () => {
     dispatchHubEvent('hub:thread_update', BATON_EVENT)
 
     const raised = NotificationConstructorSpy.mock.instances[0]
-    const tag = popoutTag(BATON_FOCUS, 'thread-1')
+    const tag = popoutTag(BATON_FOCUS, 'thread-1', 'user-001')
     expect(registeredPopoutTags()).toContain(tag)
     expect(closeSpy).not.toHaveBeenCalled()
 
@@ -294,7 +294,7 @@ describe('FE-9553 ruling 5: the popout scope preference gates the surface', () =
     expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
   })
 
-  it('scope ALL: also pops -- and is currently INDISTINGUISHABLE from actionable', async () => {
+  it('scope ALL: a baton also pops -- what separates ALL from ACTIONABLE is the silent-orchestrator popup', async () => {
     mockPopoutScope.value = 'all'
 
     const { useHubNotifications } = await import('./useHubNotifications')

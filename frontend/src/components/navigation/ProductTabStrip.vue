@@ -33,14 +33,6 @@
         @click="emit('select', tab.id)"
       >
         {{ tab.name }}
-        <span
-          v-if="tab.badgeCount > 0"
-          class="product-tab__badge"
-          :aria-label="`${tab.badgeCount} update${tab.badgeCount === 1 ? '' : 's'} on ${tab.name}`"
-          data-testid="product-tab-badge"
-        >
-          {{ tab.badgeCount > 9 ? '9+' : tab.badgeCount }}
-        </span>
       </button>
       <button
         v-if="tabs.length > 1"
@@ -162,22 +154,6 @@ const emit = defineEmits(['select', 'close', 'add', 'select-all'])
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.product-tab__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  margin-left: 6px;
-  padding: 0 4px;
-  border-radius: $border-radius-pill;
-  background: $color-brand-yellow;
-  color: var(--badge-text);
-  font-size: 0.65rem;
-  font-weight: 700;
-  line-height: 1;
 }
 
 .product-tab__close {

@@ -38,14 +38,6 @@
       ]"
       :data-testid="`timeline-message-${message.message_id}`"
     >
-      <span
-        v-if="message.message_id === focusMessageId"
-        class="timeline-msg__focus-flag"
-        :class="`timeline-msg__focus-flag--${resolvedFocusReason}`"
-        :data-testid="`hub-focus-${resolvedFocusReason}`"
-      >
-        {{ FOCUS_COPY[resolvedFocusReason] }}
-      </span>
       <div
         v-if="!message._grouped"
         class="timeline-msg__avatar smooth-border"
@@ -74,7 +66,15 @@
             {{ message._harness }}
           </span>
           <span class="timeline-msg__time" data-testid="message-time">
-            {{ formatTime(message.created_at) }}
+            {{ formatHubDateTime(message.created_at) }}
+          </span>
+          <span
+            v-if="message.message_id === focusMessageId"
+            class="timeline-msg__pill timeline-msg__focus-flag smooth-border"
+            :class="`timeline-msg__focus-flag--${resolvedFocusReason}`"
+            :data-testid="`hub-focus-${resolvedFocusReason}`"
+          >
+            {{ FOCUS_COPY[resolvedFocusReason] }}
           </span>
           <span
             v-if="message._isDirect"
@@ -86,7 +86,7 @@
           </span>
           <span
             v-if="message.requires_action"
-            class="timeline-msg__action-flag smooth-border"
+            class="timeline-msg__pill timeline-msg__pill--danger smooth-border"
             data-testid="message-action-flag"
           >
             <v-icon size="12">mdi-alert-circle-outline</v-icon>
@@ -118,6 +118,7 @@ import { useHubMessageOrder } from '@/components/hub/useHubMessageOrder'
 import { useSanitizeMarkdown } from '@/composables/useSanitizeMarkdown'
 import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { formatHubDateTime } from '@/components/hub/hubDateTime'
 import { BATON_FOCUS, MENTION_FOCUS, APPROVAL_FOCUS } from '@/components/hub/hubThreadRoute'
 
 const FOCUS_COPY = {
@@ -253,7 +254,7 @@ const decoratedMessages = computed(() =>
       _role: author.role,
       _harness: author.isUser ? '' : harnessLabel(author.harness),
       _isDirect: m.message_type === 'direct',
-      _grouped: continuesRun(m, orderedMessages.value[i - 1]),
+      _grouped: m.message_id !== props.focusMessageId && continuesRun(m, orderedMessages.value[i - 1]),
       _foldable: (m.content || '').length > FOLD_THRESHOLD,
     }
   }),
@@ -279,16 +280,6 @@ const directChipStyle = computed(() => {
     borderRadius: '8px',
   }
 })
-
-function formatTime(iso) {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return ''
-  }
-}
 </script>
 
 <style scoped lang="scss">
@@ -298,10 +289,9 @@ function formatTime(iso) {
 .thread-timeline {
   flex: 1;
   overflow-y: auto;
-  padding: v.$spacing-md;
+  padding: v.$spacing-sm v.$spacing-md;
   display: flex;
   flex-direction: column;
-  gap: v.$spacing-md;
 
   &__empty {
     margin: auto;
@@ -316,58 +306,62 @@ function formatTime(iso) {
   display: flex;
   gap: v.$spacing-sm;
   align-items: flex-start;
+  padding: v.$spacing-sm 0;
+
+  // Rows are not cards: a hairline between one speaker and the next, none inside a run.
+  & + &:not(&--grouped) {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
 
   // A continuation sits tighter against the post above it.
   &--grouped {
-    margin-top: -#{v.$spacing-sm};
+    padding-top: 0;
   }
 
   // FE-9410: the post a baton notification sent the operator to. Brand yellow is the
   // Hub's existing "this is about YOU" colour (the hand icon on both attention
   // surfaces), so the mark reads as the same event, not a new kind of alert.
   &--focus {
-    position: relative;
-
     .timeline-msg__content {
       box-shadow: inset 0 0 0 1px rgba($color-brand-yellow, 0.55);
     }
   }
 
-  // FE-9436: one flag, three tints. Geometry, type and placement are FE-9410's and are
-  // shared by all three reasons — per the operator ruling the chip's colour is the ONLY
-  // thing that differs, so it is the only thing a modifier sets. Tinted-badge pattern
-  // from design-system-sample-v2.html §2: rgba(token, ~0.15) ground, bright token ink,
-  // 8px square geometry. Every colour is a token; no hex is written here.
-  &__focus-flag {
-    position: absolute;
-    top: -0.5rem;
-    right: 0;
-    padding: 0 v.$spacing-xs;
-    border-radius: 8px;
-    font-family: 'IBM Plex Mono', monospace;
+  // The small outline pills on the name line: action required, the focus flag, and the
+  // direct chip's neighbours. Geometry is shared; the colour is the only thing a modifier
+  // sets, and every colour is a token. The ring is the pill's outline.
+  &__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 6px;
+    border-radius: $border-radius-default;
+    background: transparent;
     font-size: 0.6875rem; // 11 — the floor
-    letter-spacing: 0.02em;
+    font-weight: 600;
+    line-height: 1.5;
     white-space: nowrap;
+    color: var(--pill-color);
+    --smooth-border-color: var(--pill-color);
+  }
 
-    // Hand-off: FE-9410's brand yellow, unchanged — 10.54:1.
-    &--baton {
-      background: rgba($color-brand-yellow, 0.18);
-      color: $color-brand-yellow;
-    }
+  &__pill--danger {
+    --pill-color: #{$color-status-error};
+  }
 
-    // Mention: luminous-pastel sky blue — 6.64:1. Informational next to the hand-off's
-    // brand yellow, which stays the loudest because it is the only one that owns a turn.
-    &--mention {
-      background: rgba($color-agent-implementor, 0.18);
-      color: $color-agent-implementor;
-    }
+  // Hand-off: brand yellow, the Hub's "this is about YOU" colour.
+  &__focus-flag--baton {
+    --pill-color: #{$color-brand-yellow};
+  }
 
-    // Approval: luminous-pastel lavender — 9.08:1. The decision colour in the palette,
-    // and distinct from both blocked-orange and error-magenta, which this is not.
-    &--approval {
-      background: rgba($color-agent-reviewer, 0.18);
-      color: $color-agent-reviewer;
-    }
+  // Mention: luminous-pastel sky blue.
+  &__focus-flag--mention {
+    --pill-color: #{$color-agent-implementor};
+  }
+
+  // Approval: luminous-pastel lavender, the decision colour.
+  &__focus-flag--approval {
+    --pill-color: #{$color-agent-reviewer};
   }
 
   &--user {
@@ -383,20 +377,20 @@ function formatTime(iso) {
 
     .timeline-msg__content {
       background: rgba($color-agent-implementor, 0.1);
-      border-radius: $border-radius-md $border-radius-sharp $border-radius-md $border-radius-md;
+      border-radius: $border-radius-default;
     }
   }
 
   &--agent {
     .timeline-msg__content {
       background: rgba(255, 255, 255, 0.04);
-      border-radius: $border-radius-sharp $border-radius-md $border-radius-md $border-radius-md;
+      border-radius: $border-radius-default;
     }
   }
 
   &__avatar {
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -415,7 +409,7 @@ function formatTime(iso) {
   }
 
   &__avatar-spacer {
-    width: 32px;
+    width: 26px;
     flex-shrink: 0;
   }
 
@@ -423,7 +417,7 @@ function formatTime(iso) {
     display: flex;
     flex-direction: column;
     gap: v.$spacing-xs;
-    max-width: calc(100% - 44px);
+    max-width: calc(100% - 34px);
   }
 
   &__header {
@@ -454,28 +448,22 @@ function formatTime(iso) {
     color: var(--text-muted);
   }
 
-  &__type-chip,
-  &__action-flag {
+  &__type-chip {
     font-size: 0.6875rem; // 11 — the floor
     font-weight: 600;
     padding: 1px 6px;
     text-transform: lowercase;
   }
 
-  &__action-flag {
-    background: rgba($color-agent-analyzer, 0.15);
-    color: $color-agent-analyzer;
-    border-radius: $border-radius-default;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+  &__pill--danger {
+    text-transform: lowercase;
   }
 
   &__content {
     font-size: 0.83rem;
     line-height: 1.55;
     color: $color-text-primary;
-    padding: v.$spacing-sm v.$spacing-md;
+    padding: v.$spacing-sm 12px;
     word-break: break-word;
   }
 

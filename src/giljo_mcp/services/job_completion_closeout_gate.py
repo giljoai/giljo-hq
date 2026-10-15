@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import GateRefusalError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.schemas.service_responses import build_next_action
@@ -212,12 +212,13 @@ async def _emit_approval_bell(
         logger.warning("[BE-9153] closeout approval bell emit failed (non-fatal)", exc_info=True)
 
 
-def _block_error(job_id: str, approval_id: Any, reasons: list[str]) -> ValidationError:
-    return ValidationError(
+def _block_error(job_id: str, approval_id: Any, reasons: list[str]) -> GateRefusalError:
+    return GateRefusalError(
         message=(
             "CLOSEOUT_APPROVAL_REQUIRED: closeout_mode='hitl' and this closeout carries signal "
-            f"({'; '.join(reasons)}). A user_approval was created — resolve it via "
-            "POST /api/approvals/{id}/decide, then call complete_job() again."
+            f"({'; '.join(reasons)}). A user_approval was created — resolve it with "
+            "decide_approval(approval_id, option_id) or the dashboard (POST /api/approvals/{id}/decide), "
+            "then call complete_job() again."
         ),
         error_code="CLOSEOUT_APPROVAL_REQUIRED",
         context={
@@ -234,7 +235,7 @@ def build_completion_blocked_error(
     job_id: str,
     unread_messages: list,
     incomplete_todos: list,
-) -> ValidationError:
+) -> GateRefusalError:
     reasons: list[str] = []
     if unread_messages:
         unread_ids = [str(msg.id) for msg in unread_messages[:5]]
@@ -282,7 +283,7 @@ def build_completion_blocked_error(
             ),
         )
 
-    return ValidationError(
+    return GateRefusalError(
         message="COMPLETION_BLOCKED: Complete all TODO items and read all messages before calling complete_job()",
         error_code="COMPLETION_BLOCKED",
         context={

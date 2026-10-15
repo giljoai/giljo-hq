@@ -74,7 +74,8 @@ def shape_agent_blocker(finding: AgentReadinessFinding) -> dict[str, Any]:
             "issue_type": "awaiting_user_approval",
             "approval_id": finding.approval_id,
             "suggested_action": (
-                f"Resolve approval {finding.approval_id} via POST /api/approvals/{finding.approval_id}/decide."
+                f"Resolve approval {finding.approval_id} with decide_approval(approval_id, option_id) "
+                f"or the dashboard (POST /api/approvals/{finding.approval_id}/decide)."
             ),
         }
 

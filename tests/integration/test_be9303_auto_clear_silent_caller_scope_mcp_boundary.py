@@ -68,6 +68,12 @@ def boundary(monkeypatch):
     monkeypatch.setattr(_base, "should_run", lambda *args, **kwargs: True)
     monkeypatch.setattr(silence_module, "auto_clear_silent", _fake_auto_clear_silent)
     monkeypatch.setattr(heartbeat_module, "touch_heartbeat", _fake_touch_heartbeat)
+    from api.endpoints.mcp_tools import _silence_scope
+
+    async def _fake_orchestrator_ids(session, tenant_key, job_id):
+        return [f"orchestrator-of-{job_id}"]
+
+    monkeypatch.setattr(_silence_scope, "_project_orchestrator_job_ids", _fake_orchestrator_ids)
 
     return recorder
 
@@ -105,11 +111,13 @@ async def test_orchestrator_inspection_read_does_not_disarm_the_hint(boundary):
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["get_context", "get_agent_result", "finalize_job", "reactivate_job", "dismiss_reactivation", "complete_job"],
+    ["get_context", "get_agent_result", "close_job", "reactivate_job", "dismiss_reactivation", "complete_job"],
 )
 async def test_bystander_tools_never_clear_silence(boundary, tool_name):
     await _call(tool_name)
-    assert boundary.silence_cleared_for == [], f"{tool_name} is a bystander/recovery tool and must not clear 'silent'"
+    assert "job-be9303" not in boundary.silence_cleared_for, (
+        f"{tool_name} is a bystander/recovery tool and must not clear the job's own 'silent'"
+    )
 
 
 async def test_the_hint_survives_the_inspection_read_end_to_end(boundary):

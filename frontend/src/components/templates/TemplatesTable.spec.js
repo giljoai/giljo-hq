@@ -370,3 +370,51 @@ describe('TemplatesTable — role badge tint', () => {
     ])
   })
 })
+
+
+describe('TemplatesTable — BE-9785 Built-in updated marker', () => {
+  const marker = (wrapper, id) => wrapper.find(`[data-testid="builtin-updated-${id}"]`)
+  const hover = (wrapper, id) => wrapper.find(`[data-testid="builtin-updated-hover-${id}"]`)
+
+  it('a reset row (updated_at null, built-in differs) shows the marker with its hover note', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 1, differs_from_builtin: true, updated_at: null, can_reset: true })],
+    })
+    expect(marker(wrapper, 1).text()).toContain('Built-in updated')
+    expect(hover(wrapper, 1).text()).toBe('Never edited; the built-in has changed')
+  })
+
+  it('an edited row (updated_at set, built-in differs) shows NO marker', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 2, differs_from_builtin: true, updated_at: '2026-08-05T10:00:00Z' })],
+    })
+    expect(marker(wrapper, 2).exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Built-in updated')
+  })
+
+  it('an untouched row (updated_at null, equal to the built-in) shows no marker', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 3, differs_from_builtin: false, updated_at: null })],
+    })
+    expect(marker(wrapper, 3).exists()).toBe(false)
+  })
+
+  it('a custom agent and the system row are never marked', () => {
+    const wrapper = mountTable({
+      templates: [
+        makeTemplate({ id: 4, differs_from_builtin: null, updated_at: null }),
+        makeTemplate({ id: 5, differs_from_builtin: true, updated_at: null, _system: true }),
+      ],
+    })
+    expect(marker(wrapper, 4).exists()).toBe(false)
+    expect(marker(wrapper, 5).exists()).toBe(false)
+  })
+
+  it('clicking the marker emits open-builtin-diff with the row', async () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 1, differs_from_builtin: true, updated_at: null })],
+    })
+    await marker(wrapper, 1).trigger('click')
+    expect(wrapper.emitted('open-builtin-diff')[0][0]).toMatchObject({ id: 1 })
+  })
+})

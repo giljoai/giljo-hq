@@ -23,9 +23,11 @@ from api.endpoints.mcp_tools._base import (
     validation_rejection,
 )
 from api.endpoints.mcp_tools._call_metrics import record_untenanted_tool_call
+from api.endpoints.mcp_tools._harness import _detected_harness
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.platform_registry import (
     EXPORT_PLATFORMS,
+    GENERIC_HARNESS,
     WORKSPACE_SHARED_WORKING_TREE,
     get_preset,
 )
@@ -33,6 +35,15 @@ from giljo_mcp.services.product_tuning_service import (
     SECTION_FIELD_MAP,
     STRUCTURED_TUNING_SECTIONS,
     TUNING_PROPOSED_VALUE_MAX,
+)
+from giljo_mcp.services.template_proposal_service import (
+    ADDITIONS_TEXT_MAX_BYTES,
+    REASON_MAX_CHARS,
+    RUNGS,
+    TARGET_KINDS,
+    TEMPLATE_REF_MAX_CHARS,
+    ProposalRefusedError,
+    check_proposal_arguments,
 )
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -352,3 +363,48 @@ async def apply_context_tuning(
     if force:
         kwargs["force"] = True
     return await _call_tool(ctx, "apply_context_tuning", kwargs)
+
+
+@mcp.tool(
+    title="Propose Template Change",
+    description=(
+        "Propose new text for one agent template's instructions or one product's orchestrator "
+        "prompt additions. Nothing changes until the user presses Apply in Tools > Agents. Each "
+        "target holds one waiting proposal; a new one replaces it. Relay the response's "
+        "tell_the_user line to the user."
+    ),
+    annotations=_tool_hints("propose_template_change", destructive=True),
+)
+async def propose_template_change(
+    target_kind: Annotated[Literal[TARGET_KINDS], Field(description="What to change.")],
+    proposed_text: Annotated[
+        str, Field(max_length=ADDITIONS_TEXT_MAX_BYTES, description="The full new text, not a diff.")
+    ],
+    reason: Annotated[str, Field(max_length=REASON_MAX_CHARS, description="One line: why.")],
+    template_id_or_name: Annotated[
+        str, Field(max_length=TEMPLATE_REF_MAX_CHARS, description="For agent_template: its id or name.")
+    ] = "",
+    product_id: Annotated[
+        str, Field(max_length=MCP_ID_MAX, description="The template's product, or the product the additions are for.")
+    ] = "",
+    rung: Annotated[
+        Literal["", *RUNGS],
+        Field(description="For orchestrator_additions: 'product', with product_id. There is no account-wide rung."),
+    ] = "",
+    ctx: Context = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "target_kind": target_kind,
+        "proposed_text": proposed_text,
+        "reason": reason,
+        "template_id_or_name": template_id_or_name,
+        "product_id": product_id,
+        "rung": rung,
+    }
+    try:
+        check_proposal_arguments(**arguments)
+        harness = _detected_harness(ctx)
+        arguments["proposed_by"] = "agent" if harness == GENERIC_HARNESS else f"{harness} agent"
+        return await _call_tool(ctx, "propose_template_change", arguments)
+    except ProposalRefusedError as exc:
+        return validation_rejection(field=exc.field, constraint=exc.constraint, message=exc.message)

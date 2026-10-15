@@ -315,7 +315,7 @@ function loadFromUser() {
   error.value = ''
 }
 
-watch(() => userStore.currentUser, loadFromUser, { immediate: true })
+watch(() => userStore.currentUser?.id, loadFromUser, { immediate: true })
 
 onMounted(async () => {
   try {
@@ -361,20 +361,19 @@ async function save() {
   try {
     const payload = {
       first_name: form.value.first_name.trim(),
-      last_name: form.value.last_name.trim() || null,
+      last_name: form.value.last_name.trim(),
     }
     if (ceModeEmailChange) {
       payload.email = form.value.email
     }
-    await api.auth.updateUser(u.id, payload)
+    const { data: saved } = await api.auth.updateUser(u.id, payload)
 
     if (userStore.currentUser) {
-      userStore.currentUser.first_name = form.value.first_name.trim()
-      userStore.currentUser.last_name = form.value.last_name.trim() || null
-      const combined = `${form.value.first_name.trim()} ${form.value.last_name.trim()}`.trim()
-      userStore.currentUser.full_name = combined || userStore.currentUser.full_name
+      userStore.currentUser.first_name = saved.first_name
+      userStore.currentUser.last_name = saved.last_name
+      userStore.currentUser.full_name = saved.full_name
       if (ceModeEmailChange) {
-        userStore.currentUser.email = form.value.email
+        userStore.currentUser.email = saved.email
       }
     }
 

@@ -24,6 +24,11 @@ const isSameCalendarDay = (value, now) => {
   )
 }
 
+export const templateBuiltinUpdated = (template) =>
+  !template?._system && !template?.updated_at && template?.differs_from_builtin === true
+
+export const BUILTIN_UPDATED_HOVER = 'Never edited; the built-in has changed'
+
 const lastActivityAt = (t) => new Date(t?.updated_at || t?.created_at || 0).getTime()
 
 export const sortUpdatedState = (a, b) => lastActivityAt(a) - lastActivityAt(b)

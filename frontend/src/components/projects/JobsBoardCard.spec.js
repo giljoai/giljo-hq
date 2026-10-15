@@ -3,6 +3,8 @@ import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import JobsBoardCard from './JobsBoardCard.vue'
+import JobsBoardCardSummary from './JobsBoardCardSummary.vue'
+import cardSource from './JobsBoardCard.vue?raw'
 
 const vuetify = createVuetify()
 
@@ -67,6 +69,36 @@ describe('JobsBoardCard', () => {
     expect(wrapper.find('[data-testid="jb-stat-agents"]').text()).toBe('3')
     expect(wrapper.find('[data-testid="jb-stat-waiting"]').text()).toBe('1')
     expect(wrapper.find('[data-testid="jb-stat-duration"]').text()).toBe('41m 0s')
+  })
+
+  it('labels the unread-message stat "Unread", not "Waiting" (FE-9750)', () => {
+    const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
+    const stat = wrapper.find('[data-testid="jb-stat-waiting"]').element.parentElement
+    expect(stat.querySelector('.jb-stat-k').textContent).toBe('Unread')
+  })
+
+  it('the folded summary calls the same count "unread" (FE-9750)', () => {
+    const summary = mount(JobsBoardCardSummary, {
+      props: { agents: [], steps: { hasSteps: false }, waiting: 2, duration: '1m' },
+      global: { stubs: { 'v-tooltip': tooltipStub } },
+    })
+    expect(summary.find('[data-testid="jb-summary-facts"]').text()).toContain('2 unread')
+    expect(summary.text()).not.toContain('waiting')
+  })
+
+  it('the title is one line in every density: nowrap + ellipsis, no multi-line clamp (FE-9750)', () => {
+    const rule = cardSource.match(/\.jb-title\s*\{([^}]*)\}/)[1]
+    expect(rule).toMatch(/white-space:\s*nowrap/)
+    expect(rule).toMatch(/text-overflow:\s*ellipsis/)
+    expect(rule).toMatch(/overflow:\s*hidden/)
+    expect(rule).toMatch(/min-width:\s*0/)
+    expect(cardSource).not.toMatch(/-webkit-line-clamp:\s*[2-9]/)
+  })
+
+  it('the title is keyboard focusable so its full-name tooltip opens on focus (FE-9750)', () => {
+    const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
+    expect(wrapper.find('[data-testid="jb-title"]').attributes('tabindex')).toBe('0')
+    expect(wrapper.find('[data-testid="jb-title-tooltip"]').text()).toBe(needsInputProject.name)
   })
 
   it('renders one JobsBoardAgentRow per agent', () => {

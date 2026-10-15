@@ -20,7 +20,7 @@
       density="compact"
     >
       <ProductTabStrip
-        :tabs="tabsWithBadges"
+        :tabs="productStore.openProductTabs"
         :viewed-id="productStore.currentProductId"
         :addable-products="addableProducts"
         :show-all="isJobsRoute"
@@ -66,9 +66,7 @@ import { initWebsocketEventRouter, registerReconnectResync } from '@/stores/webs
 import { useHubNotifications } from '@/composables/useHubNotifications'
 import { useBannerPopoutLifecycle } from '@/composables/useBannerPopoutLifecycle'
 import { useActiveProductReconciliation } from '@/composables/useActiveProductReconciliation'
-import { withProductActivityBadges } from '@/composables/useProductTabBadges'
 import { useProductTabNavigation } from '@/composables/useProductTabNavigation'
-import { useProductActivityStore } from '@/stores/productActivityStore'
 import StarField from '@/components/StarField.vue'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
 import ProductTabStrip from '@/components/navigation/ProductTabStrip.vue'
@@ -92,7 +90,6 @@ const router = useRouter()
 const userStore = useUserStore()
 const productStore = useProductStore()
 const jobsScope = useJobsScopeStore()
-const productActivityStore = useProductActivityStore()
 const productTabNavigation = useProductTabNavigation()
 const projectStatusesStore = useProjectStatusesStore()
 const taskStatusesStore = useTaskStatusesStore()
@@ -125,14 +122,6 @@ const addableProducts = computed(() =>
   productStore.products.filter((p) => !productStore.openProductIds.includes(p.id)),
 )
 
-const tabsWithBadges = computed(() =>
-  withProductActivityBadges(
-    productStore.openProductTabs,
-    productStore.currentProductId,
-    productActivityStore.getCount,
-  ),
-)
-
 function onProductTabSelect(productId) {
   jobsScope.selectProduct()
   productTabNavigation.selectTab(productId)
@@ -146,7 +135,6 @@ function onProductTabClose(productId) {
 
 function onProductTabAdd(productId) {
   productStore.openTab(productId)
-  productActivityStore.clearActivity(productId)
 }
 
 const loadCurrentUser = async () => {

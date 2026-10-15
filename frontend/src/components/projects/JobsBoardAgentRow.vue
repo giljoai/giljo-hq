@@ -11,7 +11,7 @@
           data-testid="jb-agent-recopy"
           @click="emit('replay', agent)"
         >
-          <v-icon size="16">mdi-refresh</v-icon>
+          <v-icon size="16">mdi-content-copy</v-icon>
         </button>
         <button
           v-else

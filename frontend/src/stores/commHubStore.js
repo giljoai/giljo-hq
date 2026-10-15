@@ -295,6 +295,13 @@ export const useCommHubStore = defineStore('commHub', () => {
     return updated
   }
 
+  async function setThreadStatus(id, status) {
+    const res = await api.threads.update(id, { status })
+    const updated = res.data
+    _patchThread(id, { status: updated?.status ?? status })
+    return updated
+  }
+
   async function retagThread(id, { productId, projectIds } = {}) {
     const body = {}
     if (productId === '') body.clear_product = true
@@ -496,6 +503,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     loadParticipants,
     createThread,
     renameThread,
+    setThreadStatus,
     retagThread,
     postMessage,
     passBaton,

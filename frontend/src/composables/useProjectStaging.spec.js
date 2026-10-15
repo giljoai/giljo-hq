@@ -43,6 +43,10 @@ vi.mock('@/stores/projectTabs', () => ({
   useProjectTabsStore: () => ({
     isLaunched: false,
     currentProject: null,
+    noteUserImplement(project) {
+      this.currentProject = project
+      this.isLaunched = true
+    },
   }),
 }))
 

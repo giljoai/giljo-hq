@@ -90,7 +90,9 @@ def render_connect_md(server_url: str, api_key: str = KEY_PLACEHOLDER) -> str:
         "2. Run the command(s) in it.\n"
         "3. Restart or reload the harness if it asks you to, and confirm the server is connected "
         f"(for example `claude mcp list`, `codex mcp list`, `opencode mcp list`).\n"
-        "4. Call the `giljo_setup` tool. It installs the rest of the integration (skills and agent profiles) for your harness.\n\n"
+        "4. Call the `giljo_setup` tool. It installs the `/giljo` skill for your harness and writes a short "
+        "Giljo HQ block into this project's CLAUDE.md or AGENTS.md. Agent roles come from the server "
+        "when work starts, so nothing else needs installing.\n\n"
         f"## Which sign-in path\n\n{path_rule}\n"
     )
     return head + "\n" + "\n\n".join(sections) + "\n"

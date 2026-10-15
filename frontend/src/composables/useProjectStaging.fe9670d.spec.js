@@ -21,7 +21,16 @@ const copyMock = vi.fn(async () => { calls.push('copy'); return true })
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copy: copyMock }) }))
 const setLaunchedMock = vi.fn()
 vi.mock('@/stores/projectStateStore', () => ({ useProjectStateStore: () => ({ setLaunched: setLaunchedMock }) }))
-vi.mock('@/stores/projectTabs', () => ({ useProjectTabsStore: () => ({ isLaunched: false, currentProject: null }) }))
+vi.mock('@/stores/projectTabs', () => ({
+  useProjectTabsStore: () => ({
+    isLaunched: false,
+    currentProject: null,
+    noteUserImplement(project) {
+      this.currentProject = project
+      this.isLaunched = true
+    },
+  }),
+}))
 
 async function make() {
   const { useProjectStaging } = await import('./useProjectStaging')

@@ -9,7 +9,7 @@
         data-testid="jobs-side-staging"
         @click="emit('select-side', 'staging')"
       >
-        Staging <span class="jb-filter-n">{{ sideCounts.staging }}</span>
+        Staging <span class="jb-filter-n" :class="countClass(sideCounts.staging)">{{ sideCounts.staging }}</span>
       </button>
       <button
         type="button"
@@ -19,39 +19,29 @@
         data-testid="jobs-side-implementation"
         @click="emit('select-side', 'implementation')"
       >
-        Implementation <span class="jb-filter-n">{{ sideCounts.implementation }}</span>
+        Implementation <span class="jb-filter-n" :class="countClass(sideCounts.implementation)">{{ sideCounts.implementation }}</span>
       </button>
     </div>
     <div class="jb-status-line" data-testid="jobs-status-counters">
       <span v-for="option in statusCounts" :key="option.value" :data-testid="`jobs-status-${option.value}`">
         {{ option.label }}
-        <span class="jb-filter-n" :class="{ 'jb-filter-n--hot': option.value === 'needs-decision' && option.count > 0 }">
+        <span class="jb-filter-n" :class="countClass(option.count, option.value === 'needs-decision')">
           {{ option.count }}
         </span>
       </span>
     </div>
-    <div class="jb-filter-group jb-density" role="group" aria-label="View" data-testid="jobs-view-switch">
-      <span class="jb-density-label" data-testid="jobs-view-label">View</span>
-      <button
-        type="button"
-        class="jb-filter"
-        :class="{ 'jb-filter--active': !isCompact }"
-        :aria-pressed="!isCompact"
-        data-testid="jobs-density-detailed"
-        @click="emit('select-density', BOARD_DENSITIES.DETAILED)"
-      >
-        Detailed
-      </button>
-      <button
-        type="button"
-        class="jb-filter"
-        :class="{ 'jb-filter--active': isCompact }"
-        :aria-pressed="isCompact"
-        data-testid="jobs-density-compact"
-        @click="emit('select-density', BOARD_DENSITIES.COMPACT)"
-      >
-        Compact
-      </button>
+    <div class="jb-density" data-testid="jobs-view-switch">
+      <label class="jb-density-label" for="jobs-compact-switch" data-testid="jobs-view-label">Compact view</label>
+      <v-switch
+        id="jobs-compact-switch"
+        :model-value="isCompact"
+        color="primary"
+        density="compact"
+        hide-details
+        aria-label="Compact view"
+        data-testid="jobs-compact-switch"
+        @update:model-value="onToggleCompact"
+      />
     </div>
   </div>
 </template>
@@ -67,6 +57,15 @@ defineProps({
 })
 
 const emit = defineEmits(['select-side', 'select-density'])
+
+function countClass(count, hotWhenPositive = false) {
+  if (!(count > 0)) return null
+  return hotWhenPositive ? 'jb-filter-n--hot' : 'jb-filter-n--on'
+}
+
+function onToggleCompact(on) {
+  emit('select-density', on ? BOARD_DENSITIES.COMPACT : BOARD_DENSITIES.DETAILED)
+}
 </script>
 
 <style scoped lang="scss">
@@ -118,6 +117,11 @@ const emit = defineEmits(['select-side', 'select-density'])
   padding: 0 6px;
   border-radius: $border-radius-pill;
 
+  &--on {
+    background: rgba($color-brand-yellow, 0.15);
+    color: $color-brand-yellow;
+  }
+
   &--hot {
     background: rgba($color-status-warning, 0.25);
     color: $color-status-warning;
@@ -142,14 +146,18 @@ const emit = defineEmits(['select-side', 'select-density'])
 }
 
 .jb-density {
+  display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .jb-density-label {
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.8rem;
   color: $color-text-secondary;
-  padding: 0 4px 0 12px;
+  cursor: pointer;
+}
+
+.jb-density :deep(.v-switch .v-selection-control) {
+  min-height: auto;
 }
 </style>

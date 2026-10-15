@@ -88,71 +88,84 @@ class TestTeamContextHeader:
             "YOUR TEAM should show deliverable preview"
         )
 
-    def test_your_dependencies_section_analyzer_has_downstream(self):
-        analyzer = create_mock_agent_execution(agent_display_name="analyzer")
+    def test_documenter_with_phase1_implementer_and_no_link_depends_on_nothing(self):
         implementer = create_mock_agent_execution(agent_display_name="implementer")
         documenter = create_mock_agent_execution(agent_display_name="documenter")
-
-        all_agents = [analyzer, implementer, documenter]
-
-        header = _generate_team_context_header(
-            current_job=analyzer,
-            all_project_jobs=all_agents,
-            mission_lookup=None,
-        )
-
-        assert "## YOUR DEPENDENCIES" in header, "Header must include YOUR DEPENDENCIES section"
-
-        assert "You depend on: None" in header, "Analyzer should have no upstream dependencies"
-
-        assert "Others depend on you:" in header, "YOUR DEPENDENCIES must list downstream dependencies"
-        assert "implementer" in header.lower(), "Analyzer should list implementer as downstream"
-        assert "documenter" in header.lower(), "Analyzer should list documenter as downstream"
-
-    def test_your_dependencies_section_documenter_has_upstream(self):
-        analyzer = create_mock_agent_execution(agent_display_name="analyzer")
-        implementer = create_mock_agent_execution(agent_display_name="implementer")
-        documenter = create_mock_agent_execution(agent_display_name="documenter")
-
-        all_agents = [analyzer, implementer, documenter]
 
         header = _generate_team_context_header(
             current_job=documenter,
-            all_project_jobs=all_agents,
+            all_project_jobs=[implementer, documenter],
             mission_lookup=None,
         )
 
-        assert "## YOUR DEPENDENCIES" in header, "Header must include YOUR DEPENDENCIES section"
+        assert "- You depend on: None (you can start immediately)" in header
+        assert "- Others depend on you: None" in header
 
-        assert "You depend on:" in header, "YOUR DEPENDENCIES must list upstream dependencies"
-        assert "analyzer" in header.lower(), "Documenter should list analyzer as upstream"
-        assert "implementer" in header.lower(), "Documenter should list implementer as upstream"
-
-        assert "Others depend on you: None" in header, "Documenter should have no downstream dependencies"
-
-    def test_your_dependencies_section_implementer_has_both(self):
+    def test_predecessor_link_names_both_directions(self):
         analyzer = create_mock_agent_execution(agent_display_name="analyzer")
         implementer = create_mock_agent_execution(agent_display_name="implementer")
         tester = create_mock_agent_execution(agent_display_name="tester")
-        documenter = create_mock_agent_execution(agent_display_name="documenter")
+        all_agents = [analyzer, implementer, tester]
+        job_links = {
+            analyzer.job_id: (None, 1),
+            implementer.job_id: (analyzer.job_id, 2),
+            tester.job_id: (None, None),
+        }
 
-        all_agents = [analyzer, implementer, tester, documenter]
-
-        header = _generate_team_context_header(
-            current_job=implementer,
-            all_project_jobs=all_agents,
-            mission_lookup=None,
+        successor_header = _generate_team_context_header(
+            current_job=implementer, all_project_jobs=all_agents, job_links=job_links
+        )
+        predecessor_header = _generate_team_context_header(
+            current_job=analyzer, all_project_jobs=all_agents, job_links=job_links
         )
 
-        assert "## YOUR DEPENDENCIES" in header, "Header must include YOUR DEPENDENCIES section"
-
-        assert "You depend on:" in header and "analyzer" in header.lower(), (
-            "Implementer should list analyzer as upstream"
+        assert f"- You depend on: analyzer ({analyzer.agent_id}) (wait for their outputs if needed)" in successor_header
+        assert "- Others depend on you: None" in successor_header
+        assert "- You depend on: None (you can start immediately)" in predecessor_header
+        assert (
+            f"- Others depend on you: implementer ({implementer.agent_id}) (notify them when your work is ready)"
+            in predecessor_header
         )
 
-        assert "Others depend on you:" in header, "Implementer should have downstream dependencies"
-        assert "tester" in header.lower(), "Implementer should list tester as downstream"
-        assert "documenter" in header.lower(), "Implementer should list documenter as downstream"
+    def test_later_phase_job_depends_on_every_lower_phase_job(self):
+        analyzer = create_mock_agent_execution(agent_display_name="analyzer")
+        implementer = create_mock_agent_execution(agent_display_name="implementer")
+        reviewer = create_mock_agent_execution(agent_display_name="reviewer")
+        all_agents = [analyzer, implementer, reviewer]
+        job_links = {
+            analyzer.job_id: (None, 1),
+            implementer.job_id: (None, 1),
+            reviewer.job_id: (analyzer.job_id, 2),
+        }
+
+        reviewer_header = _generate_team_context_header(
+            current_job=reviewer, all_project_jobs=all_agents, job_links=job_links
+        )
+        implementer_header = _generate_team_context_header(
+            current_job=implementer, all_project_jobs=all_agents, job_links=job_links
+        )
+
+        assert (
+            f"- You depend on: analyzer ({analyzer.agent_id}), implementer ({implementer.agent_id})" in reviewer_header
+        )
+        assert "- You depend on: None (you can start immediately)" in implementer_header
+        assert f"- Others depend on you: reviewer ({reviewer.agent_id})" in implementer_header
+
+    def test_phase_one_job_never_waits_on_unphased_or_same_phase_jobs(self):
+        orchestrator = create_mock_agent_execution(agent_display_name="orchestrator")
+        implementer = create_mock_agent_execution(agent_display_name="implementer")
+        tester = create_mock_agent_execution(agent_display_name="tester")
+        all_agents = [orchestrator, implementer, tester]
+        job_links = {
+            orchestrator.job_id: (None, None),
+            implementer.job_id: (None, 1),
+            tester.job_id: (None, 1),
+        }
+
+        header = _generate_team_context_header(current_job=tester, all_project_jobs=all_agents, job_links=job_links)
+
+        assert "- You depend on: None (you can start immediately)" in header
+        assert "- Others depend on you: None" in header
 
     def test_coordination_section_mentions_messaging_tools(self):
         current_agent = create_mock_agent_execution(agent_display_name="analyzer")
@@ -251,22 +264,6 @@ class TestTeamContextHeader:
 
         for agent in agents:
             assert agent.agent_id in header, f"YOUR TEAM must include agent_id for {agent.agent_display_name}"
-
-    def test_dependency_inference_tester_depends_on_implementer(self):
-        implementer = create_mock_agent_execution(agent_display_name="implementer")
-        tester = create_mock_agent_execution(agent_display_name="tester")
-
-        all_agents = [implementer, tester]
-
-        header = _generate_team_context_header(
-            current_job=tester,
-            all_project_jobs=all_agents,
-            mission_lookup=None,
-        )
-
-        assert "You depend on:" in header and "implementer" in header.lower(), (
-            "Tester should list implementer as upstream dependency"
-        )
 
     def test_unknown_role_has_no_dependencies(self):
         custom_agent = create_mock_agent_execution(agent_display_name="custom-role")

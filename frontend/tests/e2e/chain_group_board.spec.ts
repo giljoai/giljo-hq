@@ -2,8 +2,8 @@
  * chain_group_board.spec.ts — FE-9655d
  *
  * A chain is one group on the Jobs board. Link two projects over MCP (the way
- * an agent would), open the board, Stage the chain from its header, let the
- * conductor write the chain goal, Implement from the header, and watch the group
+ * an agent would), open the board, Stage the chain from its control area, let the
+ * conductor write the chain goal, Implement from its control area, and watch the group
  * advance to step 2 when the first member finishes. The run-record writes that
  * stand in for the conductor go through the same REST writer the dashboard uses.
  *
@@ -85,17 +85,17 @@ test.describe('Jobs board chain group', () => {
     // The member cards carry no staging buttons of their own.
     await expect(group.locator('[data-testid="jbf-stage"]')).toHaveCount(0)
 
-    // TSK-9692: the header picks the mode with the same Run as switch the cards use.
+    // FE-9749: the chain's controls sit in the shared control area at the bottom;
+    // the header carries information only.
     const runAs = group.locator('[data-testid="chain-group-run-as"]')
-    await expect(runAs.locator('[data-testid="run-as-label"]')).toHaveText('Run as')
+    await expect(group.locator('[data-testid="sca-label"]')).toHaveText('Select execution mode')
     await expect(runAs.locator('[data-testid="radio-multi-terminal"]')).toHaveAttribute('aria-pressed', 'true')
-    await expect(group.locator('[data-testid="chain-group-header"]')).not.toContainText('Execution Mode')
-    if (process.env.TSK9692_SHOT) await group.locator('[data-testid="chain-group-header"]').screenshot({ path: process.env.TSK9692_SHOT })
+    await expect(group.locator('[data-testid="chain-group-header"] [data-testid="stage-chain-btn"]')).toHaveCount(0)
 
-    // Stage the chain from its header.
+    // Stage the chain from its control area.
     await group.locator('[data-testid="stage-chain-btn"]').click()
-    await expect(group.locator('[data-testid="stage-chain-btn"]')).toHaveText('Unstage Chain')
-    await expect(group.locator('[data-testid="chain-group-mode-tag"]')).toContainText('Multi-Terminal')
+    await expect(group.locator('[data-testid="stage-chain-btn"]')).toHaveText('Unstage chain')
+    await expect(group.locator('[data-testid="chain-group-mode-tag"]')).toContainText('Multi-terminal')
 
     // The conductor writes the chain goal while staging.
     const goal = await page.request.patch(`${API}/api/v1/sequence-runs/${runId}`, {
@@ -114,7 +114,8 @@ test.describe('Jobs board chain group', () => {
     await expect(group.locator('[data-testid="stop-chain-btn"]')).toBeVisible({ timeout: 15000 })
     await expect(page).toHaveURL(/\/jobs-overview/)
 
-    // The first member finishes and the conductor advances the run.
+    // The first member finishes; its closeout advances the run on the server
+    // (written directly here).
     const advance = await page.request.patch(`${API}/api/v1/sequence-runs/${runId}`, {
       headers,
       data: {

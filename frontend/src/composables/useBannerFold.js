@@ -5,6 +5,7 @@ export function useBannerFold({
   approvalCount,
   threadPostCount,
   lifecycleRows,
+  templateProposalCount = { value: 0 },
   systemBanners,
   showTutorial,
   showInteg,
@@ -16,6 +17,7 @@ export function useBannerFold({
     if (approvalCount.value > 0) keys.push('approval')
     if (threadPostCount.value > 0) keys.push('thread-post')
     for (const row of lifecycleRows.value) keys.push(`lifecycle:${row.id}`)
+    if (templateProposalCount.value > 0) keys.push('template-proposals')
     for (const n of systemBanners.value) keys.push(`system:${n.id}`)
     if (showTutorial.value) keys.push('tutorial')
     if (showInteg.value) keys.push('integ')

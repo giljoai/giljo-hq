@@ -138,20 +138,23 @@ describe('SystemStatusBanner your-turn row (FE-9368)', () => {
     })
   })
 
-  it('collapses several pending threads into one row that opens the Hub list', async () => {
+  it('collapses several pending threads into one row that opens the longest-waiting one', async () => {
     const wrapper = await mountBanner({
       threads: [
-        thread({ thread_id: 'thr-1', subject: 'One' }),
-        thread({ thread_id: 'thr-2', subject: 'Two' }),
+        thread({ thread_id: 'thr-1', subject: 'One', updated_at: '2026-08-06T10:00:00Z' }),
+        thread({ thread_id: 'thr-2', subject: 'Two', updated_at: '2026-08-06T09:00:00Z' }),
       ],
     })
     expect(wrapper.find('[data-testid="your-turn-banner-text"]').text()).toBe(
-      'Multiple chat threads are waiting for you',
+      '2 threads are waiting for you',
     )
-    expect(wrapper.find('[data-testid="your-turn-cta"]').text()).toBe('Open Message Hub')
+    expect(wrapper.find('[data-testid="your-turn-cta"]').text()).toBe('Open next')
 
     await row(wrapper).trigger('click')
-    expect(h.push).toHaveBeenCalledWith({ path: '/hub' })
+    expect(h.push).toHaveBeenCalledWith({
+      path: '/hub',
+      query: { thread: 'thr-2', focus: 'baton' },
+    })
   })
 
   it('stays hidden when the baton points at someone else', async () => {

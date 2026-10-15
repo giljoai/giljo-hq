@@ -1,14 +1,15 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-09*
 
 ## Overview
 
-Giljo HQ, a GiljoAI product, registers **49 tools**. Two of them —
+Giljo HQ, a GiljoAI product, registers **52 tools**. Two of them —
 `launch_implementation` and `decide_approval` — respect your tenant's approval mode, so
 they may not be served to every session; see Settings. Several older tool names have
-been retired and are no longer registered — only the final names below are. Every tool requires a
-valid API key passed as a Bearer token. Tenant isolation is enforced server-side; agents
+been retired and are no longer registered — only the final names below are. Every tool call must be
+authenticated, either by a browser sign-in (OAuth) or by an API key passed as a Bearer
+token. Community Edition's Connect tab gives you an API key command. Tenant isolation is enforced server-side; agents
 cannot cross tenant boundaries.
 
 Tool names match the exact MCP registrations at the time of the date above. The MCP
@@ -25,17 +26,18 @@ Every tool carries one of three permission scopes:
 | Scope | Meaning | Count |
 |-------|---------|-------|
 | `mcp:read` | Reads. Fetches data without changing it, with one exception: `get_thread_history` with `mark_read=true` records your read position. | 13 |
-| `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 10 |
-| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 26 |
-| **Total** | | **49** |
+| `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 12 |
+| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 27 |
+| **Total** | | **52** |
 
 Every tool also carries MCP behaviour hints, which a client can use to decide when to
 ask you before a call runs. 12 tools are marked read-only: every `mcp:read` tool except
-`get_thread_history`, which is not, because of `mark_read`. 19 tools are marked
+`get_thread_history`, which is not, because of `mark_read`. 22 tools are marked
 destructive, meaning a call can overwrite or remove data you already have:
-`apply_context_tuning`, `complete_job`, `decide_approval`, `finalize_job`,
-`get_staging_instructions`, `giljo_setup`, `launch_implementation`, `post_to_thread`,
-`report_progress`, `save_roadmap`, `stage_project`, `unlink_projects`,
+`apply_context_tuning`, `complete_job`, `decide_approval`,
+`finalize_job`, `get_staging_instructions`, `giljo_setup`, `launch_implementation`,
+`post_to_thread`, `promote_task_to_project`, `propose_template_change`, `report_progress`,
+`save_roadmap`, `stage_project`, `unlink_projects`, `unstage_project`,
 `update_job_mission`, `update_product_context`, `update_project`,
 `update_project_mission`, `update_task`, `update_thread` and `write_project_closeout`.
 No tool is marked idempotent, and no tool is marked open-world: none of them contacts an
@@ -197,15 +199,32 @@ with suggested next actions.
 **Purpose:** Prepare a project and return its staging plan (orchestrator/agent ids,
 prompt, token estimate) for the chosen execution mode. Staging always ends at a human
 approval gate: nothing is implemented until the user approves it with the dashboard's
-Implement button or with `launch_implementation`. Approving also makes an inactive
-project active. The `action` parameter can also undo staging.
+Implement button or with `launch_implementation`. Staging also makes an inactive
+project active, so it shows on the dashboard Jobs board; a completed, cancelled or
+otherwise closed project is refused. This tool only stages; to undo staging use
+`unstage_project`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | project_id | str | Yes | ID of the project to stage. At most 64 characters. |
-| mode | str | No | How the work runs: `subagent` (one session drives the worker agents itself) or `multi_terminal` (a separate terminal per agent). There is no built-in default: this is the user's choice, so ask them. If omitted and your account has no default mode, the call is refused with `EXECUTION_MODE_REQUIRED`, naming both modes. Values used by earlier versions are still accepted and run as `subagent`. Applies only to `action="stage"`. |
+| mode | str | No | How the work runs: `subagent` (one session drives the worker agents itself) or `multi_terminal` (a separate terminal per agent). There is no built-in default: this is the user's choice, so ask them. If omitted and your account has no default mode, the call is refused with `EXECUTION_MODE_REQUIRED`, naming both modes. Values used by earlier versions are still accepted and run as `subagent`. |
 | mission | str | No | Optional goal to write as the project mission before staging, through `update_project_mission`. Omit to leave an existing mission untouched. |
-| action | str | No | `stage` (default) prepares the project. `unstage` reverts a staged project before the agent was contacted; `cancel_staging` abandons staging that is underway; `restage` clears the mission and the staging state, retires the earlier orchestrator and creates a fresh one so staging starts over (refused once implementation has launched). |
+
+---
+
+### unstage_project `mcp:agent`
+
+**Purpose:** Undo staging at any point before implementation starts. Clears the
+project's staging state and its mission, and retires an orchestrator that had already
+started on it for a fresh one. This also starts staging over: call `stage_project` again
+afterwards. Refused once implementation has started (`IMPLEMENTATION_ALREADY_STARTED`),
+when the project is not staged (`NOTHING_TO_UNSTAGE`), and while the orchestrator is
+actively running. To abandon a project instead, call `update_project` with status
+`cancelled`. It does not approve or launch anything.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| project_id | str | Yes | The project whose staging to undo. At most 64 characters. |
 
 ---
 
@@ -354,7 +373,7 @@ A handover **cannot be converted to a project** (`HANDOVER_NOT_CONVERTIBLE`) and
 ### update_task `mcp:write`
 
 **Purpose:** Update task metadata (title, description, status, priority,
-hidden flag), or promote the task to a project. Omitted fields remain unchanged; the
+hidden flag). Omitted fields remain unchanged; the
 task type is immutable. To **complete** a task, set `status=completed` (this stamps
 `completed_at`); pass `completion_notes` to append an audit-trail entry as it completes.
 
@@ -367,14 +386,33 @@ the successor is verifying its claims. **Completed** = verified, not merely read
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | task_id | str | Yes | ID of the task to update. |
-| title | str | No | New title. Alongside `convert_to_project=true`, names the new project instead. |
+| title | str | No | New title. |
 | description | str | No | New description. |
 | status | str | No | `pending` / `in_progress` / `on_hold` / `completed` / `blocked` / `cancelled`. `on_hold` parks an undecided task: it stays open and does not stamp `started_at`. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. |
 | task_type | str | No | A task's type is fixed at creation and cannot be changed. Passing the task's own current type is a harmless no-op; passing a different one is refused with a `VALIDATION_ERROR` on field `task_type`, and the whole call writes nothing (any other fields in the same call are not applied either). Create a new task of the type you want instead. |
 | hidden | str | No | UI declutter flag (the UI calls it "archived"). Accepts `true` / `1` / `yes` or `false` / `0` / `no` (any letter case); empty leaves it unchanged, and any other value is refused with a `VALIDATION_ERROR` on field `hidden`. Setting it on a **pending** handover is refused with `PENDING_HANDOVER_NOT_ARCHIVABLE`: a handover nobody has read must not leave the list. Move it off `pending` first. |
 | completion_notes | str | No | Note appended to the audit trail when `status=completed` (folds in the retired `complete_task` tool); a no-op otherwise. |
-| convert_to_project | bool | No | Promote this task to a project in one atomic step — the same conversion the dashboard's task-to-project wizard runs. A project is created from the task, any subtasks and roadmap card re-point to it at the same roadmap position, and **the task row is deleted** (its `task_id` stops resolving). The new project is **inactive and untyped** — tag it afterward with `update_project(project_id, project_type=...)`. It lands on the task's own product, not whichever product is active, and the response names that product. Only `title` may be combined with this flag (to name the new project); any other field combined with it is refused and changes nothing, since the task row is gone before it could apply. **Refused outright for a handover** (`HANDOVER_NOT_CONVERTIBLE`): a handover records a session that already happened, and since the conversion deletes the task row, converting one would destroy the record. Default `false`. |
+
+To turn a task into a project, use `promote_task_to_project`.
+
+---
+
+### promote_task_to_project `mcp:write`
+
+**Purpose:** Turn a task that proved bigger than one step into a project. Creates a
+project from the task on the task's own product, moves its subtasks and any roadmap card to
+the project at the same roadmap position, and **deletes the task**: its `task_id` stops
+resolving, so carry the returned `project_id` instead. The new project is inactive and
+untyped; give it a type with `update_project(project_id, project_type=...)`, and the user
+activates it from the dashboard. Only the task's creator or an admin may promote it. A
+handover task (`HND`) cannot be promoted (`HANDOVER_NOT_CONVERTIBLE`): a handover records a
+session that already happened, and promoting it would delete that record.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| task_id | str | Yes | ID of the task to promote. At most 64 characters. |
+| title | str | No | Name for the new project. Omit to keep the task's own title. At most 200 characters; a blank title is refused. |
 
 ---
 
@@ -468,9 +506,9 @@ ignores it. There is no agent file to install or look up.
 after `spawn_job`. Returns the targeted mission, not the full project vision. Idempotent.
 
 The response carries an **`agent_profile`** block in every execution mode: the agent's
-name, role, description, assigned harness, model and effort hints, instructions,
-behavioural rules, and success criteria. That block is the agent's role -- read it and
-start. Nothing needs to be installed on your machine, and there is no agent template file
+name, role, description, assigned harness, model and effort hints, behavioural rules, and
+success criteria. The role instructions themselves arrive once, in **`agent_identity`**.
+Together they are the agent's role -- read them and start. Nothing needs to be installed on your machine, and there is no agent template file
 to look for.
 
 | Parameter | Type | Required | Description |
@@ -992,9 +1030,9 @@ marker block (primer plus product binding) into your harness file (`CLAUDE.md` /
 `AGENTS.md`), and records acknowledgement of the bundled `SKILLS_VERSION`. Run once after
 connecting, and again whenever your skills are outdated.
 
-It does **not** install agent templates. Every spawned agent receives its full profile
-from the server in `get_job_mission`'s `agent_profile`, so nothing has to live in your
-agents directory.
+It does **not** install agent templates. Every spawned agent receives its role from
+the server in `get_job_mission` (`agent_profile` and `agent_identity`), so nothing has to
+live in your agents directory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1013,18 +1051,47 @@ agents directory.
 
 ---
 
+### propose_template_change `mcp:write`
+
+**Purpose:** Propose new text for one agent template's instructions, or for one product's
+orchestrator prompt additions. The tool never changes the live template or prompt:
+the proposal waits until someone presses **Apply** or **Reject** in **Tools > Agents**,
+which shows the full before/after text. Each target holds one waiting proposal. A new
+proposal for the same target replaces the waiting one, and the response says so (with the
+saved date and reason of the one it replaced); proposals for different targets never
+affect each other. There is no MCP tool that applies a proposal.
+
+Every response carries `tell_the_user`, a sentence for the agent to pass on, for example:
+"Tell the user: I proposed a change to the implementer agent template for Storefront. Review
+it in Tools > Agents and press Apply or Reject." When the proposal replaced a waiting one,
+the sentence says so. Any member of the account may apply an agent template
+proposal; orchestrator additions proposals need the admin role, the same as their editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| target_kind | str | Yes | `agent_template` or `orchestrator_additions`. |
+| proposed_text | str | Yes | The full new text, not a diff. Agent templates: the role instructions, at most 50 KB. Additions: at most about 150 KB. |
+| reason | str | Yes | One line saying why. At most 500 characters. |
+| template_id_or_name | str | For `agent_template` | The template's id or name. A name shared by several templates is refused; pass the id or `product_id`. Templates managed by the system cannot be targeted. |
+| product_id | str | No | For `agent_template`, narrows the lookup to that product. For `orchestrator_additions`, required. Must be a product of your account. |
+| rung | str | For `orchestrator_additions` | `product` (one product's additions). Additions are set per product; there is no account-wide level. Not allowed for `agent_template`. |
+
+**Returns:** `{proposal_id, replaced: {saved_at, reason} | null, tell_the_user}`.
+
+---
+
 ## Tool Count Summary
 
 | Category | Scope mix | Tools |
 |----------|-----------|-------|
 | Discovery & Health | 2 read | health_check, get_giljo_guide |
 | Project Management | 2 write · 2 read · 1 agent | create_project, update_project, list_projects, update_project_mission, diagnose_project_state |
-| Project Lifecycle | 7 agent | stage_project, get_staging_instructions, get_implementation_prompt, launch_implementation, link_projects, unlink_projects, write_project_closeout |
-| Tasks | 2 write · 1 read | create_task, update_task, list_tasks |
+| Project Lifecycle | 8 agent | stage_project, unstage_project, get_staging_instructions, get_implementation_prompt, launch_implementation, link_projects, unlink_projects, write_project_closeout |
+| Tasks | 3 write · 1 read | create_task, update_task, promote_task_to_project, list_tasks |
 | Roadmap | 1 write · 1 read | save_roadmap, get_roadmap |
 | Agent Jobs & Lifecycle | 12 agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, finalize_job, resume_or_dismiss_job, set_agent_status, get_agent_result, get_workflow_status, request_approval, decide_approval |
 | Agent Message Hub | 5 agent · 4 read | create_thread, join_thread, post_to_thread, set_next_actor, update_thread, get_my_turn, get_participant_liveness, list_threads, get_thread_history |
 | Context & Memory | 2 read · 1 agent | get_context, search_memory, write_memory_entry |
 | Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_document, update_product_context, apply_context_tuning |
-| Setup | 1 write | giljo_setup |
-| **Total** | **13 read · 10 write · 26 agent** | **49** |
+| Setup & Templates | 2 write | giljo_setup, propose_template_change |
+| **Total** | **13 read · 12 write · 27 agent** | **52** |

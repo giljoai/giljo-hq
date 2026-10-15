@@ -16,6 +16,7 @@ PUBLIC_TOOL_METHODS = frozenset(
         "update_project_mission",
         "diagnose_project_state",
         "stage_project",
+        "unstage_project",
         "implement_project",
         "launch_implementation",
         "start_chain_run",
@@ -34,6 +35,7 @@ PUBLIC_TOOL_METHODS = frozenset(
         "create_vision_document",
         "bootstrap_setup",
         "apply_context_tuning",
+        "propose_template_change",
     }
 )
 

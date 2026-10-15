@@ -14,7 +14,9 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import BaseGiljoError, ResourceNotFoundError
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
+from giljo_mcp.schemas.service_responses import AgentStatusChangeEvent
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.closeout_ws_broadcast import build_agent_status_change_events
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.identity import validate_agent_display_name
 
@@ -106,3 +108,14 @@ class AgentJobManager:
         except Exception as e:
             self._logger.exception("Failed to complete job")
             raise BaseGiljoError(message=str(e), context={"operation": "complete_job"}) from e
+
+    async def decommission_job(self, job_id: str, tenant_key: str) -> list[AgentStatusChangeEvent]:
+        repo = AgentJobRepository(None)
+        async with self._get_session(tenant_key) as session:
+            in_flight = await repo.find_in_flight_executions(session, tenant_key, job_id)
+            if not in_flight:
+                return []
+            events = build_agent_status_change_events(in_flight, "decommissioned")
+            await repo.decommission_job_with_executions(session, tenant_key, job_id, in_flight)
+        self._logger.info("Decommissioned job %s (%d execution(s))", job_id, len(events))
+        return events

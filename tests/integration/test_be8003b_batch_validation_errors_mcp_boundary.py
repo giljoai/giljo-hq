@@ -115,7 +115,7 @@ async def test_mcp_boundary_surfaces_all_failures_for_combined_violation(autospe
             },
         )
 
-    assert result.is_error is True
+    assert not result.is_error, "BE-9738: a cap rejection is Tier-2 VALIDATION_ERROR content, not isError"
     text = _error_text(result)
     assert "decisions_made" in text
     assert "tags" in text, f"batched second violation missing from MCP-boundary error text: {text!r}"
@@ -148,7 +148,7 @@ async def test_mcp_boundary_surfaces_full_vocab_on_first_tag_failure(autospec_mc
             },
         )
 
-    assert result.is_error is True
+    assert not result.is_error, "BE-9738: a cap rejection is Tier-2 VALIDATION_ERROR content, not isError"
     text = _error_text(result)
     missing = [tag for tag in CONTROLLED_TAG_VOCABULARY if tag not in text]
     assert not missing, f"allowed vocabulary missing from first-failure MCP-boundary text: {missing}"

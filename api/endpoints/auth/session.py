@@ -330,9 +330,23 @@ async def refresh_token(
 
     jti = payload.get("jti")
     if jti and tenant_key:
-        from giljo_mcp.services.oauth_revocation_service import is_access_token_jti_revoked
+        from giljo_mcp.services.oauth_revocation_service import (
+            SESSION_DISPLACED_ERROR_CODE,
+            TOKEN_TYPE_ACCESS_DISPLACED,
+            get_access_token_revocation_type,
+            is_access_token_jti_revoked,
+        )
 
         if await is_access_token_jti_revoked(db, tenant_key=tenant_key, jti=jti):
+            revoked_as = await get_access_token_revocation_type(db, tenant_key=tenant_key, jti=jti)
+            if revoked_as == TOKEN_TYPE_ACCESS_DISPLACED:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "error_code": SESSION_DISPLACED_ERROR_CODE,
+                        "message": "Signed out because this account signed in on another browser.",
+                    },
+                )
             raise HTTPException(status_code=401, detail="Token has been revoked")
 
     with tenant_session_context(db, tenant_key):

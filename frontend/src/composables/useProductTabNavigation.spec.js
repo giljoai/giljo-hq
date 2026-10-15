@@ -14,7 +14,6 @@ vi.mock('vue-router', () => ({
 import { useProductTabNavigation } from './useProductTabNavigation'
 import { useProductStore } from '@/stores/products'
 import { useProjectStore } from '@/stores/projects'
-import { useProductActivityStore } from '@/stores/productActivityStore'
 
 let pinia
 let switchTabCalls
@@ -30,14 +29,12 @@ beforeEach(() => {
 function setup({ projects = [] } = {}) {
   const productStore = useProductStore()
   const projectStore = useProjectStore()
-  const activityStore = useProductActivityStore()
   projectStore.projects = projects
   productStore.switchTab = vi.fn(async (id) => {
     switchTabCalls.push(id)
     projectStore.projects = []
   })
-  activityStore.clearActivity = vi.fn()
-  return { productStore, projectStore, activityStore }
+  return { productStore, projectStore }
 }
 
 describe('useProductTabNavigation — a tab click leaves another product’s detail page', () => {
@@ -93,12 +90,12 @@ describe('useProductTabNavigation — a tab click leaves another product’s det
     expect(h.push).not.toHaveBeenCalled()
   })
 
-  it('still clears the activity badge for the tab being viewed', async () => {
-    const { activityStore } = setup()
+  it('still switches the store to the clicked tab', async () => {
+    setup()
 
     const { selectTab } = useProductTabNavigation()
     await selectTab('prod-b')
 
-    expect(activityStore.clearActivity).toHaveBeenCalledWith('prod-b')
+    expect(switchTabCalls).toEqual(['prod-b'])
   })
 })

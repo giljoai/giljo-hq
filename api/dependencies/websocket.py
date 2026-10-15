@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import Depends, Request
 
 from api.websocket import WebSocketManager
+from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class WebSocketDependency:
         if not self.manager:
             self.logger.warning(
                 "WebSocket manager not available for broadcast",
-                extra={"tenant_key": tenant_key, "event_type": event_type},
+                extra={"tenant_key": sanitize(tenant_key), "event_type": sanitize(event_type)},
             )
             return 0
 

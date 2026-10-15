@@ -2,14 +2,14 @@
   <span
     v-if="dates.created || dates.lastMessage"
     class="thread-dates"
-    :class="`thread-dates--${size}`"
+    :class="[`thread-dates--${size}`, { 'thread-dates--tinted': tinted, 'thread-dates--dotted': dotted }]"
     data-testid="thread-dates"
   >
-    <span v-if="dates.created" class="thread-dates__item" data-testid="thread-dates-created">
+    <span v-if="dates.created" class="thread-dates__item thread-dates__item--created" data-testid="thread-dates-created">
       <span class="thread-dates__label">{{ CREATED_LABEL }}</span>
       <time :datetime="thread.created_at">{{ dates.created }}</time>
     </span>
-    <span v-if="dates.lastMessage" class="thread-dates__item" data-testid="thread-dates-last-message">
+    <span v-if="dates.lastMessage" class="thread-dates__item thread-dates__item--last" data-testid="thread-dates-last-message">
       <span class="thread-dates__label">{{ LAST_MESSAGE_LABEL }}</span>
       <time :datetime="thread.last_message?.created_at || thread.last_activity_at">{{ dates.lastMessage }}</time>
     </span>
@@ -23,6 +23,8 @@ import { threadDates, CREATED_LABEL, LAST_MESSAGE_LABEL } from '@/components/hub
 const props = defineProps({
   thread: { type: Object, required: true },
   size: { type: String, default: 'sm', validator: (v) => ['sm', 'md'].includes(v) },
+  tinted: { type: Boolean, default: false },
+  dotted: { type: Boolean, default: false },
 })
 
 const dates = computed(() => threadDates(props.thread))
@@ -42,6 +44,16 @@ const dates = computed(() => threadDates(props.thread))
   &--md { font-size: 0.75rem; } // 12
 
   &__item { white-space: nowrap; }
+
+  &--dotted { gap: 4px 8px; }
+  &--dotted &__item + &__item::before {
+    content: '·';
+    margin-right: 8px;
+    color: var(--text-muted);
+  }
+
+  &--tinted &__item--created { color: var(--text-primary); }
+  &--tinted &__item--last { color: $color-brand-yellow; }
 
   &__label {
     margin-right: 5px;

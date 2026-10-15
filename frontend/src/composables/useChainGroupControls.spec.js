@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   unstageChain: vi.fn(),
   chainImplementation: vi.fn(),
   chainMemberFallback: vi.fn(),
+  getDefault: vi.fn(),
   copy: vi.fn(),
   toast: vi.fn(),
 }))
@@ -18,6 +19,7 @@ vi.mock('@/services/api', () => {
       chainImplementation: (...a) => h.chainImplementation(...a),
       chainMemberFallback: (...a) => h.chainMemberFallback(...a),
     },
+    settings: { getExecutionModeDefault: (...a) => h.getDefault(...a) },
   }
   return { default: api, api }
 })
@@ -30,6 +32,7 @@ vi.mock('@/composables/useChainLifecycle', () => ({
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copy: h.copy }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: h.toast }) }))
 
+import { flushPromises } from '@vue/test-utils'
 import { useChainGroupControls } from './useChainGroupControls'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 
@@ -55,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.launchChainHead.mockResolvedValue(true)
   h.copy.mockResolvedValue(true)
+  h.getDefault.mockResolvedValue({ data: { execution_mode_default: 'ask' } })
 })
 
 describe('Implement', () => {
@@ -70,11 +74,27 @@ describe('Implement', () => {
     expect(h.launchChainHead).toHaveBeenCalledWith('only')
   })
 
-  it('reports a refused start without throwing', async () => {
+  it('reports a refused start without throwing, and copies nothing', async () => {
     h.launchChainHead.mockResolvedValue(false)
     const c = useChainGroupControls({ chainCtx: ctxFor() })
     await expect(c.handleChainImplement()).resolves.toBe(false)
     expect(c.launching.value).toBe(false)
+    expect(h.chainImplementation).not.toHaveBeenCalled()
+    expect(h.copy).not.toHaveBeenCalled()
+  })
+
+  it.each(['subagent', 'multi_terminal'])('%s: opens the head gate, then copies the chain prompt', async (mode) => {
+    h.chainImplementation.mockResolvedValue({ data: { prompt: 'CONDUCTOR PROMPT' } })
+    const c = useChainGroupControls({ chainCtx: ctxFor({ execution_mode: mode }) })
+    await expect(c.handleChainImplement()).resolves.toBe(true)
+    expect(h.launchChainHead).toHaveBeenCalledWith('head')
+    expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
+    expect(h.launchChainHead.mock.invocationCallOrder[0]).toBeLessThan(h.chainImplementation.mock.invocationCallOrder[0])
+    expect(h.copy).toHaveBeenCalledWith('CONDUCTOR PROMPT')
+    expect(h.toast).toHaveBeenCalledWith({
+      message: 'Chain prompt copied. Paste it into your conductor session.',
+      type: 'success',
+    })
   })
 })
 
@@ -119,21 +139,59 @@ describe('Stage / mode', () => {
     expect(patch).toHaveBeenCalledWith('run-1', { execution_mode: 'subagent' })
   })
 
-  it('offers the master prompt only for a staged multi-terminal chain that is not running', () => {
-    expect(useChainGroupControls({ chainCtx: ctxFor() }).showCopyMasterPrompt.value).toBe(true)
-    expect(
-      useChainGroupControls({ chainCtx: ctxFor({ execution_mode: 'subagent' }) }).showCopyMasterPrompt.value,
-    ).toBe(false)
-    expect(
-      useChainGroupControls({ chainCtx: ctxFor({ locked: false }, { locked: false }) }).showCopyMasterPrompt.value,
-    ).toBe(false)
+  it('FE-9749: an unstaged chain with no mode needs one; a picked mode clears it', () => {
+    const none = useChainGroupControls({ chainCtx: ctxFor({ locked: false, execution_mode: null }, { locked: false }) })
+    expect(none.chainStageNeedsMode.value).toBe(true)
+    expect(none.chainMode.value).toBeNull()
+    const picked = useChainGroupControls({ chainCtx: ctxFor({ locked: false }, { locked: false }) })
+    expect(picked.chainStageNeedsMode.value).toBe(false)
+    expect(picked.chainMode.value).toBe('multi_terminal')
+  })
+
+  it('FE-9749: a real-mode account default is preselected; Stage writes it to the run first', async () => {
+    h.getDefault.mockResolvedValue({ data: { execution_mode_default: 'subagent' } })
+    const patch = vi.spyOn(store, 'patchRun').mockResolvedValue(null)
+    const ctx = ctxFor({ locked: false, execution_mode: null }, { locked: false })
+    const c = useChainGroupControls({ chainCtx: ctx })
+    await flushPromises()
+    expect(c.chainMode.value).toBe('subagent')
+    expect(c.chainStageNeedsMode.value).toBe(false)
+    expect(patch).not.toHaveBeenCalled()
+
+    await c.handleChainStage()
+    expect(patch).toHaveBeenCalledWith('run-1', { execution_mode: 'subagent' })
+    expect(patch.mock.invocationCallOrder[0]).toBeLessThan(h.stageChain.mock.invocationCallOrder[0])
+  })
+
+  it('FE-9749: "Ask every time" preselects nothing', async () => {
+    const c = useChainGroupControls({ chainCtx: ctxFor({ locked: false, execution_mode: null }, { locked: false }) })
+    await flushPromises()
+    expect(c.chainMode.value).toBeNull()
+  })
+})
+
+describe('chainPhase (FE-9749)', () => {
+  const tabs = [{ projectId: 'head' }, { projectId: 'tail' }]
+  it('ready before staging, staged once locked', () => {
+    expect(useChainGroupControls({ chainCtx: ctxFor({ locked: false }, { locked: false }) }).chainPhase.value).toBe('ready')
+    expect(useChainGroupControls({ chainCtx: ctxFor() }).chainPhase.value).toBe('staged')
+  })
+
+  it('running with no agent past waiting is pickup; one agent working makes it running', () => {
+    store._testSeedRuns([{ id: 'run-1', resolved_order: ['head', 'tail'], project_ids: ['head', 'tail'], status: 'running' }])
+    const agents = { head: [{ status: 'waiting' }] }
+    const ctx = ctxFor({ status: 'running' }, { tabs })
+    const c = useChainGroupControls({ chainCtx: ctx, agentsByProject: () => agents })
+    expect(c.chainPhase.value).toBe('pickup')
+    agents.head = [{ status: 'working' }]
+    expect(useChainGroupControls({ chainCtx: ctx, agentsByProject: () => agents }).chainPhase.value).toBe('running')
   })
 })
 
 describe('prompt copies', () => {
-  it('copies the conductor prompt verbatim', async () => {
+  it('copies the conductor chain prompt verbatim', async () => {
     h.chainImplementation.mockResolvedValue({ data: { prompt: 'MASTER' } })
-    await useChainGroupControls({ chainCtx: ctxFor() }).copyMasterPrompt()
+    await useChainGroupControls({ chainCtx: ctxFor() }).copyChainPrompt()
     expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
     expect(h.copy).toHaveBeenCalledWith('MASTER')
   })

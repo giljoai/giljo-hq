@@ -43,9 +43,9 @@
           <v-radio value="all" data-test="popout-scope-all">
             <template #label>
               <span>
-                Everything a banner shows
+                Everything
                 <span class="text-body-small text-muted-a11y">
-                  — anything asking for you, plus projects starting and finishing
+                  (all of the below, plus an orchestrator that has gone silent)
                 </span>
               </span>
             </template>
@@ -55,7 +55,7 @@
               <span>
                 Only things asking for you
                 <span class="text-body-small text-muted-a11y">
-                  — decisions, your turn, mentions
+                  (decisions, your turn, mentions, blocked agents)
                 </span>
               </span>
             </template>

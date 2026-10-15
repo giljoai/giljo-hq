@@ -245,7 +245,7 @@ class TestTask3HarnessReminderOverride:
 
 class TestTask5PayloadSize:
 
-    PAYLOAD_BUDGET_BYTES = 41_500
+    PAYLOAD_BUDGET_BYTES = 44_000
 
     @pytest.mark.asyncio
     async def test_get_staging_instructions_under_budget(

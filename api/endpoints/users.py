@@ -64,6 +64,11 @@ class UserUpdate(BaseModel):
         None, min_length=4, max_length=4, pattern="^[0-9]{4}$", description="4-digit recovery PIN"
     )
 
+    @field_validator("last_name")
+    @classmethod
+    def blank_last_name_is_none(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
+
 
 class UserResponse(BaseModel):
     """Response model for user data (password excluded)"""
@@ -444,7 +449,7 @@ async def update_user(
         updates["email"] = user_data.email
     if user_data.first_name is not None:
         updates["first_name"] = user_data.first_name
-    if user_data.last_name is not None:
+    if "last_name" in user_data.model_fields_set:
         updates["last_name"] = user_data.last_name
     if user_data.is_active is not None:
         updates["is_active"] = user_data.is_active

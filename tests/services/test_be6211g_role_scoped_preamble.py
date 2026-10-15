@@ -80,6 +80,7 @@ def test_suborch_seams_live_in_ch_sub_orchestrator() -> None:
     assert "hub_thread_id" in chapter, "the sub-orch must be told how to RESOLVE the Hub, not merely to load a tool"
     assert "list_threads(query=" not in chapter, "the retired substring-discovery path must not be re-introduced"
     low = chapter.lower()
-    assert "escalat" in low, "sub-orch must carry the blocker-escalation seam (route to conductor)"
-    assert "not the user" in low, "escalation must redirect AWAY from the user to the conductor"
+    assert "escalat" in low, "sub-orch must carry the blocker-escalation seam"
+    assert "not the user" not in low
+    assert "whoever drives the chain answers" in " ".join(low.split())
     assert "write_project_closeout" in chapter

@@ -40,7 +40,7 @@ Use this if you prefer to clone the repository and run the installer yourself.
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Python | 3.10 or higher | 3.12+ recommended |
+| Python | 3.12 or higher | The installer refuses older versions |
 | PostgreSQL | 16 minimum, 18 recommended | Must be accessible via PATH or common location |
 | Node.js | 22 LTS | Required for the frontend dashboard; optional for backend-only use |
 | npm | Bundled with Node.js | Used to build the frontend |
@@ -158,8 +158,9 @@ mode for the frontend build.
 ### 13. Add HTTPS (optional, after install)
 
 The installer does not set up certificates and the server does not terminate TLS. To
-encrypt traffic, or to sign in to AI tools with OAuth, put a reverse proxy such as
-Caddy in front of the server. The User Guide section "HTTPS and Browser
+encrypt traffic, or to let AI tools you add yourself sign in with OAuth, put a reverse
+proxy such as Caddy in front of the server. The Connect tab still gives you an API key
+command for each tool; that works over HTTP or HTTPS. The User Guide section "HTTPS and Browser
 Configuration" has a working Caddy example and notes for Cloudflare Tunnel and
 Tailscale.
 
@@ -242,15 +243,16 @@ For manual setup, go to Tools > Connect in the dashboard.
 
 ### Step 4: Launch
 
-The final step shows three action cards:
+The final step shows four next-step cards:
 
-- **Define Your Product:** Create a product to organize projects, tasks, and agent
-  configurations.
-- **Start a Project:** Create your first project to begin orchestrating AI agents.
-- **Track Your Work:** Add tasks and ideas, or look up projects and tasks, using `/giljo`.
+- **Create your first product:** Define what you're building.
+- **Open the dashboard:** See products, projects, and jobs.
+- **Read the guide:** Learn how GiljoAI works.
+- **Drive from your terminal:** Ask your connected agent to stage and run a project,
+  no dashboard needed.
 
-Click any card to navigate to the corresponding section, or click "Go to Home" to
-go to the dashboard home page.
+The cards are pointers only. Click **Finish** (or **Done** when you reopen the wizard
+later) to close it.
 
 ---
 
@@ -260,8 +262,8 @@ go to the dashboard home page.
 tool. It downloads the slash commands as a ZIP, installs them in the correct location
 for your CLI tool, and writes the Giljo HQ marker block into your project file.
 
-The tool auto-detects the platform from the MCP client name. You can also pass a
-platform explicitly:
+Pass the platform you are running in. It accepts `claude_code`, `codex_cli`,
+`opencode`, or `generic`, and defaults to `claude_code` when omitted:
 
 ```
 giljo_setup(platform="claude_code")
@@ -283,14 +285,8 @@ health_check()
 
 A successful response returns status and server details.
 
-To see what project types are configured for your tenant, call:
-
-```
-discovery(category="project_types")
-```
-
-Both tools require a valid API key. If either call fails with an authentication
-error, re-run the connection step in the setup wizard to generate a new key.
+If the call fails with an authentication error, re-run the connection step in the
+setup wizard to generate a new key.
 
 ---
 

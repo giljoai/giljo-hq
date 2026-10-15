@@ -60,7 +60,12 @@
         </button>
       </div>
       <pre class="command-code config-code">{{ mcpEndpoint }}</pre>
-      <p class="connect-subline">
+      <p v-if="isCe" class="connect-subline">
+        Connecting a web app or IDE instead? Paste this URL into its MCP connector settings
+        (claude.ai, ChatGPT, and most IDEs), then sign in when the browser opens. Browser
+        sign-in needs your server on HTTPS; over plain HTTP, use the key-based config below.
+      </p>
+      <p v-else class="connect-subline">
         Connecting a web app or IDE instead? Paste this URL into its MCP connector settings
         (claude.ai, ChatGPT, and most IDEs), then sign in when the browser opens. No key needed.
       </p>

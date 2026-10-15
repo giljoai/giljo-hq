@@ -313,7 +313,7 @@ def build_complete_job_footer(
         return (
             "Done: orchestrator closeout recorded (closeout) — your orchestrator chip flips to "
             "complete and the project's CloseoutModal readiness advances. Next: call "
-            "write_project_closeout (orchestrators coordinate; they do not commit code)."
+            "write_project_closeout (pass the commits you or your workers made)."
         )
     return (
         "Done: deliverable recorded (deliverable) — your agent row flips to complete (green) at "

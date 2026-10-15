@@ -193,3 +193,35 @@ class TestRunWithoutSetupOnly:
         assert "configs_generated" in result["steps"]
         assert "database_created" in result["steps"]
         assert "frontend_dependencies_installed" in result["steps"]
+
+
+class TestFrontendInstallOmitsDevDependencies:
+
+    @staticmethod
+    def _installer(tmp_path, dev):
+        settings = {"install_dir": str(tmp_path), "headless": True, "pg_password": "test", "dev": dev}
+        with patch("install.get_platform_handler", return_value=MagicMock()):
+            inst = UnifiedInstaller(settings=settings)
+        inst.platform.run_npm_command = MagicMock(return_value={"success": True, "stdout": "", "stderr": ""})
+        inst._npm_preflight_checks = MagicMock(return_value={"healthy": True, "issues": [], "warnings": []})
+        inst._verify_npm_dependencies = MagicMock(return_value=True)
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        (frontend_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+        return inst, frontend_dir
+
+    @staticmethod
+    def _npm_commands(inst):
+        return [call.kwargs["cmd"] for call in inst.platform.run_npm_command.call_args_list]
+
+    def test_default_install_omits_dev_dependencies(self, tmp_path):
+        inst, frontend_dir = self._installer(tmp_path, dev=False)
+        assert inst._install_npm_dependencies_with_retry(frontend_dir) is True
+        assert ["npm", "ci", "--omit=dev"] in self._npm_commands(inst)
+
+    def test_dev_install_keeps_the_full_toolchain(self, tmp_path):
+        inst, frontend_dir = self._installer(tmp_path, dev=True)
+        assert inst._install_npm_dependencies_with_retry(frontend_dir) is True
+        commands = self._npm_commands(inst)
+        assert ["npm", "ci"] in commands
+        assert not any("--omit=dev" in cmd for cmd in commands)

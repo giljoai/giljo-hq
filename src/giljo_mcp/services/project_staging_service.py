@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
+    GateRefusalError,
     ImplementationNotReadyError,
     ProjectStateError,
     ResourceNotFoundError,
@@ -209,6 +210,29 @@ class ProjectStagingService:
                 "message": "Project unstaged successfully",
                 "project_id": project.id,
             }
+
+    async def undo_staging(self, project_id: str) -> dict:
+        tenant_key = self.tenant_manager.get_current_tenant()
+        async with self._get_session() as session:
+            project = await self._project_repo.get_by_id(session, tenant_key, project_id)
+            if not project:
+                raise ResourceNotFoundError(message="Project not found", context={"project_id": project_id})
+            staging_status, launched_at = project.staging_status, project.implementation_launched_at
+        context = {"project_id": project_id}
+        if launched_at is not None:
+            raise GateRefusalError(
+                "Implementation has already started, so staging can no longer be undone. "
+                "To abandon the project, call update_project with status='cancelled'.",
+                error_code="IMPLEMENTATION_ALREADY_STARTED",
+                context=context,
+            )
+        if staging_status is None:
+            raise GateRefusalError(
+                "This project is not staged, so there is nothing to undo. Call stage_project to start staging.",
+                error_code="NOTHING_TO_UNSTAGE",
+                context=context,
+            )
+        return await (self.unstage if staging_status == "staged" else self.restage)(project_id)
 
     async def mark_staged(
         self,

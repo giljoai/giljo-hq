@@ -320,8 +320,9 @@ class CommThreadService(
                 recipient_ids=recipient_ids,
                 loop_interval_minutes=interval_to_persist,
             )
-            if set_status is not None:
-                await self._repo.set_status(session, tk, thread_id, set_status)
+            thread_reopened = set_status is None and thread.status == "resolved"
+            if set_status is not None or thread_reopened:
+                await self._repo.set_status(session, tk, thread_id, set_status or "active")
             notice = await self.collect_handover_notice(
                 session, tk, thread, pass_baton_to if baton_passed else None, from_display_name
             )
@@ -338,6 +339,7 @@ class CommThreadService(
                 "loop_interval_minutes": interval_to_persist,
                 "baton_passed": baton_passed,
                 "baton_cleared": baton_cleared,
+                "thread_reopened": thread_reopened,
                 "next_action_owner": thread.next_action_owner,
                 **self._post_advice_entry(
                     set_status, content=content, requires_action=requires_action, baton_passed=baton_passed

@@ -187,3 +187,74 @@ class TestSpawnWithoutPredecessorRegression:
 
         assert result.job_id is not None
         assert result.predecessor_job_id is None
+
+
+
+
+def _dependency_lines(mission: str) -> str:
+    section = mission.split("## YOUR DEPENDENCIES\n", 1)[1]
+    return section.split("\n\n", 1)[0]
+
+
+@pytest.mark.asyncio
+class TestMissionDependenciesFromJobLinks:
+
+    async def test_parallel_phase1_documenter_depends_on_nothing(self, service, project, tenant_key):
+        await service.spawn_job(
+            agent_display_name="implementer",
+            agent_name="specialist-1",
+            mission="Implement the feature",
+            project_id=project.id,
+            tenant_key=tenant_key,
+            phase=1,
+        )
+        documenter = await service.spawn_job(
+            agent_display_name="documenter",
+            agent_name="specialist-1",
+            mission="Document the feature",
+            project_id=project.id,
+            tenant_key=tenant_key,
+            phase=1,
+        )
+
+        response = await service.get_agent_mission(documenter.job_id, tenant_key)
+
+        assert _dependency_lines(response.mission) == (
+            "- You depend on: None (you can start immediately)\n- Others depend on you: None"
+        )
+
+    async def test_predecessor_link_is_stored_and_named_in_both_missions(
+        self, db_session, service, project, tenant_key
+    ):
+        analyzer = await service.spawn_job(
+            agent_display_name="analyzer",
+            agent_name="specialist-1",
+            mission="Analyze the module",
+            project_id=project.id,
+            tenant_key=tenant_key,
+            phase=1,
+        )
+        implementer = await service.spawn_job(
+            agent_display_name="implementer",
+            agent_name="tdd-implementor",
+            mission="Implement from the analysis",
+            project_id=project.id,
+            tenant_key=tenant_key,
+            phase=2,
+            predecessor_job_id=analyzer.job_id,
+        )
+
+        stored = (await db_session.execute(select(AgentJob).where(AgentJob.job_id == implementer.job_id))).scalar_one()
+        assert stored.job_metadata["predecessor_job_id"] == analyzer.job_id
+
+        successor_mission = (await service.get_agent_mission(implementer.job_id, tenant_key)).mission
+        predecessor_mission = (await service.get_agent_mission(analyzer.job_id, tenant_key)).mission
+
+        assert _dependency_lines(successor_mission) == (
+            f"- You depend on: analyzer ({analyzer.agent_id}) (wait for their outputs if needed)\n"
+            "- Others depend on you: None"
+        )
+        assert _dependency_lines(predecessor_mission) == (
+            "- You depend on: None (you can start immediately)\n"
+            f"- Others depend on you: implementer ({implementer.agent_id}) (notify them when your work is ready)"
+        )

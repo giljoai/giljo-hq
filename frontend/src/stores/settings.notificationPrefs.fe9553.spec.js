@@ -20,7 +20,7 @@ import { useSettingsStore } from './settings'
 const RULED = {
   bannerLifecycleEnabled: true,
   bannerAdvisoriesInFold: true,
-  popoutScope: 'all',
+  popoutScope: 'actionable',
 }
 
 function serverPayload(overrides = {}) {
@@ -73,7 +73,7 @@ describe('notification preferences — reads (FE-9553)', () => {
 
     expect(store.bannerLifecycleEnabled).toBe(true)
     expect(store.bannerAdvisoriesInFold).toBe(true)
-    expect(store.popoutScope).toBe('all')
+    expect(store.popoutScope).toBe('actionable')
   })
 
   it('tolerates a legacy row that carries none of the three keys', async () => {
@@ -91,7 +91,7 @@ describe('notification preferences — reads (FE-9553)', () => {
 
     expect(store.bannerLifecycleEnabled).toBe(true)
     expect(store.bannerAdvisoriesInFold).toBe(true)
-    expect(store.popoutScope).toBe('all')
+    expect(store.popoutScope).toBe('actionable')
   })
 
   it('falls back for an UNRECOGNISED popout scope rather than storing it', async () => {
@@ -100,7 +100,7 @@ describe('notification preferences — reads (FE-9553)', () => {
 
     await store.loadNotificationPrefs()
 
-    expect(store.popoutScope).toBe('all')
+    expect(store.popoutScope).toBe('actionable')
   })
 })
 

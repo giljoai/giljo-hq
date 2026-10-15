@@ -11,16 +11,13 @@ import { computed } from 'vue'
 import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { agentStatusDot, agentPillTitle } from '@/composables/useAgentStatusDot'
+import { harnessLabel } from '@/components/hub/rosterState'
 
 const props = defineProps({
   participant: { type: Object, required: true },
 })
 
-const harness = computed(() => {
-  const h = props.participant.harness
-  if (!h || h === 'generic') return 'Generic Harness'
-  return String(h).split(' · ')[0]
-})
+const harness = computed(() => harnessLabel(props.participant.harness))
 
 const initials = computed(() => {
   const name = props.participant.display_name || props.participant.participant_id || '?'

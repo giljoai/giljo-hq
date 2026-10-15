@@ -375,7 +375,11 @@ def _solo_runtime_render(mode: str, preset_name: str | None) -> str:
         project_phase=None,
     )
     project = SimpleNamespace(
-        execution_mode=mode, implementation_launched_at=1, auto_checkin_enabled=False, auto_checkin_interval=10
+        execution_mode=mode,
+        implementation_launched_at=1,
+        auto_checkin_enabled=False,
+        auto_checkin_interval=10,
+        mission="",
     )
     return assemble_mission_context(
         mock.Mock(),
