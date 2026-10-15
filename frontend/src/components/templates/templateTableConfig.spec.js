@@ -8,6 +8,8 @@ import {
   templateOwningProductName,
   sortByProductName,
   templateTableHeaders,
+  templateBuiltinUpdated,
+  BUILTIN_UPDATED_HOVER,
   TEMPLATE_TABLE_HEADERS,
   TEMPLATE_TABLE_DEFAULT_SORT,
 } from './templateTableConfig'
@@ -202,5 +204,30 @@ describe('the product column (show all products)', () => {
     const shown = templateTableHeaders({ showAllProducts: true, productsById })
     expect(shown.map((h) => h.key)).toContain('product_id')
     expect(shown[1].key).toBe('product_id')
+  })
+})
+
+
+describe('templateBuiltinUpdated (BE-9785)', () => {
+  const stale = { differs_from_builtin: true, updated_at: null, _system: false }
+  const edited = { differs_from_builtin: true, updated_at: '2026-08-05T10:00:00Z', _system: false }
+  const current = { differs_from_builtin: false, updated_at: null, _system: false }
+  const custom = { differs_from_builtin: null, updated_at: null, _system: false }
+
+  it('marks only a never-edited factory copy whose built-in differs', () => {
+    expect(templateBuiltinUpdated(stale)).toBe(true)
+    expect(templateBuiltinUpdated(edited)).toBe(false)
+    expect(templateBuiltinUpdated(current)).toBe(false)
+    expect(templateBuiltinUpdated(custom)).toBe(false)
+    expect(templateBuiltinUpdated({ ...stale, _system: true })).toBe(false)
+    expect(templateBuiltinUpdated(undefined)).toBe(false)
+  })
+
+  it('a row with no differs_from_builtin field (older server) is never marked', () => {
+    expect(templateBuiltinUpdated({ updated_at: null, _system: false })).toBe(false)
+  })
+
+  it('the hover note is the one sentence the rule can stand behind', () => {
+    expect(BUILTIN_UPDATED_HOVER).toBe('Never edited; the built-in has changed')
   })
 })

@@ -8,13 +8,14 @@ export const templatesApi = {
   update: (id, data) => apiClient.put(`/api/v1/templates/${id}`, data),
   delete: (id) => apiClient.delete(`/api/v1/templates/${id}`),
   history: (id, limit = 10) =>
-    apiClient.get(`/api/v1/templates/${id}/history/`, { params: { limit } }),
+    apiClient.get(`/api/v1/templates/${id}/history`, { params: { limit } }),
   restore: (templateId, archiveId, reason = null) => {
     const payload = reason ? { reason } : {}
-    return apiClient.post(`/api/v1/templates/${templateId}/restore/${archiveId}/`, payload)
+    return apiClient.post(`/api/v1/templates/${templateId}/restore/${archiveId}`, payload)
   },
   preview: (id, data = {}) => apiClient.post(`/api/v1/templates/${id}/preview/`, data),
-  reset: (id) => apiClient.post(`/api/v1/templates/${id}/reset/`),
+  reset: (id) => apiClient.post(`/api/v1/templates/${id}/reset`),
+  factoryDefault: (id) => apiClient.get(`/api/v1/templates/${id}/factory-default`),
   resetAll: (productId) =>
     apiClient.post('/api/v1/templates/reset-all', null, { params: { product_id: productId } }),
   activeCount: (productId) =>
@@ -30,4 +31,11 @@ export const assignmentsApi = {
     apiClient.put(`/api/v1/products/${productId}/agent-assignments/${templateId}`, {
       is_active: isActive,
     }),
+}
+
+export const templateProposalsApi = {
+  list: () => apiClient.get('/api/v1/template-proposals'),
+  count: () => apiClient.get('/api/v1/template-proposals/count'),
+  apply: (id) => apiClient.post(`/api/v1/template-proposals/${id}/apply`),
+  reject: (id) => apiClient.post(`/api/v1/template-proposals/${id}/reject`),
 }

@@ -110,6 +110,18 @@ class CodedRefusalError(ValidationError):
         return payload if self.products is None else {**payload, "products": self.products}
 
 
+class GateRefusalError(CodedRefusalError):
+
+    def __init__(self, message: str, *, error_code: str, context: dict | None = None):
+        super().__init__(message, error_code=error_code, context=context)
+        self.code = error_code
+
+    def as_refusal(self) -> dict[str, object]:
+        refusal = super().as_refusal()
+        fields = _scrub(self.context).items()
+        return {**refusal, **{k: v for k, v in fields if k not in refusal and k != "tenant_key"}}
+
+
 class CrewNamingExhaustedError(CodedRefusalError):
 
     code = "CREW_NAMING_EXHAUSTED"

@@ -14,18 +14,20 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 
+from giljo_mcp.models import Configuration
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
-from giljo_mcp.system_prompts.service import SystemPromptService
+from giljo_mcp.system_prompts.service import DEFAULT_ORCHESTRATOR_CONFIG_KEY, SystemPromptService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
 
-TENANT_TEXT = "TENANT-WIDE orchestrator seed for FE-9408."
+LEFTOVER_TENANT_TEXT = "ACCOUNT-WIDE row left behind by an old version, FE-9408."
+OTHER_PRODUCT_TEXT = "ANOTHER PRODUCT's orchestrator seed for FE-9408."
 PRODUCT_TEXT = "PRODUCT-SCOPED orchestrator seed for FE-9408."
 
 
@@ -149,6 +151,18 @@ async def _seed_orchestrator_job(db_session, tenant_key: str, project_id: str) -
     return job.job_id
 
 
+async def _store_leftover_account_wide_row(db_session, tenant_key: str) -> None:
+    db_session.add(
+        Configuration(
+            tenant_key=tenant_key,
+            key=DEFAULT_ORCHESTRATOR_CONFIG_KEY,
+            value={"content": LEFTOVER_TENANT_TEXT},
+            category="system",
+        )
+    )
+    await db_session.commit()
+
+
 async def _save_override(db_manager, db_session, tenant_key: str, content: str, product_id: str | None) -> str:
     record = await SystemPromptService(db_manager=db_manager).update_orchestrator_prompt(
         tenant_key=tenant_key,
@@ -178,19 +192,17 @@ async def _staging_payload(client, job_id: str) -> dict:
 
 
 
-async def test_mission_tenant_scope_names_the_tenant_wide_override(mcp_client):
-    client, tenant_key, db_session, db_manager = mcp_client
+async def test_mission_ignores_a_leftover_account_wide_row(mcp_client):
+    client, tenant_key, db_session, _db_manager = mcp_client
     product_id, _ = await _seed_org_product(db_session, tenant_key)
     project_id = await _seed_project(db_session, tenant_key, product_id, implementation_launched=True)
     job_id = await _seed_orchestrator_job(db_session, tenant_key, project_id)
-    saved = await _save_override(db_manager, db_session, tenant_key, TENANT_TEXT, product_id=None)
+    await _store_leftover_account_wide_row(db_session, tenant_key)
 
     payload = await _mission_payload(client, job_id)
 
-    expected = f"identity source: tenant-wide override, saved {saved}"
-    assert payload["agent_identity"] is not None
-    assert expected in payload["agent_identity"]
-    assert payload["identity_source"] == expected
+    assert LEFTOVER_TENANT_TEXT not in payload["agent_identity"]
+    assert payload["identity_source"] == "identity source: built-in default"
 
 
 async def test_mission_product_scope_names_the_product(mcp_client):
@@ -198,7 +210,7 @@ async def test_mission_product_scope_names_the_product(mcp_client):
     product_id, product_name = await _seed_org_product(db_session, tenant_key)
     project_id = await _seed_project(db_session, tenant_key, product_id, implementation_launched=True)
     job_id = await _seed_orchestrator_job(db_session, tenant_key, project_id)
-    await _save_override(db_manager, db_session, tenant_key, TENANT_TEXT, product_id=None)
+    await _save_override(db_manager, db_session, tenant_key, OTHER_PRODUCT_TEXT, product_id=str(uuid.uuid4()))
     saved = await _save_override(db_manager, db_session, tenant_key, PRODUCT_TEXT, product_id=product_id)
 
     payload = await _mission_payload(client, job_id)
@@ -206,6 +218,7 @@ async def test_mission_product_scope_names_the_product(mcp_client):
     expected = f"identity source: product override ({product_name}), saved {saved}"
     assert expected in payload["agent_identity"]
     assert payload["identity_source"] == expected
+    assert OTHER_PRODUCT_TEXT not in payload["agent_identity"]
 
 
 async def test_mission_default_scope_says_built_in(mcp_client):
@@ -224,18 +237,17 @@ async def test_mission_default_scope_says_built_in(mcp_client):
 
 
 
-async def test_staging_tenant_scope_names_the_tenant_wide_override(mcp_client):
-    client, tenant_key, db_session, db_manager = mcp_client
+async def test_staging_ignores_a_leftover_account_wide_row(mcp_client):
+    client, tenant_key, db_session, _db_manager = mcp_client
     product_id, _ = await _seed_org_product(db_session, tenant_key)
     project_id = await _seed_project(db_session, tenant_key, product_id, implementation_launched=False)
     job_id = await _seed_orchestrator_job(db_session, tenant_key, project_id)
-    saved = await _save_override(db_manager, db_session, tenant_key, TENANT_TEXT, product_id=None)
+    await _store_leftover_account_wide_row(db_session, tenant_key)
 
     payload = await _staging_payload(client, job_id)
 
-    expected = f"identity source: tenant-wide override, saved {saved}"
-    assert expected in payload["orchestrator_identity"]
-    assert payload["identity"]["identity_source"] == expected
+    assert LEFTOVER_TENANT_TEXT not in payload["orchestrator_identity"]
+    assert payload["identity"]["identity_source"] == "identity source: built-in default"
 
 
 async def test_staging_product_scope_names_the_product(mcp_client):
@@ -243,7 +255,7 @@ async def test_staging_product_scope_names_the_product(mcp_client):
     product_id, product_name = await _seed_org_product(db_session, tenant_key)
     project_id = await _seed_project(db_session, tenant_key, product_id, implementation_launched=False)
     job_id = await _seed_orchestrator_job(db_session, tenant_key, project_id)
-    await _save_override(db_manager, db_session, tenant_key, TENANT_TEXT, product_id=None)
+    await _save_override(db_manager, db_session, tenant_key, OTHER_PRODUCT_TEXT, product_id=str(uuid.uuid4()))
     saved = await _save_override(db_manager, db_session, tenant_key, PRODUCT_TEXT, product_id=product_id)
 
     payload = await _staging_payload(client, job_id)

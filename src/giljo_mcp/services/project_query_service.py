@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.domain.project_status import is_review_pending
+from giljo_mcp.domain.project_status import ProjectStatus, is_review_pending
 from giljo_mcp.exceptions import BaseGiljoError, ValidationError
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import ActiveProjectDetail
@@ -125,6 +125,10 @@ class ProjectQueryService:
 
                 self._logger.info(f"Found {len(projects)} active project(s) for tenant {tenant_key}")
 
+                summaries = await self._repo.get_latest_closeout_summaries(
+                    session, tenant_key, [p.id for p in projects if p.status == ProjectStatus.COMPLETED.value]
+                )
+
                 details = []
                 for project in projects:
                     agent_count = await self._repo.count_agent_jobs(session, tenant_key, project.id)
@@ -150,6 +154,7 @@ class ProjectQueryService:
                             ),
                             reviewed_at=project.reviewed_at.isoformat() if project.reviewed_at else None,
                             review_pending=is_review_pending(project.status, project.reviewed_at),
+                            closeout_summary=summaries.get(project.id),
                             deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
                             agent_count=agent_count,
                             message_count=message_count,

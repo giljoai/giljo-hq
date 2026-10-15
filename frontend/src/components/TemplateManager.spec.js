@@ -26,6 +26,9 @@ vi.mock('@/services/api', () => {
       history: vi.fn(() => Promise.resolve({ data: [] })),
       restore: vi.fn(() => Promise.resolve({ data: { success: true } })),
       reset: vi.fn(() => Promise.resolve({ data: { success: true } })),
+      factoryDefault: vi.fn(() =>
+        Promise.resolve({ data: { role: 'tester', version: '1.2.0', user_instructions: 'the new built-in' } })
+      ),
       resetAll: vi.fn(() => Promise.resolve({ data: { reset: [], skipped: [], failed: [] } })),
       importDefaults: vi.fn(() =>
         Promise.resolve({ data: { added: [], added_as_duplicate: [], skipped_identical: [] } })
@@ -194,6 +197,49 @@ describe('TemplateManager — header chip', () => {
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toContain('4')
     expect(chip.text()).toContain('16')
+  })
+
+  it('points the reserved-slot tooltip at the Orchestrator prompt view, not Admin Settings', () => {
+    const text = wrapper.text()
+    expect(text).not.toContain('Admin Settings')
+    expect(text).toContain('Orchestrator prompt view')
+  })
+})
+
+
+describe('TemplateManager — FE-9784 no dead agent_export_stale writes', () => {
+  it('toggling an agent does not write agent_export_stale to localStorage', async () => {
+    mockShowToast = vi.fn()
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+    api.templates.list.mockResolvedValue({
+      data: [makeTemplate({ id: 5, role: 'frontend' })],
+    })
+    api.assignments.list.mockResolvedValue({
+      data: { assignments: [{ template_id: 5, is_active: true }], count: 1 },
+    })
+    // global mock is the thing to inspect (a Storage.prototype spy sees nothing).
+    const setItem = window.localStorage.setItem
+    setItem.mockClear()
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+
+    const toggle = wrapper.find('[data-testid="template-toggle-frontend"]')
+    toggle.element.checked = false
+    await toggle.trigger('change')
+    await flushPromises()
+
+    expect(api.assignments.toggle).toHaveBeenCalledWith('prod-test', 5, false)
+    const staleWrites = setItem.mock.calls.filter(([key]) => key === 'agent_export_stale')
+    expect(staleWrites).toEqual([])
+  })
+
+  it('the component source carries no agent_export_stale write at all', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const source = readFileSync(resolve(__dirname, 'TemplateManager.vue'), 'utf8')
+    expect(source).not.toContain('agent_export_stale')
   })
 })
 
@@ -863,5 +909,78 @@ describe('TemplateManager — BE-9646: reset all agents to default', () => {
     const messages = mockShowToast.mock.calls.map((c) => c[0].message).join(' | ')
     expect(messages).toContain('reviewer-2')
     expect(messages).toContain('Reset 1 agent to default')
+  })
+})
+
+
+describe('TemplateManager — BE-9785: built-in updated marker', () => {
+  beforeEach(() => {
+    mockShowToast = vi.fn()
+  })
+
+  async function mountWithStaleRow() {
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    api.templates.list.mockResolvedValue({
+      data: [
+        makeTemplate({
+          id: 5,
+          name: 'tester-2',
+          role: 'tester',
+          can_reset: true,
+          differs_from_builtin: true,
+          updated_at: null,
+          user_instructions: 'the old copy',
+        }),
+      ],
+    })
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+    return { wrapper, api }
+  }
+
+  it('clicking the marker fetches the built-in and opens the diff view', async () => {
+    const { wrapper, api } = await mountWithStaleRow()
+
+    await wrapper.get('[data-testid="builtin-updated-5"]').trigger('click')
+    await flushPromises()
+
+    expect(api.templates.factoryDefault).toHaveBeenCalledWith(5)
+    const dialog = wrapper.get('[data-testid="template-proposal-dialog"]')
+    expect(dialog.attributes('data-mode')).toBe('builtin')
+    const texts = dialog.findAll('[data-testid="diff-row"]').map((r) => r.get('.diff-text').text())
+    expect(texts).toEqual(['the old copy', 'the new built-in'])
+  })
+
+  it('"Use the new built-in" closes the diff and opens the existing reset confirm for that row', async () => {
+    const { wrapper, api } = await mountWithStaleRow()
+    await wrapper.get('[data-testid="builtin-updated-5"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="use-builtin"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="template-proposal-dialog"]').exists()).toBe(false)
+    expect(wrapper.vm.resetDialog).toBe(true)
+    expect(wrapper.vm.resettingTemplate?.id).toBe(5)
+    expect(api.templates.reset).not.toHaveBeenCalled()
+
+    await wrapper.vm.resetTemplate()
+    expect(api.templates.reset).toHaveBeenCalledWith(5)
+  })
+
+  it('a failed built-in fetch shows the server reason and opens nothing', async () => {
+    const { wrapper, api } = await mountWithStaleRow()
+    api.templates.factoryDefault.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { status: 404, data: { message: 'no built-in here' } } }),
+    )
+
+    await wrapper.get('[data-testid="builtin-updated-5"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="template-proposal-dialog"]').exists()).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('no built-in here') }),
+    )
   })
 })

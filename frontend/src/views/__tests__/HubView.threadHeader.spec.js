@@ -5,6 +5,10 @@ import { createVuetify } from 'vuetify'
 
 vi.mock('@/services/api', () => ({
   default: { threads: { list: vi.fn().mockResolvedValue({ data: { threads: [] } }) } },
+  api: {
+    projects: { get: vi.fn().mockResolvedValue({ data: null }) },
+    products: { get: vi.fn().mockResolvedValue({ data: null }) },
+  },
 }))
 vi.mock('@/stores/websocketEventRouter', () => ({ registerReconnectResync: () => () => {} }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
@@ -58,13 +62,13 @@ describe('HubView thread header (FE-9289c)', () => {
     expect(wrapper.find('[data-testid="thread-header"]').exists()).toBe(false)
   })
 
-  it('titles the thread and shows the id with the join_thread hint', () => {
+  it('titles the thread and offers one Copy join id control instead of a join_thread line (FE-9742)', () => {
     seed(store, { thread_id: GENERAL_ID, subject: 'Laptop interop', title: 'Laptop interop', project_id: null })
     const wrapper = mountHub(pinia)
     expect(wrapper.get('[data-testid="thread-header-title"]').text()).toBe('Laptop interop')
-    const id = wrapper.get('[data-testid="thread-header-id"]').text()
-    expect(id).toContain('join_thread')
-    expect(id).toContain(GENERAL_ID)
+    expect(wrapper.get('[data-testid="thread-header-copy"]').attributes('aria-label')).toBe('Copy join id')
+    expect(wrapper.find('[data-testid="thread-header-id"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('join_thread')
   })
 
   it('renames from the header through the store action', async () => {
@@ -108,10 +112,10 @@ describe('HubView thread header (FE-9289c)', () => {
 
   it('states the right scope note per thread kind', () => {
     seed(store, { thread_id: GENERAL_ID, subject: 'General', project_id: null })
-    expect(mountHub(pinia).get('[data-testid="thread-header-scope"]').text()).toContain('next poll')
+    expect(mountHub(pinia).get('[data-testid="thread-roster-scope"]').text()).toContain('next poll')
 
     seed(store, { thread_id: PROJECT_ID, subject: 'Bound', project_id: 'p-1' })
-    expect(mountHub(pinia).get('[data-testid="thread-header-scope"]').text()).toContain(
+    expect(mountHub(pinia).get('[data-testid="thread-roster-scope"]').text()).toContain(
       "not part of an agent's working context",
     )
   })

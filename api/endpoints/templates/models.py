@@ -143,6 +143,19 @@ class TemplateResponse(BaseModel):
     created_by: str | None = None
     is_system_role: bool = Field(default=False, description="True when template is system managed")
     can_reset: bool = Field(default=False, description="True when a factory default exists to reset this agent to")
+    differs_from_builtin: bool | None = Field(
+        default=None,
+        description="True when this factory agent's instructions are not the current built-in text; "
+        "absent for an agent you made",
+    )
+
+
+class TemplateFactoryDefaultResponse(BaseModel):
+    """The shipped built-in text an agent resets to."""
+
+    role: str
+    version: str
+    user_instructions: str
 
 
 class TemplateHistoryResponse(BaseModel):

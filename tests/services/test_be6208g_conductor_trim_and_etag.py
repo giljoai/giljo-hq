@@ -62,7 +62,7 @@ def test_trim_is_the_only_body_difference() -> None:
         _WORKER_SPAWN_BLOCK_START,
     )
     from giljo_mcp.services.protocol_sections.orchestrator_body import (
-        _GIT_CONSTRAINT_CONDUCTOR,
+        _GIT_CONSTRAINT_CONDUCTOR_MULTI_TERMINAL,
         _GIT_CONSTRAINT_SELF_ADOPT,
     )
 
@@ -81,7 +81,7 @@ def test_trim_is_the_only_body_difference() -> None:
 
     restored = conductor.replace(_CONDUCTOR_COORDINATION_NOTE, worker_block, 1)
     restored = restored.replace(_CONDUCTOR_CLOSEOUT_NOTE, finale_block, 1)
-    restored = restored.replace(_GIT_CONSTRAINT_CONDUCTOR, _GIT_CONSTRAINT_SELF_ADOPT, 1)
+    restored = restored.replace(_GIT_CONSTRAINT_CONDUCTOR_MULTI_TERMINAL, _GIT_CONSTRAINT_SELF_ADOPT, 1)
     anchor = "## Orchestrator Coordination Protocol (3 Phases)"
     assert restored[restored.find(anchor) :] == non_conductor[non_conductor.find(anchor) :], (
         "conductor trims must remove ONLY the worker-spawn + PHASE-3 finale blocks "

@@ -176,7 +176,7 @@ def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool =
                     "Staging is complete. You are a chain sub-orchestrator -- there is NO "
                     "gate to wait behind. Call get_job_mission now; it returns your "
                     "implementation protocol immediately, then continue implementing -- "
-                    "do NOT wait for a human and do NOT return to the dashboard."
+                    "do NOT wait for a human; there is no Implement click to wait for."
                 ),
                 "thin_client": True,
             }
@@ -201,6 +201,7 @@ def build_identity_source_line(ctx: dict[str, Any]) -> str:
         getattr(override, "scope", None) or SCOPE_DEFAULT,
         updated_at=getattr(override, "updated_at", None),
         product_name=getattr(product, "name", None) if product is not None else None,
+        mode=getattr(override, "mode", None),
     )
 
 

@@ -93,7 +93,7 @@ describe('HubThreadHeader dates (FE-9593)', () => {
 
   it('carries the SAME two labelled values as the card, under the serial', () => {
     const w = mount(HubThreadHeader, {
-      global: { plugins: [pinia, vuetify], stubs: { AgentPill: true, ThreadRetagMenu: true } },
+      global: { plugins: [pinia, vuetify], stubs: { AgentPill: true } },
     })
     const dates = w.find('[data-testid="thread-header-dates"]')
     expect(dates.exists()).toBe(true)

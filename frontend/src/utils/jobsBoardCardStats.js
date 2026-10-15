@@ -40,10 +40,25 @@ export function jobsBoardMetaLine(project, sectionLabel, nowMs) {
   }
   if (sectionLabel === JOBS_SECTION_LABELS.REVIEW) {
     const completed = formatTimeOfDay(project?.completed_at || project?.updated_at)
-    const total = formatDurationSeconds(projectDurationSeconds(project, nowMs))
+    const seconds = projectDurationSeconds(project, nowMs)
+    if (seconds === null) return completed ? `completed ${completed}` : 'completed'
+    const total = formatDurationSeconds(seconds)
     return completed ? `completed ${completed} · ${total} total` : `${total} total`
   }
   const launched = formatTimeOfDay(project?.implementation_launched_at)
   const elapsed = formatDurationSeconds(projectDurationSeconds(project, nowMs))
   return launched ? `launched ${launched} · ${elapsed} elapsed` : `${elapsed} elapsed`
+}
+
+export const EMPTY_RUN_LABEL = 'No agent run recorded'
+export const EMPTY_RUN_HINT =
+  'This project was completed without the HQ staging flow, so there are no agent, step or time records.'
+
+export function isEmptyAgentRun(project, agents = []) {
+  return project?.status === 'completed' && !agents.length && !project?.agent_count
+}
+
+export function closeoutMissionText(project) {
+  const summary = (project?.closeout_summary || '').trim()
+  return summary ? `Closeout: ${summary}` : ''
 }

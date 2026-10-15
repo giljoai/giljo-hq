@@ -259,3 +259,11 @@ class TestPortDetection:
             result = sock.connect_ex(("127.0.0.1", 7272))
 
         assert result == 0
+
+
+class TestFrontendDependencyInstallScope:
+
+    def test_production_rebuild_omits_dev_dependencies(self):
+        source = (Path(__file__).parent.parent.parent / "startup.py").read_text(encoding="utf-8")
+        assert 'subprocess.run([npm_cmd, "ci", "--omit=dev"]' in source
+        assert 'subprocess.run([npm_executable, "ci"]' in source

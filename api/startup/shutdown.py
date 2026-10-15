@@ -66,6 +66,7 @@ async def shutdown(state: APIState) -> None:
             "metrics_sync_task",
             "system_banner_refresh_task",
             "update_checker_task",
+            "access_log_purge_task",
         ):
             task = getattr(state, task_attr, None)
             if task:

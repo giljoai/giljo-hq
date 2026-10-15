@@ -20,6 +20,7 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
     "get_job_mission": "response body IS the mission/implementation prompt -- next_action would duplicate it",
     "get_agent_result": "pure read of a stored result -- no forced next step",
     "update_project_mission": "metadata write, no natural next-step to advertise",
+    "unstage_project": "undo write returning status + message; the next step is the caller's, not the tool's",
     "update_job_mission": "metadata write, no natural next-step to advertise",
     "create_thread": "fire-and-forget write, no natural next-step to advertise",
     "update_thread": "fire-and-forget write (retag/rename/status), no natural next-step to advertise",

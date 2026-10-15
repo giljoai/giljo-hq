@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -58,7 +57,7 @@ async def _create_product(session: AsyncSession, tenant_key: str) -> str:
     return product_id
 
 
-async def _create_project(session: AsyncSession, tenant_key: str, product_id: str) -> str:
+async def _create_project(session: AsyncSession, tenant_key: str, product_id: str, series_number: int) -> str:
     project_id = str(uuid.uuid4())
     session.add(
         Project(
@@ -70,7 +69,7 @@ async def _create_project(session: AsyncSession, tenant_key: str, product_id: st
             status="completed",
             tenant_key=tenant_key,
             execution_mode="multi_terminal",
-            series_number=random.randint(1, 9000),
+            series_number=series_number,
         )
     )
     await session.commit()
@@ -148,8 +147,8 @@ async def test_purge_deletes_run_and_conductor_but_survivors_live(
     cleanup_tenants.append(tenant)
 
     product_id = await _create_product(db_session, tenant)
-    p1 = await _create_project(db_session, tenant, product_id)
-    p2 = await _create_project(db_session, tenant, product_id)
+    p1 = await _create_project(db_session, tenant, product_id, 1)
+    p2 = await _create_project(db_session, tenant, product_id, 2)
     memory_id = await _create_memory(db_session, tenant, product_id, p1)
     message_id = await _create_message(db_session, tenant, p1)
 
@@ -181,8 +180,8 @@ async def test_purge_is_idempotent(db_session: AsyncSession, cleanup_tenants: li
     cleanup_tenants.append(tenant)
 
     product_id = await _create_product(db_session, tenant)
-    p1 = await _create_project(db_session, tenant, product_id)
-    p2 = await _create_project(db_session, tenant, product_id)
+    p1 = await _create_project(db_session, tenant, product_id, 1)
+    p2 = await _create_project(db_session, tenant, product_id, 2)
     run = await _create_run(db_session, tenant, [p1, p2])
 
     first = await _seq_svc(db_session).purge_run(run_id=run["id"], tenant_key=tenant)
@@ -199,13 +198,13 @@ async def test_purge_is_tenant_scoped(db_session: AsyncSession, cleanup_tenants:
     cleanup_tenants.extend([tenant_a, tenant_b])
 
     prod_a = await _create_product(db_session, tenant_a)
-    a1 = await _create_project(db_session, tenant_a, prod_a)
-    a2 = await _create_project(db_session, tenant_a, prod_a)
+    a1 = await _create_project(db_session, tenant_a, prod_a, 1)
+    a2 = await _create_project(db_session, tenant_a, prod_a, 2)
     run_a = await _create_run(db_session, tenant_a, [a1, a2])
 
     prod_b = await _create_product(db_session, tenant_b)
-    b1 = await _create_project(db_session, tenant_b, prod_b)
-    b2 = await _create_project(db_session, tenant_b, prod_b)
+    b1 = await _create_project(db_session, tenant_b, prod_b, 1)
+    b2 = await _create_project(db_session, tenant_b, prod_b, 2)
     run_b = await _create_run(db_session, tenant_b, [b1, b2])
     b_job_ids = await _conductor_job_ids(db_session, tenant_b, run_b["id"])
     assert b_job_ids

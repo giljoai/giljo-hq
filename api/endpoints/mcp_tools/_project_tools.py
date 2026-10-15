@@ -598,18 +598,16 @@ async def update_project_mission(
     title="Stage Project",
     description=(
         "Prepares a project in your own private Giljo HQ workspace and returns its staging plan. "
+        "Staging also makes an inactive project active, so it shows on the dashboard Jobs board; "
+        "a completed, cancelled or otherwise closed project is refused. "
         "Staging always ends at a human approval gate: nothing is implemented until the user "
         "approves it with the Implement button in the dashboard or with launch_implementation. "
         "Approving also makes an inactive project active. "
         "Ask the user which `mode` to use (subagent or multi_terminal); if it is omitted and the "
         "account has no default, the call is refused with EXECUTION_MODE_REQUIRED and names both "
         "modes. Pass `mission` to set the project's goal at the same time; it is written through "
-        "update_project_mission, which is also where you change a mission on its own. The `action` parameter "
-        "can undo staging: 'unstage' reverts a staged project before the agent was contacted, "
-        "'cancel_staging' abandons staging that is underway, and 'restage' clears the mission and "
-        "the staging state, retires the earlier orchestrator and creates a fresh one so staging "
-        "starts over (refused once implementation has launched). `mode` only applies to the "
-        "default 'stage' action. No outside service is contacted."
+        "update_project_mission, which is also where you change a mission on its own. This tool "
+        "only stages; to undo staging, use unstage_project. No outside service is contacted."
     ),
     annotations=_tool_hints("stage_project", destructive=True),
 )
@@ -632,22 +630,16 @@ async def stage_project(
         Field(
             max_length=MCP_MISSION_MAX,
             description=(
-                "Optional goal-at-staging: write this as the project mission before staging. "
-                "Routed through update_project_mission -- the same single writer the standalone "
-                "tool uses. Omit to stage without touching an existing mission."
+                "Optional goal-at-staging: saved as the project mission before staging. "
+                "Omit to stage without touching an existing mission."
             ),
         ),
     ] = "",
-    action: Annotated[
-        Literal["stage", "unstage", "restage", "cancel_staging"],
-        Field(description="'stage' (default) prepares the project; the other three undo staging, as described above."),
-    ] = "stage",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "project_id": project_id,
         "mode": mode,
-        "action": action,
         "user_id": _base._resolve_user_id(ctx),
     }
     if mission:

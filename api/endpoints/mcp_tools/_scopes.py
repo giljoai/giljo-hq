@@ -21,6 +21,7 @@ TOOL_SCOPES: dict[str, str] = {
     "update_project_mission": SCOPE_AGENT,
     "diagnose_project_state": SCOPE_READ,
     "stage_project": SCOPE_AGENT,
+    "unstage_project": SCOPE_AGENT,
     "get_implementation_prompt": SCOPE_AGENT,
     "launch_implementation": SCOPE_AGENT,
     "link_projects": SCOPE_AGENT,
@@ -38,6 +39,7 @@ TOOL_SCOPES: dict[str, str] = {
     "get_thread_history": SCOPE_READ,
     "create_task": SCOPE_WRITE,
     "update_task": SCOPE_WRITE,
+    "promote_task_to_project": SCOPE_WRITE,
     "list_tasks": SCOPE_READ,
     "save_roadmap": SCOPE_WRITE,
     "get_roadmap": SCOPE_READ,
@@ -64,6 +66,7 @@ TOOL_SCOPES: dict[str, str] = {
     "update_product_context": SCOPE_WRITE,
     "create_product": SCOPE_WRITE,
     "create_vision_document": SCOPE_WRITE,
+    "propose_template_change": SCOPE_WRITE,
 }
 
 
@@ -115,6 +118,7 @@ _STANDARD_PROFILE_TOOLS: frozenset[str] = _CORE_PROFILE_TOOLS | frozenset(
         "get_thread_history",
         "get_roadmap",
         "save_roadmap",
+        "promote_task_to_project",
         "get_vision_document",
         "update_product_context",
         "apply_context_tuning",

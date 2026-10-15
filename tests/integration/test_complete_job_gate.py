@@ -208,7 +208,9 @@ async def test_complete_job_blocked_when_agent_is_awaiting_user(gate_mcp_client,
             },
         )
 
-    assert result.is_error is True, "GATE LEAK: complete_job returned success while agent was awaiting_user"
+    assert not result.is_error and _payload(result).get("error") == "AWAITING_USER_APPROVAL", (
+        "GATE LEAK: complete_job did not refuse while agent was awaiting_user"
+    )
     err = _error_text(result)
     assert "awaiting" in err.lower() or "AWAITING_USER_APPROVAL" in err or approval_id in err, (
         f"expected awaiting_user gate error, got: {err!r}"
@@ -276,7 +278,9 @@ async def test_complete_job_gate_blocks_signal_bearing_closeout_under_hitl(gate_
             },
         )
 
-    assert result.is_error is True, "GATE LEAK: signal-bearing closeout completed under hitl without approval"
+    assert not result.is_error and _payload(result).get("error") == "CLOSEOUT_APPROVAL_REQUIRED", (
+        "GATE LEAK: signal-bearing closeout completed under hitl without approval"
+    )
     err = _error_text(result)
     assert "CLOSEOUT_APPROVAL_REQUIRED" in err or "approval" in err.lower(), f"unexpected error: {err!r}"
 

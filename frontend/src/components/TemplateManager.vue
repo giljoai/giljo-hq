@@ -10,9 +10,10 @@
         </template>
         <span
           >Each active agent template consumes context tokens during orchestration. The 16-slot limit
-          keeps prompt budgets manageable. 1 slot is reserved for the Orchestrator (managed in Admin
-          Settings), leaving 15 for your custom agents. Agents receive their profile from the server when a
-          job starts; nothing needs installing. Use a row's menu to download any profile as Markdown.</span
+          keeps prompt budgets manageable. 1 slot is reserved for the Orchestrator, whose prompt you
+          edit in this screen's Orchestrator prompt view, leaving 15 for your custom agents. Agents
+          receive their profile from the server when a job starts; nothing needs installing. Use a
+          row's menu to download any profile as Markdown.</span
         >
       </v-tooltip>
       <v-chip
@@ -52,6 +53,14 @@
 
     <v-card v-if="activeView === 'roster'" class="template-manager smooth-border">
       <v-card-text>
+        <v-alert v-if="proposalsElsewhere" type="info" variant="tonal" density="compact" class="mb-4" data-testid="proposals-elsewhere">
+          <div class="d-flex align-center flex-wrap ga-2">
+            <span>{{ proposalsElsewhere }} template {{ proposalsElsewhere === 1 ? 'change' : 'changes' }} waiting outside this list.</span>
+            <v-btn v-if="hiddenTemplateProposals.length && !showAllProducts" size="small" variant="text" data-testid="proposals-show-all" @click="showAllProducts = true">Show all products</v-btn>
+            <v-btn v-if="additionsProposals.length && canEditPrompt" size="small" variant="text" data-testid="proposals-open-prompt" @click="openPromptForProposal">Open orchestrator prompt</v-btn>
+          </div>
+        </v-alert>
+
         <EmptyState
           v-if="!viewedProductId && !showAllProducts"
           icon="mdi-package-variant-closed"
@@ -111,6 +120,9 @@
             :remaining-user-slots="remainingUserSlots"
             :user-agent-limit="userAgentLimit"
             :can-edit-prompt="canEditPrompt"
+            :proposal-template-ids="proposalTemplateIds"
+            @open-proposal="openProposal = templateProposals.byTemplateId[$event.id] || null"
+            @open-builtin-diff="openBuiltinDiff"
             @toggle-active="handleToggleActive"
             @edit="editTemplate"
             @duplicate="duplicateTemplate"
@@ -236,6 +248,14 @@
       </v-dialog>
 
     </v-card>
+
+    <TemplateProposalDialog
+      :proposal="openProposal"
+      :builtin-diff="builtinDiff"
+      @close="openProposal = null; closeBuiltinDiff()"
+      @use-builtin="useBuiltin"
+      @decided="onProposalDecided"
+    />
   </div>
 </template>
 
@@ -258,6 +278,8 @@ import EmptyState from './common/EmptyState.vue'
 import AgentBehaviourView from './settings/AgentBehaviourView.vue'
 import HandoverTemplateView from './settings/tabs/HandoverTemplateView.vue'
 import SystemPromptTab from './settings/tabs/SystemPromptTab.vue'
+import TemplateProposalDialog from './templates/TemplateProposalDialog.vue'
+import { useTemplateProposalsStore } from '@/stores/templateProposalsStore'
 import {
   TEMPLATE_ROLE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
@@ -325,6 +347,9 @@ const {
   resetEditingTemplate,
   importingDefaults,
   importDefaults,
+  builtinDiff,
+  openBuiltinDiff,
+  closeBuiltinDiff,
 } = useTemplateData(search, filterRole, filterStatus, viewedProductId, showAllProducts)
 
 const {
@@ -399,7 +424,6 @@ const handleToggleActive = async (template, newValue) => {
         ? 'Agent enabled for this product'
         : 'Agent disabled for this product',
       type: newValue ? 'warning' : 'info' })
-    localStorage.setItem('agent_export_stale', 'true')
   } catch (error) {
     const overBudget = error.response?.status === 409
     showToast({
@@ -448,7 +472,6 @@ const setAllHere = async (isActive) => {
     message: isActive ? `Enabled ${n} for this product` : `Disabled ${n} for this product`,
     type: isActive ? 'warning' : 'info',
   })
-  localStorage.setItem('agent_export_stale', 'true')
 }
 
 const importDefaultAgents = async () => {
@@ -558,6 +581,8 @@ const confirmReset = (template) => {
   resetDialog.value = true
 }
 
+const useBuiltin = () => confirmReset(closeBuiltinDiff())
+
 const resetTemplate = async () => {
   resetting.value = true
   try {
@@ -614,6 +639,24 @@ const downloadProfile = (template) => {
   window.open(api.templates.profileDownloadUrl(template.id), '_blank')
 }
 
+const templateProposals = useTemplateProposalsStore()
+const openProposal = ref(null)
+const proposalTemplateIds = computed(() => Object.values(templateProposals.byTemplateId).map((p) => p.template_id))
+const additionsProposals = computed(() => templateProposals.proposals.filter((p) => p.target_kind === 'orchestrator_additions'))
+const hiddenTemplateProposals = computed(() => {
+  const shown = new Set(templates.value.map((t) => t.id))
+  return Object.values(templateProposals.byTemplateId).filter((p) => !shown.has(p.template_id))
+})
+const proposalsElsewhere = computed(() => hiddenTemplateProposals.value.length + additionsProposals.value.length)
+const openPromptForProposal = () => {
+  activeView.value = 'prompt'
+}
+const onProposalDecided = async ({ action }) => {
+  openProposal.value = null
+  showToast({ message: action === 'apply' ? 'Change applied' : 'Proposal rejected', type: action === 'apply' ? 'success' : 'info' })
+  if (action === 'apply') await reloadTemplates()
+}
+
 const reloadTemplates = async () => (await loadTemplates(), loadProductAssignments())
 const reloadActiveCount = () => loadActiveCount()
 
@@ -622,6 +665,7 @@ useTemplateRealtime(templates, reloadActiveCount)
 onMounted(() => {
   reloadTemplates()
   reloadActiveCount()
+  templateProposals.fetchAll().catch(() => {})
 })
 
 watch([() => productStore.effectiveProductId, showAllProducts], () => {

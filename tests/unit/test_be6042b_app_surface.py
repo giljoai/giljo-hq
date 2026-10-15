@@ -34,7 +34,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 254
+EXPECTED_ROUTE_COUNT = 259
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -226,6 +226,10 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/taxonomy-types/", frozenset({"POST"})),
         ("/api/v1/taxonomy-types/{type_id}", frozenset({"DELETE"})),
         ("/api/v1/taxonomy-types/{type_id}", frozenset({"PUT"})),
+        ("/api/v1/template-proposals", frozenset({"GET"})),
+        ("/api/v1/template-proposals/count", frozenset({"GET"})),
+        ("/api/v1/template-proposals/{proposal_id}/apply", frozenset({"POST"})),
+        ("/api/v1/template-proposals/{proposal_id}/reject", frozenset({"POST"})),
         ("/api/v1/templates/", frozenset({"GET"})),
         ("/api/v1/templates/", frozenset({"POST"})),
         ("/api/v1/templates/import-defaults", frozenset({"POST"})),
@@ -234,6 +238,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/templates/{template_id}", frozenset({"GET"})),
         ("/api/v1/templates/{template_id}", frozenset({"PUT"})),
         ("/api/v1/templates/{template_id}/profile.md", frozenset({"GET"})),
+        ("/api/v1/templates/{template_id}/factory-default", frozenset({"GET"})),
         ("/api/v1/templates/{template_id}/history", frozenset({"GET"})),
         ("/api/v1/templates/{template_id}/preview/", frozenset({"POST"})),
         ("/api/v1/templates/{template_id}/reset", frozenset({"POST"})),

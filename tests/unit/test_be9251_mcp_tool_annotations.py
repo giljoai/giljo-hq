@@ -62,6 +62,8 @@ EXPECTED_DESTRUCTIVE_TOOLS = frozenset(
         "report_progress",
         "save_roadmap",
         "stage_project",
+        "unstage_project",
+        "promote_task_to_project",
         "unlink_projects",
         "update_project",
         "update_task",
@@ -74,6 +76,7 @@ EXPECTED_DESTRUCTIVE_TOOLS = frozenset(
         "apply_context_tuning",
         "decide_approval",
         "giljo_setup",
+        "propose_template_change",
     }
 )
 

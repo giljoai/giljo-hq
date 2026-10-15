@@ -1,4 +1,21 @@
 
+import { parseErrorResponse } from '@/utils/errorMessages'
+
+const SIGN_OUT_REASON_KEY = 'giljo_sign_out_reason'
+const SESSION_DISPLACED_ERROR_CODE = 'SESSION_DISPLACED'
+
+export function noteSignOutReason(refreshError) {
+  if (parseErrorResponse(refreshError).errorCode === SESSION_DISPLACED_ERROR_CODE) {
+    sessionStorage.setItem(SIGN_OUT_REASON_KEY, 'displaced')
+  }
+}
+
+export function takeSignOutReason() {
+  const reason = sessionStorage.getItem(SIGN_OUT_REASON_KEY)
+  sessionStorage.removeItem(SIGN_OUT_REASON_KEY)
+  return reason
+}
+
 export async function handleAuthFailure(error) {
   const { default: router } = await import('@/router')
 

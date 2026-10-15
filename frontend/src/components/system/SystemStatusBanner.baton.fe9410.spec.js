@@ -108,11 +108,21 @@ describe('SystemStatusBanner baton navigation (FE-9410)', () => {
     })
   })
 
-  it('still opens the plain Hub list when several threads are pending', async () => {
+  it('opens the longest-waiting thread, with its focus, when several are pending', async () => {
     const wrapper = await mountBanner({
-      threads: [thread(), thread({ thread_id: 'thr-43', subject: 'Second' })],
+      threads: [
+        thread({ last_message: { created_at: '2026-08-13T06:00:00Z' } }),
+        thread({
+          thread_id: 'thr-43',
+          subject: 'Second',
+          last_message: { created_at: '2026-08-13T04:00:00Z' },
+        }),
+      ],
     })
     await wrapper.find('[data-testid="your-turn-cta"]').trigger('click')
-    expect(h.push).toHaveBeenCalledWith({ path: '/hub' })
+    expect(h.push).toHaveBeenCalledWith({
+      path: '/hub',
+      query: { thread: 'thr-43', focus: 'baton' },
+    })
   })
 })

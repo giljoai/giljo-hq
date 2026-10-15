@@ -59,8 +59,7 @@ def test_solo_closeout_next_action_byte_identical() -> None:
     expected = build_next_action(
         tool="write_project_closeout",
         why=(
-            "Call write_project_closeout() to write the project closeout (orchestrators "
-            "coordinate, they do not commit code)."
+            "Call write_project_closeout() to write the project closeout (pass the commits you or your workers made)."
         ),
     )
     explicit = JobCompletionService._phase_response(is_staging_end=False, is_closeout_phase=True, is_conductor=False)

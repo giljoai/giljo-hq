@@ -114,7 +114,8 @@ _DOWNLOAD_LINK_NOTE = (
 
 _AGENT_PROFILE_NOTE = (
     "Agent templates are NOT installed as files any more: every spawned agent receives its "
-    "full profile from the server when its job starts (get_job_mission's agent_profile). Do not "
+    "profile from the server when its job starts (get_job_mission: the role instructions in "
+    "agent_identity; the role, model, effort and harness in agent_profile). Do not "
     "create, edit or delete anything in an agents directory as part of this setup.\n\n"
 )
 

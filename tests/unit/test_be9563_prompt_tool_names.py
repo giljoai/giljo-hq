@@ -289,7 +289,9 @@ def _layer_f_renderers() -> dict[str, object]:
     from giljo_mcp import template_renderer as tr
     from giljo_mcp.services.mission_assembly import compose_agent_profile
 
-    return {"profile": lambda template: tr.render_profile_markdown(compose_agent_profile(template))}
+    return {
+        "profile": lambda template: tr.render_profile_markdown(compose_agent_profile(template, with_instructions=True))
+    }
 
 
 def test_no_renderer_output_names_a_retired_or_unresolved_tool() -> None:

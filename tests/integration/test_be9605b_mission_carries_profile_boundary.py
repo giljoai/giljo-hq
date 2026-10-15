@@ -183,7 +183,7 @@ async def test_subagent_mission_carries_the_full_profile(mission_boundary_client
     assert profile["harness"] == "codex"
     assert profile["model"] == "opus"
     assert profile["effort"] == "high"
-    assert _PERSONA_MARKER in profile["instructions"]
+    assert "instructions" not in profile, "BE-9756: the role text rides agent_identity only"
     assert profile["behavioral_rules"] == [_RULE_MARKER]
     assert profile["success_criteria"] == [_CRITERION_MARKER]
     assert mission.get("agent_identity"), "identity block withheld -- the ruling requires it served in every mode"
@@ -211,8 +211,9 @@ async def test_product_scoped_template_binds_and_the_disabled_sibling_is_refused
     )
 
     spawned = await _spawn(new_client, project_id, enabled_row.name)
-    profile = (await _read_mission(new_client, spawned["job_id"]))["agent_profile"]
-    assert profile["instructions"] == "PRODUCT-SCOPED BODY."
+    mission = await _read_mission(new_client, spawned["job_id"])
+    profile = mission["agent_profile"]
+    assert "PRODUCT-SCOPED BODY." in mission["agent_identity"]
     assert profile["template_id"] == enabled_row.id
 
     async with new_client() as session:
@@ -269,3 +270,43 @@ async def test_thin_prompt_carries_the_hints_but_no_launch_line_in_subagent_mode
     assert "--dangerously-bypass-approvals-and-sandbox" not in prompt
     assert "Model hint: gpt-5" in prompt
     assert "Effort hint: high" in prompt
+
+
+_ROLE_TEXT_MARKER = "BE-9756 distinctive role text: tests first, then the smallest change that passes."
+
+
+async def test_role_text_ships_once_and_agent_name_is_the_template_name(mission_boundary_client) -> None:
+    new_client, tenant_key, db_session = mission_boundary_client
+    project_id, product_id = await _seed_project(db_session, tenant_key, "subagent")
+    template = await _seed_template(
+        db_session,
+        tenant_key,
+        name="implementer-frontend",
+        user_instructions=_ROLE_TEXT_MARKER,
+        model="sonnet",
+        effort="high",
+        cli_tool="claude",
+        enable_for=product_id,
+    )
+
+    spawned = await _spawn(new_client, project_id, template.name)
+    mission = await _read_mission(new_client, spawned["job_id"])
+
+    assert json.dumps(mission).count(_ROLE_TEXT_MARKER) == 1, "role text must ship exactly once"
+    assert _ROLE_TEXT_MARKER in mission["agent_identity"]
+    assert mission["agent_name"] == "implementer-frontend"
+    assert mission["agent_display_name"] == "implementer"
+    profile = mission["agent_profile"]
+    assert "instructions" not in profile
+    assert (profile["model"], profile["effort"], profile["harness"]) == ("sonnet", "high", "claude")
+
+    async with new_client() as session:
+        cached = _payload(
+            await session.call_tool(
+                "get_job_mission", {"job_id": spawned["job_id"], "protocol_etag": mission["protocol_etag"]}
+            )
+        )
+    assert cached.get("protocol_unchanged") is True
+    assert not cached.get("agent_identity")
+    assert _ROLE_TEXT_MARKER not in json.dumps(cached)
+    assert cached["agent_name"] == "implementer-frontend"

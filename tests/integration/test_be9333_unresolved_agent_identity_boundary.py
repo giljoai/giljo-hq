@@ -177,7 +177,7 @@ async def test_spawn_job_rejects_an_unresolvable_name_on_the_orchestrator_door(s
             },
         )
 
-    assert result.is_error is True, (
+    assert not result.is_error and _payload(result).get("error") == "INVALID_AGENT_NAME", (
         "spawn_job accepted an agent_name that resolves to no template. The caller asked for "
         f"'{missing_name}' and would silently receive the DEFAULT orchestrator identity instead. "
         f"Got: {_payload(result)!r}"

@@ -50,7 +50,7 @@ from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.services.protocol_builder import _get_user_config
 from giljo_mcp.services.protocol_survival import staging_orchestrator_actions
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
-from giljo_mcp.services.sequence_run_service import active_chain_run, broadcast_deferred_sequence_updates
+from giljo_mcp.services.sequence_run_service import active_chain_run
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
 
@@ -438,7 +438,7 @@ class MissionOrchestrationService:
         await completion.apply_completion(session, ctx["agent_job"], ctx["execution"], result, tenant_key)
         await session.flush()
 
-        from giljo_mcp.services.project_helpers import mark_chain_member_status
+        from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_chain_member_status
 
         await mark_chain_member_status(
             db_manager=self.db_manager,
@@ -450,7 +450,7 @@ class MissionOrchestrationService:
             websocket_manager=self._websocket_manager,
         )
         await session.commit()
-        await broadcast_deferred_sequence_updates(session)
+        await broadcast_deferred_events(session)
 
         logger.info(
             "[BE-5122] CTX self-close applied server-side",
@@ -467,7 +467,6 @@ class MissionOrchestrationService:
                 "job_id": job_id,
                 "project_id": str(project.id),
                 "project_name": project.name,
-                "tenant_key": tenant_key,
             },
             "staging_directive": {
                 "status": "STAGING_SESSION_COMPLETE",

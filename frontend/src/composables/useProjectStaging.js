@@ -147,8 +147,7 @@ export function useProjectStaging({ projectId, executionMode, isProjectStaged, r
       })
       if (!launched) return
       await api.orchestrator.launchProject({ project_id: projectId.value })
-      tabsStore.isLaunched = true
-      tabsStore.currentProject = project
+      tabsStore.noteUserImplement(project)
       projectStateStore.setLaunched(projectId.value, true)
 
       for (const cb of launchSuccessCallbacks) {

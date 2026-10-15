@@ -15,8 +15,6 @@ import { SEQUENCE_EVENT_ROUTES } from './eventRoutes/sequenceEventRoutes'
 import { SYSTEM_EVENT_ROUTES } from './eventRoutes/systemEventRoutes'
 import { useCommHubStore } from './commHubStore'
 import { useSequenceRunStore } from './sequenceRunStore'
-import { useGlobalActivityStore } from './globalActivityStore'
-import { useProductActivityStore } from './productActivityStore'
 import { useApprovalsStore } from './useApprovalsStore'
 import { useMemoryStore } from './memoryStore'
 
@@ -30,8 +28,6 @@ const STORE_REGISTRY = {
   products: () => useProductStore(),
   projectTabs: () => useProjectTabsStore(),
   sequenceRun: () => useSequenceRunStore(),
-  globalActivity: () => useGlobalActivityStore(),
-  productActivity: () => useProductActivityStore(),
   approvals: () => useApprovalsStore(),
   memory: () => useMemoryStore(),
 }
@@ -154,58 +150,37 @@ export async function routeWebsocketEvent(
   return true
 }
 
-const GLOBAL_ACTIVITY_EVENT_TYPES = new Set([
+const GLOBAL_APPROVAL_EVENT_TYPES = new Set([
   'agent:created',
   'agent:status_changed',
   'agent:removed',
   'job:progress_update',
 ])
 
-// eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported in tests/stores/websocketEventRouter.*.spec.js (outside src/)
-export function routeGlobalActivityEvent(rawEvent, { storeRegistry = STORE_REGISTRY } = {}) {
-  const { type, payload } = normalizeWebsocketPayload(rawEvent)
-  if (!type || !GLOBAL_ACTIVITY_EVENT_TYPES.has(type)) return false
-  if (!isSameTenant(payload)) return false
+const WINDOW_MIRRORED_AGENT_EVENTS = new Set(['agent:status_changed', 'agent:silent', 'job:progress_update'])
 
-  const projectId = payload?.project_id
-  if (projectId) {
-    const activityStore = storeRegistry?.globalActivity?.() ?? useGlobalActivityStore()
-    activityStore.recordActivity(projectId)
-  }
+function mirrorAgentEventOnWindow(type, payload) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(type, { detail: payload }))
+}
+
+// eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported in tests/stores/websocketEventRouter.*.spec.js (outside src/)
+export function routeGlobalApprovalEvent(rawEvent, { storeRegistry = STORE_REGISTRY } = {}) {
+  const { type, payload } = normalizeWebsocketPayload(rawEvent)
+  if (!type) return false
+  const forApprovals = GLOBAL_APPROVAL_EVENT_TYPES.has(type)
+  const forWindow = WINDOW_MIRRORED_AGENT_EVENTS.has(type)
+  if (!forApprovals && !forWindow) return false
+  if (!isSameTenant(payload)) return false
 
   if (type === 'agent:status_changed' && (payload?.user_approval_id || payload?.decided_option_id)) {
     const approvalsStore = storeRegistry?.approvals?.() ?? useApprovalsStore()
     approvalsStore.handleStatusEvent(payload).catch((error) => {
-      console.warn('[websocketEventRouter] global-activity approvals refresh failed:', error)
+      console.warn('[websocketEventRouter] global approvals refresh failed:', error)
     })
   }
 
-  return true
-}
-
-const PRODUCT_ACTIVITY_EVENT_TYPES = new Set([
-  'project_update',
-  'task:updated',
-  'agent:status_changed',
-  'agent:health_alert',
-  'agent:auto_failed',
-  'agent:created',
-  'agent:removed',
-  'job:progress_update',
-  'orchestrator:prompt_generated',
-])
-
-// eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported in tests/stores/websocketEventRouter.*.spec.js (outside src/)
-export function routeProductActivityEvent(rawEvent, { storeRegistry = STORE_REGISTRY } = {}) {
-  const { type, payload } = normalizeWebsocketPayload(rawEvent)
-  if (!type || !PRODUCT_ACTIVITY_EVENT_TYPES.has(type)) return false
-  if (!isSameTenant(payload)) return false
-
-  const productId = payload?.product_id
-  if (productId) {
-    const activityStore = storeRegistry?.productActivity?.() ?? useProductActivityStore()
-    activityStore.recordActivity(productId)
-  }
+  if (forWindow) mirrorAgentEventOnWindow(type, payload)
 
   return true
 }
@@ -238,17 +213,9 @@ export function initWebsocketEventRouter({
 
   resolvedWsStore.on('*', (event) => {
     try {
-      routeGlobalActivityEvent(event, { storeRegistry })
+      routeGlobalApprovalEvent(event, { storeRegistry })
     } catch (error) {
-      console.error('[websocketEventRouter] Unhandled global-activity routing error:', error)
-    }
-  })
-
-  resolvedWsStore.on('*', (event) => {
-    try {
-      routeProductActivityEvent(event, { storeRegistry })
-    } catch (error) {
-      console.error('[websocketEventRouter] Unhandled product-activity routing error:', error)
+      console.error('[websocketEventRouter] Unhandled global approvals routing error:', error)
     }
   })
 

@@ -282,6 +282,12 @@ def _stamp_resolved_harness(scope: Scope, session_row: Any) -> None:
         scope.setdefault("state", {})["resolved_harness"] = resolved
 
 
+def _stamp_client_name(scope: Scope, client_info: Any) -> None:
+    name = client_info.get("name") if isinstance(client_info, dict) else None
+    if isinstance(name, str) and name:
+        scope.setdefault("state", {})["mcp_client_name"] = name
+
+
 def _stamp_resolved_preset(scope: Scope, session_row: Any) -> None:
     session_data = getattr(session_row, "session_data", None)
     if not isinstance(session_data, dict):

@@ -67,16 +67,27 @@ export function useChainContext({ runId = () => null, projectId = () => null } =
     { immediate: true },
   )
 
+  function memberRow(id) {
+    const detail = projectStore.projectById(id)
+    const listed =
+      projectStore.activeProjectsMeta.find((p) => p.id === id) ||
+      projectStore.unreviewedProjectsMeta.find((p) => p.id === id)
+    if (!listed) return detail
+    if (!detail) return listed
+    if (Date.parse(listed.updated_at) < Date.parse(detail.updated_at)) return detail
+    return { ...detail, ...listed }
+  }
+
   const projects = computed(() =>
     loadedIds.value
       .map((id, i) => {
-        const p = projectStore.projectById(id)
+        const p = memberRow(id)
         return p ? { ...p, _order: i } : null
       })
       .filter(Boolean),
   )
 
-  const missingIds = computed(() => loadedIds.value.filter((id) => !projectStore.projectById(id)))
+  const missingIds = computed(() => loadedIds.value.filter((id) => !memberRow(id)))
 
   const total = computed(() => orderedIds.value.length)
   const currentIndex = computed(() =>

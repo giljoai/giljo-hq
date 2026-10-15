@@ -410,7 +410,7 @@ async def test_large_payload_arrives_whole_at_the_server(closeout_mcp_client):
         )
 
     text = _content_text(result)
-    assert result.is_error, f"a 180 KB summary is over the documented cap and must be rejected, got: {text!r}"
+    assert '"error": "VALIDATION_ERROR"' in text, f"a 180 KB summary is over the cap and must be refused: {text!r}"
     assert "180000" in text, (
         "the cap rejection must report the length the server actually received -- "
         f"if the transport truncated, this number would be smaller; got: {text!r}"

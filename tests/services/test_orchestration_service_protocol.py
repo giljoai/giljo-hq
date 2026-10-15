@@ -84,7 +84,7 @@ class TestAgentProtocolFormat:
 
             assert "tenant_key=" not in call, f"get_thread_history example must omit tenant_key: {call}"
 
-    def test_protocol_includes_todowrite_sync_instructions_for_claude_code(self):
+    def test_protocol_makes_report_progress_the_one_todo_list_for_claude_code(self):
         protocol = _generate_agent_protocol(
             job_id="job-123", tenant_key="tenant-abc", agent_name="test-agent", tool="claude-code"
         )
@@ -97,16 +97,9 @@ class TestAgentProtocolFormat:
             "Protocol should include instructions to sync TodoWrite status with progress reporting"
         )
 
-        lines = protocol.split("\n")
-        todowrite_section_found = False
-        for i, line in enumerate(lines):
-            if "todowrite" in line.lower() and "sync" in line.lower():
-                context = "\n".join(lines[max(0, i - 5) : min(len(lines), i + 15)])
-                if "report_progress" in context.lower():
-                    todowrite_section_found = True
-                    break
-
-        assert todowrite_section_found, "Protocol should have a section explaining TodoWrite sync with report_progress"
+        assert "ONE TODO list, the one you send to report_progress" in protocol
+        assert "A TodoWrite list of your own is optional and never replaces it: do not mirror into one." in protocol
+        assert "MANDATORY: Create your TodoWrite list" not in protocol
 
     def test_protocol_uses_harness_neutral_phrasing_for_non_claude_tool(self):
         protocol = _generate_agent_protocol(job_id="job-123", tenant_key="tenant-abc", agent_name="test-agent")

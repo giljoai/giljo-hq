@@ -39,6 +39,7 @@ class APIState:
         self.notification_purge_task: asyncio.Task | None = None
         self.mcp_session_cleanup_task: asyncio.Task | None = None
         self.oauth_code_cleanup_task: asyncio.Task | None = None
+        self.access_log_purge_task: asyncio.Task | None = None
         self.health_monitor: Any = None
         self.health_monitor_task: asyncio.Task | None = None
         self.silence_detector: Any = None

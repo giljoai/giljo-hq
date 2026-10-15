@@ -190,5 +190,5 @@ async def test_action_required_post_still_blocks_via_mcp(boundary_client):
             {"job_id": job.job_id, "result": {"summary": "should be blocked"}},
         )
 
-    assert result.is_error is True, "an unresolved action-required post must block complete_job at the boundary"
-    assert "COMPLETION_BLOCKED" in _error_text(result)
+    assert not result.is_error, "BE-9738: the gate refusal is Tier-2 content, not isError"
+    assert _payload(result).get("error") == "COMPLETION_BLOCKED", "an action-required post must block complete_job"

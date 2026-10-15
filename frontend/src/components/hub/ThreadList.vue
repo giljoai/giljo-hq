@@ -13,17 +13,66 @@
         No threads found.
       </div>
 
-      <ThreadCard
-        v-for="thread in displayThreads"
-        :key="thread.thread_id"
-        :thread="decorate(thread)"
-        :selected="commHub.selectedThreadId === thread.thread_id"
-        @open="onSelect"
-        @rename="onRename"
-        @copy="onCopyThreadId"
-        @delete="onRequestDelete"
-        @lock-info="onLockInfo"
-      />
+      <template v-else>
+        <div
+          v-if="openThreads.length === 0"
+          class="thread-list__empty"
+          data-testid="thread-list-no-open"
+        >
+          No open threads.
+        </div>
+
+        <ThreadCard
+          v-for="thread in visibleOpenThreads"
+          :key="thread.thread_id"
+          :thread="decorate(thread)"
+          :selected="commHub.selectedThreadId === thread.thread_id"
+          @open="onSelect"
+          @rename="onRename"
+          @copy="onCopyThreadId"
+          @delete="onRequestDelete"
+          @lock-info="onLockInfo"
+          @toggle-resolved="toggleResolved"
+        />
+
+        <button
+          v-if="canToggleCap"
+          type="button"
+          class="thread-list__toggle"
+          data-testid="thread-list-show-all"
+          @click="setShowAll(!showAll)"
+        >
+          {{ showAll ? 'Show fewer' : `Show all (${openThreads.length})` }}
+        </button>
+
+        <section v-if="resolvedThreads.length" class="thread-list__resolved" data-testid="thread-list-resolved">
+          <button
+            type="button"
+            class="thread-list__resolved-toggle"
+            :aria-expanded="resolvedExpanded ? 'true' : 'false'"
+            data-testid="thread-list-resolved-toggle"
+            @click="setResolvedOpen(!resolvedOpen)"
+          >
+            <v-icon size="16">{{ resolvedExpanded ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+            Resolved ({{ resolvedThreads.length }})
+          </button>
+
+          <template v-if="resolvedExpanded">
+            <ThreadCard
+              v-for="thread in resolvedThreads"
+              :key="thread.thread_id"
+              :thread="decorate(thread)"
+              :selected="commHub.selectedThreadId === thread.thread_id"
+              @open="onSelect"
+              @rename="onRename"
+              @copy="onCopyThreadId"
+              @delete="onRequestDelete"
+              @lock-info="onLockInfo"
+              @toggle-resolved="toggleResolved"
+            />
+          </template>
+        </section>
+      </template>
     </div>
 
     <BaseDialog
@@ -59,11 +108,15 @@ import { useToast } from '@/composables/useToast'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ThreadCard from '@/components/hub/ThreadCard.vue'
+import { OPEN_THREAD_CAP, useThreadListFold } from '@/components/hub/useThreadListFold'
+import { useThreadProjectBadges } from '@/components/hub/useThreadProjectBadges'
+import { useThreadResolve } from '@/components/hub/useThreadResolve'
 
 const commHub = useCommHubStore()
 const userStore = useUserStore()
 const { copy } = useClipboard()
 const { showToast } = useToast()
+const { toggleResolved } = useThreadResolve()
 
 const emit = defineEmits(['select'])
 
@@ -76,6 +129,9 @@ const props = defineProps({
   search: { type: String, default: '' },
   sort: { type: String, default: 'activity' },
 })
+
+const searchResults = ref(null)
+let searchDebounce = null
 
 const scopedThreads = computed(() => {
   if (searchResults.value !== null) return searchResults.value
@@ -102,15 +158,48 @@ const displayThreads = computed(() => {
   return [...exact, ...rows.filter((t) => aliasSerial(t.chat_id) !== serial)]
 })
 
+const TERMINAL = new Set(['resolved', 'closed'])
+const isTerminal = (t) => TERMINAL.has(String(t.status || '').toLowerCase())
+
+const { showAll, resolvedOpen, setShowAll, setResolvedOpen } = useThreadListFold()
+const searching = computed(() => searchResults.value !== null)
+const openThreads = computed(() => displayThreads.value.filter((t) => !isTerminal(t)))
+const resolvedThreads = computed(() => displayThreads.value.filter(isTerminal))
+
+const selectedPastCap = computed(() => {
+  const id = commHub.selectedThreadId
+  return !!id && openThreads.value.findIndex((t) => t.thread_id === id) >= OPEN_THREAD_CAP
+})
+const selectedInResolved = computed(() => {
+  const id = commHub.selectedThreadId
+  return !!id && resolvedThreads.value.some((t) => t.thread_id === id)
+})
+
+const capped = computed(() => !(showAll.value || searching.value || selectedPastCap.value))
+const visibleOpenThreads = computed(() =>
+  capped.value ? openThreads.value.slice(0, OPEN_THREAD_CAP) : openThreads.value,
+)
+const canToggleCap = computed(() => !searching.value && openThreads.value.length > OPEN_THREAD_CAP)
+const resolvedExpanded = computed(
+  () => resolvedOpen.value || searching.value || selectedInResolved.value,
+)
+
+const visibleThreads = computed(() =>
+  resolvedExpanded.value ? [...visibleOpenThreads.value, ...resolvedThreads.value] : visibleOpenThreads.value,
+)
+const { projectBadgeFor } = useThreadProjectBadges(visibleThreads)
+
 function aliasSerial(value) {
   const m = String(value || '').trim().match(/^(?:cht-?)?(\d{1,9})$/i)
   return m ? Number(m[1]) : null
 }
 
-const TERMINAL = new Set(['resolved', 'closed'])
 function decorate(thread) {
-  const terminal = TERMINAL.has(String(thread.status || '').toLowerCase())
-  return { ...thread, _yourTurn: !terminal && thread.next_action_owner === userStore.currentUser?.id }
+  return {
+    ...thread,
+    ...projectBadgeFor(thread),
+    _yourTurn: !isTerminal(thread) && thread.next_action_owner === userStore.currentUser?.id,
+  }
 }
 
 function onSelect(threadId) {
@@ -168,8 +257,6 @@ async function onConfirmDelete() {
   }
 }
 
-const searchResults = ref(null)
-let searchDebounce = null
 
 watch(
   () => props.search,
@@ -205,6 +292,32 @@ onBeforeUnmount(() => clearTimeout(searchDebounce))
     gap: 12px;
     max-width: 1120px;
     align-content: flex-start;
+  }
+
+  &__toggle,
+  &__resolved-toggle {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    border-radius: $border-radius-md;
+    color: var(--text-secondary);
+    font-size: 0.8125rem; // 13
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover { color: $color-text-primary; }
+    &:focus-visible { outline: 2px solid $color-brand-yellow; outline-offset: 2px; }
+  }
+
+  &__resolved {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: v.$spacing-sm;
   }
 
   &__empty {

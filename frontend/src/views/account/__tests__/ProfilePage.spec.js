@@ -32,15 +32,22 @@ vi.mock('@/services/setupService', () => ({
 }))
 
 const logoutMock = vi.fn()
+const storeState = { currentUser: null }
+function freshUser() {
+  return {
+    id: 'user-1',
+    username: 'solo',
+    first_name: 'Solo',
+    last_name: 'Admin',
+    full_name: 'Solo Admin',
+    email: 'solo@example.com',
+    role: 'admin',
+  }
+}
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
-    currentUser: {
-      id: 'user-1',
-      username: 'solo',
-      first_name: 'Solo',
-      last_name: 'Admin',
-      email: 'solo@example.com',
-      role: 'admin',
+    get currentUser() {
+      return storeState.currentUser
     },
     currentOrg: { name: 'My Workspace' },
     orgRole: 'owner',
@@ -81,6 +88,7 @@ async function mountPage() {
 describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
   beforeEach(() => {
     modeRef.value = 'ce'
+    storeState.currentUser = freshUser()
     changePasswordMock.mockReset()
     updateUserMock.mockReset()
     showToastMock.mockClear()
@@ -160,5 +168,38 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
 
     expect(updateUserMock).toHaveBeenCalledTimes(1)
     expect(updateUserMock).toHaveBeenCalledWith('user-1', { recovery_pin: '1234' })
+  })
+
+  it('clearing the last name sends "" and the store follows the server', async () => {
+    updateUserMock.mockResolvedValue({
+      data: { first_name: 'Solo', last_name: null, full_name: 'Solo', email: 'solo@example.com' },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.form.last_name = '   '
+    await wrapper.vm.save()
+    await flushPromises()
+
+    expect(updateUserMock).toHaveBeenCalledTimes(1)
+    expect(updateUserMock).toHaveBeenCalledWith('user-1', { first_name: 'Solo', last_name: '' })
+    expect(storeState.currentUser.last_name).toBeNull()
+    expect(storeState.currentUser.full_name).toBe('Solo')
+  })
+
+  it('updates the store from the server response, not from what was typed', async () => {
+    updateUserMock.mockResolvedValue({
+      data: { first_name: 'Ada', last_name: 'Byron', full_name: 'Ada Byron', email: 'solo@example.com' },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.form.first_name = ' Ada '
+    wrapper.vm.form.last_name = 'byron (typed)'
+    await wrapper.vm.save()
+    await flushPromises()
+
+    expect(updateUserMock).toHaveBeenCalledWith('user-1', { first_name: 'Ada', last_name: 'byron (typed)' })
+    expect(storeState.currentUser.first_name).toBe('Ada')
+    expect(storeState.currentUser.last_name).toBe('Byron')
+    expect(storeState.currentUser.full_name).toBe('Ada Byron')
   })
 })

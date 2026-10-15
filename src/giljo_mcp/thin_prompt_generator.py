@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, orchestrator_placeholder_mission
 from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
 from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
 from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
@@ -345,7 +345,7 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
                 f"(no active orchestrator found)"
             )
 
-            placeholder_mission = project.mission or f"Orchestrator mission for project: {project.name}"
+            placeholder_mission = project.mission or orchestrator_placeholder_mission(project.name)
             orchestrator_id = str(uuid4())
             agent_id = str(uuid4())
 

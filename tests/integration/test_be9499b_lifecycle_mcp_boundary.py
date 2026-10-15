@@ -178,7 +178,7 @@ class TestReverseGearMcpBoundary:
 
         try:
             async with client() as mcp_session:
-                result = await mcp_session.call_tool("stage_project", {"project_id": project_id, "action": "unstage"})
+                result = await mcp_session.call_tool("unstage_project", {"project_id": project_id})
             assert not result.is_error, f"unstage must succeed: {result.content!r}"
 
             async with db_manager.get_session_async(tenant_key=tenant_key) as verify:
@@ -188,7 +188,7 @@ class TestReverseGearMcpBoundary:
         finally:
             await _cleanup(db_manager, tenant_key)
 
-    async def test_restage_resets_staging_and_mints_fresh_orchestrator(self, be9499b_client, db_manager):
+    async def test_unstage_from_staging_resets_and_mints_fresh_orchestrator(self, be9499b_client, db_manager):
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 
@@ -209,8 +209,8 @@ class TestReverseGearMcpBoundary:
 
         try:
             async with client() as mcp_session:
-                result = await mcp_session.call_tool("stage_project", {"project_id": project_id, "action": "restage"})
-            assert not result.is_error, f"restage must succeed: {result.content!r}"
+                result = await mcp_session.call_tool("unstage_project", {"project_id": project_id})
+            assert not result.is_error, f"unstage from staging must succeed: {result.content!r}"
 
             async with db_manager.get_session_async(tenant_key=tenant_key) as verify:
                 project = (await verify.execute(select(Project).where(Project.id == project_id))).scalar_one()
@@ -219,11 +219,11 @@ class TestReverseGearMcpBoundary:
                 )
             assert project.staging_status is None
             assert project.mission == ""
-            assert len(fixtures) == 1, "restage must mint a fresh orchestrator fixture"
+            assert len(fixtures) == 1, "unstage from staging must mint a fresh orchestrator fixture"
         finally:
             await _cleanup(db_manager, tenant_key)
 
-    async def test_cancel_staging_cancels_the_project(self, be9499b_client, db_manager):
+    async def test_update_project_cancelled_abandons_a_staging_project(self, be9499b_client, db_manager):
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 
@@ -245,9 +245,9 @@ class TestReverseGearMcpBoundary:
         try:
             async with client() as mcp_session:
                 result = await mcp_session.call_tool(
-                    "stage_project", {"project_id": project_id, "action": "cancel_staging"}
+                    "update_project", {"project_id": project_id, "status": "cancelled"}
                 )
-            assert not result.is_error, f"cancel_staging must succeed: {result.content!r}"
+            assert not result.is_error, f"cancelling must succeed: {result.content!r}"
 
             async with db_manager.get_session_async(tenant_key=tenant_key) as verify:
                 project = (await verify.execute(select(Project).where(Project.id == project_id))).scalar_one()
@@ -255,7 +255,7 @@ class TestReverseGearMcpBoundary:
         finally:
             await _cleanup(db_manager, tenant_key)
 
-    async def test_invalid_action_is_refused(self, be9499b_client, db_manager):
+    async def test_unknown_action_on_stage_project_is_refused(self, be9499b_client, db_manager):
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 

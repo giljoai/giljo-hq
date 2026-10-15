@@ -133,12 +133,12 @@ async def test_call_on_a_project_with_a_stale_orchestrator_carries_the_board_lin
     assert "you" not in board.lower().split()
 
 
-async def test_call_carrying_a_job_id_of_that_project_carries_the_line_too(board_client, db_manager):
+async def test_call_carrying_the_orchestrators_own_job_id_carries_the_line_too(board_client, db_manager):
     new_client, tenant_key = board_client
     ids = await _seed_project(db_manager, tenant_key, orchestrator_status="silent", quiet_minutes=14)
 
     async with new_client() as session:
-        result = await session.call_tool("get_agent_result", {"job_id": ids["implementer_job_id"]})
+        result = await session.call_tool("get_context", {"categories": ["todos"], "job_id": ids["orchestrator_job_id"]})
 
     assert result.is_error is False, _error_text(result)
     assert "Monitoring (2 agents running)" in _payload(result)["_meta"]["board"]

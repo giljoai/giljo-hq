@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
-import { usePlayButton } from './usePlayButton'
+import { usePlayButton, startChainMemberThenCopyPrompt } from './usePlayButton'
 import { api } from '@/services/api'
 
 const mockShowToast = vi.fn()
@@ -300,31 +300,30 @@ describe('usePlayButton — chain member (FE-9629)', () => {
     vi.clearAllMocks()
   })
 
-  it('renders the play button for the member at the current index, despite staging not being complete', () => {
-    const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip } = usePlayButton(
-      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
-    )
-    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(true)
-    expect(isPlayButtonFaded(ORCHESTRATOR)).toBe(false)
-    expect(playButtonTooltip(ORCHESTRATOR)).toBe('Copy prompt')
+  it('offers no start on the orchestrator row of the current member', () => {
+    const { shouldShowCopyButton } = usePlayButton({ project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0))
+    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(false)
   })
 
-  it('renders a FADED button naming the predecessor for a member whose turn has not come', () => {
-    const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip } = usePlayButton(
-      { project_id: 'p2' }, getProjectState, clipboardCopy, chainCtx(0),
+  it('offers the recovery copy on the current member once it launched', () => {
+    getProjectState = vi.fn(() => ({ stagingComplete: false, implementationLaunched: true, execution_mode: 'multi_terminal' }))
+    const { shouldShowCopyButton, isPlayButtonFaded, canReplay } = usePlayButton(
+      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
     )
     expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(true)
     expect(isPlayButtonFaded(ORCHESTRATOR)).toBe(true)
-    expect(playButtonTooltip(ORCHESTRATOR)).toBe('Starts after FE-9640 closes out')
+    expect(canReplay(ORCHESTRATOR)).toBe(true)
   })
 
-  it('handlePlay launches THIS member and copies ITS OWN orchestrator prompt', async () => {
-    api.prompts.chainMember.mockResolvedValue({ data: { prompt: 'MEMBER 1 BOOTSTRAP' } })
-    const { handlePlay } = usePlayButton(
-      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
-    )
+  it('offers nothing on a member whose turn has not come, launched or not', () => {
+    getProjectState = vi.fn(() => ({ implementationLaunched: true, execution_mode: 'multi_terminal' }))
+    const { shouldShowCopyButton } = usePlayButton({ project_id: 'p2' }, getProjectState, clipboardCopy, chainCtx(0))
+    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(false)
+  })
 
-    await handlePlay(ORCHESTRATOR)
+  it('startChainMemberThenCopyPrompt opens THIS member gate, then copies ITS OWN orchestrator prompt', async () => {
+    api.prompts.chainMember.mockResolvedValue({ data: { prompt: 'MEMBER 1 BOOTSTRAP' } })
+    await expect(startChainMemberThenCopyPrompt({ projectId: 'p1', clipboardCopy, showToast: mockShowToast })).resolves.toBe(true)
 
     expect(api.projects.launchImplementation).toHaveBeenCalledWith('p1')
     expect(api.prompts.chainMember).toHaveBeenCalledWith('p1')
@@ -336,29 +335,14 @@ describe('usePlayButton — chain member (FE-9629)', () => {
     expect(launchOrder).toBeLessThan(fetchOrder)
   })
 
-  it('handlePlay does nothing at all for a member whose turn has not come', async () => {
-    const { handlePlay } = usePlayButton(
-      { project_id: 'p2' }, getProjectState, clipboardCopy, chainCtx(0),
-    )
-
-    await handlePlay(ORCHESTRATOR)
-
-    expect(api.projects.launchImplementation).not.toHaveBeenCalled()
-    expect(api.prompts.chainMember).not.toHaveBeenCalled()
-    expect(clipboardCopy).not.toHaveBeenCalled()
-  })
-
-  it('surfaces the server refusal verbatim when the launch is rejected', async () => {
+  it('startChainMemberThenCopyPrompt surfaces the server refusal verbatim and copies nothing', async () => {
     api.projects.launchImplementation.mockRejectedValueOnce({
       response: { data: { message: 'Cannot start this chain member yet: FE-9640 is still open.' } },
     })
-    const { handlePlay } = usePlayButton(
-      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
-    )
-
-    await handlePlay(ORCHESTRATOR)
+    await expect(startChainMemberThenCopyPrompt({ projectId: 'p1', clipboardCopy, showToast: mockShowToast })).resolves.toBe(false)
 
     expect(api.prompts.chainMember).not.toHaveBeenCalled()
+    expect(clipboardCopy).not.toHaveBeenCalled()
     expect(mockShowToast).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'error', message: expect.stringContaining('FE-9640') }),
     )

@@ -17,7 +17,7 @@ from giljo_mcp.system_prompts.service import SystemPromptService
 from giljo_mcp.template_seeder import compose_orchestrator_identity
 
 
-TENANT_TEXT = "TENANT-WIDE orchestrator seed for BE-9385d."
+OTHER_PRODUCT_TEXT = "ANOTHER PRODUCT's orchestrator seed for BE-9385d."
 PRODUCT_TEXT = "PRODUCT-SCOPED orchestrator seed for BE-9385d."
 MEMBER_PROJECT_ID = "proj-be9385d-member"
 
@@ -59,13 +59,16 @@ def _project_row(product_id: str | None):
     )
 
 
-async def _seed_overrides(db_manager, db_session, tenant_key, *, product_id=None, tenant=True, product=False):
+async def _seed_overrides(db_manager, db_session, tenant_key, *, product_id=None):
     service = SystemPromptService(db_manager=db_manager)
-    if tenant:
-        await service.update_orchestrator_prompt(
-            tenant_key=tenant_key, content=TENANT_TEXT, updated_by="admin", session=db_session
-        )
-    if product:
+    await service.update_orchestrator_prompt(
+        tenant_key=tenant_key,
+        content=OTHER_PRODUCT_TEXT,
+        updated_by="admin",
+        product_id=str(uuid.uuid4()),
+        session=db_session,
+    )
+    if product_id:
         await service.update_orchestrator_prompt(
             tenant_key=tenant_key,
             content=PRODUCT_TEXT,
@@ -80,7 +83,7 @@ async def _seed_overrides(db_manager, db_session, tenant_key, *, product_id=None
 class TestProjectBoundOrchestratorIdentity:
     async def test_member_orchestrator_gets_its_products_override(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         svc = _make_mission_service(db_manager, project_row=_project_row(product_id))
         identity, _status, _source, _template = await svc._resolve_mission_template(
@@ -88,24 +91,25 @@ class TestProjectBoundOrchestratorIdentity:
         )
 
         assert PRODUCT_TEXT in identity
-        assert TENANT_TEXT not in identity
+        assert OTHER_PRODUCT_TEXT not in identity
 
-    async def test_falls_back_to_tenant_override_byte_identically(self, db_manager, db_session, test_tenant_key):
+    async def test_a_products_saved_text_is_served_byte_identically(self, db_manager, db_session, test_tenant_key):
         from giljo_mcp.services.mission_service import _EXECUTION_MODE_TO_TOOL
 
-        await _seed_overrides(db_manager, db_session, test_tenant_key, tenant=True, product=False)
+        product_id = str(uuid.uuid4())
+        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id)
 
-        svc = _make_mission_service(db_manager, project_row=_project_row(str(uuid.uuid4())))
+        svc = _make_mission_service(db_manager, project_row=_project_row(product_id))
         identity, _status, _source, _template = await svc._resolve_mission_template(
             db_session, _orchestrator_job(project_id=MEMBER_PROJECT_ID), _execution(), test_tenant_key
         )
 
         expected_tool = _EXECUTION_MODE_TO_TOOL.get("multi_terminal", "multi_terminal")
         composed, _, source_line = identity.rpartition("\n\n")
-        assert composed == compose_orchestrator_identity(TENANT_TEXT, tool=expected_tool)
-        assert source_line.startswith("identity source: tenant-wide override, saved ")
+        assert composed == compose_orchestrator_identity(PRODUCT_TEXT, tool=expected_tool)
+        assert source_line.startswith("identity source: product override, saved ")
 
-    async def test_seed_used_when_no_override_at_any_rung(self, db_manager, db_session, test_tenant_key):
+    async def test_seed_used_when_the_product_has_no_override(self, db_manager, db_session, test_tenant_key):
         from giljo_mcp.services.mission_service import _EXECUTION_MODE_TO_TOOL
 
         svc = _make_mission_service(db_manager, project_row=_project_row(str(uuid.uuid4())))
@@ -118,31 +122,35 @@ class TestProjectBoundOrchestratorIdentity:
         assert composed == compose_orchestrator_identity(None, tool=expected_tool)
         assert source_line == "identity source: built-in default"
 
-    async def test_project_without_a_product_uses_the_tenant_rung(self, db_manager, db_session, test_tenant_key):
-        await _seed_overrides(db_manager, db_session, test_tenant_key, tenant=True, product=False)
+    async def test_project_without_a_product_gets_the_built_in_prompt(self, db_manager, db_session, test_tenant_key):
+        await _seed_overrides(db_manager, db_session, test_tenant_key)
 
         svc = _make_mission_service(db_manager, project_row=_project_row(None))
         identity, _status, _source, _template = await svc._resolve_mission_template(
             db_session, _orchestrator_job(project_id=MEMBER_PROJECT_ID), _execution(), test_tenant_key
         )
-        assert TENANT_TEXT in identity
+        assert OTHER_PRODUCT_TEXT not in identity
+        assert identity.endswith("identity source: built-in default")
 
-    async def test_unusable_product_id_still_yields_the_tenant_override(self, db_manager, db_session, test_tenant_key):
-        await _seed_overrides(db_manager, db_session, test_tenant_key, tenant=True, product=False)
+    async def test_unusable_product_id_degrades_to_the_built_in_prompt_without_raising(
+        self, db_manager, db_session, test_tenant_key
+    ):
+        await _seed_overrides(db_manager, db_session, test_tenant_key)
 
         svc = _make_mission_service(db_manager, project_row=_project_row("not-a-uuid"))
         identity, _status, _source, _template = await svc._resolve_mission_template(
             db_session, _orchestrator_job(project_id=MEMBER_PROJECT_ID), _execution(), test_tenant_key
         )
-        assert TENANT_TEXT in identity, "a malformed product id must not cost the tenant its override"
+        assert OTHER_PRODUCT_TEXT not in identity
+        assert identity.endswith("identity source: built-in default")
 
 
 @pytest.mark.asyncio
 class TestProjectLessConductorIdentity:
 
-    async def test_conductor_resolves_the_same_rung_as_its_member(self, db_manager, db_session, test_tenant_key):
+    async def test_conductor_resolves_the_same_override_as_its_member(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         job = _orchestrator_job(project_id=MEMBER_PROJECT_ID)
         execution = _execution()
@@ -168,14 +176,14 @@ class TestProjectLessConductorIdentity:
 
         assert PRODUCT_TEXT in member_identity
         assert PRODUCT_TEXT in conductor_identity, (
-            "the project-less conductor fell through to a different rung than its members -- "
+            "the project-less conductor fell through to a different override than its members -- "
             "this is premortem #4, an inconsistent chain persona"
         )
-        assert TENANT_TEXT not in conductor_identity
+        assert OTHER_PRODUCT_TEXT not in conductor_identity
 
-    async def test_conductor_with_no_active_run_uses_the_tenant_rung(self, db_manager, db_session, test_tenant_key):
+    async def test_conductor_with_no_active_run_gets_the_built_in_prompt(self, db_manager, db_session, test_tenant_key):
         product_id = str(uuid.uuid4())
-        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
+        await _seed_overrides(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         svc = _make_mission_service(db_manager, project_row=_project_row(product_id))
         with patch("giljo_mcp.services.sequence_run_service.SequenceRunService") as run_cls:
@@ -189,13 +197,14 @@ class TestProjectLessConductorIdentity:
                 chain_execution_mode="multi_terminal",
             )
 
-        assert TENANT_TEXT in identity
         assert PRODUCT_TEXT not in identity
+        assert OTHER_PRODUCT_TEXT not in identity
+        assert identity.endswith("identity source: built-in default")
 
     async def test_product_resolution_failure_never_breaks_identity_delivery(
         self, db_manager, db_session, test_tenant_key
     ):
-        await _seed_overrides(db_manager, db_session, test_tenant_key, tenant=True, product=False)
+        await _seed_overrides(db_manager, db_session, test_tenant_key)
 
         svc = _make_mission_service(db_manager, project_row=_project_row(None))
         with patch("giljo_mcp.services.sequence_run_service.SequenceRunService") as run_cls:
@@ -211,4 +220,5 @@ class TestProjectLessConductorIdentity:
                 chain_execution_mode="multi_terminal",
             )
 
-        assert TENANT_TEXT in identity, "a failed product resolution must degrade, not propagate"
+        assert OTHER_PRODUCT_TEXT not in identity
+        assert identity.endswith("identity source: built-in default"), "a failed product resolution must degrade"

@@ -31,6 +31,10 @@ PROJECT_NOT_STAGED_HINT = (
     "To implement this project, call stage_project(project_id, mode). The server pauses "
     "you at staging for the user's go; then launch_implementation."
 )
+PROJECT_STAGING_HINT = (
+    "Staging is in progress: the orchestrator continues with get_staging_instructions(job_id) "
+    "and ends it with complete_job. To start staging over, call unstage_project(project_id)."
+)
 PROJECT_AWAITING_GO_HINT = "Staging is complete. Wait for the user's go, then call launch_implementation(project_id)."
 PROJECT_IN_FLIGHT_HINT = "Implementation is in flight. Report with report_progress; finish with write_project_closeout."
 PROJECT_AWAITING_USER_HINT = (
@@ -65,6 +69,8 @@ def project_next_action(
         return build_next_action(tool="report_progress", why=PROJECT_IN_FLIGHT_HINT)
     if staging_status == STAGING_COMPLETE:
         return build_next_action(tool="launch_implementation", why=PROJECT_AWAITING_GO_HINT)
+    if staging_status:
+        return build_next_action(tool="get_staging_instructions", why=PROJECT_STAGING_HINT)
     return build_next_action(tool="stage_project", why=PROJECT_NOT_STAGED_HINT)
 
 

@@ -278,6 +278,41 @@ class AgentJobRepository:
 
         return job, list(executions)
 
+    async def find_in_flight_executions(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        job_id: str,
+    ) -> list[AgentExecution]:
+        result = await session.execute(
+            select(AgentExecution).where(
+                AgentExecution.tenant_key == tenant_key,
+                AgentExecution.job_id == job_id,
+                AgentExecution.status.notin_(TERMINAL_EXECUTION_STATUSES),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def decommission_job_with_executions(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        job_id: str,
+        in_flight: list[AgentExecution],
+    ) -> None:
+        now = datetime.now(UTC)
+        for execution in in_flight:
+            execution.status = "decommissioned"
+            execution.completed_at = now
+        job_result = await session.execute(
+            select(AgentJob).where(AgentJob.job_id == job_id, AgentJob.tenant_key == tenant_key)
+        )
+        job = job_result.scalar_one_or_none()
+        if job is not None and job.status == "active":
+            job.status = "cancelled"
+            job.completed_at = now
+        await session.flush()
+
     async def list_team_executions(
         self,
         session: AsyncSession,

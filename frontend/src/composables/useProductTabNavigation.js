@@ -1,7 +1,6 @@
 import { useRoute, useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
 import { useProjectStore } from '@/stores/projects'
-import { useProductActivityStore } from '@/stores/productActivityStore'
 
 const PROJECT_SCOPED_ROUTES = new Set(['ProjectLaunch'])
 
@@ -10,7 +9,6 @@ export function useProductTabNavigation() {
   const router = useRouter()
   const productStore = useProductStore()
   const projectStore = useProjectStore()
-  const productActivityStore = useProductActivityStore()
 
   function routeLeavesProduct(nextProductId) {
     if (!PROJECT_SCOPED_ROUTES.has(route.name)) return false
@@ -24,7 +22,6 @@ export function useProductTabNavigation() {
     const detailRoute = route.name === 'ProductDetail' && route.params.id !== productId
 
     await productStore.switchTab(productId)
-    productActivityStore.clearActivity(productId)
 
     if (detailRoute) {
       await router.push({ name: 'ProductDetail', params: { id: productId } })

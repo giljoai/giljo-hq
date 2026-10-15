@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick, ref } from 'vue'
 
+const USER_ID = 'user-001'
+vi.mock('@/stores/user', () => ({
+  useUserStore: () => ({ currentUser: { id: USER_ID, tenant_key: 'tenant-abc' } }),
+}))
+
 const mockYourTurnThreads = ref([])
 vi.mock('./useYourTurnThreads', () => ({
   useYourTurnThreads: () => ({
@@ -43,7 +48,7 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('closes a baton popout once the baton no longer points at the operator', async () => {
-    const tag = popoutTag(BATON_FOCUS, 'thread-1')
+    const tag = popoutTag(BATON_FOCUS, 'thread-1', USER_ID)
     const popout = fakePopout()
 
     mockYourTurnThreads.value = [{ thread_id: 'thread-1', next_action_owner: 'user-001' }]
@@ -61,7 +66,7 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('keeps a MENTION popout while the mention is unread, and closes it when it clears', async () => {
-    const tag = popoutTag(MENTION_FOCUS, 'thread-3')
+    const tag = popoutTag(MENTION_FOCUS, 'thread-3', USER_ID)
     const popout = fakePopout()
 
     mockMentions.value = [{ thread_id: 'thread-3', message_ids: ['m1'] }]
@@ -79,7 +84,7 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('keeps a DIRECTED action-request popout while it is unresolved, and closes it on acknowledgement', async () => {
-    const tag = popoutTag(APPROVAL_FOCUS, 'thread-7')
+    const tag = popoutTag(APPROVAL_FOCUS, 'thread-7', USER_ID)
     const popout = fakePopout()
 
     mockDirectedAsks.value = [{ thread_id: 'thread-7' }]
@@ -96,8 +101,8 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('does not close a baton popout for a DIFFERENT thread that is still live', async () => {
-    const goneTag = popoutTag(BATON_FOCUS, 'thread-gone')
-    const liveTag = popoutTag(BATON_FOCUS, 'thread-live')
+    const goneTag = popoutTag(BATON_FOCUS, 'thread-gone', USER_ID)
+    const liveTag = popoutTag(BATON_FOCUS, 'thread-live', USER_ID)
     const gone = fakePopout()
     const live = fakePopout()
 
@@ -115,8 +120,8 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('does not cross the reasons: a mention clearing leaves that thread\'s baton popout alone', async () => {
-    const batonTag = popoutTag(BATON_FOCUS, 'thread-9')
-    const mentionTag = popoutTag(MENTION_FOCUS, 'thread-9')
+    const batonTag = popoutTag(BATON_FOCUS, 'thread-9', USER_ID)
+    const mentionTag = popoutTag(MENTION_FOCUS, 'thread-9', USER_ID)
     const baton = fakePopout()
     const mention = fakePopout()
 
@@ -135,8 +140,8 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('survives a popout whose close() throws -- one bad handle cannot strand the rest', async () => {
-    const throwingTag = popoutTag(BATON_FOCUS, 'thread-throws')
-    const okTag = popoutTag(BATON_FOCUS, 'thread-ok')
+    const throwingTag = popoutTag(BATON_FOCUS, 'thread-throws', USER_ID)
+    const okTag = popoutTag(BATON_FOCUS, 'thread-ok', USER_ID)
     const throwing = {
       close: vi.fn(() => {
         throw new Error('handle is dead')
@@ -159,8 +164,8 @@ describe('FE-9553 ruling 4(c): a popout dies with its banner', () => {
   })
 
   it('CLOSES NOTHING while the state is merely UNLOADED', async () => {
-    const batonTag = popoutTag(BATON_FOCUS, 'thread-1')
-    const mentionTag = popoutTag(MENTION_FOCUS, 'thread-2')
+    const batonTag = popoutTag(BATON_FOCUS, 'thread-1', USER_ID)
+    const mentionTag = popoutTag(MENTION_FOCUS, 'thread-2', USER_ID)
     const baton = fakePopout()
     const mention = fakePopout()
 

@@ -108,6 +108,20 @@ class AgentJob(Base):
 
 TERMINAL_EXECUTION_STATUSES: tuple[str, ...] = ("complete", "closed", "decommissioned")
 
+_ORCHESTRATOR_PLACEHOLDER_PREFIX = "Orchestrator mission for project: "
+_LEGACY_FIXTURE_PLACEHOLDER_PREFIX = "Orchestrator for project: "
+
+
+def orchestrator_placeholder_mission(project_name: str) -> str:
+    return f"{_ORCHESTRATOR_PLACEHOLDER_PREFIX}{project_name}"
+
+
+def is_orchestrator_placeholder_mission(mission: str | None) -> bool:
+    return not mission or (
+        mission.startswith((_ORCHESTRATOR_PLACEHOLDER_PREFIX, _LEGACY_FIXTURE_PLACEHOLDER_PREFIX))
+        and "\n" not in mission
+    )
+
 
 class AgentExecution(Base):
 

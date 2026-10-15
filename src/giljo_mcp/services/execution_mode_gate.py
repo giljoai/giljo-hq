@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import GateRefusalError
 from giljo_mcp.platform_registry import VALID_EXECUTION_MODES, mode_label_list
 
 
@@ -47,7 +47,7 @@ def execution_mode_selected(project: Any) -> bool:
 
 def require_execution_mode(project: Any, project_id: str, tenant_key: str) -> None:
     if not execution_mode_selected(project):
-        raise ValidationError(
+        raise GateRefusalError(
             message=execution_mode_not_selected_message(getattr(project, "name", None)),
             error_code="EXECUTION_MODE_NOT_SELECTED",
             context={"project_id": project_id, "tenant_key": tenant_key},

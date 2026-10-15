@@ -6,13 +6,11 @@
 
 from __future__ import annotations
 
-import logging
 import re
+import textwrap
 
 from giljo_mcp.platform_registry import giljo_invocation, is_subagent_render
-
-
-logger = logging.getLogger(__name__)
+from giljo_mcp.services.memory_entry_write_validator import CONTROLLED_TAG_VOCABULARY
 
 
 def render_capability_ladder(
@@ -85,7 +83,7 @@ _SUBORCH_PHASE1_NOTE = (
     "CH_SUB_ORCHESTRATOR step 5 above is your AUTHORITATIVE implementation entry: after\n"
     "staging-end you call `get_job_mission` ONCE (without your boot `protocol_etag`) and it flips\n"
     "you waiting→working and returns this implementation protocol. There is NO human Implement\n"
-    "click, you do NOT wait for the user to start agents, and you do NOT return to the\n"
+    "click, you do NOT wait for the user to start agents, and you do NOT wait on the\n"
     "dashboard — the solo multi_terminal startup that says otherwise does NOT apply to a chain\n"
     "member. On entry: read `current_team_state` from this response (live-queried) and your\n"
     "pre-planned coordination TODOs (written during staging — do NOT drop any items), then\n"
@@ -153,34 +151,57 @@ def trim_embedded_protocol_for_chain(protocol: str, role: str, phase: str | None
     return protocol
 
 
-_CHAIN_MISSION_PI_HEADER = re.compile(r"(?m)^#{1,6}\s*P_(\d+)\b")
+_CHAIN_MISSION_PI_HEADER = re.compile(r"(?m)^#{1,6}\s*P_?(\d+)\b")
+_MARKDOWN_HEADER = re.compile(r"(?m)^#{1,6}\s.*$")
 
 
-def slice_chain_mission_for_position(chain_mission: str, position: int) -> str:
+def find_chain_mission_block(chain_mission: str, position: int, project_id: str | None = None) -> str | None:
     if not chain_mission:
-        return chain_mission
-    headers = list(_CHAIN_MISSION_PI_HEADER.finditer(chain_mission))
-    if not headers:
-        return chain_mission
-    for idx, match in enumerate(headers):
-        if int(match.group(1)) == position:
-            start = match.start()
-            end = headers[idx + 1].start() if idx + 1 < len(headers) else len(chain_mission)
-            return chain_mission[start:end].rstrip()
-    logger.warning(
-        "chain_mission has P_i headers but none for position %d; shipping the whole mission (tolerance).",
-        position,
+        return None
+    headers = list(_MARKDOWN_HEADER.finditer(chain_mission))
+    own = next(
+        (h for h in headers if (m := _CHAIN_MISSION_PI_HEADER.match(h.group(0))) and int(m.group(1)) == position),
+        None,
     )
-    return chain_mission
+    if own is None and project_id:
+        own = next((h for h in headers if project_id in h.group(0)), None)
+    if own is None:
+        return None
+    level = len(own.group(0)) - len(own.group(0).lstrip("#"))
+    end = len(chain_mission)
+    for h in headers:
+        if h.start() > own.start() and len(h.group(0)) - len(h.group(0).lstrip("#")) <= level:
+            end = h.start()
+            break
+    return chain_mission[own.start() : end].rstrip()
 
 
 _GIT_CONSTRAINT_SELF_ADOPT = """- **Git commit requirement does NOT apply *while you are delegating*.** When you SPAWN a
-  worker, IT commits its work and you coordinate — you do not commit on its behalf. But a job
-  you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
-  its work (git add the specific files; NEVER git add -A) before complete_job, exactly as the
-  worker protocol requires."""
-_GIT_CONSTRAINT_CONDUCTOR = (
-    "- **Git commit requirement does NOT apply.** You only delegate — each project's own workers commit their work."
+  worker, IT commits its work and you coordinate — you do not commit on its behalf. A job you
+  SELF-ADOPT (only when your harness has no spawn mechanism at all)
+  carries that worker's commit duty: commit its work (git add the specific files;
+  NEVER git add -A) before complete_job, exactly as the worker protocol requires."""
+_GIT_CONSTRAINT_SUBAGENT = """- **You are the committer (subagent mode).** Your workers run in this session and do NOT
+  commit: each lists its changed files in `complete_job(result={"artifacts": [...]})`. Stage
+  those files by name (git add the specific files; NEVER git add -A) and commit once before
+  closeout. A job you SELF-ADOPT (only when your harness has no spawn mechanism at all) is
+  committed the same way."""
+_GIT_WARNING_MULTI_TERMINAL = """This is expected for a PURE coordinator (you only spawned workers — THEY committed) or a
+documentation-only agent, and needs no action THERE. But if you SELF-ADOPTED any job (did the
+implementation yourself in this session), a no-commits warning is a RED FLAG that your own work is
+uncommitted: go back, commit the changed files (git add the specific files; NEVER git add -A) and
+re-verify before closeout."""
+_GIT_WARNING_SUBAGENT = """In subagent mode you are the committer, so on a project that changed
+code a no-commits warning is a RED FLAG that your workers' files are uncommitted: go back, commit
+them (git add the specific files; NEVER git add -A) and re-verify before closeout. A
+documentation-only project needs no action there."""
+_GIT_CONSTRAINT_CONDUCTOR_SUBAGENT = (
+    "- **Git commit requirement does NOT apply.** You only delegate. In this subagent chain each "
+    "project's sub-orchestrator commits once for its project; its workers hand it their files."
+)
+_GIT_CONSTRAINT_CONDUCTOR_MULTI_TERMINAL = (
+    "- **Git commit requirement does NOT apply.** You only delegate. In this multi-terminal chain "
+    "each worker commits its own work in its own tree."
 )
 
 
@@ -189,6 +210,21 @@ def _apply_conductor_body_trims(body: str) -> str:
         body, _WORKER_SPAWN_BLOCK_START, _PROGRESS_REPORTING_ANCHOR, _CONDUCTOR_COORDINATION_NOTE
     )
     return _apply_anchor_slice(body, _PHASE3_CLOSEOUT_START, _ORCHESTRATOR_CONSTRAINTS_ANCHOR, _CONDUCTOR_CLOSEOUT_NOTE)
+
+
+CLOSEOUT_TAG_LIST = ", ".join(sorted(CONTROLLED_TAG_VOCABULARY))
+
+
+CHAIN_DRIVER_MODEL = (
+    "Who starts each project: when a project closes out, the server advances the chain and opens "
+    "the next project's gate. The user (from the dashboard) or the conductor (from its own session) "
+    "starts the next project. A sub-orchestrator runs its own project only and never starts the next "
+    "one. The per-project recovery prompt is for recovery only."
+)
+
+
+def render_chain_driver_model(indent: str) -> str:
+    return textwrap.fill(CHAIN_DRIVER_MODEL, width=88, initial_indent=indent, subsequent_indent=indent)
 
 
 LAUNCH_PROMPT_RULE = (
@@ -239,7 +275,16 @@ def _build_orchestrator_protocol_body(
       `get_job_mission(job_id=<the job_id from step 1>)` so it binds to the record you just created.
     - Multi-terminal: tell the user "Verification agent spawned, start it from the dashboard.\""""
 
-    git_commit_constraint = _GIT_CONSTRAINT_CONDUCTOR if is_chain_conductor else _GIT_CONSTRAINT_SELF_ADOPT
+    if is_chain_conductor:
+        git_commit_constraint = (
+            _GIT_CONSTRAINT_CONDUCTOR_SUBAGENT if is_subagent else _GIT_CONSTRAINT_CONDUCTOR_MULTI_TERMINAL
+        )
+    elif is_subagent:
+        git_commit_constraint = _GIT_CONSTRAINT_SUBAGENT
+    else:
+        git_commit_constraint = _GIT_CONSTRAINT_SELF_ADOPT
+
+    git_warning_expectation = _GIT_WARNING_SUBAGENT if is_subagent else _GIT_WARNING_MULTI_TERMINAL
 
     giljo_cmd = giljo_invocation(tool)
 
@@ -399,11 +444,7 @@ a human-readable `git_unavailable_reason` explaining why. The job still closes c
 list will be empty or contain only agent-supplied hashes. When this happens, include the phrase
 "git not available — commits omitted" in your closeout summary so the audit trail is honest. The
 `git_warning` field covers a separate case: git integration enabled but the agent produced no
-commits. This is expected for a PURE coordinator (you only spawned workers — THEY committed) or a
-documentation-only agent, and needs no action THERE. But if you SELF-ADOPTED any job (did the
-implementation yourself in this session), a no-commits warning is a RED FLAG that your own work is
-uncommitted: go back, commit the changed files (git add the specific files; NEVER git add -A) and
-re-verify before closeout.
+commits. {git_warning_expectation}
 
 **Closeout steps (order matters):**
 > Chain conductor exception: if you are the CONDUCTOR of a sequential multi-project chain with projects still incomplete, do NOT self-complete here — follow CH_CHAIN_DRIVE and ADVANCE to the next project (`launch_implementation`) instead. complete_job is valid only after the final project closes out.
@@ -411,16 +452,16 @@ re-verify before closeout.
 2. `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})` — mark YOUR orchestrator job complete FIRST
    → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
    → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "Needs decision" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{{id}}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
+   → When the closeout has deferred findings, call `request_approval(...)` — you flip to `awaiting_user` and `complete_job` refuses until the user decides. Neither `set_agent_status` nor `report_progress` clears that state. Two doors clear it through one write: the ApprovalCard in the project's CloseoutModal (the dashboard shows only a passive "Needs decision" pill) or `decide_approval(approval_id, option_id)`. If the user answers verbally, call `decide_approval` with their option; if your tenant requires a dashboard decision it refuses, so point the user to the ApprovalCard. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
-4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
+4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag vocabulary: {CLOSEOUT_TAG_LIST}. Unknown tags are rejected.
 5. Tell user: "Project complete. Use `{giljo_cmd}` to create follow-ups or look up existing project/task state."
 
 **IMPORTANT:** You MUST complete your own job (step 2) BEFORE closing the project (step 4). The server requires all agents including the orchestrator to be complete before project closeout.
 
 **If `complete_job()` is rejected:** Read the error. Common causes:
 - Unread messages remain → run get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true) and ACT on the posts — only genuine action-required posts block this gate, and acting on them (then retrying) is the ONLY way through; there is no bypass flag
-- TODO items incomplete �� review and update your TODO list, then retry
+- TODO items incomplete → review and update your TODO list, then retry
 
 ## ORCHESTRATOR CONSTRAINTS
 {git_commit_constraint}

@@ -14,6 +14,9 @@ from giljo_mcp.models.sequence_runs import (
     CHAIN_TERMINAL_PROJECT_STATUSES,
     CHAIN_UNSTARTED_PROJECT_STATUSES,
 )
+from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
+from giljo_mcp.services.agent_job_manager import AgentJobManager
+from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_changed
 
 
 class SequenceRunBackoutMixin:
@@ -50,12 +53,43 @@ class SequenceRunBackoutMixin:
             except (ResourceNotFoundError, ProjectStateError):
                 continue
 
-        return await self.update(
-            run_id=run_id,
-            tenant_key=tenant_key,
-            status="cancelled",
-            project_statuses={**member_statuses, **healed} if healed else None,
-        )
+        return await self._cancel_run_and_retire_conductor(run, {**member_statuses, **healed} if healed else None)
+
+    async def _cancel_run_and_retire_conductor(
+        self, run: dict[str, Any], project_statuses: dict[str, str] | None
+    ) -> dict[str, Any]:
+        from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
+
+        tenant_key = run["tenant_key"]
+        conductor_events = []
+        async with self._get_session(tenant_key) as session:
+            conductor = None
+            if run.get("conductor_agent_id"):
+                conductor = await AgentJobRepository(None).get_execution_by_agent_id(
+                    session, tenant_key, run["conductor_agent_id"]
+                )
+            if conductor is not None:
+                conductor_events = await AgentJobManager(
+                    self.db_manager, self.tenant_manager, test_session=session
+                ).decommission_job(conductor.job_id, tenant_key)
+            stopped = await type(self)(
+                db_manager=self.db_manager,
+                tenant_manager=self.tenant_manager,
+                session=session,
+                websocket_manager=self._websocket_manager,
+            ).update(
+                run_id=run["id"],
+                tenant_key=tenant_key,
+                status="cancelled",
+                project_statuses=project_statuses,
+                defer_broadcast=True,
+            )
+        await broadcast_deferred_sequence_updates(session)
+        for event in conductor_events:
+            await broadcast_agent_status_changed(
+                self._websocket_manager, tenant_key=tenant_key, project_id=None, event=event
+            )
+        return stopped
 
     async def deactivate_chain(
         self,

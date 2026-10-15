@@ -152,6 +152,45 @@ async def _wake_conductor_on_member_closeout(
         return False
 
 
+def _next_member_after(run: dict[str, Any], project_id: str) -> tuple[str | None, int | None]:
+    order: list[str] = run.get("resolved_order") or []
+    if project_id not in order:
+        return None, None
+    next_index = order.index(project_id) + 1
+    if next_index >= len(order):
+        return None, None
+    advance_to = next_index if next_index > (run.get("current_index") or 0) else None
+    return order[next_index], advance_to
+
+
+async def _open_member_gate(session: Any, project_id: str, tenant_key: str, websocket_manager: Any | None) -> None:
+    from sqlalchemy import select
+
+    from giljo_mcp.models.projects import Project
+
+    project = (
+        await session.execute(select(Project).where(Project.id == project_id, Project.tenant_key == tenant_key))
+    ).scalar_one_or_none()
+    if project is None or project.deleted_at is not None or project.implementation_launched_at is not None:
+        return
+    if project.status not in (ProjectStatus.INACTIVE, ProjectStatus.ACTIVE):
+        return
+    launched_at = stamp_launch(project)
+    await session.flush()
+    defer_tenant_event(
+        session,
+        websocket_manager,
+        tenant_key,
+        "project:implementation_launched",
+        {
+            "project_id": project_id,
+            "product_id": project.product_id,
+            "implementation_launched_at": launched_at.isoformat(),
+        },
+    )
+    logger.info("[CHAIN_ADVANCE] opened the gate of next member %s (tenant=%s)", sanitize(project_id), tenant_key)
+
+
 async def mark_chain_member_status(
     *,
     db_manager: Any,
@@ -191,19 +230,28 @@ async def mark_chain_member_status(
         return False
 
     merged_statuses[project_id] = status
+    next_project_id, advance_to = _next_member_after(run, project_id) if status == "completed" else (None, None)
     await svc.update(
         run_id=run["id"],
         tenant_key=tenant_key,
         project_statuses=merged_statuses,
+        current_index=advance_to,
         defer_broadcast=True,
     )
     logger.info(
-        "[CHAIN_MEMBER_STATUS] run=%s project=%s -> %s (tenant=%s)",
+        "[CHAIN_MEMBER_STATUS] run=%s project=%s -> %s (tenant=%s, advanced_to=%s)",
         run["id"],
         sanitize(project_id),
         status,
         tenant_key,
+        advance_to,
     )
+    if next_project_id is not None and test_session is not None:
+        await _open_member_gate(test_session, next_project_id, tenant_key, websocket_manager)
+    elif next_project_id is not None:
+        async with db_manager.get_session_async(tenant_key=tenant_key) as gate_session:
+            await _open_member_gate(gate_session, next_project_id, tenant_key, websocket_manager)
+        await broadcast_deferred_events(gate_session)
 
     conductor_agent_id = run.get("conductor_agent_id")
     if status == "completed" and conductor_agent_id:

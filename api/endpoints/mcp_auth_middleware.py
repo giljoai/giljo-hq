@@ -13,6 +13,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from api.endpoints.auth.session import _resolve_client_ip
 from api.endpoints.mcp_tools import logger
 from api.endpoints.mcp_transport import (
     _DISCOVER_METHOD,
@@ -28,6 +29,7 @@ from api.endpoints.mcp_transport import (
     _replay_receive,
     _send_method_not_allowed,
     _send_raw_status,
+    _stamp_client_name,
     _stamp_declared_profile,
     _stamp_resolved_harness,
     _stamp_resolved_preset,
@@ -39,7 +41,7 @@ from api.endpoints.mcp_transport import (
     announces_client,
 )
 from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scope
-from giljo_mcp.signals import SIGNAL_POST_AUTH_GATE_FAILED, publish_signal
+from giljo_mcp.signals import SIGNAL_ACCOUNT_ACCESS_OBSERVED, SIGNAL_POST_AUTH_GATE_FAILED, publish_signal
 
 
 
@@ -56,6 +58,24 @@ def register_mcp_post_auth_gate(gate: McpPostAuthGate) -> None:
 def clear_mcp_post_auth_gate() -> None:
     global _mcp_post_auth_gate  # noqa: PLW0603
     _mcp_post_auth_gate = None
+
+
+def _announce_agent_access(
+    scope: Scope, request: StarletteRequest, tenant_key: str, user_id: str | None, api_key_id: str | None
+) -> None:
+    if not user_id:
+        return
+    publish_signal(
+        SIGNAL_ACCOUNT_ACCESS_OBSERVED,
+        {
+            "tenant_key": tenant_key,
+            "user_id": user_id,
+            "source_kind": "api_key" if api_key_id else "oauth",
+            "client_ip": _resolve_client_ip(request),
+            "client_name": scope.get("state", {}).get("mcp_client_name"),
+            "surface": "mcp",
+        },
+    )
 
 
 def _initialize_capture(scope: Scope) -> dict[str, Any]:
@@ -268,6 +288,8 @@ class MCPAuthMiddleware:
         if send is None:
             return
 
+        _announce_agent_access(scope, request, tenant_key, user_id, api_key_id)
+
         _stamp_url_profile(scope)
 
         from giljo_mcp.tenant import TenantManager, current_tenant
@@ -342,6 +364,9 @@ class MCPAuthMiddleware:
         auth_method: str | None,
         mcp_session_id: str | None,
     ) -> Send | None:
+        if method in (_DISCOVER_METHOD, _INITIALIZE_METHOD):
+            _stamp_client_name(scope, client_info)
+
         if method == _DISCOVER_METHOD:
             await self._record_announced_client(
                 tenant_key=tenant_key,
@@ -403,6 +428,7 @@ class MCPAuthMiddleware:
                 await _not_found_response("Not Found: Invalid or expired session ID")(scope, request.receive, send)
                 return None
             _stamp_declared_profile(scope, session_row)
+            _stamp_client_name(scope, (session_row.session_data or {}).get("client_info"))
             _stamp_resolved_harness(scope, session_row)
             _stamp_resolved_preset(scope, session_row)
             from api.endpoints.mcp_session import SESSION_EXTEND_DEBOUNCE_SECONDS, SESSION_EXTEND_NS

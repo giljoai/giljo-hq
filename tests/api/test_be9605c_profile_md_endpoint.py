@@ -101,8 +101,9 @@ async def test_profile_md_uses_the_mission_profile_composer(api_client, auth_hea
     async with db_manager.get_session_async() as session:
         with tenant_session_context(session, tenant_key):
             row = await session.get(AgentTemplate, template_id)
-        expected = render_profile_markdown(compose_agent_profile(row))
+        expected = render_profile_markdown(compose_agent_profile(row, with_instructions=True))
     resp = await api_client.get(f"/api/v1/templates/{template_id}/profile.md", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.text == expected
     assert "inherit / inherit" in resp.text
+    assert "Build the thing carefully." in resp.text

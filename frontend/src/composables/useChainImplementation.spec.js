@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import api from '@/services/api'
+import { useProjectTabsStore } from '@/stores/projectTabs'
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }))
 
@@ -9,6 +11,7 @@ import { useChainImplementation } from './useChainImplementation'
 
 describe('useChainImplementation — starting the chain at member 1 (FE-9629)', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     mockShowToast.mockClear()
     api.projects.launchImplementation.mockClear()
     api.projects.launchImplementation.mockResolvedValue({ data: { success: true } })
@@ -24,7 +27,27 @@ describe('useChainImplementation — starting the chain at member 1 (FE-9629)', 
     expect(api.projects.launchImplementation).toHaveBeenCalledWith('head-pid')
   })
 
-  it('does NOT copy a conductor prompt on this path', async () => {
+  it('the user\'s own press moves the Jobs board to Implementation (noteUserImplement)', async () => {
+    const tabs = useProjectTabsStore()
+    const note = vi.spyOn(tabs, 'noteUserImplement')
+    const { launchChainHead } = useChainImplementation()
+
+    await launchChainHead('head-pid')
+
+    expect(note).toHaveBeenCalledTimes(1)
+    expect(note).toHaveBeenCalledWith({ id: 'head-pid' })
+    expect(tabs.isLaunched).toBe(true)
+    expect(tabs.currentProject).toEqual({ id: 'head-pid' })
+  })
+
+  it('a refused launch does not move the board', async () => {
+    api.projects.launchImplementation.mockRejectedValueOnce({ response: { data: { message: 'no' } } })
+    const note = vi.spyOn(useProjectTabsStore(), 'noteUserImplement')
+    await useChainImplementation().launchChainHead('head-pid')
+    expect(note).not.toHaveBeenCalled()
+  })
+
+  it('copies nothing itself (the chain prompt copy is the caller\'s next step)', async () => {
     const { launchChainHead } = useChainImplementation()
 
     await launchChainHead('head-pid')

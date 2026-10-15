@@ -5,6 +5,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 const h = vi.hoisted(() => ({
   getProject: vi.fn(),
+  getDefault: vi.fn(),
   launch: vi.fn(),
   chainStaging: vi.fn(),
   chainImplementation: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('@/services/api', () => {
       chainImplementation: (...a) => h.chainImplementation(...a),
       chainMemberFallback: (...a) => h.chainMemberFallback(...a),
     },
+    settings: { getExecutionModeDefault: (...a) => h.getDefault(...a) },
     sequenceRuns: {
       update: (...a) => h.updateRun(...a),
       stop: (...a) => h.stopRun(...a),
@@ -98,6 +100,7 @@ const stubs = {
   },
   EmptyState: { props: ['title'], template: '<div class="empty-stub">{{ title }}</div>' },
   'v-tooltip': { template: '<div><slot name="activator" :props="{}" /><slot /></div>' },
+  'v-menu': { template: '<div class="menu-stub"><slot name="activator" :props="{}" /><slot /></div>' },
 }
 
 let pinia
@@ -131,6 +134,7 @@ beforeEach(async () => {
   store = useSequenceRunStore()
   vi.clearAllMocks()
   h.getProject.mockImplementation(async (id) => ({ data: PROJECTS[id] }))
+  h.getDefault.mockResolvedValue({ data: { execution_mode_default: 'ask' } })
   h.listRuns.mockResolvedValue({ data: [] })
   h.copy.mockResolvedValue(true)
   h.launch.mockResolvedValue({ data: {} })
@@ -160,13 +164,56 @@ describe('ChainGroup header (FE-9655d)', () => {
     expect(w.find('[data-testid="chain-group-name"]').text()).toBe('FE-0001 → FE-0002 → FE-0003')
   })
 
-  it('before staging: mode pills and Stage chain, which locks the run through the store', async () => {
+  it('FE-9749: the header carries information only; the controls sit below the members', async () => {
     seed(makeRun({ status: 'pending', locked: false, current_index: 0, project_statuses: { p1: 'pending', p2: 'pending', p3: 'pending' } }))
     const w = await mountGroup()
-    expect(w.find('[data-testid="radio-multi-terminal"]').exists()).toBe(true)
+    const header = w.find('[data-testid="chain-group-header"]')
+    for (const id of ['radio-multi-terminal', 'stage-chain-btn', 'implement-chain-btn', 'stop-chain-btn', 'chain-group-deactivate']) {
+      expect(header.find(`[data-testid="${id}"]`).exists(), id).toBe(false)
+    }
+    const area = w.find('[data-testid="staging-control-area"]')
+    expect(area.exists()).toBe(true)
+    const lastMember = w.findAll('[data-testid="chain-group-member"]').at(-1)
+    expect(lastMember.element.compareDocumentPosition(area.element) & 4).toBe(4)
+  })
+
+  it('puts the Conductor Generated badge on its own line directly above the goal box', async () => {
+    seed(makeRun())
+    const w = await mountGroup()
+    const tag = w.find('[data-testid="chain-mission-tag"]')
+    const box = w.find('[data-testid="chain-mission-window"]')
+    expect(tag.exists()).toBe(true)
+    expect(box.find('[data-testid="chain-mission-tag"]').exists()).toBe(false)
+    expect(box.text()).not.toContain('Conductor Generated')
+    expect(tag.element.parentElement.nextElementSibling).toBe(box.element)
+  })
+})
+
+describe('ChainGroup control area (FE-9749)', () => {
+  const UNSTAGED = { status: 'pending', locked: false, current_index: 0, project_statuses: { p1: 'pending', p2: 'pending', p3: 'pending' } }
+  const STAGED = { status: 'pending', current_index: 0, project_statuses: { p1: 'staged', p2: 'staged', p3: 'staged' } }
+  const WAITING_AGENTS = { p1: [{ job_id: 'j1', status: 'waiting' }], p2: [], p3: [] }
+
+  it('before staging with no mode: Stage chain waits for a mode, nothing is sent', async () => {
+    seed(makeRun({ ...UNSTAGED, execution_mode: null }))
+    const w = await mountGroup()
+    const stage = w.find('[data-testid="stage-chain-btn"]')
+    expect(stage.text()).toBe('Stage chain')
+    expect(stage.attributes('aria-disabled')).toBe('true')
+    expect(w.find('[data-testid="sca-mode-reason"]').text()).toBe('Pick a mode first')
+    await stage.trigger('click')
+    await flushPromises()
+    expect(h.updateRun).not.toHaveBeenCalled()
+    expect(h.chainStaging).not.toHaveBeenCalled()
+  })
+
+  it('before staging with a mode: Stage chain is the filled step and locks the run through the store', async () => {
+    seed(makeRun(UNSTAGED))
+    const w = await mountGroup()
+    expect(w.find('[data-testid="radio-multi-terminal"]').attributes('aria-pressed')).toBe('true')
     expect(w.find('[data-testid="chain-group-mode-tag"]').exists()).toBe(false)
     const stage = w.find('[data-testid="stage-chain-btn"]')
-    expect(stage.text()).toBe('Stage Chain')
+    expect(stage.classes()).toContain('jb-btn-primary')
     await stage.trigger('click')
     await flushPromises()
     expect(h.updateRun).toHaveBeenCalledWith('run-1', { locked: true })
@@ -174,37 +221,75 @@ describe('ChainGroup header (FE-9655d)', () => {
     expect(h.copy).toHaveBeenCalledWith('STAGING PROMPT')
   })
 
-  it('staged: Implement starts the head member and stays on the board', async () => {
-    seed(makeRun({ status: 'pending', current_index: 0, project_statuses: { p1: 'staged', p2: 'staged', p3: 'staged' } }))
+  it('the account default is preselected on an unstaged chain', async () => {
+    h.getDefault.mockResolvedValue({ data: { execution_mode_default: 'subagent' } })
+    seed(makeRun({ ...UNSTAGED, execution_mode: null }))
     const w = await mountGroup()
-    expect(w.find('[data-testid="chain-group-mode-tag"]').text()).toContain('Multi-Terminal')
-    expect(w.find('[data-testid="stage-chain-btn"]').text()).toBe('Unstage Chain')
-    await w.find('[data-testid="implement-chain-btn"]').trigger('click')
-    await flushPromises()
-    expect(h.launch).toHaveBeenCalledWith('p1')
-    expect(router.currentRoute.value.name).toBe('Root')
+    expect(w.find('[data-testid="radio-subagent"]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-testid="stage-chain-btn"]').classes()).toContain('jb-btn-primary')
   })
 
-  it('staged multi-terminal chain keeps the copy-master-prompt link', async () => {
-    seed(makeRun({ status: 'pending', current_index: 0, project_statuses: { p1: 'staged', p2: 'staged', p3: 'staged' } }))
-    const w = await mountGroup()
-    await w.find('[data-testid="chain-group-copy-master"]').trigger('click')
-    await flushPromises()
-    expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
-    expect(h.copy).toHaveBeenCalledWith('MASTER PROMPT')
-  })
+  it.each(['multi_terminal', 'subagent'])(
+    'staged %s chain: Implement chain is filled, opens the head gate and copies the chain prompt, on the board',
+    async (mode) => {
+      seed(makeRun({ ...STAGED, execution_mode: mode }))
+      const w = await mountGroup()
+      expect(w.find('[data-testid="chain-group-mode-tag"]').exists()).toBe(true)
+      expect(w.find('[data-testid="stage-chain-btn"]').text()).toBe('Unstage chain')
+      expect(w.find('[data-testid="stage-chain-btn"]').classes()).toContain('jb-btn-secondary')
+      const implement = w.find('[data-testid="implement-chain-btn"]')
+      expect(implement.classes()).toContain('jb-btn-primary')
+      await implement.trigger('click')
+      await flushPromises()
+      expect(h.launch).toHaveBeenCalledWith('p1')
+      expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
+      expect(h.copy).toHaveBeenCalledWith('MASTER PROMPT')
+      expect(h.toast).toHaveBeenCalledWith({ message: 'Chain prompt copied. Paste it into your conductor session.', type: 'success' })
+      expect(router.currentRoute.value.name).toBe('Root')
+    },
+  )
 
-  it('subagent chains do not offer the master prompt link', async () => {
-    seed(makeRun({ status: 'pending', execution_mode: 'subagent', current_index: 0, project_statuses: { p1: 'staged', p2: 'staged', p3: 'staged' } }))
+  it('no separate copy-master-prompt link remains', async () => {
+    seed(makeRun(STAGED))
     const w = await mountGroup()
     expect(w.find('[data-testid="chain-group-copy-master"]').exists()).toBe(false)
   })
 
-  it('running: Stop chain confirms, then posts the stop path without leaving the board', async () => {
+  it('waiting for pickup: Copy chain prompt filled, Stop chain outlined, Deactivate chain a text link', async () => {
+    seed(makeRun({ current_index: 0, project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }))
+    const w = await mountGroup({ agentsByProject: WAITING_AGENTS })
+    expect(w.find('[data-testid="staging-control-area"]').attributes('data-phase')).toBe('pickup')
+    expect(w.find('[data-testid="sca-pickup-hint"]').text()).toBe('No agent has picked this up yet')
+    const copy = w.find('[data-testid="sca-copy-prompt"]')
+    expect(copy.text()).toContain('Copy chain prompt')
+    expect(w.find('[data-testid="stop-chain-btn"]').text()).toContain('Stop chain')
+    expect(w.find('[data-testid="chain-group-deactivate"]').classes()).toContain('sca-link')
+    await copy.trigger('click')
+    await flushPromises()
+    expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
+    expect(h.copy).toHaveBeenCalledWith('MASTER PROMPT')
+    expect(h.launch).not.toHaveBeenCalled()
+  })
+
+  it('running (FE-9793): Stop chain sits on the header row, confirms, then posts the stop path without leaving the board', async () => {
     seed(makeRun())
-    const w = await mountGroup()
+    const w = await mountGroup({ agentsByProject: { p1: [{ status: 'complete' }], p2: [{ status: 'working' }], p3: [] } })
+    expect(w.find('[data-testid="staging-control-area"]').exists()).toBe(false)
     expect(w.find('[data-testid="implement-chain-btn"]').exists()).toBe(false)
-    await w.find('[data-testid="stop-chain-btn"]').trigger('click')
+    expect(w.find('[data-testid="chain-compact-controls"]').exists()).toBe(false)
+    expect(w.find('[data-testid="chain-more-menu"]').exists()).toBe(false)
+    const header = w.find('[data-testid="chain-group-header"]')
+    const stop = header.find('[data-testid="stop-chain-btn"]')
+    expect(stop.exists()).toBe(true)
+    expect(stop.text()).toContain('Stop chain')
+    expect(stop.classes()).not.toContain('csc-btn--icon')
+    const row = header.find('[data-testid="chain-mission-row"]')
+    const tag = row.find('[data-testid="chain-mission-tag"]')
+    const actions = row.find('[data-testid="chain-header-actions"]')
+    expect(tag.exists()).toBe(true)
+    expect(actions.exists()).toBe(true)
+    expect(tag.element.compareDocumentPosition(actions.element) & 4).toBe(4)
+    await stop.trigger('click')
     const dialog = w.find('.dialog-stub[data-title="Stop chain?"]')
     expect(dialog.exists()).toBe(true)
     await dialog.find('.dialog-confirm').trigger('click')
@@ -213,10 +298,18 @@ describe('ChainGroup header (FE-9655d)', () => {
     expect(router.currentRoute.value.name).toBe('Root')
   })
 
-  it('Deactivate chain names the agents it removes, then posts the rewind', async () => {
+  it('running (FE-9793): Deactivate chain sits on the header row after Stop chain, names the agents it removes, then posts the rewind', async () => {
     seed(makeRun())
     const w = await mountGroup()
-    await w.find('[data-testid="chain-group-deactivate"]').trigger('click')
+    expect(w.find('[data-testid="chain-more-menu"]').exists()).toBe(false)
+    const header = w.find('[data-testid="chain-group-header"]')
+    const deactivate = header.find('[data-testid="chain-header-actions"] [data-testid="chain-group-deactivate"]')
+    expect(deactivate.exists()).toBe(true)
+    expect(deactivate.text()).toBe('Deactivate chain')
+    expect(w.findAll('[data-testid="chain-group-deactivate"]')).toHaveLength(1)
+    const stop = header.find('[data-testid="stop-chain-btn"]')
+    expect(stop.element.compareDocumentPosition(deactivate.element) & 4).toBe(4)
+    await deactivate.trigger('click')
     const dialog = w.find('.dialog-stub[data-title="Deactivate chain?"]')
     expect(dialog.text()).toContain('3 agents')
     expect(dialog.text()).toContain('3 linked projects')
@@ -289,18 +382,29 @@ describe('ChainGroup members (FE-9655d)', () => {
     expect(cards.every((c) => c.attributes('data-chain') === 'yes')).toBe(true)
   })
 
-  it('the recycle control copies the fallback prompt for that member only', async () => {
+  it('FE-9749: every member offers "Run this project alone (recovery)" in its more-menu; it copies that member only', async () => {
     seed(makeRun())
     const w = await mountGroup()
-    expect(w.find('[data-testid="chain-member-fallback-p2"]').attributes('aria-label')).toMatch(
-      /^Re-issue the latest launch prompt after a disconnect or reboot/,
-    )
+    for (const pid of ['p1', 'p2', 'p3']) {
+      expect(w.find(`[data-testid="chain-member-menu-${pid}"]`).exists(), pid).toBe(true)
+    }
+    expect(w.find('[data-testid="chain-member-fallback-p2"]').text()).toBe('Run this project alone (recovery)')
+    expect(w.find('.cg-fallback').exists()).toBe(false)
     await w.find('[data-testid="chain-member-fallback-p2"]').trigger('click')
     await flushPromises()
     expect(h.chainMemberFallback).toHaveBeenCalledWith('p2')
     expect(h.copy).toHaveBeenCalledWith('FALLBACK PROMPT')
     expect(h.launch).not.toHaveBeenCalled()
     expect(h.updateRun).not.toHaveBeenCalled()
+  })
+
+  it('FE-9749: a status line instead of a start button: who runs it, or what it waits for', async () => {
+    seed(makeRun())
+    const w = await mountGroup()
+    const members = w.findAll('[data-testid="chain-group-member"]')
+    expect(members[0].find('[data-testid="chain-member-status"]').exists()).toBe(false)
+    expect(members[1].find('[data-testid="chain-member-status"]').text()).toBe('Run by the conductor')
+    expect(members[2].find('[data-testid="chain-member-status"]').text()).toBe('Starts after step 2 is merged')
   })
 
   it('an unstaged chain offers no fallback prompt yet (members have no orchestrator)', async () => {

@@ -4,9 +4,11 @@
 # [CE] Community Edition.
 
 
+import contextlib
 import shutil
 import subprocess
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +108,7 @@ class FrontendSetupMixin:
 
         lockfile = frontend_dir / "package-lock.json"
         use_npm_ci = lockfile.exists()
+        omit_dev: list[str] = [] if self.settings.get("dev") else ["--omit=dev"]
 
         for attempt in range(max_retries):
             if attempt > 0:
@@ -122,12 +125,11 @@ class FrontendSetupMixin:
                     self._print_success("npm cache cleared")
 
             if use_npm_ci and attempt == 0:
-                npm_cmd = ["npm", "ci"]
-                cmd_name = "npm ci"
+                npm_cmd = ["npm", "ci", *omit_dev]
             else:
-                npm_cmd = ["npm", "install"]
-                cmd_name = "npm install"
+                npm_cmd = ["npm", "install", *omit_dev]
                 use_npm_ci = False
+            cmd_name = " ".join(npm_cmd)
 
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n{'=' * 70}\n")

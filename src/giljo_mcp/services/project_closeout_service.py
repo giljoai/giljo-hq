@@ -38,8 +38,7 @@ from giljo_mcp.services.project_closeout_readiness import (
     live_action_required_unread_by_agent,
     pending_approval_ids_by_execution,
 )
-from giljo_mcp.services.project_helpers import mark_chain_member_status
-from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
+from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_chain_member_status
 from giljo_mcp.tenant import TenantManager
 
 
@@ -105,7 +104,7 @@ class ProjectCloseoutService:
                     decommissioned_ids.append(execution.job_id)
 
                 await session.commit()
-                await broadcast_deferred_sequence_updates(session)
+                await broadcast_deferred_events(session)
 
                 self._logger.info(
                     f"Closed out project {project_id} with {len(decommissioned_ids)} agents decommissioned"
@@ -465,7 +464,6 @@ class ProjectCloseoutService:
                 all_finished=all_finished,
                 staging_status=getattr(project, "staging_status", None),
                 any_awaiting_user=any(f.awaiting_user for f in report.findings),
-                status=status,
             )
 
             blockers = [

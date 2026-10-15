@@ -46,15 +46,15 @@ test.describe('Jobs board default density (FE-9685)', () => {
     const card = page.locator('[data-testid="jobs-board-card-wrap"]').filter({ hasText: projectName })
     await expect(card).toBeVisible()
 
-    await expect(page.locator('[data-testid="jobs-density-compact"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('[data-testid="jobs-compact-switch"] input')).toBeChecked()
     await expect(card.locator('[data-testid="jb-summary"]')).toBeVisible()
     await expect(card.locator('[data-testid="jb-footer"]')).toHaveCount(0)
 
-    await page.locator('[data-testid="jobs-density-detailed"]').click()
+    await page.locator('[data-testid="jobs-compact-switch"] input').uncheck({ force: true })
     await expect(card.locator('[data-testid="jb-summary"]')).toHaveCount(0)
     await expect(card.locator('[data-testid="jb-footer"]')).toBeVisible()
 
-    await page.locator('[data-testid="jobs-density-compact"]').click()
+    await page.locator('[data-testid="jobs-compact-switch"] input').check({ force: true })
     await expect(card.locator('[data-testid="jb-summary"]')).toBeVisible()
   })
 })

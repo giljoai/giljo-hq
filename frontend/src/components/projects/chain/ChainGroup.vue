@@ -6,7 +6,7 @@
     :data-run-id="chainCtx.runId"
     data-testid="chain-group"
   >
-    <ChainGroupHeader :chain-ctx="chainCtx" :controls="controls" :agent-count="agentCount" />
+    <ChainGroupHeader :chain-ctx="chainCtx" :controls="controls" />
 
     <div class="cg-members">
       <div
@@ -29,19 +29,33 @@
           </span>
           <span v-if="!member.tab.needsReview && member.tab.isCompleted" class="cg-reviewed">Reviewed</span>
           <span class="cg-spacer" />
-          <v-btn
-            v-if="chainCtx.locked"
-            icon
-            size="x-small"
-            variant="text"
-            class="cg-fallback"
-            :title="`${REPLAY_LABEL} (${member.label} only)`"
-            :aria-label="`${REPLAY_LABEL} (${member.label} only)`"
-            :data-testid="`chain-member-fallback-${member.tab.projectId}`"
-            @click="controls.copyMemberFallbackPrompt(member.tab.projectId)"
-          >
-            <v-icon size="16">mdi-recycle</v-icon>
-          </v-btn>
+          <span v-if="memberStatusLine(member)" class="cg-member-status" data-testid="chain-member-status">
+            {{ memberStatusLine(member) }}
+          </span>
+          <v-menu v-if="chainCtx.locked" location="bottom end">
+            <template #activator="{ props: menuProps }">
+              <v-btn
+                v-bind="menuProps"
+                icon
+                size="x-small"
+                variant="text"
+                class="cg-more"
+                :aria-label="`More actions for ${member.label}`"
+                :title="`More actions for ${member.label}`"
+                :data-testid="`chain-member-menu-${member.tab.projectId}`"
+              >
+                <v-icon size="16">mdi-dots-vertical</v-icon>
+              </v-btn>
+            </template>
+            <v-list density="compact">
+              <v-list-item
+                :data-testid="`chain-member-fallback-${member.tab.projectId}`"
+                @click="controls.copyMemberFallbackPrompt(member.tab.projectId)"
+              >
+                Run this project alone (recovery)
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </div>
         <JobsBoardCard
           v-if="member.project"
@@ -74,6 +88,8 @@
       </div>
     </div>
 
+    <ChainStagingActions :chain-ctx="chainCtx" :controls="controls" :agent-count="agentCount" />
+
     <CloseoutModal
       v-if="chainReviewTab"
       :show="showChainReview"
@@ -91,7 +107,6 @@
 
 <script setup>
 import { computed, reactive } from 'vue'
-import { REPLAY_LABEL } from '@/composables/usePlayButton'
 import { useChainContext } from '@/composables/useChainContext'
 import { useChainGroupControls } from '@/composables/useChainGroupControls'
 import { withChainReview } from '@/utils/jobsSectionLabel'
@@ -99,6 +114,7 @@ import { useChainMemberReview } from '@/composables/useChainMemberReview'
 import CloseoutModal from '@/components/orchestration/CloseoutModal.vue'
 import JobsBoardCard from '@/components/projects/JobsBoardCard.vue'
 import ChainGroupHeader from './ChainGroupHeader.vue'
+import ChainStagingActions from './ChainStagingActions.vue'
 
 const props = defineProps({
   runId: { type: String, required: true },
@@ -122,7 +138,7 @@ const emit = defineEmits([
 ])
 
 const { chainCtx } = useChainContext({ runId: () => props.runId })
-const controls = reactive(useChainGroupControls({ chainCtx }))
+const controls = reactive(useChainGroupControls({ chainCtx, agentsByProject: () => props.agentsByProject }))
 const { showChainReview, chainReviewTab, handleTabReview, handleChainReviewComplete } = useChainMemberReview({ chainCtx })
 
 function memberState(tab) {
@@ -135,6 +151,12 @@ function memberStateLabel(member) {
   if (member.state === 'done') return 'done'
   const step = member.tab.order + 1
   return step > 1 ? `waiting for step ${step - 1}` : 'waiting'
+}
+
+function memberStatusLine(member) {
+  if (member.state === 'done') return ''
+  if (member.state === 'current') return 'Run by the conductor'
+  return `Starts after step ${member.tab.order} is merged`
 }
 
 function memberProject(tab) {
@@ -240,7 +262,12 @@ const agentCount = computed(() =>
   flex: 1;
 }
 
-.cg-fallback {
+.cg-member-status {
+  font-size: 0.72rem;
+  color: $color-text-secondary;
+}
+
+.cg-more {
   color: $color-text-secondary;
 }
 </style>

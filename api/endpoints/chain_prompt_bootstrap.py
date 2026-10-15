@@ -14,14 +14,15 @@ from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
+from giljo_mcp.services.protocol_sections.orchestrator_body import CHAIN_DRIVER_MODEL
 
 
 _TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 logger = logging.getLogger(__name__)
 
 CHAIN_MEMBER_FALLBACK_PREAMBLE = (
-    "You are a member of a chain run by a conductor. This is a fallback prompt for this project only. "
-    "Do not advance the chain yourself; the conductor decides the next step."
+    "This is a recovery prompt for one project in a linked chain. Use it to restart this "
+    "project's orchestrator only; it does not move the chain forward."
 )
 
 
@@ -62,7 +63,7 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
     if project_id:
         role_line = (
             "You are the ORCHESTRATOR for ONE project in a linked chain. You stage, implement "
-            "and close out THIS project only; the user starts the next project when this one closes."
+            f"and close out THIS project only.\n{CHAIN_DRIVER_MODEL}"
         )
         project_line = f"  Project ID: {project_id}"
         returns_note = (
@@ -78,7 +79,14 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
         returns_note = None
 
     fetch_tool = _TOOL_PREFIX if harness_is_claude else ""
-    if phase == "staging":
+    if phase == "staging" and project_id:
+        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_job_mission(job_id='{job_id}')"
+        protocol_note = (
+            f"{returns_note}\n"
+            f"3. Fetch your staging details: {fetch_tool}get_staging_instructions(job_id='{job_id}')\n"
+            "   -> Returns the agent templates, project description and toggles for staging."
+        )
+    elif phase == "staging":
         fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_staging_instructions(job_id='{job_id}')"
         protocol_note = returns_note or (
             "   -> Returns your full chain protocol (CH_CAPABILITY + CH_CHAIN_STAGING):\n"

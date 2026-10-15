@@ -38,6 +38,7 @@ _EXPECTED_STANDARD_ADDITIONS = frozenset(
         "get_thread_history",
         "get_roadmap",
         "save_roadmap",
+        "promote_task_to_project",
         "get_vision_document",
         "update_product_context",
         "apply_context_tuning",
@@ -51,6 +52,7 @@ _EXPECTED_STANDARD = _EXPECTED_STANDARD_FROM_CORE | _EXPECTED_STANDARD_ADDITIONS
 
 _STANDARD_MUST_EXCLUDE = (
     "stage_project",
+    "unstage_project",
     "get_implementation_prompt",
     "launch_implementation",
     "start_chain_run",

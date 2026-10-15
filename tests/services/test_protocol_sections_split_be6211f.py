@@ -92,4 +92,9 @@ def test_worker_protocol_renders_through_moved_body(mode: str, git_enabled: bool
 
     assert isinstance(proto, str) and proto
     assert "## Agent Lifecycle Protocol (5 Phases)" in proto
-    assert ("### Git Commit (REQUIRED - Git Integration Enabled)" in proto) == git_enabled
+    git_heading = (
+        "### Git Commit (REQUIRED - Git Integration Enabled)"
+        if mode == "multi_terminal"
+        else "### Git (subagent mode): do NOT commit"
+    )
+    assert (git_heading in proto) == git_enabled

@@ -50,28 +50,12 @@ describe('ProductTabStrip — two real tabs', () => {
   })
 })
 
-describe('ProductTabStrip — background activity badges (FE-9502d)', () => {
-  it('renders no badge when a tab has no badgeCount', () => {
-    const wrapper = mount(ProductTabStrip, { props: { tabs: [TAB_A, TAB_B], viewedId: TAB_A.id } })
-    expect(wrapper.find('[data-testid="product-tab-badge"]').exists()).toBe(false)
-  })
-
-  it('renders a badge with the count for a background tab with activity', () => {
-    const busyTab = { ...TAB_B, badgeCount: 3 }
-    const wrapper = mount(ProductTabStrip, { props: { tabs: [TAB_A, busyTab], viewedId: TAB_A.id } })
-    expect(wrapper.find('[data-testid="product-tab-badge"]').text()).toBe('3')
-  })
-
-  it('caps the displayed badge at "9+" rather than growing unbounded', () => {
+describe('ProductTabStrip — no activity badges (FE-9751)', () => {
+  it('renders no badge and no count text, even if a tab descriptor still carries a badgeCount', () => {
     const busyTab = { ...TAB_B, badgeCount: 42 }
     const wrapper = mount(ProductTabStrip, { props: { tabs: [TAB_A, busyTab], viewedId: TAB_A.id } })
-    expect(wrapper.find('[data-testid="product-tab-badge"]').text()).toBe('9+')
-  })
-
-  it('renders no badge for badgeCount of exactly 0 (the viewed-tab / cleared case)', () => {
-    const clearedTab = { ...TAB_A, badgeCount: 0 }
-    const wrapper = mount(ProductTabStrip, { props: { tabs: [clearedTab, TAB_B], viewedId: TAB_A.id } })
     expect(wrapper.find('[data-testid="product-tab-badge"]').exists()).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').map((t) => t.text())).toEqual(['Product A', 'Product B'])
   })
 })
 

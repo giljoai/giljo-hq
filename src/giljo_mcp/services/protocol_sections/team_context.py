@@ -6,11 +6,52 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from giljo_mcp.models import AgentExecution
+    from giljo_mcp.models import AgentExecution, AgentJob
+
+
+_SUMMARY_EMPHASIS = re.compile(r"[*`]+")
+_SUMMARY_NOISE = re.compile(r"[#>|]+")
+ORCHESTRATOR_TEAM_ROLE = "Coordinates the team; message it with blockers and questions"
+
+
+def summarize_mission(text: str | None, limit: int) -> str:
+    summary = ""
+    for token in _SUMMARY_NOISE.sub(" ", _SUMMARY_EMPHASIS.sub("", text or "")).split():
+        word = "[...]" if len(token) > limit else token
+        candidate = f"{summary} {word}".strip()
+        if len(candidate) > limit:
+            return f"{summary}..."
+        summary = candidate
+        if word.endswith((".", "!", "?")) and len(summary) >= limit // 2:
+            break
+    return summary
+
+
+JobLinks = dict[str, tuple[str | None, int | None]]
+
+
+def job_dependency_link(job: AgentJob) -> tuple[str | None, int | None]:
+    metadata = getattr(job, "job_metadata", None)
+    predecessor = metadata.get("predecessor_job_id") if isinstance(metadata, dict) else None
+    return (predecessor if isinstance(predecessor, str) else None, getattr(job, "phase", None))
+
+
+def _upstream_job_ids(job_id: str, job_links: JobLinks) -> set[str]:
+    predecessor, phase = job_links.get(job_id, (None, None))
+    upstream = {predecessor} if predecessor else set()
+    if phase is not None and phase > 1:
+        upstream.update(
+            other_id
+            for other_id, (_, other_phase) in job_links.items()
+            if other_phase is not None and other_phase < phase
+        )
+    upstream.discard(job_id)
+    return upstream
 
 
 def _generate_team_context_header(
@@ -18,6 +59,7 @@ def _generate_team_context_header(
     all_project_jobs: list[AgentExecution],
     mission_lookup: dict[str, str] | None = None,
     include_team_table: bool = True,
+    job_links: JobLinks | None = None,
 ) -> str:
     agent_name = getattr(current_job, "agent_name", None) or getattr(current_job, "agent_display_name", "unknown")
     agent_display_name = getattr(current_job, "agent_display_name", "unknown")
@@ -31,9 +73,9 @@ Role: {agent_display_name}
 """
 
     if include_team_table:
-        num_agents = len(all_project_jobs)
+        is_orchestrator = [getattr(job, "agent_display_name", None) == "orchestrator" for job in all_project_jobs]
         team_rows = []
-        for job in all_project_jobs:
+        for job, orchestrator_row in zip(all_project_jobs, is_orchestrator, strict=True):
             role_name = getattr(job, "agent_name", None) or getattr(job, "agent_display_name", "unknown")
 
             mission_text = ""
@@ -42,17 +84,17 @@ Role: {agent_display_name}
             elif hasattr(job, "mission") and job.mission:
                 mission_text = job.mission
 
-            deliverable_preview = (mission_text or "")[:80].replace("\n", " ")
-            if len(mission_text or "") > 80:
-                deliverable_preview += "..."
+            deliverable = ORCHESTRATOR_TEAM_ROLE if orchestrator_row else summarize_mission(mission_text, 80)
             job_agent_id = getattr(job, "agent_id", "unknown")
             team_rows.append(
-                f"| {role_name} | `{job_agent_id}` | {getattr(job, 'agent_display_name', 'unknown')} | {deliverable_preview} |"
+                f"| {role_name} | `{job_agent_id}` | {getattr(job, 'agent_display_name', 'unknown')} | {deliverable} |"
             )
 
+        workers = len(all_project_jobs) - sum(is_orchestrator)
+        headcount = f"{workers} agent(s) and its orchestrator" if any(is_orchestrator) else f"{workers} agent(s)"
         team_table = "\n".join(team_rows)
         team_section = f"""## YOUR TEAM
-This project has {num_agents} agent(s) working together:
+This project has {headcount}:
 
 | Agent | agent_id | Role | Deliverables |
 |-------|----------|------|--------------|
@@ -61,27 +103,14 @@ This project has {num_agents} agent(s) working together:
     else:
         team_section = ""
 
-    dependencies_upstream = []
-    dependencies_downstream = []
-
-    dependency_rules = {
-        "analyzer": {"upstream": [], "downstream": ["implementer", "documenter", "tester"]},
-        "implementer": {"upstream": ["analyzer"], "downstream": ["tester", "reviewer", "documenter"]},
-        "tester": {"upstream": ["implementer"], "downstream": ["reviewer"]},
-        "reviewer": {"upstream": ["implementer", "tester"], "downstream": ["documenter"]},
-        "documenter": {"upstream": ["analyzer", "implementer", "reviewer"], "downstream": []},
-    }
-
-    current_id = getattr(current_job, "agent_id", None) or getattr(current_job, "job_id", None)
-    other_agents = [
-        j for j in all_project_jobs if (getattr(j, "agent_id", None) or getattr(j, "job_id", None)) != current_id
+    links = job_links or {}
+    current_job_id = getattr(current_job, "job_id", None)
+    upstream_ids = _upstream_job_ids(current_job_id, links)
+    others = [j for j in all_project_jobs if getattr(j, "job_id", None) != current_job_id]
+    dependencies_upstream = [f"{j.agent_display_name} ({j.agent_id})" for j in others if j.job_id in upstream_ids]
+    dependencies_downstream = [
+        f"{j.agent_display_name} ({j.agent_id})" for j in others if current_job_id in _upstream_job_ids(j.job_id, links)
     ]
-    other_types = {getattr(j, "agent_display_name", "unknown") for j in other_agents}
-
-    if agent_display_name in dependency_rules:
-        rules = dependency_rules[agent_display_name]
-        dependencies_upstream.extend([upstream for upstream in rules["upstream"] if upstream in other_types])
-        dependencies_downstream.extend([downstream for downstream in rules["downstream"] if downstream in other_types])
 
     if dependencies_upstream:
         upstream_text = f"- You depend on: {', '.join(dependencies_upstream)} (wait for their outputs if needed)"

@@ -67,10 +67,13 @@ EXPECTED_SMOKE_TOOLS: frozenset[str] = frozenset(
         "giljo_setup",
         "apply_context_tuning",
         "stage_project",
+        "unstage_project",
+        "promote_task_to_project",
         "get_implementation_prompt",
         "launch_implementation",
         "link_projects",
         "unlink_projects",
+        "propose_template_change",
     }
 )
 

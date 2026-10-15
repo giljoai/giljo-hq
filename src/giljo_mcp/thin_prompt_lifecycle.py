@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 from sqlalchemy import select
@@ -72,16 +73,18 @@ class ThinClientLifecycleMixin:
     ) -> None:
         template_ids = {e.job.template_id for e in executions if e.job and e.job.template_id}
         mapping: dict[str, str | None] = {}
+        hints: dict[str, SimpleNamespace] = {}
         if template_ids:
             rows = (
                 await self.db.execute(
-                    select(AgentTemplate.id, AgentTemplate.cli_tool).where(
+                    select(AgentTemplate.id, AgentTemplate.cli_tool, AgentTemplate.model, AgentTemplate.effort).where(
                         AgentTemplate.id.in_(template_ids),
                         AgentTemplate.tenant_key == self.tenant_key,
                     )
                 )
             ).all()
-            mapping = dict(rows)
+            mapping = {tid: cli_tool for tid, cli_tool, _model, _effort in rows}
+            hints = {tid: SimpleNamespace(model=model, effort=effort) for tid, _cli, model, effort in rows}
 
         role_default_map: dict[str, str] = {}
         if (execution_mode or "") == "multi_terminal":
@@ -112,6 +115,7 @@ class ThinClientLifecycleMixin:
             if cli is None and role_default_map:
                 cli = role_default_map.get(e.agent_display_name)
             e.cli_tool = cli or "claude"
+            e.launch_template = hints.get(tid)
 
     def _launch_commands_for(self, executions: list[AgentExecution], *, launched: bool) -> list[dict]:
         from giljo_mcp.prompts.launch_command_synth import DEFAULT_CLI_TOOL, render_harness_launch_block

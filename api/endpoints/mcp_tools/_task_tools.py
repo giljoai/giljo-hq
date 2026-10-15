@@ -151,8 +151,7 @@ async def create_task(
         "fields are written. task_type is fixed at creation: a different one is refused and "
         "nothing is written. Pass status='completed' to complete "
         "it (stamps completed_at); pass completion_notes to append an audit note as it completes. "
-        "Pass convert_to_project=true to PROMOTE the task to a project instead of editing it -- "
-        "same conversion the dashboard wizard runs, and it DELETES the task row. Tenant-scoped."
+        "To turn a task into a project use promote_task_to_project. Tenant-scoped."
     ),
     annotations=_tool_hints("update_task", destructive=True),
 )
@@ -199,24 +198,6 @@ async def update_task(
             ),
         ),
     ] = "",
-    convert_to_project: Annotated[
-        bool,
-        Field(
-            description=(
-                "Promote this task to a project (default false). Runs the SAME conversion as the "
-                "dashboard's task-to-project wizard, in one atomic step: a project is created from "
-                "the task, subtasks and any roadmap card re-point to it (same roadmap position), and "
-                "THE TASK ROW IS DELETED -- its task_id stops resolving, so do not reuse it. The new "
-                "project is INACTIVE and UNTYPED; tag it with update_project(project_id, "
-                "project_type=...). It lands on the TASK's own product -- not whichever product is "
-                "active -- and the response names that product. Pass title alongside to name the "
-                "project; NO other field may be "
-                "combined (the task row is gone, so any other write would be discarded) -- a "
-                "combined call is refused and changes nothing. Use this instead of hand-building a "
-                "project and completing the task: that recipe leaves the roadmap card orphaned."
-            )
-        ),
-    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"task_id": task_id}
@@ -244,9 +225,6 @@ async def update_task(
             )
     if completion_notes:
         params["completion_notes"] = completion_notes
-    if convert_to_project:
-        params["convert_to_project"] = True
-        params["user_id"] = _base._resolve_user_id(ctx)
     try:
         return await _call_tool(ctx, "update_task", params)
     except ValidationError as exc:
@@ -255,6 +233,38 @@ async def update_task(
         raise
     except TaskTypeImmutableError as exc:
         return validation_rejection(field=exc.field, constraint=exc.constraint, message=str(exc))
+
+
+@mcp.tool(
+    title="Promote Task To Project",
+    description=(
+        "Turns a task into a project in your own private Giljo HQ workspace, for a task that "
+        "turned out to be bigger than one step. Creates a project from the task on the task's own "
+        "product, moves its subtasks and any roadmap card to the project (same roadmap position), "
+        "and DELETES the task: its task_id no longer resolves, so carry the returned project_id "
+        "instead. The new project is inactive and untyped; give it a type with update_project, and "
+        "the user activates it from the dashboard. Only the task's creator or an admin may promote "
+        "it, and a handover task cannot be promoted. Tenant-scoped. No outside service is contacted."
+    ),
+    annotations=_tool_hints("promote_task_to_project", destructive=True),
+)
+async def promote_task_to_project(
+    task_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="UUID of the task to promote.")],
+    title: Annotated[
+        str | None,
+        Field(
+            max_length=MCP_NAME_MAX,
+            description="Name for the new project; omit to keep the task's own title.",
+        ),
+    ] = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    if title is not None and not title.strip():
+        return blank_text_rejection("title", entity="Project")
+    params: dict[str, Any] = {"task_id": task_id, "user_id": _base._resolve_user_id(ctx)}
+    if title is not None:
+        params["title"] = title
+    return await _call_tool(ctx, "promote_task_to_project", params)
 
 
 @mcp.tool(

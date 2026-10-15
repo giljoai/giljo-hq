@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from giljo_mcp.platform_registry import Platform, giljo_invocation, task_list_phrase
+from giljo_mcp.platform_registry import Platform, giljo_invocation, is_subagent_render, task_list_phrase
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
@@ -53,14 +53,26 @@ def _phase1_step0(preset: Platform | None) -> str:
     )
 
 
+_GIT_HANDOFF_LINE = 'list every file you changed in `complete_job(result={"artifacts": [...]})`'
+_GIT_MISSION_WINS_LINE = "If your mission gives a git instruction, the mission wins."
+
+
 def _build_conditional_blocks(
     git_integration_enabled: bool,
     execution_mode: str,
     tool: str,
 ) -> tuple[str, str]:
     git_commit_block = ""
-    if git_integration_enabled:
-        git_commit_block = """
+    if git_integration_enabled and is_subagent_render(execution_mode):
+        git_commit_block = f"""
+### Git (subagent mode): do NOT commit
+You run inside your orchestrator's session and share its working tree. Do not stage,
+commit, or push. Before calling `complete_job()`, {_GIT_HANDOFF_LINE};
+the orchestrator stages them by name and commits once.
+{_GIT_MISSION_WINS_LINE}
+"""
+    elif git_integration_enabled:
+        git_commit_block = f"""
 ### Git Commit (REQUIRED - Git Integration Enabled)
 Before calling `complete_job()`, commit your work:
 1. Stage your changes: `git add` relevant files (never use `git add -A`)
@@ -68,7 +80,8 @@ Before calling `complete_job()`, commit your work:
 3. Include the commit SHA AND its title (not the SHA alone) in your
    completion result, so the orchestrator has enough to build a titled
    git_commits entry at closeout:
-   `complete_job(job_id, result={"summary": "...", "commits": ["<sha> <one-line commit title>"], "artifacts": [...]})`
+   `complete_job(job_id, result={{"summary": "...", "commits": ["<sha> <one-line commit title>"], "artifacts": [...]}})`
+{_GIT_MISSION_WINS_LINE}
 """
 
     giljo_block = ""
@@ -133,10 +146,10 @@ def _build_worker_protocol_body(
 {phase1_step4}
 
 ### Phase 2: EXECUTION
-Execute your assigned tasks (your {todo_phrase}, created in Phase 1):
+Execute your assigned tasks (your TODO items, published in Phase 1):
 - Maintain focus on mission objectives
 - Update todos as you progress
-- **MESSAGE CHECK**: Call `get_thread_history()` after completing each item on your {todo_phrase}
+- **MESSAGE CHECK**: Call `get_thread_history()` after completing each TODO item
   - Full call: `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
   - If any messages are returned: Process them BEFORE continuing
   - If none are returned: Safe to proceed
@@ -150,9 +163,9 @@ Execute your assigned tasks (your {todo_phrase}, created in Phase 1):
    report_progress(
        job_id="{job_id}",
        todo_items=[
-           {{{{"content": "Task 1 description", "status": "completed"}}}},
-           {{{{"content": "Task 2 description", "status": "in_progress"}}}},
-           {{{{"content": "Task 3 description", "status": "pending"}}}}
+           {{"content": "Task 1 description", "status": "completed"}},
+           {{"content": "Task 2 description", "status": "in_progress"}},
+           {{"content": "Task 3 description", "status": "pending"}}
        ]
    )
 
@@ -163,13 +176,13 @@ Status values: "pending", "in_progress", "completed"
 current statuses. Omitting completed items will be REJECTED by the server (regression guard).
 Use todo_append to add genuinely new items discovered mid-work.
 
-### CRITICAL: Sync your {todo_phrase} with MCP Progress
+### CRITICAL: ONE TODO list, the one you send to report_progress
 
-Every time you update a task's status on your {todo_phrase} (mark item complete or in_progress),
+Every time a TODO item changes status (mark item complete or in_progress),
 IMMEDIATELY call report_progress() with your updated todo_items list.
 
-The todo_items array appears in the Plan/TODOs tab of the dashboard.
-Do NOT skip this step - the backend cannot see your {todo_phrase} updates.
+The todo_items array appears in the Plan/TODOs tab of the dashboard; the server reads
+nothing else. A {todo_phrase} of your own is optional and never replaces it: do not mirror into one.
 
 ### BACKEND MONITORING ACTIVE
 The backend monitors report_progress() calls. If todo_items is missing:
@@ -185,7 +198,7 @@ The backend monitors report_progress() calls. If todo_items is missing:
 
 ### Phase 4: COMPLETION
 Before calling `complete_job()`, you MUST verify:
-1. All TODO items completed (your {todo_phrase} is fully marked completed)
+1. All TODO items completed (every item in your last report_progress list)
 2. All messages read (queue empty after `get_thread_history(..., mark_read=true)`)
 
 **Follow-up work:** When you finish work and a follow-up is needed, create a task via `create_task` — or a project via `create_project` if it's multi-step — and cite the returned ID in `decisions_made` when you call `write_project_closeout`.
@@ -297,7 +310,7 @@ If your mission references undefined entities, has unclear dependencies, or ambi
 
 **When to Check Messages:**
 - Phase 1 (STARTUP): Before starting work
-- Phase 2 (EXECUTION): After each item on your {todo_phrase}
+- Phase 2 (EXECUTION): After each TODO item
 - Phase 3 (PROGRESS): Before reporting progress
 - Phase 4 (COMPLETION): Before calling complete_job()
 

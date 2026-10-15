@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.auth.principal import PrincipalValidationError, validate_principal
 from giljo_mcp.exceptions import AuthorizationError
 from giljo_mcp.models import APIKey, User
+from giljo_mcp.signals import SIGNAL_ACCOUNT_ACCESS_OBSERVED, publish_signal
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,22 @@ async def _record_api_key_usage(db: AsyncSession, request: Request, api_key_id: 
     except SQLAlchemyError:
         await db.rollback()
         logger.warning("API-key usage bookkeeping failed (non-blocking)", exc_info=True)
+
+
+def _announce_api_key_access(request: Request, principal) -> None:
+    from api.endpoints.auth.session import _resolve_client_ip
+
+    publish_signal(
+        SIGNAL_ACCOUNT_ACCESS_OBSERVED,
+        {
+            "tenant_key": principal.tenant_key,
+            "user_id": principal.user_id,
+            "source_kind": "api_key",
+            "client_ip": _resolve_client_ip(request),
+            "client_name": None,
+            "surface": "rest",
+        },
+    )
 
 
 async def get_current_user(
@@ -113,6 +130,7 @@ async def get_current_user(
             await enforce_api_key_auth_failure(request)
         else:
             await _record_api_key_usage(db, request, principal.api_key_id)
+            _announce_api_key_access(request, principal)
             logger.debug("[AUTH] API key SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
             _stamp_auth_credential(request, "api_key")
             return principal.user

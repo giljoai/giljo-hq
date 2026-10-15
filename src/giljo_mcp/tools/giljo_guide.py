@@ -64,13 +64,12 @@ so every future session in that repo passes `product_id` automatically and never
 - **Update**: to change an existing project, `list_projects` to find it, then
   `update_project` with the new values.
 - **A task turned out to be a project? PROMOTE it -- never rebuild it.**
-  `update_task(task_id, convert_to_project=true)` runs the same conversion as the
+  `promote_task_to_project(task_id)` runs the same conversion as the
   dashboard wizard, in one atomic step: the project is created from the task, subtasks
   and any roadmap card re-point to it (same roadmap position), and **the task row is
   DELETED** -- that `task_id` stops resolving, so drop it and carry the returned
-  `project_id`. Add `title` to name the project. Do NOT combine it with any other field
-  (`status`, `priority`, ...): the task row is gone, so such a write would be discarded,
-  and the call is refused instead. The promoted project is **inactive and UNTYPED** --
+  `project_id`. Add `title` to name the project. The promoted project is
+  **inactive and UNTYPED** --
   tag it with `update_project(project_id, project_type='BE'|'FE'|...)`, then the user
   activates it. The promoted project lands on **the task's own product**, not on
   whichever product is currently active, and the response names it (`product_id` +
@@ -221,6 +220,11 @@ Drive it with these tools:
   (5) only THEN stop and wait for the user's explicit approval to implement. The response
   STARTS staging -- it does not mean staging is complete -- and staging never
   auto-executes into implementation.
+- `unstage_project(project_id)` -- undo staging any time before implementation starts:
+  clears the mission and staging state (retiring an orchestrator that had already started
+  and creating a fresh one). It also starts staging over -- call `stage_project` again
+  afterwards. Refused once implementation has launched. To abandon a project use
+  `update_project(project_id, status='cancelled')`.
 - `get_implementation_prompt(project_id)` -- call this only AFTER the user has pressed
   Implement. If the gate has not cleared it returns a structured error
   (status='gate_not_passed') telling you the exact next action: either run
@@ -237,9 +241,9 @@ Drive it with these tools:
   When off, this call returns a structured refusal naming the setting, not an error.
 
 **Workers get their role from the server, not from your disk.** Every spawned agent's
-`get_job_mission` response carries an `agent_profile` (role, description, harness,
-model/effort, instructions, rules, success criteria) in every execution mode -- that IS
-its role. Do NOT look for, install, or refresh agent template files; there are none.
+`get_job_mission` response carries its role instructions in `agent_identity` and an
+`agent_profile` (role, description, harness, model/effort, rules, success criteria) in
+every execution mode -- that IS its role. Do NOT look for, install, or refresh agent template files; there are none.
 A template may name a preferred `model`/`effort`; `inherit` means the same as the
 orchestrator, and a harness that cannot honour a value ignores it.
 
@@ -275,7 +279,7 @@ NOT need to know which phase you are in -- the response tells you via its `phase
   runs the whole archive lifecycle (deactivate, terminal status with the completion date
   stamped, spawned agents moved from `complete` to `closed`) -- the same thing the dashboard's
   Archive button does. A CHAIN MEMBER needs no third step: its closeout already flips the row
-  and the conductor advances the run. **That third step now REQUIRES the closeout to have
+  and the server advances the chain. **That third step now REQUIRES the closeout to have
   actually run first:** archiving without one (no `write_project_closeout` success on this
   project) is refused with `CLOSEOUT_BLOCKED` naming the same blockers a closeout attempt
   would report -- resolve them (drain messages, `complete_job`, `write_project_closeout`) and

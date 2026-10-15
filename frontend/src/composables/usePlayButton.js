@@ -40,6 +40,10 @@ export async function launchThenCopyImplementationPrompt({ projectId, executionM
   return true
 }
 
+export function copyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast }) {
+  return _copyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast })
+}
+
 async function _copyImplementationPrompt({ projectId, executionMode, clipboardCopy, showToast, replay = false }) {
   let response
   try {
@@ -63,6 +67,40 @@ async function _copyImplementationPrompt({ projectId, executionMode, clipboardCo
     : `Orchestrator prompt copied. ${agentCount} specialists ready to launch.`
   showToast({ message, type: 'success' })
   return true
+}
+
+async function _copyChainMemberPrompt({ projectId, clipboardCopy, showToast, successMessage }) {
+  const { data } = await api.prompts.chainMember(projectId)
+  const prompt = data?.prompt
+  if (!prompt) throw new Error('No prompt text returned')
+
+  const clipboardOk = await clipboardCopy(prompt)
+  if (!clipboardOk) {
+    showToast({ message: CLIPBOARD_BLOCKED, type: 'error' })
+    return false
+  }
+  showToast({ message: successMessage, type: 'success' })
+  return true
+}
+
+export async function startChainMemberThenCopyPrompt({ projectId, clipboardCopy, showToast }) {
+  try {
+    await api.projects.launchImplementation(projectId)
+  } catch (gateError) {
+    showToast({ message: parseErrorResponse(gateError).message || 'Could not start this project.', type: 'error' })
+    return false
+  }
+  try {
+    return await _copyChainMemberPrompt({
+      projectId,
+      clipboardCopy,
+      showToast,
+      successMessage: 'Orchestrator prompt copied. Paste it in a fresh session to run this project.',
+    })
+  } catch (error) {
+    showToast({ message: parseErrorResponse(error).message || 'Failed to prepare launch prompt', type: 'error' })
+    return false
+  }
 }
 
 export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx = null) {
@@ -91,19 +129,12 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     return _chainTabs().some((tab) => tab.projectId === pid)
   }
 
-  function _blockingPredecessorLabel() {
-    const tabs = _chainTabs()
-    const index = tabs.findIndex((tab) => tab.projectId === _projectId())
-    if (index <= 0) return null
-    const previous = tabs[index - 1]
-    return previous.taxonomyAlias || previous.name || 'the previous project'
-  }
-
   function shouldShowCopyButton(agent) {
     const proj = _getProject()
     const projectId = proj?.project_id || proj?.id
     const state = getProjectState(projectId)
-    if (!state?.stagingComplete && !_isChainMember(agent)) return false
+    if (_isChainMember(agent)) return canReplay(agent)
+    if (!state?.stagingComplete) return false
 
     const executionMode = state?.execution_mode ?? proj?.execution_mode
     const claudeCodeCliMode = isSubagentExecutionMode(executionMode)
@@ -114,23 +145,13 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
   function isPlayButtonFaded(agent) {
     const jobId = agent.job_id || agent.agent_id
     if (reactivatedAgents.value.has(jobId)) return false
-    if (_isChainMember(agent)) {
-      if (!sequenceRunStore.isProjectStartable(_projectId())) return true
-      return agent.status !== 'waiting'
-    }
     if (agent?.agent_display_name === 'orchestrator') return true
     return agent.status !== 'waiting'
   }
 
   function playButtonTooltip(agent) {
-    if (agent?.agent_display_name === 'orchestrator' && !_isChainMember(agent)) {
-      return 'Start this project with Implement'
-    }
-    if (!_isChainMember(agent) || sequenceRunStore.isProjectStartable(_projectId())) {
-      return DEFAULT_PLAY_TOOLTIP
-    }
-    const predecessor = _blockingPredecessorLabel()
-    return predecessor ? `Starts after ${predecessor} closes out` : DEFAULT_PLAY_TOOLTIP
+    if (agent?.agent_display_name === 'orchestrator') return 'Start this project with Implement'
+    return DEFAULT_PLAY_TOOLTIP
   }
 
   function reactivatePlay(agent) {
@@ -145,11 +166,6 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     const proj = _getProject()
 
     try {
-      if (_isChainMember(agent)) {
-        await _handleChainMemberPlay()
-        return
-      }
-
       if (agent.agent_display_name === 'orchestrator') {
         const projectId = proj?.project_id || proj?.id
         const executionMode = getProjectState(projectId)?.execution_mode ?? proj?.execution_mode
@@ -174,34 +190,6 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     }
   }
 
-  async function _handleChainMemberPlay() {
-    const projectId = _projectId()
-    if (!sequenceRunStore.isProjectStartable(projectId)) return
-
-    try {
-      await api.projects.launchImplementation(projectId)
-    } catch (gateError) {
-      const msg = parseErrorResponse(gateError).message || 'Could not start this project.'
-      showToast({ message: msg, type: 'error' })
-      return
-    }
-
-    await _copyChainMemberPrompt(projectId, 'Orchestrator prompt copied. Paste it in a fresh session to run this project.')
-  }
-
-  async function _copyChainMemberPrompt(projectId, successMessage) {
-    const { data } = await api.prompts.chainMember(projectId)
-    const prompt = data?.prompt
-    if (!prompt) throw new Error('No prompt text returned')
-
-    const clipboardOk = await clipboardCopy(prompt)
-    if (!clipboardOk) {
-      showToast({ message: CLIPBOARD_BLOCKED, type: 'error' })
-      return
-    }
-    showToast({ message: successMessage, type: 'success' })
-  }
-
   function _projectLaunched() {
     const proj = _getProject()
     const state = getProjectState(_projectId())
@@ -219,7 +207,12 @@ export function usePlayButton(project, getProjectState, clipboardCopy, chainCtx 
     const projectId = _projectId()
     try {
       if (_isChainMember(agent)) {
-        await _copyChainMemberPrompt(projectId, 'Latest launch prompt copied. Paste it to reconnect.')
+        await _copyChainMemberPrompt({
+          projectId,
+          clipboardCopy,
+          showToast,
+          successMessage: 'Latest launch prompt copied. Paste it to reconnect.',
+        })
         return
       }
       if (agent?.agent_display_name === 'orchestrator') {

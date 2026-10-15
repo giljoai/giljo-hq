@@ -78,17 +78,18 @@ test.describe('Staging on the Jobs board', () => {
     await expect(card.locator('[data-testid="jb-row-mission"]')).toContainText('No mission yet')
     await expect(card.locator('[data-testid="jb-stat-mode"]')).toContainText('not picked')
 
-    // The mode gate: Stage with nothing picked refuses, visibly, and sends nothing.
+    // The mode gate (FE-9749): with nothing picked (account default "Ask every
+    // time") Stage is disabled with its reason, and a press sends nothing.
     const footer = card.locator('[data-testid="jb-footer"]')
     await expect(footer).toHaveAttribute('data-footer-state', 'ready')
-    await expect(card.locator('[data-testid="jbf-stage"]')).toBeEnabled()
+    await expect(card.locator('[data-testid="jbf-stage"]')).toHaveAttribute('aria-disabled', 'true')
+    await expect(card.locator('[data-testid="sca-mode-reason"]')).toHaveText('Pick a mode first')
     await card.locator('[data-testid="jbf-stage"]').click()
-    await expect(card.locator('[data-testid="jbf-mode-refusal"]')).toContainText('Pick a mode before staging')
     await expect(footer).toHaveAttribute('data-footer-state', 'ready')
 
-    // Pick a mode: the refusal clears; Stage copies the staging prompt.
+    // Pick a mode: the reason clears; Stage copies the staging prompt.
     await card.locator('[data-testid="radio-subagent"]').click()
-    await expect(card.locator('[data-testid="jbf-mode-refusal"]')).toHaveCount(0)
+    await expect(card.locator('[data-testid="sca-mode-reason"]')).toHaveCount(0)
     await card.locator('[data-testid="jbf-stage"]').click()
     await expect(card.locator('[data-testid="jbf-stage"]')).toHaveText('Unstage')
 

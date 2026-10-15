@@ -22,6 +22,7 @@ vi.mock('@/composables/useJobActions', () => ({
 }))
 
 import JobsViewportView from './JobsViewportView.vue'
+import { withRealVuetify } from '../../tests/helpers/realVuetify'
 import { useProductStore } from '@/stores/products'
 import { useJobsScopeStore } from '@/stores/jobsScope'
 
@@ -53,9 +54,9 @@ const tooltipStub = {
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
 
-function mountView() {
+function mountView(extraPlugins = []) {
   return mount(JobsViewportView, {
-    global: { plugins: [pinia, router], stubs: { 'v-tooltip': tooltipStub } },
+    global: { plugins: [pinia, router, ...extraPlugins], stubs: { 'v-tooltip': tooltipStub } },
   })
 }
 
@@ -102,10 +103,10 @@ describe('JobsViewportView', () => {
     await flushPromises()
 
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Flip the headless launch fence')
-    await wrapper.find('[data-testid="jobs-side-staging"]').trigger('click')
-    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Lifecycle banners')
+    await wrapper.find('[data-testid="jobs-side-implementation"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Flip the headless launch fence')
   })
 
   it('a third project appearing on a later fetch (live update) is reflected without a manual reload', async () => {
@@ -255,27 +256,36 @@ describe('JobsViewportView density (FE-9678)', () => {
     }
   }
 
+  async function setCompactSwitch(wrapper, on) {
+    const toggle = wrapper.find('[data-testid="jobs-compact-switch"] input')
+    toggle.element.checked = on
+    await toggle.trigger('input')
+    await flushPromises()
+  }
+
   let originalStorage
-  beforeEach(() => {
+  let real
+  beforeEach(async () => {
+    real = await withRealVuetify(['VSwitch', 'VSelectionControl', 'VLabel'])
     originalStorage = window.localStorage
     window.localStorage = memoryStorage()
   })
   afterEach(() => {
+    real.restore()
     window.localStorage = originalStorage
   })
 
-  it('renders the View segment, labelled View, with Compact pressed by default', async () => {
+  it('renders one Compact view switch, on by default', async () => {
     h.getActive.mockResolvedValue({ data: [NEEDS_INPUT_PROJECT] })
-    const wrapper = mountView()
+    const wrapper = mountView([real.plugin])
     await flushPromises()
-    const detailed = wrapper.find('[data-testid="jobs-density-detailed"]')
-    const compact = wrapper.find('[data-testid="jobs-density-compact"]')
-    expect(wrapper.find('[data-testid="jobs-view-label"]').text()).toBe('View')
-    expect(wrapper.find('[data-testid="jobs-view-switch"]').attributes('aria-label')).toBe('View')
-    expect(detailed.exists()).toBe(true)
-    expect(compact.exists()).toBe(true)
-    expect(detailed.attributes('aria-pressed')).toBe('false')
-    expect(compact.attributes('aria-pressed')).toBe('true')
+    const toggle = wrapper.find('[data-testid="jobs-compact-switch"] input')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-label')).toBe('Compact view')
+    expect(toggle.element.checked).toBe(true)
+    expect(wrapper.find('[data-testid="jobs-view-label"]').text()).toBe('Compact view')
+    expect(wrapper.find('[data-testid="jobs-density-detailed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="jobs-density-compact"]').exists()).toBe(false)
   })
 
   it('Compact folds every card, Detailed opens them all, and the choice is remembered', async () => {
@@ -290,17 +300,15 @@ describe('JobsViewportView density (FE-9678)', () => {
         ),
       ),
     )
-    const wrapper = mountView()
+    const wrapper = mountView([real.plugin])
     await flushPromises()
     expect(wrapper.findAll('[data-testid="jb-summary"]')).toHaveLength(2)
 
-    await wrapper.find('[data-testid="jobs-density-detailed"]').trigger('click')
-    await flushPromises()
+    await setCompactSwitch(wrapper, false)
     expect(wrapper.findAll('[data-testid="jb-summary"]')).toHaveLength(0)
     expect(window.localStorage.getItem('jobs.density.v2')).toBe('detailed')
 
-    await wrapper.find('[data-testid="jobs-density-compact"]').trigger('click')
-    await flushPromises()
+    await setCompactSwitch(wrapper, true)
     expect(wrapper.findAll('[data-testid="jb-summary"]')).toHaveLength(2)
     expect(window.localStorage.getItem('jobs.density.v2')).toBe('compact')
   })
@@ -311,7 +319,7 @@ describe('JobsViewportView sides (FE-9679)', () => {
   const STAGED = { id: 'p-staged', taxonomy_alias: 'BE-2', name: 'Waiting for the go', status: 'active', staging_status: 'staging_complete', implementation_launched_at: null }
   const IMPL = { id: 'p-impl', taxonomy_alias: 'BE-3', name: 'Running', status: 'active', implementation_launched_at: '2026-08-30T23:02:00Z' }
 
-  it('the side segment counts each side; Implementation is the landing when anything runs', async () => {
+  it('the side segment counts each side and each side carries its own filters', async () => {
     h.getActive.mockResolvedValue({ data: [ACTIVATED, STAGED, IMPL] })
     h.listAgentJobs.mockImplementation((pid) =>
       Promise.resolve(envelope(pid === 'p-impl' ? [{ agent_display_name: 'orchestrator', agent_name: 'orchestrator', status: 'working' }] : [])),
@@ -324,6 +332,7 @@ describe('JobsViewportView sides (FE-9679)', () => {
     const impl = wrapper.find('[data-testid="jobs-side-implementation"]')
     expect(staging.text()).toContain('2')
     expect(impl.text()).toContain('1')
+    await impl.trigger('click')
     expect(impl.attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Running')

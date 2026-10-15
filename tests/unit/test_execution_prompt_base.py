@@ -94,13 +94,21 @@ class TestAgentList:
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=False)
         assert "(No agents spawned yet" in prompt
 
-    def test_long_mission_is_truncated(self):
+    def test_long_mission_is_summarised_at_a_word_boundary(self):
         builder = _MinimalBuilder()
-        long_mission = "x" * 250
+        path = "/srv/repos/acme-app/src/acme_app/services/billing/next_action.py"
+        long_mission = f"Repo: {path} first. " + "word " * 50
         agent = _make_agent_job(mission=long_mission)
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [agent], git_enabled=False)
-        assert "x" * 100 + "..." in prompt
-        assert long_mission not in prompt
+        assert f"Mission Summary: Repo: {path} first." in prompt
+        assert long_mission.strip() not in prompt
+
+    def test_a_single_overlong_token_is_never_cut_in_half(self):
+        builder = _MinimalBuilder()
+        agent = _make_agent_job(mission="x" * 250)
+        prompt = builder.build_execution_prompt("orch-1", _make_project(), [agent], git_enabled=False)
+        assert "Mission Summary: [...]" in prompt
+        assert "x" * 100 not in prompt
 
 
 class TestNewAgentSpawnJobFirstRule:

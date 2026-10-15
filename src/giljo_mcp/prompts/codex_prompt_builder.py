@@ -43,8 +43,8 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
             "## How to Spawn Agents via Codex spawn_agent",
             "",
             "### CRITICAL: the role comes from the server, not from your disk",
-            "get_job_mission returns this agent's full agent_profile: role, description,",
-            "instructions, model and effort hints, behavioural rules and success criteria.",
+            "get_job_mission returns this agent's role instructions in agent_identity and its",
+            "agent_profile: role, description, model and effort hints, rules and success criteria.",
             "There is no agent file to install, look up, or keep in sync.",
             "",
             "### Prefer the tenant's own agent; fall back to the default agent",
@@ -63,38 +63,11 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
             "```",
             "spawn_agent(",
             '    agent="gil-{agent_name}",  # role arrives from get_job_mission, not a local file',
-            '    instructions="""',
-            "    You are {agent_name} (job_id: {job_id})",
-            "    ",
-            '    First action: Call get_job_mission(job_id="{job_id}")',
-            "    This returns your `mission` and `full_protocol`.",
-            "    Follow `full_protocol` for all lifecycle behavior.",
-            '    """',
+            '    instructions="""<that agent\'s launch prompt from Launch Prompts below, verbatim>""",',
             ")",
             "```",
-            "Keep instructions= MINIMAL \u2014 only the job_id and mission fetch call above.",
+            "Keep instructions= to that launch prompt alone \u2014 it names the job_id and the mission fetch call.",
             "",
         ]
-
-        if agent_jobs:
-            first = agent_jobs[0]
-            lines.extend(
-                [
-                    "### Example: First Agent",
-                    "```",
-                    "spawn_agent(",
-                    f'    agent="gil-{first.agent_name}",  # gil- prefix!',
-                    '    instructions="""',
-                    f"    You are {first.agent_name} (job_id: {first.job_id})",
-                    "    ",
-                    f'    First action: Call get_job_mission(job_id="{first.job_id}")',
-                    "    This returns your `mission` and `full_protocol`.",
-                    "    Follow `full_protocol` for all lifecycle behavior.",
-                    '    """',
-                    ")",
-                    "```",
-                    "",
-                ]
-            )
 
         return lines

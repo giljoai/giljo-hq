@@ -132,6 +132,12 @@ class MemoryEntryWriteValidationError(Exception):
             lines.append(other)
         return " || ".join(lines)
 
+    @property
+    def constraint(self) -> str:
+        if self.invalid_tag is not None:
+            return "invalid_choice"
+        return "too_long" if self.actual_size > self.max_size else "invalid"
+
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "error": self.error,

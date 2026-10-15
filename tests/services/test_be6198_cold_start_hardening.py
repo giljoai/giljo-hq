@@ -236,7 +236,8 @@ def test_phase_response_chain_member_staging_end_polls():
     assert phase == "staging_end"
     why = next_action["why"]
     assert "click Implement" not in why and "presses Implement" not in why
-    assert "opens your implementation gate automatically" in why
+    assert "implementation gate is already open" in why
+    assert "CHAIN ORCHESTRATOR" not in why
     assert next_action["tool"] == "get_job_mission"
 
 
@@ -261,7 +262,7 @@ def test_phase_response_conductor_staging_end_awaits_go():
     assert "explicit go" in low, "the conductor must be told to wait for the user's explicit GO"
     assert "do not re-call get_job_mission" in low, "the conductor must not self-drive via get_job_mission"
     assert "implement chain" in low, "the dashboard GO equivalent must be named"
-    assert "opens your implementation gate automatically" not in next_action["why"]
+    assert "implementation gate is already open" not in next_action["why"]
 
 
 

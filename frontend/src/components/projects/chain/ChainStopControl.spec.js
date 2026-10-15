@@ -55,6 +55,15 @@ describe('ChainStopControl — the button', () => {
   it('shows no modal until it is opened', () => {
     expect(mountControl().find('.base-dialog-stub').exists()).toBe(false)
   })
+
+  it('has no compact variant: one labelled button, icon plus text', () => {
+    expect(ChainStopControl.props.compact).toBeUndefined()
+    const btn = mountControl().find('[data-testid="stop-chain-btn"]')
+    expect(btn.classes()).not.toContain('csc-btn--icon')
+    expect(btn.attributes('aria-label')).toBeUndefined()
+    expect(btn.find('.v-icon-stub').exists()).toBe(true)
+    expect(btn.text()).toContain('Stop chain')
+  })
 })
 
 describe('ChainStopControl — the confirm modal', () => {

@@ -309,6 +309,9 @@ async def generate_staging_prompt(
             detail=("No execution mode selected. Choose an execution mode (Multi-Terminal / Subagent) before staging."),
         )
 
+    if project:
+        await project_service.lifecycle.activate_for_staging(project_id, tenant_key=current_user.tenant_key)
+
     try:
         generator = ThinClientPromptGenerator(db, current_user.tenant_key)
 
@@ -599,8 +602,8 @@ async def get_chain_member_prompt(
     fallback: bool = Query(
         default=False,
         description=(
-            "Return the fallback form: the same prompt, opened by a line telling the session "
-            "it runs this project only and the conductor decides the next step."
+            "Return the recovery form: the same prompt, opened by a line saying it restarts "
+            "this project only and does not move the chain forward."
         ),
     ),
     current_user: User = Depends(get_current_active_user),
@@ -615,7 +618,7 @@ async def get_chain_member_prompt(
     member's button unlocks once this one has closed out.
 
     With ``fallback=true`` the prompt is opened by a fixed line saying it is a
-    fallback for this project only; the conductor still decides the next step.
+    recovery prompt for this project only; it does not move the chain forward.
 
     Raises 404 when the project is not found, is not a member of an active chain,
     or has no orchestrator of its own yet.

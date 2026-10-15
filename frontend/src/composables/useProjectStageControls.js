@@ -1,14 +1,15 @@
-import { computed, ref, watch } from 'vue'
-import { api } from '@/services/api'
+import { computed, watch } from 'vue'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useExecutionMode } from '@/composables/useExecutionMode'
 import { useProjectStaging } from '@/composables/useProjectStaging'
+import { useSettingsStore } from '@/stores/settings'
+import { preselectedExecutionMode } from '@/utils/executionModeDefault'
 
 export function isProjectLaunched(project, state) {
   return Boolean(project?.implementation_launched_at || state?.implementationLaunched || state?.isLaunched)
 }
 
-export function useProjectStageControls({ project, seedState = false, loadHarness = false }) {
+export function useProjectStageControls({ project, seedState = false }) {
   const projectStateStore = useProjectStateStore()
 
   const getProject = typeof project === 'function' ? project : () => project?.value
@@ -24,24 +25,6 @@ export function useProjectStageControls({ project, seedState = false, loadHarnes
       { immediate: true },
     )
   }
-
-  const detectedHarness = ref(null)
-  const harnessWanted = typeof loadHarness === 'function' ? loadHarness : () => Boolean(loadHarness)
-  let harnessReadFor = null
-  watch(
-    [projectId, harnessWanted],
-    async ([pid, wanted]) => {
-      if (!pid || !wanted || harnessReadFor === pid) return
-      harnessReadFor = pid
-      try {
-        const response = await api.projects.getOrchestrator(pid)
-        detectedHarness.value = response?.data?.orchestrator?.detected_harness || null
-      } catch {
-        detectedHarness.value = null
-      }
-    },
-    { immediate: true },
-  )
 
   const missionText = computed(() => projectState.value?.mission || '')
   const isProjectStaged = computed(() => Boolean(projectState.value?.isStaged))
@@ -85,12 +68,20 @@ export function useProjectStageControls({ project, seedState = false, loadHarnes
     { immediate: true },
   )
 
-  const modeRefused = ref(false)
+  const settingsStore = useSettingsStore()
+  settingsStore.ensureExecutionModeDefault()
+  watch(
+    [() => settingsStore.executionModeDefault, modeIsFact, executionPlatform],
+    ([accountDefault, fact, picked]) => {
+      const preset = preselectedExecutionMode(accountDefault)
+      if (fact || picked || !preset) return
+      executionPlatform.value = preset
+      executionMode.value = preset
+    },
+    { immediate: true },
+  )
 
-  async function handleExecutionModeChange(newValue) {
-    modeRefused.value = false
-    return changeMode(newValue)
-  }
+  const handleExecutionModeChange = changeMode
 
   const readyToLaunch = computed(() =>
     Boolean(projectState.value?.stagingComplete && !projectState.value?.isStaging),
@@ -121,13 +112,11 @@ export function useProjectStageControls({ project, seedState = false, loadHarnes
     canRestage,
   })
 
+  const freshStage = computed(() => !isProjectStaged.value && !isProjectStaging.value && !canRestage.value)
+
+  const stageNeedsMode = computed(() => freshStage.value && !executionModeSelected.value)
+
   async function handleStageOrRestage() {
-    const freshStage = !isProjectStaged.value && !isProjectStaging.value && !canRestage.value
-    if (freshStage && !executionModeSelected.value) {
-      modeRefused.value = true
-      return
-    }
-    modeRefused.value = false
     const wasStagedOrRestage = isProjectStaged.value || canRestage.value
     await stageOrRestage()
     if (wasStagedOrRestage) executionPlatform.value = null
@@ -168,7 +157,6 @@ export function useProjectStageControls({ project, seedState = false, loadHarnes
 
   return {
     projectId,
-    detectedHarness,
     missionText,
     isProjectStaged,
     isProjectStaging,
@@ -182,7 +170,7 @@ export function useProjectStageControls({ project, seedState = false, loadHarnes
     executionModeSelected,
     isExecutionModeLocked,
     modeIsFact,
-    modeRefused,
+    stageNeedsMode,
     agenticTool,
     handleExecutionModeChange,
     loadingStageProject,

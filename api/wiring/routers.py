@@ -42,6 +42,7 @@ from api.endpoints import (
     task_statuses,
     tasks,
     taxonomy_types,
+    template_proposals,
     templates,
     tenant_data,
     user_settings,
@@ -80,6 +81,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(system_prompts.router, prefix="/api/v1/system", tags=["system"])
     app.include_router(statistics.router, prefix="/api/v1/stats", tags=["statistics"])
     app.include_router(templates.router)
+    app.include_router(template_proposals.router, prefix="/api/v1/template-proposals", tags=["template-proposals"])
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(auth_pin_recovery.router, prefix="/api/auth", tags=["auth"])
     app.include_router(connect.router, prefix="/api/connect", tags=["connect"])

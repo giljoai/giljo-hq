@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from giljo_mcp.platform_registry import Platform, task_list_phrase
+from giljo_mcp.platform_registry import Platform
 from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orchestrator_protocol
 from giljo_mcp.services.protocol_sections.worker_body import (
     _build_conditional_blocks,
@@ -43,12 +43,10 @@ def _generate_agent_protocol(
 
     git_commit_block, giljo_block = _build_conditional_blocks(git_integration_enabled, execution_mode, tool)
 
-    todo_phrase = task_list_phrase(tool)
-
     phase1_step4 = (
-        f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE implementation):\n"
+        "5. **MANDATORY: Plan your TODO items** (BEFORE implementation):\n"
         "   - Break mission into 3-7 specific, actionable tasks\n"
-        '   - Count and announce: "X steps to complete: [list items]"\n'
+        "   - Publish them with `report_progress(todo_items=[...])`: that list is your plan of record\n"
         "   - NEVER skip this step - planning prevents poor execution"
     )
 

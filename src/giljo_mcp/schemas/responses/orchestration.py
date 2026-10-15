@@ -202,8 +202,8 @@ class MissionResponse(BaseModel):
     identity_source: str | None = Field(
         default=None,
         description=(
-            "Where your orchestrator identity came from: a product override, an "
-            "account-wide override with the date it was saved, or the built-in default."
+            "Where your orchestrator identity came from: a product override with the "
+            "date it was saved, or the built-in default."
         ),
     )
     truncation_check: str | None = Field(

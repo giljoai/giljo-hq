@@ -7,10 +7,11 @@ import RunAsSwitch from './RunAsSwitch.vue'
 const tooltipStub = { template: '<div><slot name="activator" :props="{}" /><slot /></div>' }
 const mountSwitch = (props = {}) => mount(RunAsSwitch, { props, global: { stubs: { 'v-tooltip': tooltipStub } } })
 
-describe('RunAsSwitch (TSK-9692)', () => {
-  it('reads "Run as" and offers the two modes, nothing picked by default', () => {
-    const w = mountSwitch({ modelValue: null })
-    expect(w.find('[data-testid="run-as-label"]').text()).toBe('Run as')
+describe('RunAsSwitch (TSK-9692, FE-9749)', () => {
+  it('offers the two modes as one group, nothing picked by default', () => {
+    const w = mountSwitch({ modelValue: null, labelledBy: 'lbl-1' })
+    expect(w.attributes('role')).toBe('group')
+    expect(w.attributes('aria-labelledby')).toBe('lbl-1')
     const multi = w.find('[data-testid="radio-multi-terminal"]')
     const sub = w.find('[data-testid="radio-subagent"]')
     expect(multi.text()).toBe('Multi-terminal')
@@ -26,23 +27,15 @@ describe('RunAsSwitch (TSK-9692)', () => {
     expect(w.emitted('change')?.[0]).toEqual(['multi_terminal'])
   })
 
-  it('a locked switch cannot change', async () => {
-    const w = mountSwitch({ modelValue: 'subagent', locked: true })
-    const multi = w.find('[data-testid="radio-multi-terminal"]')
-    expect(multi.attributes('disabled')).toBeDefined()
-    await multi.trigger('click')
-    expect(w.emitted('change')).toBeUndefined()
-  })
-
-  it('a refused switch is marked for the refusal outline', () => {
-    expect(mountSwitch({ modelValue: null, refused: true }).classes()).toContain('run-as--refused')
-  })
-
-  it('the card and the chain header both use it; the old selector is gone', () => {
+  it('the shared control area is its one host; the card and chain header no longer embed it', () => {
+    const area = readFileSync(resolve(__dirname, 'StagingControlArea.vue'), 'utf8')
     const footer = readFileSync(resolve(__dirname, 'JobsBoardCardFooter.vue'), 'utf8')
     const header = readFileSync(resolve(__dirname, 'chain/ChainGroupHeader.vue'), 'utf8')
-    expect(footer).toMatch(/<RunAsSwitch\b/)
-    expect(header).toMatch(/<RunAsSwitch\b/)
+    const chainActions = readFileSync(resolve(__dirname, 'chain/ChainStagingActions.vue'), 'utf8')
+    expect(area).toMatch(/<RunAsSwitch\b/)
+    expect(footer).toMatch(/<StagingControlArea\b/)
+    expect(chainActions).toMatch(/<StagingControlArea\b/)
+    expect(header).not.toMatch(/<RunAsSwitch\b/)
     expect(header).not.toMatch(/ExecutionModeSelector/)
   })
 })

@@ -16,6 +16,7 @@ from giljo_mcp.services import next_action as na
 
 ALL_HINTS = (
     na.PROJECT_NOT_STAGED_HINT,
+    na.PROJECT_STAGING_HINT,
     na.PROJECT_AWAITING_GO_HINT,
     na.PROJECT_IN_FLIGHT_HINT,
     na.PROJECT_AWAITING_USER_HINT,
@@ -51,9 +52,10 @@ def test_not_staged_project_is_told_to_stage():
 
 
 @pytest.mark.parametrize("staging_status", ["staging", "staged"])
-def test_mid_staging_lands_in_the_stage_project_bucket(staging_status):
+def test_mid_staging_is_told_to_continue_staging_not_to_stage_again(staging_status):
     hint = na.project_next_action(status="inactive", staging_status=staging_status, implementation_launched_at=None)
-    assert hint["tool"] == "stage_project"
+    assert hint == {"tool": "get_staging_instructions", "args_hint": None, "why": na.PROJECT_STAGING_HINT}
+    assert "unstage_project" in hint["why"]
 
 
 def test_staged_project_is_told_to_wait_for_the_go():

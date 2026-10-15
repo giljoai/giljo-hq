@@ -124,6 +124,21 @@
               </v-text-field>
             </v-col>
 
+            <v-col v-if="template.id" cols="12">
+              <v-alert
+                type="warning"
+                variant="tonal"
+                density="compact"
+                class="mb-2"
+                data-testid="edit-coordination-warning"
+              >
+                Editing this agent's instructions can break agent coordination; verify a job after
+                saving.<template v-if="template.can_reset">
+                  Reset to Default restores the built-in; your edits stay in version history.</template
+                >
+              </v-alert>
+            </v-col>
+
             <v-col cols="12">
               <div class="d-flex align-center mb-2">
                 <span class="text-title-small">Role & Expertise</span>

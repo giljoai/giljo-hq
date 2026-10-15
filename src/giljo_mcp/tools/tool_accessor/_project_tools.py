@@ -48,10 +48,10 @@ _STAGING_STOP_INSTRUCTION = (
 )
 
 _STAGING_CHAIN_CONTINUE_INSTRUCTION = (
-    "chain mode: there is NO per-project human Implement gate in a chain; the conductor "
-    "already released you. Continue to implementation: call get_job_mission ONCE — it "
+    "chain mode: there is NO per-project human Implement gate in a chain; your gate opens "
+    "with the chain. Continue to implementation: call get_job_mission ONCE — it "
     "returns your implementation protocol and flips you to working. Do NOT wait for a "
-    "human, do NOT return to the dashboard, do NOT sleep-poll a gate."
+    "human, there is no Implement click to wait for, do NOT sleep-poll a gate."
 )
 
 _STAGING_START_PHASES = (
@@ -102,12 +102,8 @@ class ProjectToolsMixin:
         mode: str,
         tenant_key: str,
         user_id: str | None = None,
-        action: str = "stage",
         mission: str = "",
     ) -> dict[str, Any]:
-        if action != "stage":
-            return await self._stage_project_reverse_gear(project_id, action)
-
         from giljo_mcp.exceptions import ValidationError
         from giljo_mcp.platform_registry import ACCEPTED_EXECUTION_MODES, stage_mode_token
         from giljo_mcp.services.orchestrator_prompt_ws_broadcast import (
@@ -119,9 +115,6 @@ class ProjectToolsMixin:
             mode = await self._resolve_stage_mode_default(tenant_key)
             if not mode:
                 return _execution_mode_required_rejection()
-
-        if mission:
-            await self.update_project_mission(project_id, mission)
 
         if mode in _STAGE_MODE_MAP:
             normalized_mode = mode
@@ -137,6 +130,11 @@ class ProjectToolsMixin:
             )
         mode = normalized_mode
         tool, execution_mode = mapping
+
+        await self._project_service.lifecycle.activate_for_staging(project_id, tenant_key=tenant_key)
+
+        if mission:
+            await self.update_project_mission(project_id, mission)
 
         async with self.get_session_async() as db:
             generator = ThinClientPromptGenerator(db, tenant_key)
@@ -184,32 +182,9 @@ class ProjectToolsMixin:
             )
         return default_stage_mode(stored if isinstance(stored, str) else None)
 
-    _STAGE_REVERSE_ACTIONS: frozenset[str] = frozenset({"unstage", "restage", "cancel_staging"})
-
-    async def _stage_project_reverse_gear(self, project_id: str, action: str) -> dict[str, Any]:
-        from giljo_mcp.exceptions import ValidationError
-
-        if action not in self._STAGE_REVERSE_ACTIONS:
-            raise ValidationError(
-                f"Invalid action '{action}'. Valid actions: stage, {', '.join(sorted(self._STAGE_REVERSE_ACTIONS))}.",
-                context={"valid_actions": ["stage", *sorted(self._STAGE_REVERSE_ACTIONS)]},
-            )
-
-        if action == "unstage":
-            result = await self._project_service.lifecycle.unstage(project_id)
-        elif action == "restage":
-            result = await self._project_service.lifecycle.restage(project_id)
-        else:
-            data = await self._project_service.lifecycle.cancel_staging(
-                project_id, websocket_manager=self._websocket_manager
-            )
-            result = {"message": "Staging cancelled.", "project_id": data.id}
-
-        return {
-            "status": action,
-            "project_id": result["project_id"],
-            "message": result["message"],
-        }
+    async def unstage_project(self, project_id: str) -> dict[str, Any]:
+        result = await self._project_service.lifecycle.undo_staging(project_id)
+        return {"status": "unstaged", "project_id": result["project_id"], "message": result["message"]}
 
     async def implement_project(
         self,

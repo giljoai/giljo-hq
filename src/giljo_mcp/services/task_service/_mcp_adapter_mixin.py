@@ -153,8 +153,6 @@ class McpAdapterMixin:
         actual_effort: float | None = None,
         hidden: bool | None = None,
         completion_notes: str | None = None,
-        convert_to_project: bool = False,
-        user_id: str | None = None,
     ) -> dict[str, Any]:
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         if not effective_tenant_key:
@@ -163,24 +161,6 @@ class McpAdapterMixin:
                 context={"operation": "update_task_for_mcp", "task_id": task_id},
             )
         read_task = self._under_tenant(effective_tenant_key, self.get_task)
-
-        if convert_to_project:
-            return await self._convert_task_for_mcp(
-                task_id,
-                effective_tenant_key,
-                project_name=title,
-                user_id=user_id,
-                supplied={
-                    "description": description,
-                    "status": status,
-                    "priority": priority,
-                    "project_id": project_id,
-                    "estimated_effort": estimated_effort,
-                    "actual_effort": actual_effort,
-                    "hidden": hidden,
-                    "completion_notes": completion_notes,
-                },
-            )
 
         if status is not None and status not in VALID_TASK_STATUSES:
             valid_status_values = sorted(s.value for s in VALID_TASK_STATUSES)
@@ -248,35 +228,27 @@ class McpAdapterMixin:
             response["completion_notes"] = completion_notes
         return response
 
-    async def _convert_task_for_mcp(
+    async def promote_task_for_mcp(
         self,
         task_id: str,
-        tenant_key: str,
-        *,
-        project_name: str | None,
-        user_id: str | None,
-        supplied: dict[str, Any],
+        tenant_key: str | None = None,
+        title: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
+        tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
+        if not tenant_key:
+            raise ValidationError(
+                message="tenant_key is required",
+                context={"operation": "promote_task_for_mcp", "task_id": task_id},
+            )
+        if title is not None and not title.strip():
+            raise ValidationError(
+                message="Project title is required and cannot be empty or whitespace-only.",
+                context={"operation": "promote_task_for_mcp", "task_id": task_id, "field": "title"},
+            )
         is_handover, _status = await handover_state(self._under_tenant(tenant_key, self.get_task), task_id)
         if is_handover:
             return handover_not_convertible(task_id)
-
-        conflicting = sorted(name for name, value in supplied.items() if value is not None)
-        if conflicting:
-            return {
-                "success": False,
-                "error": "CONVERT_FIELD_CONFLICT",
-                "task_id": task_id,
-                "conflicting_fields": conflicting,
-                "message": (
-                    f"convert_to_project deletes the task row, so {conflicting} cannot be written in "
-                    "the same call — they would be silently discarded. Nothing was changed. Either "
-                    "convert on its own (pass only convert_to_project=true, plus title to name the "
-                    "new project), or update those fields first and convert in a second call. To "
-                    "record an outcome instead of promoting, drop convert_to_project and pass "
-                    "status='completed'."
-                ),
-            }
 
         if not user_id:
             return {
@@ -297,7 +269,7 @@ class McpAdapterMixin:
         try:
             result = await self.convert_to_project(
                 task_id=task_id,
-                project_name=project_name,
+                project_name=title,
                 strategy="single",
                 include_subtasks=True,
                 user_id=user_id,

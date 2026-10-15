@@ -111,11 +111,12 @@ describe('JobsBoardCard actionable controls share the Jobs detail link colour (F
     expect(block(drawer, '.jb-pen')).not.toMatch(MUTED)
   })
 
-  it('the "Run as" label next to the mode chips, and the Jobs detail link itself', async () => {
+  it('the mode label is crisp white and the Jobs detail link keeps the link colour (FE-9749)', async () => {
     const footer = (await import('./JobsBoardCardFooter.vue?raw')).default
-    const runAs = (await import('./RunAsSwitch.vue?raw')).default
-    expect(block(runAs, '.run-as-k')).toMatch(LINK)
-    expect(block(runAs, '.run-as-k')).not.toMatch(MUTED)
+    const area = (await import('./StagingControlArea.vue?raw')).default
+    expect(block(area, '.sca-label')).toMatch(/color:\s*\$color-text-primary/)
+    expect(block(area, '.sca-link')).toMatch(LINK)
+    expect(block(area, '.sca-link')).not.toMatch(MUTED)
     expect(block(footer, '.jb-btn-ghost')).toMatch(LINK)
   })
 })

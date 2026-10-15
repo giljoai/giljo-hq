@@ -107,3 +107,12 @@ def test_connect_md_is_public_on_the_real_app_and_not_swallowed_by_spa(monkeypat
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/markdown")
     assert "giljo_setup" in resp.text
+
+
+@pytest.mark.parametrize("mode_fixture", ["ce_mode", "saas_mode"])
+def test_giljo_setup_step_matches_what_it_installs(client, mode_fixture, request):
+    request.getfixturevalue(mode_fixture)
+    body = client.get("/connect.md", headers={"Host": "localhost:7272"}).text
+    assert "agent profiles" not in body
+    assert "`/giljo` skill" in body
+    assert "CLAUDE.md" in body and "AGENTS.md" in body

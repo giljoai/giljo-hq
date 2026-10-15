@@ -8,31 +8,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.services.next_action import project_next_action_for
 
 
+_ABANDON_HINT = "Project can also be abandoned entirely — call update_project(project_id, status='cancelled')."
+
 STAGING_STUCK_HINTS: dict[str, tuple[str, ...]] = {
     "staged": (
-        "Staged but no agent has been launched yet — call "
-        "stage_project(project_id, action='unstage') to revert to ready.",
+        "Staged but no agent has been launched yet — call unstage_project(project_id) to revert to ready.",
+        _ABANDON_HINT,
     ),
     "staging": (
         "Staging is underway but no agents exist yet — call "
-        "stage_project(project_id, action='restage') to reset staging and mint a "
+        "unstage_project(project_id) to reset staging and mint a "
         "fresh orchestrator.",
+        _ABANDON_HINT,
     ),
 }
-
-_CANCEL_STAGING_HINT = (
-    "Project can also be abandoned entirely — call stage_project(project_id, action='cancel_staging')."
-)
-
-
-def _cancel_staging_hint(staging_status: str | None, status: str | None) -> tuple[str, ...]:
-    if staging_status == "staging" and status == ProjectStatus.INACTIVE:
-        return (_CANCEL_STAGING_HINT,)
-    return ()
 
 
 def compute_stuck_conditions(
@@ -43,7 +35,6 @@ def compute_stuck_conditions(
     all_finished: bool,
     staging_status: str | None,
     any_awaiting_user: bool,
-    status: str | None = None,
 ) -> tuple[list[str], list[str]]:
     stuck: list[str] = []
     suggested: list[str] = []
@@ -53,7 +44,6 @@ def compute_stuck_conditions(
     if counts["total"] == 0 and not is_terminal:
         stuck.append("no_agents_spawned")
         suggested.extend(STAGING_STUCK_HINTS.get(staging_status, ()))
-        suggested.extend(_cancel_staging_hint(staging_status, status))
     if all_finished and not is_terminal:
         stuck.append("all_agents_finished_project_still_open")
         suggested.append("All agents are finished — run write_project_closeout to finalize, or review blockers.")

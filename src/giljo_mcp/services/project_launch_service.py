@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ResourceNotFoundError
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, orchestrator_placeholder_mission
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.project_repository import ProjectRepository
@@ -177,7 +177,7 @@ class ProjectLaunchService:
             job_id=orchestrator_job_id,
             tenant_key=tenant_key,
             project_id=project_id,
-            mission=project.mission or f"Orchestrator mission for project: {project.name}",
+            mission=project.mission or orchestrator_placeholder_mission(project.name),
             job_type="orchestrator",
             status="active",
             job_metadata=validate_agent_job_metadata(

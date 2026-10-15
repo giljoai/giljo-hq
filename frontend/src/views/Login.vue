@@ -50,6 +50,18 @@
             </AppAlert>
 
             <AppAlert
+              v-if="signedOutNotice"
+              type="info"
+              variant="tonal"
+              class="mb-4"
+              closable
+              data-testid="signed-out-notice"
+              @click:close="signedOutNotice = ''"
+            >
+              {{ signedOutNotice }}
+            </AppAlert>
+
+            <AppAlert
               v-if="successMessage"
               type="success"
               variant="tonal"
@@ -187,6 +199,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api, { apiClient } from '@/services/api'
 import { getRuntimeConfig } from '@/config/api'
+import { takeSignOutReason } from '@/services/apiFailureHandling'
 import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME
@@ -233,6 +246,7 @@ const showForgotPasswordEmail = ref(false)
 const loading = ref(false)
 const error = ref('')
 const successMessage = ref('')
+const signedOutNotice = ref('')
 const loginForm = ref(null)
 
 const rules = {
@@ -407,6 +421,11 @@ onMounted(async () => {
         console.warn('[Login] SocialLoginButtons failed to load:', error)
       }
     }
+  }
+
+  if (takeSignOutReason() === 'displaced') {
+    signedOutNotice.value =
+      'You were signed out because your account signed in on another browser. Each person can use two browsers at a time.'
   }
 
   if (route.query.passwordChanged === 'true') {

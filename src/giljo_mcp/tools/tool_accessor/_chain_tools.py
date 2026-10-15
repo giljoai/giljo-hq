@@ -34,6 +34,10 @@ _EXECUTION_MODE_QUESTION = (
 )
 
 
+def _agent_facing_run(run: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in run.items() if key != "tenant_key"}
+
+
 def _execution_mode_question() -> dict[str, Any]:
     return {
         "success": False,
@@ -138,7 +142,7 @@ class ChainToolsMixin:
 
         if action == "terminate_remaining":
             run = await service.stop_chain(run_id=run_id, tenant_key=tenant_key)
-            return {"success": True, "action": action, "run": run}
+            return {"success": True, "action": action, "run": _agent_facing_run(run)}
 
         if not isinstance(member_project_id, str) or not member_project_id.strip():
             raise ValidationError(
@@ -146,7 +150,7 @@ class ChainToolsMixin:
                 context={"field": "member_project_id"},
             )
         run = await service.mark_member_reviewed(run_id=run_id, project_id=member_project_id, tenant_key=tenant_key)
-        return {"success": True, "action": action, "run": run}
+        return {"success": True, "action": action, "run": _agent_facing_run(run)}
 
 
     @staticmethod
@@ -242,7 +246,7 @@ class ChainToolsMixin:
             return self._reject(
                 "PROJECT_NOT_CHAINABLE",
                 "One or more projects are staged and awaiting the solo Implement gate; click Implement "
-                "(or unstage) before linking them into a chain.",
+                "(or call unstage_project to start staging over) before linking them into a chain.",
                 project_ids=awaiting_implement,
                 reason="awaiting_implement",
             )
@@ -305,13 +309,14 @@ class ChainToolsMixin:
                 "run['current_index'] + run['project_statuses'] are the live progress, all "
                 "durable on the sequence_run record -- a fresh session that lost this response "
                 "recovers by reading the record (get_context / the run itself), never by "
-                "re-electing or re-staging. The dashboard's Run Sequential button writes this "
-                "SAME record through the same SequenceRunService; you are not its only writer."
+                "re-electing or re-staging. The chain card's Stage chain and Implement chain "
+                "controls on the dashboard write this SAME record through the same "
+                "SequenceRunService; you are not its only writer."
             ),
         )
         return {
             "success": True,
-            "run": run,
+            "run": _agent_facing_run(run),
             "run_id": run["id"],
             "conductor_agent_id": run["conductor_agent_id"],
             "conductor_job_id": conductor_job_id,

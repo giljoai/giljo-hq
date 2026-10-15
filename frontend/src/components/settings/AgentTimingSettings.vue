@@ -28,10 +28,12 @@
           :min="1"
           :max="1440"
           :rules="RULES"
-          :disabled="saving || loadFailed"
+          :disabled="loadFailed"
+          :loading="savingSilence"
           class="ats-number"
           data-test="silence-threshold-input"
-          @update:model-value="saveSilence"
+          @blur="saveSilence"
+          @keydown.enter="saveSilence"
         />
         <span class="setting-row-unit">min</span>
       </div>
@@ -65,10 +67,12 @@
           :min="1"
           :max="1440"
           :rules="RULES"
-          :disabled="saving || loadFailed"
+          :disabled="loadFailed"
+          :loading="savingCadence"
           class="ats-number"
           data-test="checkin-cadence-input"
-          @update:model-value="saveCadence"
+          @blur="saveCadence"
+          @keydown.enter="saveCadence"
         />
         <span class="setting-row-unit">min</span>
       </div>
@@ -82,7 +86,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { useSettingsStore } from '@/stores/settings'
 import { parseErrorResponse } from '@/utils/errorMessages'
@@ -95,17 +99,21 @@ const RULES = [
 const settings = useSettingsStore()
 const silenceMinutes = ref(10)
 const cadenceMinutes = ref(10)
-const saving = ref(false)
+const savingSilence = ref(false)
+const savingCadence = ref(false)
 const error = ref('')
 const loadFailed = ref(false)
+
+const lastSent = { silence: null, cadence: null }
+const latestSave = { silence: 0, cadence: 0 }
 
 onMounted(async () => {
   const [silence, cadence] = await Promise.allSettled([
     settings.loadAgentSilenceThreshold(),
     settings.loadAgentCheckinCadence(),
   ])
-  if (silence.status === 'fulfilled') silenceMinutes.value = silence.value
-  if (cadence.status === 'fulfilled') cadenceMinutes.value = cadence.value
+  if (silence.status === 'fulfilled') silenceMinutes.value = lastSent.silence = silence.value
+  if (cadence.status === 'fulfilled') cadenceMinutes.value = lastSent.cadence = cadence.value
   const failed = [silence, cadence].find((r) => r.status === 'rejected')
   if (failed) {
     loadFailed.value = true
@@ -113,29 +121,39 @@ onMounted(async () => {
   }
 })
 
+onBeforeUnmount(() => {
+  if (loadFailed.value) return
+  saveSilence()
+  saveCadence()
+})
+
 function isValid(value) {
   return Number.isInteger(value) && value >= 1 && value <= 1440
 }
 
-async function commit(fn, value) {
-  if (!isValid(value)) return
-  saving.value = true
+async function commit(key, fn, value, savingRef) {
+  if (!isValid(value) || value === lastSent[key]) return
+  const previous = lastSent[key]
+  const token = ++latestSave[key]
+  lastSent[key] = value
+  savingRef.value = true
   error.value = ''
   try {
     await fn(value)
   } catch {
+    if (token === latestSave[key]) lastSent[key] = previous
     error.value = 'Could not save that. The value on the server is unchanged.'
   } finally {
-    saving.value = false
+    if (token === latestSave[key]) savingRef.value = false
   }
 }
 
 function saveSilence() {
-  return commit(settings.updateAgentSilenceThreshold, silenceMinutes.value)
+  return commit('silence', settings.updateAgentSilenceThreshold, silenceMinutes.value, savingSilence)
 }
 
 function saveCadence() {
-  return commit(settings.updateAgentCheckinCadence, cadenceMinutes.value)
+  return commit('cadence', settings.updateAgentCheckinCadence, cadenceMinutes.value, savingCadence)
 }
 </script>
 
