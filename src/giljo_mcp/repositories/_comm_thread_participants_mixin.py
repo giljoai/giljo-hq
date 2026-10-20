@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,14 +139,17 @@ class CommThreadParticipantsMixin:
         participant_id: str,
         *,
         thread_id: str | None = None,
+        min_interval: timedelta = timedelta(seconds=60),
     ) -> None:
+        now = datetime.now(UTC)
         conditions = [
             CommParticipant.tenant_key == tenant_key,
             CommParticipant.participant_id == participant_id,
+            or_(CommParticipant.last_seen_at.is_(None), CommParticipant.last_seen_at < now - min_interval),
         ]
         if thread_id is not None:
             conditions.append(CommParticipant.thread_id == thread_id)
-        await session.execute(update(CommParticipant).where(*conditions).values(last_seen_at=datetime.now(UTC)))
+        await session.execute(update(CommParticipant).where(*conditions).values(last_seen_at=now))
 
     async def get_participants(self, session: AsyncSession, tenant_key: str, thread_id: str) -> list[CommParticipant]:
         result = await session.execute(
@@ -179,3 +182,14 @@ class CommThreadParticipantsMixin:
             )
         )
         return result.scalar_one_or_none()
+
+    async def is_agent_identity(self, session: AsyncSession, tenant_key: str, identity: str) -> bool:
+        result = await session.execute(
+            select(AgentExecution.id)
+            .where(
+                AgentExecution.tenant_key == tenant_key,
+                or_(AgentExecution.agent_id == identity, AgentExecution.job_id == identity),
+            )
+            .limit(1)
+        )
+        return result.first() is not None

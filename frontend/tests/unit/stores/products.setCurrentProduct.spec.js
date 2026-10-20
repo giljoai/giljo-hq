@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   fetchProjects: vi.fn(),
   fetchTasks: vi.fn(),
   loadThreads: vi.fn(),
+  showToast: vi.fn(),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -22,6 +23,8 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/stores/projects', () => ({ useProjectStore: () => ({ fetchProjects: h.fetchProjects }) }))
 vi.mock('@/stores/tasks', () => ({ useTaskStore: () => ({ fetchTasks: h.fetchTasks }) }))
 vi.mock('@/stores/commHubStore', () => ({ useCommHubStore: () => ({ loadThreads: h.loadThreads }) }))
+// A shared spy: the global useToast mock hands each caller a fresh one (tests/setup.js).
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: h.showToast }) }))
 
 import { useProductStore } from '@/stores/products'
 
@@ -102,5 +105,71 @@ describe('products.setCurrentProduct', () => {
     expect(stored()).toEqual([])
     expect(refreshed()).toEqual({ projects: 0, tasks: [], threads: [] })
     expect(events).toEqual([])
+  })
+
+  // FE-9796: "Failed to fetch product: AxiosError: timeout" was followed by
+  // "Product not found, switching to first available". Only a real not-found
+  // may move the user to another product.
+  describe('a failed read is not a not-found (FE-9796)', () => {
+    const C = { id: 'prod-c', name: 'C' }
+    const timeout = () => Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED', isAxiosError: true })
+    const http = (status) => Object.assign(new Error(`Request failed with status code ${status}`), { response: { status, data: {} } })
+    const seen = { events: [] }
+    const onEvent = (e) => seen.events.push(e.detail)
+    const toasts = () => h.showToast.mock.calls.map((c) => c[0])
+
+    // Viewing B; the user asks for C, whose read fails. A (the first product) reads fine,
+    // so a wrong "not found" verdict would visibly land the user on A.
+    async function viewingBThenAskForC(cError) {
+      h.list.mockResolvedValue({ data: [A, B, C] })
+      h.get.mockImplementation(async (id) => {
+        if (id === 'prod-c') throw cError
+        return { data: id === 'prod-a' ? A : B }
+      })
+      await store.setCurrentProduct('prod-b')
+      vi.clearAllMocks()
+      seen.events = []
+      window.addEventListener('product-changed', onEvent)
+      try {
+        await store.setCurrentProduct('prod-c')
+      } finally {
+        window.removeEventListener('product-changed', onEvent)
+      }
+    }
+
+    it.each([
+      ['a timeout', timeout],
+      ['a network error', () => Object.assign(new Error('Network Error'), { code: 'ERR_NETWORK' })],
+      ['a 500', () => http(500)],
+    ])('%s keeps the current product, switches nowhere and tells the user', async (_label, makeError) => {
+      await viewingBThenAskForC(makeError())
+      expect(store.currentProductId).toBe('prod-b')
+      expect(store.currentProduct).toEqual(B)
+      expect(stored()).toEqual([])
+      expect(refreshed()).toEqual({ projects: 0, tasks: [], threads: [] })
+      expect(seen.events).toEqual([])
+      expect(toasts()).toHaveLength(1)
+      expect(toasts()[0].type).toBe('error')
+    })
+
+    it('a timeout reading the product list keeps the current product', async () => {
+      await store.setCurrentProduct('prod-b')
+      vi.clearAllMocks()
+      store.products = []
+      h.list.mockRejectedValue(timeout())
+      await store.setCurrentProduct('prod-a')
+      expect(store.currentProductId).toBe('prod-b')
+      expect(stored()).toEqual([])
+      expect(toasts()).toHaveLength(1)
+    })
+
+    it('a real 404 still falls back to the first product', async () => {
+      await viewingBThenAskForC(http(404))
+      expect(store.currentProductId).toBe('prod-a')
+      expect(store.currentProduct).toEqual(A)
+      expect(stored()).toEqual([['set', 'prod-a']])
+      expect(seen.events).toEqual([{ productId: 'prod-a', product: A }])
+      expect(toasts()).toEqual([])
+    })
   })
 })

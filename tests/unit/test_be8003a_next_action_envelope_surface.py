@@ -32,7 +32,8 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
     "spawn_job": "returns SpawnResult identity; not in the BE-8003a evidence index -- candidate for a follow-up",
     "write_project_closeout": "terminal write; not in the BE-8003a evidence index -- candidate for a follow-up",
     "launch_implementation": "not in the BE-8003a evidence index -- candidate follow-up (natural next: get_implementation_prompt)",
-    "resume_or_dismiss_job": "carries Reactivation/DismissResult.instruction (analogous, differently-named) -- BE-8003a follow-up candidate",
+    "resume_job": "carries ReactivationResult.instruction (analogous, differently-named) -- BE-8003a follow-up candidate",
+    "dismiss_job": "carries DismissResult.instruction (analogous, differently-named) -- BE-8003a follow-up candidate",
     "set_agent_status": (
         "carries ErrorReportResult.guidance (analogous, differently-named); NOT in the evidence index "
         "-- BE-8003a follow-up candidate (WO-8003a KICKOFF)"

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from giljo_mcp.exceptions import BaseGiljoError
@@ -20,6 +21,21 @@ logger = logging.getLogger(__name__)
 _SANITIZED_SERVER_ERROR = (
     "The server hit an unexpected internal error handling this request. Full details were logged server-side."
 )
+
+SERVER_BUSY_RETRY_AFTER_SECONDS = 5
+
+
+def server_busy_response(request: Request) -> JSONResponse:
+    from api.app_state import state
+
+    engine = getattr(getattr(state, "db_manager", None), "async_engine", None)
+    pool_status = engine.pool.status() if engine is not None else "unavailable"
+    logger.warning("db_pool_timeout path=%s pool=%s", request.url.path, pool_status)
+    return JSONResponse(
+        status_code=503,
+        content={"error_code": "SERVER_BUSY", "message": "The server is busy. Try again in a moment."},
+        headers={"Retry-After": str(SERVER_BUSY_RETRY_AFTER_SECONDS)},
+    )
 
 
 def register_exception_handlers(app):
@@ -51,9 +67,6 @@ def register_exception_handlers(app):
                 "msg": error.get("msg", ""),
                 "type": error.get("type", ""),
             }
-            input_val = error.get("input")
-            if input_val is not None and isinstance(input_val, (str, int, float, bool, list, dict, type(None))):
-                sanitized["input"] = input_val
             sanitized_errors.append(sanitized)
 
         return JSONResponse(
@@ -90,8 +103,14 @@ def register_exception_handlers(app):
             headers=getattr(exc, "headers", None),
         )
 
+    @app.exception_handler(PoolTimeoutError)
+    async def pool_timeout_handler(request: Request, exc: PoolTimeoutError):
+        return server_busy_response(request)
+
     @app.exception_handler(Exception)
     async def unexpected_exception_handler(request: Request, exc: Exception):
+        if isinstance(exc, PoolTimeoutError):
+            return server_busy_response(request)
         logger.exception(f"Unexpected error: {exc}")
         return JSONResponse(
             status_code=500,

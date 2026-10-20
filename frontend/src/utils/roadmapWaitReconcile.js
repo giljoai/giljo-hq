@@ -12,7 +12,7 @@ export function agentSavedAfter(roadmap, items, stampedAt) {
 
 export function waitIsSuperseded(roadmap, items, storageKey) {
   if (!storageKey) return false
-  let raw = null
+  let raw
   try {
     raw = localStorage.getItem(storageKey)
   } catch {

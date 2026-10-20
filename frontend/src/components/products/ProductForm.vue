@@ -216,6 +216,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  initialCreateBlank: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits([
@@ -650,7 +654,7 @@ watch(() => props.modelValue, (newVal) => {
     resetTab()
     saving.value = false
     skipAiAnalysis.value = false
-    createBlank.value = false
+    createBlank.value = props.initialCreateBlank && !props.isEdit
     ctxConfirmOpen.value = false
     ctxLaunching.value = false
     resetAnalysisState()

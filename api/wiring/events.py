@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import text
 
 from api.app_state import GILJO_MODE, state
 from api.exception_handlers import register_exception_handlers
@@ -65,19 +64,12 @@ def register_event_handlers(app: FastAPI) -> None:
 
     @app.get("/health")
     async def health_check():
-        """Health check endpoint"""
-        checks = {"api": "healthy", "database": "unknown", "websocket": "unknown"}
+        """Liveness check: the API process, its WebSocket layer and, when configured, Redis.
 
-        if state.db_manager:
-            try:
-                async with state.db_manager.get_session_async() as session:
-                    await session.execute(text("SELECT 1"))
-                    checks["database"] = "healthy"
-                    state.health_detail.pop("database", None)
-            except (ConnectionError, TimeoutError, RuntimeError, OSError) as e:
-                checks["database"] = "unhealthy: database"
-                state.health_detail["database"] = "unreachable"
-                logger.warning("Health check: database unhealthy: %s", sanitize(str(e)))
+        Database readiness is not part of it, so a busy database connection pool never
+        makes a running server look down.
+        """
+        checks = {"api": "healthy", "websocket": "unknown"}
 
         if state.websocket_manager:
             checks["websocket"] = "healthy"

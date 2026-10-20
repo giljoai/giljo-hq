@@ -486,6 +486,17 @@ function openHub(project) {
   handleMessages({}, project.id)
 }
 
+function agentsLoadFailed(ids, error) {
+  agentsByProject.value = { ...agentsByProject.value, ...Object.fromEntries(ids.map((id) => [id, []])) }
+  notifyFailure(notificationStore, {
+    operation: 'jobs.load',
+    entityId: ids.length === 1 ? ids[0] || 'none' : 'board',
+    error,
+    fallbackMessage: 'Failed to load agent jobs. Refresh the page or try again.',
+    title: 'Agent jobs unavailable',
+  })
+}
+
 async function loadAgentsFor(project) {
   try {
     const response = await api.agentJobs.list(project.id)
@@ -494,14 +505,29 @@ async function loadAgentsFor(project) {
       [project.id]: extractJobsFromResponse(response?.data),
     }
   } catch (error) {
-    agentsByProject.value = { ...agentsByProject.value, [project.id]: [] }
-    notifyFailure(notificationStore, {
-      operation: 'jobs.load',
-      entityId: project.id || 'none',
-      error,
-      fallbackMessage: 'Failed to load agent jobs. Refresh the page or try again.',
-      title: 'Agent jobs unavailable',
-    })
+    agentsLoadFailed([project.id], error)
+  }
+}
+
+const AGENT_READ_IDS_MAX = 200
+async function loadAgentsForMany(ids) {
+  for (let start = 0; start < ids.length; start += AGENT_READ_IDS_MAX) {
+    const chunk = ids.slice(start, start + AGENT_READ_IDS_MAX)
+    let data, jobs
+    try {
+      data = (await api.agentJobs.listMany(chunk))?.data
+      jobs = extractJobsFromResponse(data)
+    } catch (error) {
+      agentsLoadFailed(chunk, error)
+      continue
+    }
+    if (data.total > jobs.length) {
+      await Promise.all(chunk.map((id) => loadAgentsFor({ id })))
+      continue
+    }
+    const byProject = Object.fromEntries(chunk.map((id) => [id, []]))
+    for (const job of jobs) byProject[job.project_id]?.push(job)
+    agentsByProject.value = { ...agentsByProject.value, ...byProject }
   }
 }
 
@@ -512,7 +538,7 @@ async function loadBoard() {
   const scope = { allProducts: allProducts.value }
   await Promise.all([projectStore.fetchActiveProject(scope), sequenceRunStore.hydrate(undefined, scope)])
   const ids = new Set([...boardIds(), ...chainMemberIds.value])
-  await Promise.all([...ids].map((id) => loadAgentsFor({ id })))
+  await loadAgentsForMany([...ids])
 }
 const fetchBoard = coalesceAsync(loadBoard)
 
@@ -524,7 +550,7 @@ const reloadLive = coalesceAsync(async () => {
   await Promise.all([projectStore.fetchActiveProject(scope), sequenceRunStore.hydrate(undefined, scope)])
   const onBoard = new Set([...boardIds(), ...chainMemberIds.value])
   const stale = [...onBoard].filter((id) => named.has(id) || !(id in agentsByProject.value))
-  await Promise.all(stale.map((id) => loadAgentsFor({ id })))
+  await loadAgentsForMany(stale)
 })
 function refreshBoardLive(named = []) {
   named.forEach((id) => liveNamed.add(id))

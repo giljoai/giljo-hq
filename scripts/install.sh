@@ -70,7 +70,8 @@ fi
 DEFAULT_INSTALL_DIR="${HOME:-$PWD}/giljoai-mcp"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
-MIN_NODE_MAJOR=20
+# The frontend/package.json engines.node floor (BE-9813; a test keeps them equal).
+MIN_NODE_VERSION="22.23.3"
 SERVER_PORT=7272
 
 # ---------------------------------------------------------------------------
@@ -307,6 +308,21 @@ version_minor() {
     echo "$1" | cut -d. -f2
 }
 
+version_at_least() {
+    # version_at_least <have> <need>: true when dotted numeric <have> >= <need>.
+    local -a have=() need=()
+    local i h n
+    IFS=. read -r -a have <<< "$1"
+    IFS=. read -r -a need <<< "$2"
+    for i in 0 1 2; do
+        h="${have[i]:-0}"
+        n="${need[i]:-0}"
+        if (( 10#$h > 10#$n )); then return 0; fi
+        if (( 10#$h < 10#$n )); then return 1; fi
+    done
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Phase 1 -- Prerequisites
 # ---------------------------------------------------------------------------
@@ -370,14 +386,13 @@ check_prerequisites() {
     # -- Node.js --
     print_step "Checking Node.js..."
     if is_real_linux_bin node; then
-        local node_raw node_ver node_major
+        local node_raw node_ver
         node_raw="$(node --version 2>&1)"
-        node_ver="$(parse_version "$node_raw")"
-        node_major="$(version_major "$node_ver")"
-        if [[ "$node_major" -ge "$MIN_NODE_MAJOR" ]]; then
+        node_ver="$(echo "$node_raw" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        if [[ -n "$node_ver" ]] && version_at_least "$node_ver" "$MIN_NODE_VERSION"; then
             print_ok "Node.js ${node_ver} found"
         else
-            print_warn "Node.js found but version too old: $node_raw (need ${MIN_NODE_MAJOR}+)"
+            print_warn "Node.js found but version too old: $node_raw (need ${MIN_NODE_VERSION}+)"
             missing+=("node")
         fi
     else
@@ -507,7 +522,7 @@ install_prereqs_linux() {
                     node)
                         print_step "Installing Node.js 22..."
                         # Direct binary from nodejs.org CDN — fast, no repo setup needed
-                        local node_ver="v22.22.0"
+                        local node_ver="v${MIN_NODE_VERSION}"
                         local node_arch="x64"
                         [[ "$(uname -m)" == "aarch64" ]] && node_arch="arm64"
                         curl -fsSL "https://nodejs.org/dist/${node_ver}/node-${node_ver}-linux-${node_arch}.tar.xz" | sudo tar -xJ -C /usr/local --strip-components=1

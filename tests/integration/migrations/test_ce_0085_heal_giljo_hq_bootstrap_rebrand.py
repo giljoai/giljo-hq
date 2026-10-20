@@ -17,6 +17,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
+from giljo_mcp.db_url import normalize_database_url
 from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 
 
@@ -63,7 +64,7 @@ def _scratch_db_url() -> str:
 
 
 def _scratch_engine() -> sa.Engine:
-    return sa.create_engine(_scratch_db_url(), poolclass=sa.pool.NullPool)
+    return sa.create_engine(normalize_database_url(_scratch_db_url(), "sync"), poolclass=sa.pool.NullPool)
 
 
 def _drop_all_objects(engine: sa.Engine) -> None:
@@ -110,7 +111,9 @@ def _ensure_scratch_database_exists() -> None:
     scratch = _scratch_db_url()
     prefix, _, _ = scratch.rpartition("/")
     owner_admin_url = f"{prefix}/postgres"
-    eng = sa.create_engine(owner_admin_url, poolclass=sa.pool.NullPool, isolation_level="AUTOCOMMIT")
+    eng = sa.create_engine(
+        normalize_database_url(owner_admin_url, "sync"), poolclass=sa.pool.NullPool, isolation_level="AUTOCOMMIT"
+    )
     try:
         with eng.connect() as conn:
             existing = conn.execute(

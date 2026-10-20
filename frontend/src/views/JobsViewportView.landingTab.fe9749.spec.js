@@ -6,7 +6,8 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 const server = vi.hoisted(() => ({ active: [], runs: [], agents: {} }))
 const h = vi.hoisted(() => ({ launchImplementation: vi.fn(), launchProject: vi.fn(), copy: vi.fn() }))
 
-vi.mock('@/services/api', () => {
+vi.mock('@/services/api', async () => {
+  const { listManyFrom } = await import('../../tests/helpers/agentJobsListMany')
   const ok = (data) => Promise.resolve({ data })
   const api = {
     projects: {
@@ -23,6 +24,7 @@ vi.mock('@/services/api', () => {
         const jobs = server.agents[pid] || []
         return ok({ jobs, total: jobs.length, limit: 50, offset: 0 })
       },
+      listMany: (ids) => listManyFrom(api.agentJobs.list, ids),
     },
     settings: { getHeadlessLaunch: () => ok({ allow_headless_launch: true }) },
   }

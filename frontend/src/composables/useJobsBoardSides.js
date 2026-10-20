@@ -141,11 +141,22 @@ export function useJobsBoardSides({
     group?.scrollIntoView?.({ block: 'start' })
   }
 
+  let landed = false
   function land() {
+    landed = true
     side.value = sideCounts.value.staging > 0 ? 'staging' : 'implementation'
     revealHighlightedRun()
     consumeArrival()
   }
+
+  const ONE_SHOT_FLAGS = ['detail', 'review', 'decide']
+  watch(
+    () => `${ONE_SHOT_FLAGS.map((flag) => route.query[flag] ?? '').join('|')}|${arrivalProjectId.value ?? ''}`,
+    () => {
+      if (!landed || !ONE_SHOT_FLAGS.some((flag) => route.query[flag] === '1')) return
+      consumeArrival()
+    },
+  )
 
   return {
     side,

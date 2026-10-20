@@ -6,11 +6,13 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.endpoints._boundary_types import ID_MAX, IdPath, IdQuery
 from giljo_mcp.auth.dependencies import get_current_active_user
+from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import User
+from giljo_mcp.services.job_query_service import PROJECT_IDS_MAX
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -71,6 +73,18 @@ def job_to_response(job: dict) -> JobResponse:
     )
 
 
+def _parse_project_ids(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    ids = [part.strip() for part in raw.split(",") if part.strip()]
+    if any(len(pid) > ID_MAX for pid in ids):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Each project id in project_ids must be at most {ID_MAX} characters",
+        )
+    return ids
+
+
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
     project_id: IdQuery = None,
@@ -84,6 +98,11 @@ async def list_jobs(
     ),
     limit: int = Query(100, ge=1, le=500, description="Maximum results (default 100, max 500)"),
     offset: int = Query(0, ge=0, description="Pagination offset (default 0)"),
+    project_ids: str | None = Query(
+        None,
+        max_length=(ID_MAX + 1) * PROJECT_IDS_MAX,
+        description=f"Comma-separated project UUIDs (up to {PROJECT_IDS_MAX}); not combinable with project_id",
+    ),
     current_user: User = Depends(get_current_active_user),
     orchestration_service: OrchestrationService = Depends(get_orchestration_service),
 ) -> JobListResponse:
@@ -101,6 +120,7 @@ async def list_jobs(
         agent_display_name: Filter by agent display name (optional)
         limit: Maximum results (default 100)
         offset: Pagination offset (default 0)
+        project_ids: Comma-separated project UUIDs, to read several projects in one request (optional)
         current_user: Authenticated user (from dependency)
         orchestration_service: Service for job operations (from dependency)
 
@@ -108,11 +128,14 @@ async def list_jobs(
         JobListResponse with jobs list and pagination metadata
 
     Raises:
+        HTTPException 422: project_ids is empty, too long, or sent with project_id
         HTTPException 500: Failed to list jobs
 
     Example:
         GET /api/agent-jobs/?project_id=abc123&status=active&limit=50
+        GET /api/agent-jobs/?project_ids=abc123,def456&limit=500
     """
+    project_id_list = _parse_project_ids(project_ids)
     logger.debug(
         "User %s listing jobs (project=%s, status=%s, type=%s, limit=%s, offset=%s)",
         sanitize(current_user.username),
@@ -123,14 +146,18 @@ async def list_jobs(
         sanitize(offset),
     )
 
-    result = await orchestration_service.list_jobs(
-        tenant_key=current_user.tenant_key,
-        project_id=project_id,
-        status_filter=status,
-        agent_display_name=agent_display_name,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        result = await orchestration_service.list_jobs(
+            tenant_key=current_user.tenant_key,
+            project_id=project_id,
+            status_filter=status,
+            agent_display_name=agent_display_name,
+            limit=limit,
+            offset=offset,
+            project_ids=project_id_list,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
 
     logger.info(
         "Found %d jobs for user %s (total=%d, offset=%s)",

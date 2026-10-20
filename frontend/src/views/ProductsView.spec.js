@@ -76,6 +76,7 @@ vi.mock('@/services/api', () => ({ default: {} }))
 
 import ProductsView from './ProductsView.vue'
 import ProductTuningDialog from '@/components/products/ProductTuningDialog.vue'
+import ProductForm from '@/components/products/ProductForm.vue'
 
 async function mountView() {
   const wrapper = shallowMount(ProductsView)
@@ -120,5 +121,58 @@ describe('ProductsView — FE-9222 ?tune deep-link', () => {
     const dialog = wrapper.findComponent(ProductTuningDialog)
     expect(dialog.props('modelValue')).toBe(false)
     expect(h.replace).not.toHaveBeenCalled()
+  })
+})
+
+describe('ProductsView — FE-9795 tour landings', () => {
+  beforeEach(() => {
+    h.push.mockClear()
+    h.replace.mockClear()
+    h.route = { path: '/Products', query: {} }
+    h.products = [
+      { id: 'prod-1', name: 'Acme' },
+      { id: 'prod-2', name: 'Beta' },
+    ]
+  })
+
+  it('?create=blank opens the new-product form already in blank mode and strips the param', async () => {
+    h.route.query = { create: 'blank' }
+    const wrapper = await mountView()
+
+    const form = wrapper.findComponent(ProductForm)
+    expect(form.props('modelValue')).toBe(true)
+    expect(form.props('isEdit')).toBe(false)
+    expect(form.props('initialCreateBlank')).toBe(true)
+    expect(h.replace).toHaveBeenCalledWith({ path: '/Products' })
+  })
+
+  it('?create=true still opens the AI-first form (no blank mode)', async () => {
+    h.route.query = { create: 'true' }
+    const wrapper = await mountView()
+
+    const form = wrapper.findComponent(ProductForm)
+    expect(form.props('modelValue')).toBe(true)
+    expect(form.props('initialCreateBlank')).toBe(false)
+    expect(h.replace).toHaveBeenCalledWith({ path: '/Products' })
+  })
+
+  it('?edit=<id> opens that product in the edit form and strips the param', async () => {
+    h.route.query = { edit: 'prod-2' }
+    const wrapper = await mountView()
+
+    const form = wrapper.findComponent(ProductForm)
+    expect(form.props('modelValue')).toBe(true)
+    expect(form.props('isEdit')).toBe(true)
+    expect(form.props('product')).toEqual({ id: 'prod-2', name: 'Beta' })
+    expect(form.props('initialCreateBlank')).toBe(false)
+    expect(h.replace).toHaveBeenCalledWith({ path: '/Products' })
+  })
+
+  it('?edit with an unknown id fails soft: no form, param still stripped', async () => {
+    h.route.query = { edit: 'ghost-id' }
+    const wrapper = await mountView()
+
+    expect(wrapper.findComponent(ProductForm).props('modelValue')).toBe(false)
+    expect(h.replace).toHaveBeenCalledWith({ path: '/Products' })
   })
 })

@@ -228,10 +228,10 @@ class TestAdvertisedSurface:
         for phrase in ("deletes the task", "no longer resolves", "inactive", "untyped", "update_project"):
             assert phrase in tool.description.lower(), f"description must say: {phrase}"
 
-    async def test_registry_has_exactly_52_tools(self):
+    async def test_registry_has_exactly_54_tools(self):
         from api.endpoints.mcp_sdk_server import mcp
 
-        assert len({t.name for t in mcp._tool_manager.list_tools()}) == 52
+        assert len({t.name for t in mcp._tool_manager.list_tools()}) == 54
 
 
 class TestRetiredArgumentHelperBooleanFlag:

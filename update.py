@@ -112,11 +112,13 @@ def _get_revisions(db_url: str) -> tuple[str | None, str | None]:
         from alembic.script import ScriptDirectory
         from sqlalchemy import create_engine, text
 
+        from giljo_mcp.db_url import normalize_database_url
+
         alembic_cfg = Config(str(alembic_ini))
         script = ScriptDirectory.from_config(alembic_cfg)
         head = script.get_current_head()
 
-        engine = create_engine(db_url, connect_args={"connect_timeout": 10})
+        engine = create_engine(normalize_database_url(db_url, "sync"), connect_args={"connect_timeout": 10})
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
             ctx = MigrationContext.configure(conn)

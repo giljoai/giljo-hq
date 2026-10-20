@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -358,8 +358,10 @@ async def test_last_seen_advances_on_read(db_manager, db_session):
     thread = await svc.create_thread(subject="seen", creator_id="agent-orch", tenant_key=tenant)
     tid = thread["thread_id"]
     await svc.join_thread(thread_id=tid, participant_id="agent-reader", tenant_key=tenant)
-    at_join = (await _participant(db_session, tenant, tid, "agent-reader")).last_seen_at
-    assert at_join is not None
+    assert (await _participant(db_session, tenant, tid, "agent-reader")).last_seen_at is not None
+    at_join = datetime.now(UTC) - timedelta(seconds=61)
+    (await _participant(db_session, tenant, tid, "agent-reader")).last_seen_at = at_join
+    await db_session.flush()
 
     await svc.get_thread_history(thread_id=tid, as_participant="agent-reader", tenant_key=tenant)
 
@@ -388,10 +390,11 @@ async def test_baton_poll_advances_last_seen_across_threads(db_manager, db_sessi
     second = (await svc.create_thread(subject="two", creator_id="agent-orch", tenant_key=tenant))["thread_id"]
     await svc.join_thread(thread_id=first, participant_id="agent-waiter", tenant_key=tenant)
     await svc.join_thread(thread_id=second, participant_id="agent-waiter", tenant_key=tenant)
-    before = [
-        (await _participant(db_session, tenant, first, "agent-waiter")).last_seen_at,
-        (await _participant(db_session, tenant, second, "agent-waiter")).last_seen_at,
-    ]
+    stale = datetime.now(UTC) - timedelta(seconds=61)
+    for tid in (first, second):
+        (await _participant(db_session, tenant, tid, "agent-waiter")).last_seen_at = stale
+    await db_session.flush()
+    before = [stale, stale]
 
     await svc.get_my_turn(agent_id="agent-waiter", tenant_key=tenant)
 

@@ -110,7 +110,7 @@ class UserApprovalRead(BaseModel):
     @classmethod
     def banner_state_is_valid(cls, v: str) -> str:
         if v not in VALID_APPROVAL_BANNER_STATES:
-            raise ValueError(f"banner_state must be one of {sorted(VALID_APPROVAL_BANNER_STATES)} (got {v!r})")
+            raise ValueError(f"banner_state must be one of {sorted(VALID_APPROVAL_BANNER_STATES)}")
         return v
 
 

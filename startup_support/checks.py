@@ -197,7 +197,9 @@ def check_first_run() -> tuple[bool, dict | None]:
 
         from sqlalchemy import create_engine, text
 
-        engine = create_engine(db_url, connect_args={"connect_timeout": 5})
+        from src.giljo_mcp.db_url import normalize_database_url
+
+        engine = create_engine(normalize_database_url(db_url, "sync"), connect_args={"connect_timeout": 5})
         try:
             with engine.connect() as conn:
                 row = conn.execute(
@@ -247,6 +249,8 @@ def seed_default_settings() -> bool:
 
         from sqlalchemy import create_engine, text
 
+        from src.giljo_mcp.db_url import normalize_database_url
+
         config = {}
         with contextlib.suppress(Exception):
             from src.giljo_mcp._config_io import read_config
@@ -274,7 +278,7 @@ def seed_default_settings() -> bool:
             "security": json.dumps(security_data),
         }
 
-        engine = create_engine(db_url, connect_args={"connect_timeout": 5})
+        engine = create_engine(normalize_database_url(db_url, "sync"), connect_args={"connect_timeout": 5})
         try:
             with engine.connect() as conn:
                 table_check = conn.execute(

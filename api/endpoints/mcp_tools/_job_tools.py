@@ -136,19 +136,23 @@ async def complete_job(
     result: Annotated[
         dict,
         Field(
-            description="Completion result dict (validator-canonical shape, AgentExecutionResult): 'summary' (str, what was accomplished); 'artifacts' (list[str], optional); 'commits' (list[str], optional). artifacts and commits must be lists. Extra keys are allowed (e.g. files_changed, decisions_made)."
+            description=(
+                "Completion result: 'summary' (str), optional 'artifacts' and 'commits' (lists). Extra keys are "
+                "allowed (files_changed, decisions_made)."
+            )
         ),
     ],
     acknowledge_closeout_todo: Annotated[
         bool,
-        Field(
-            description="Retired and ignored: the closeout TODO completes on its own, and other open TODOs block either way. Do not pass it."
-        ),
+        Field(description=("Retired and ignored; do not pass it.")),
     ] = False,
     acknowledge_messages_on_complete: Annotated[
         bool,
         Field(
-            description="Retired and ignored: only action-required posts block completion. Read them with get_thread_history(unread_only=true, mark_read=true), act, and retry. Do not pass it."
+            description=(
+                "Retired and ignored; do not pass it. Drain action-required posts with "
+                "get_thread_history(unread_only=true, mark_read=true), act, and retry."
+            )
         ),
     ] = False,
     ctx: Context = None,
@@ -205,23 +209,16 @@ async def finalize_job(
 
 
 @mcp.tool(
-    title="Resume Or Dismiss Job",
+    title="Resume Job",
     description=(
-        "When a finished job receives a message that needs action, it is put on hold. This "
-        "tool answers that hold. 'resume' sets the job back to working so it can act on the "
-        "message. 'dismiss' acknowledges the message and sets the job back to finished, for "
-        "a message that was only information. It only changes the job's status in your own "
-        "private Giljo HQ workspace: nothing is deleted and no outside service is contacted. "
-        "It only works while the job is on hold."
+        "Set a finished job that an action-required message put on hold back to working, so it "
+        "can act on that message. Only works while the job is on hold. Changes only the job's "
+        "status in your own Giljo HQ workspace; nothing is deleted."
     ),
-    annotations=_tool_hints("resume_or_dismiss_job"),
+    annotations=_tool_hints("resume_job"),
 )
-async def resume_or_dismiss_job(
+async def resume_job(
     job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The job that is on hold.")],
-    action: Annotated[
-        Literal["resume", "dismiss"],
-        Field(description="'resume' to pick the work back up, or 'dismiss' to acknowledge without resuming."),
-    ],
     reason: Annotated[
         str,
         Field(max_length=MCP_SHORT_TEXT_MAX, description="Optional note about the decision, kept in the server log."),
@@ -231,8 +228,30 @@ async def resume_or_dismiss_job(
     kwargs: dict[str, Any] = {"job_id": job_id}
     if reason:
         kwargs["reason"] = reason
-    target = "reactivate_job" if action == "resume" else "dismiss_reactivation"
-    return await _call_tool(ctx, target, kwargs)
+    return await _call_tool(ctx, "reactivate_job", kwargs)
+
+
+@mcp.tool(
+    title="Dismiss Job",
+    description=(
+        "Acknowledge the message that put a finished job on hold and set the job back to "
+        "finished, for a message that was only information. Only works while the job is on "
+        "hold. Changes only the job's status in your own Giljo HQ workspace; nothing is deleted."
+    ),
+    annotations=_tool_hints("dismiss_job"),
+)
+async def dismiss_job(
+    job_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The job that is on hold.")],
+    reason: Annotated[
+        str,
+        Field(max_length=MCP_SHORT_TEXT_MAX, description="Optional note about the decision, kept in the server log."),
+    ] = "",
+    ctx: Context = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"job_id": job_id}
+    if reason:
+        kwargs["reason"] = reason
+    return await _call_tool(ctx, "dismiss_reactivation", kwargs)
 
 
 @mcp.tool(
@@ -358,14 +377,9 @@ async def get_job_mission(
 @mcp.tool(
     title="Spawn Job",
     description=(
-        "Create specialist agent job for execution. Called by: ORCHESTRATOR ONLY during "
-        "staging to delegate work (Step 4 of workflow). Orchestrator breaks down mission "
-        "into agent-specific tasks and spawns agents who EXECUTE the work. Returns job_id "
-        "and thin prompt (~10 lines). Agent later calls get_job_mission() to fetch full "
-        "mission. Creates database record linking agent to project. In multi_terminal mode "
-        "the returned prompt is normally a dashboard-Copy pointer -- pass inline_seed=true "
-        "to get the actual seed text back inline instead (same generator subagent mode "
-        "already uses)."
+        "Create a specialist agent job (orchestrator only, during staging). Returns job_id and a thin "
+        "prompt; the agent calls get_job_mission to fetch its full mission. In multi_terminal mode the "
+        "prompt is a dashboard Copy pointer unless inline_seed=true."
     ),
     annotations=_tool_hints("spawn_job"),
 )
@@ -390,10 +404,8 @@ async def spawn_job(
         Field(
             max_length=MCP_MISSION_MAX,
             description=(
-                "The specific work assignment for this agent. Be detailed — this becomes the "
-                "agent's full mission. Optional: omit (or pass empty) for a two-phase spawn that "
-                "creates a 'staged', messageable agent now and writes the mission later via "
-                "update_job_mission (which transitions it from 'staged' to 'waiting')."
+                "The agent's work assignment; this becomes its full mission. Omit for a two-phase spawn: a "
+                "'staged', messageable agent now, the mission later via update_job_mission."
             ),
         ),
     ] = "",
@@ -401,12 +413,8 @@ async def spawn_job(
         int | None,
         Field(
             description=(
-                "Optional ordering metadata. Same phase = parallel siblings; "
-                "higher phase = depends on lower phases completing. "
-                "In multi_terminal execution mode the dashboard groups Play buttons by phase. "
-                "In subagent modes the orchestrator manages ordering "
-                "via Task() / spawn_agent() / @-syntax invocation order; phase is informational. "
-                "Must be an integer."
+                "Ordering metadata: same phase = parallel siblings, higher = depends on lower phases. Groups Play"
+                " buttons in multi_terminal mode; informational in subagent modes."
             )
         ),
     ] = None,
@@ -415,11 +423,8 @@ async def spawn_job(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Optional job_id of a previous agent whose output this successor needs. The server "
-                "reads the predecessor's completion record and renders an appropriate context "
-                "preamble into the successor's mission (chain vs replacement is auto-detected from "
-                "the predecessor's status). In subagent execution modes the server silently skips "
-                "the preamble because your CLI already returned the predecessor result inline."
+                "Job whose completion record this agent needs; the server renders its context into the mission "
+                "(skipped in subagent modes, where your CLI already returned the result)."
             ),
         ),
     ] = "",
@@ -427,9 +432,7 @@ async def spawn_job(
         bool,
         Field(
             description=(
-                "In multi_terminal mode, return the actual bootstrap seed text inline (like "
-                "subagent modes already do) instead of the dashboard 'Copy prompt' pointer. "
-                "No effect outside multi_terminal mode -- subagent modes always seed inline."
+                "multi_terminal only: return the bootstrap seed text inline instead of the dashboard Copy pointer."
             )
         ),
     ] = False,

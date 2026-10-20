@@ -55,7 +55,7 @@
           title="New product"
           aria-label="New product"
           data-testid="products-new"
-          @click="openNewProductDialog"
+          @click="openNewProductDialog()"
         />
         <v-badge
           :content="deletedProductsCount"
@@ -128,6 +128,7 @@
       v-model:saving="savingProduct"
       :product="editingProduct"
       :is-edit="!!editingProduct && !autoSavedForAnalysis"
+      :initial-create-blank="createBlankOnOpen"
       :existing-vision-documents="existingVisionDocuments"
       :uploading-vision="uploadingVision"
       :upload-progress="uploadProgress"
@@ -225,6 +226,7 @@ const showDeleteDialog = ref(false)
 const showDetailsDialog = ref(false)
 const showTuningDialog = ref(false)
 const editingProduct = ref(null)
+const createBlankOnOpen = ref(false)
 const deletingProduct = ref(null)
 const selectedProduct = ref(null)
 const tuningProduct = ref(null)
@@ -408,8 +410,9 @@ async function handleProductRefresh() {
   }
 }
 
-function openNewProductDialog() {
+function openNewProductDialog(blank = false) {
   editingProduct.value = null
+  createBlankOnOpen.value = blank
   showDialog.value = true
 }
 
@@ -572,14 +575,22 @@ async function loadProducts() {
 }
 
 onMounted(async () => {
-  if (route.query.create === 'true') {
-    openNewProductDialog()
+  const createMode = route.query.create
+  if (createMode === 'true' || createMode === 'blank') {
+    openNewProductDialog(createMode === 'blank')
     router.replace({ path: route.path })
   }
 
   const tuneProductId = route.query.tune
+  const editProductId = route.query.edit
 
   await loadProducts()
+
+  if (editProductId) {
+    const target = productStore.products.find((product) => product.id === editProductId)
+    if (target) await editProduct(target)
+    router.replace({ path: route.path })
+  }
 
   if (tuneProductId) {
     const target = productStore.products.find((product) => product.id === tuneProductId)

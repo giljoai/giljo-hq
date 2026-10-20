@@ -91,20 +91,15 @@ async def diagnose_project_state(
 @mcp.tool(
     title="Create Project",
     description=(
-        "Create a new project. PASS product_id: in a bound repo it is already in your boot context "
-        "(giljo_setup wrote it), and resolve an unknown one via get_context(categories=['products']). "
-        "Omitting it falls back to the default product only for a single-product tenant; a tenant "
-        "that owns more than one product gets a structured PRODUCT_AMBIGUOUS rejection instead (the "
-        "product list is in the error) -- nothing is created on a bare guess. project_type is a "
-        "taxonomy abbreviation (e.g. FE, BE, INF); the reserved 'TSK' type is task-only and is never "
-        "valid here. series_number is auto-assigned server-side -- omit it for a normal create. "
-        "Project is created inactive. Launching its implementation makes it active; the launch "
-        "gate is a separate, explicit step (either door -- see get_giljo_guide). The response names the "
-        "product the project landed on and carries TWO aliases: alias is the short permanent "
-        "share code (e.g. A1B2C3, never changes), taxonomy_alias is the human-readable serial "
-        "(e.g. BE-0007) -- quote taxonomy_alias to people, use project_id in tool calls. See "
-        "get_giljo_guide for chain creation (shared series_number + a/b/c suffix), taxonomy "
-        "errors, and Edition Scope."
+        "Create a project: an actionable, multi-step body of work. Pass product_id when you know it (a "
+        "bound repo carries it; get_context(categories=['products']) resolves a name). Omitted, it falls "
+        "back to the default product only for a single-product tenant; otherwise a PRODUCT_AMBIGUOUS "
+        "rejection lists the products and nothing is created. project_type is a taxonomy abbreviation "
+        "(FE, BE, INF...); 'TSK' is task-only. Serials auto-assign. The project is created inactive; "
+        "launching its implementation activates it. The response names the product and carries two "
+        "aliases: alias is the short permanent share code (e.g. A1B2C3), taxonomy_alias the "
+        "human-readable serial (e.g. BE-0007); quote taxonomy_alias to people, use project_id in calls. "
+        "Chains, taxonomy errors and Edition Scope: get_giljo_guide."
     ),
     annotations=_tool_hints("create_project"),
 )
@@ -115,9 +110,8 @@ async def create_project(
         Field(
             max_length=MCP_DESCRIPTION_MAX,
             description=(
-                "What the project is for, in the user's own terms: the requirements, the "
-                "definition of done, and what is out of scope. This is the INPUT brief -- the "
-                "execution plan is written separately via update_project_mission."
+                "What the project is for, in the user's own terms: requirements, definition of done, what is out "
+                "of scope. The execution plan is written separately via update_project_mission."
             ),
         ),
     ],
@@ -126,10 +120,8 @@ async def create_project(
         Field(
             max_length=MCP_NAME_MAX,
             description=(
-                "Taxonomy type abbreviation, e.g. 'FE', 'BE', 'INF'. Must match a type already "
-                "configured for this account; an unknown value is rejected with the full valid "
-                "list in the error, so re-map and retry. The reserved 'TSK' tag is task-only and "
-                "never valid here. Omit to create an untyped project and tag it later."
+                "Taxonomy abbreviation ('FE', 'BE', 'INF'); must be a type configured for this account, or the "
+                "rejection lists the valid ones. 'TSK' is task-only. Omit to create an untyped project."
             ),
         ),
     ] = "",
@@ -137,8 +129,8 @@ async def create_project(
         int,
         Field(
             description=(
-                "Leave at 0 -- the serial is auto-assigned. Pass a number ONLY to place this "
-                "project into an existing series slot alongside a suffix (see suffix)."
+                "Leave at 0: the serial is auto-assigned. Pass a number only to join an existing series alongside"
+                " a suffix."
             )
         ),
     ] = 0,
@@ -147,9 +139,8 @@ async def create_project(
         Field(
             max_length=8,
             description=(
-                "Single letter (a-z) marking this project's position in a multi-step series: "
-                "the shared number says these belong together, the letter says which runs "
-                "first. Empty for a normal standalone project."
+                "Single letter (a-z) marking this project's position in a multi-step series. Empty for a "
+                "standalone project."
             ),
         ),
     ] = "",
@@ -168,12 +159,10 @@ async def create_project(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Product UUID to create this project under. PASS IT WHEN YOU KNOW YOUR PRODUCT: "
-                "a bound repo already carries it, and get_context(categories=['products']) "
-                "resolves a name to an id. Omitting it falls back to the default product only "
-                "for a single-product account; an account with several gets a structured "
-                "PRODUCT_AMBIGUOUS rejection listing them, and creates nothing. An id that is "
-                "not one of your own products is rejected and creates nothing."
+                "Product UUID to create under. Pass it when you know it (a bound repo carries it; "
+                "get_context(categories=['products']) resolves a name). Omitted, it falls back to the default "
+                "product only for a single-product account; otherwise PRODUCT_AMBIGUOUS and nothing is created. "
+                "An id that is not yours is rejected."
             ),
         ),
     ] = "",
@@ -234,27 +223,14 @@ async def create_project(
 @mcp.tool(
     title="List Projects",
     description=(
-        "List and SEARCH projects for your default product with server-side filtering. Default "
-        "returns only active-lifecycle projects (excludes completed/cancelled/terminated/"
-        "deleted); pass include_completed=true or an explicit status to change that. EVERY "
-        "response carries a counts block describing the WHOLE board (totals by status and type, "
-        "the date span) so you can size it before choosing what to ask for. counts.matched is "
-        "your filters' full hit count and stays constant across a walk; counts.remaining (only "
-        "while walking, via cursor) is the part still ahead of you and shrinks each page. If your "
-        "default-view result looks emptier than expected, counts.advice explains why and names "
-        "the true count for YOUR filters (not a whole-board number) and how to see the rest -- "
-        "this is NOT a truncation, just an explicit note. Use query "
-        "to find a project by name, serial, or a word from its description without listing the "
-        "board. Results are bounded by "
-        f"limit (default {LIST_PROJECTS_LIMIT_DEFAULT}, max {LIST_PROJECTS_LIMIT_MAX}); a cut "
-        "response says so via truncated + truncation, and carries truncation.next_cursor -- pass "
-        "it back as cursor with the SAME filters to walk the rest, page by page, until truncated "
-        "is false. That is how you list EVERYTHING without guessing at slices. "
-        "Prefer mode=triage|planning|audit|forensic "
-        "over numeric depth. Cheap-first: mode=triage to find a project_id, then "
-        "get_context(categories=['project']) for one project's full detail. Defaults to your "
-        "default product; pass product_id to list a specific product's projects instead. See "
-        "get_giljo_guide for read-vs-write routing."
+        "List and search projects for your default product (pass product_id for another). The "
+        "default view shows active-lifecycle projects only; pass include_completed=true or an "
+        "explicit status for more. query finds a project by name, serial or a word from its "
+        "description; mode=triage|planning|audit|forensic sets the detail level (cheapest first). "
+        "Every response carries counts for the whole board and counts.matched for your filters; a "
+        f"response cut by limit (default {LIST_PROJECTS_LIMIT_DEFAULT}, max {LIST_PROJECTS_LIMIT_MAX}) "
+        "says so and carries truncation.next_cursor to walk the rest. Details and read-vs-write "
+        "routing: get_giljo_guide."
     ),
     meta=MCP_HEAVY_TOOL_META,
     annotations=_tool_hints("list_projects"),
@@ -264,12 +240,9 @@ async def list_projects(
         str,
         Field(
             description=(
-                "Filter by status. Single value or comma-separated list. Valid values: "
-                "active, cancelled, completed, deleted, inactive, parked, superseded, "
-                "terminated. When set, include_completed is ignored. status='deleted' "
-                "reaches soft-deleted rows (the default hides them). If status_filter is "
-                "ALSO passed with a different effective meaning, the call is refused "
-                "(conflict) naming both values and the remedy; identical values pass."
+                "Filter by status: one value or a comma-separated list of active, cancelled, completed, deleted, "
+                "inactive, parked, superseded, terminated. Overrides include_completed. status='deleted' reaches "
+                "soft-deleted rows. A different status_filter in the same call is refused."
             )
         ),
     ] = "",
@@ -283,8 +256,7 @@ async def list_projects(
     taxonomy_alias_prefix: Annotated[
         str,
         Field(
-            description="Prefix-match against taxonomy_alias (e.g. 'BE-50' matches BE-5001..BE-5099 but not "
-            "BE-5100; 'BE-5036' exact-matches one)."
+            description=("Prefix match on taxonomy_alias ('BE-50' matches BE-5001..BE-5099; 'BE-5036' matches one).")
         ),
     ] = "",
     created_after: Annotated[
@@ -304,56 +276,60 @@ async def list_projects(
     include_completed: Annotated[
         bool,
         Field(
-            description="When True, archived projects (completed, cancelled, terminated, deleted) are "
-            "included. Ignored when status is explicitly set."
+            description=(
+                "Include archived projects (completed, cancelled, terminated, deleted). Ignored when status is set."
+            )
         ),
     ] = False,
     include_superseded: Annotated[
         bool,
         Field(
-            description="When True, superseded projects (work replaced by a successor) are included. Hidden "
-            "by default even under include_completed=True. An explicit status='superseded' also surfaces them."
+            description=(
+                "Include superseded projects (replaced by a successor); hidden by default even with "
+                "include_completed. status='superseded' also surfaces them."
+            )
         ),
     ] = False,
     hidden: Annotated[str, Field(description="'true' / 'false' / '' (empty = no filter, default).")] = "",
     summary_only: Annotated[
         bool,
-        Field(
-            description="When True (default), return only summary fields to minimize payload. An explicit "
-            "nonzero depth overrides this default (see depth); mode always wins over both when passed."
-        ),
+        Field(description=("Summary fields only (default). A nonzero depth overrides it; mode wins over both.")),
     ] = True,
     depth: Annotated[
         int,
         Field(
-            description="Detail level 0-3: 0 = summary fields only. 1 = + description, mission, agent job "
-            "summary. 2 = + 360 memory entries, agent job details. 3 = + message history, git commits from 360 "
-            "memory. An explicit nonzero depth overrides the summary_only=True default (same precedence mode "
-            "already has); mode still wins over depth when both are passed."
+            description=(
+                "Detail level 0-3: 0 summary fields; 1 adds description, mission and agent job summary; 2 adds "
+                "360 memory entries and job details; 3 adds message history and commits. Prefer mode."
+            )
         ),
     ] = 0,
     status_filter: Annotated[
         str,
         Field(
-            description="Legacy -- prefer `status`. Used when `status` is unset. Valid values: active, all, "
-            "cancelled, completed, inactive, parked. When BOTH `status` and `status_filter` are passed, a "
-            "genuine disagreement is refused (conflict) naming both values; identical/compatible values pass."
+            description=(
+                "Legacy; prefer status. Values: active, all, cancelled, completed, inactive, parked. A "
+                "disagreement with status is refused."
+            )
         ),
     ] = "",
     mode: Annotated[
         Literal["", "triage", "planning", "audit", "forensic"],
         Field(
-            description="Agent-facing projection depth, preferred over numeric depth. 'triage' = "
-            "id+name+status+dates (cheapest). 'planning' = + description, mission, agent counts. 'audit' = + "
-            "memory headlines + agent summaries. 'forensic' = + full memory bodies, agent results (no cap). "
-            "'' (default) = use numeric depth instead."
+            description=(
+                "Detail level, preferred over depth: triage (id, name, status, dates), planning (+ description, "
+                "mission, agent counts), audit (+ memory headlines, agent summaries), forensic (+ full memory "
+                "bodies and agent results). Empty = use depth."
+            )
         ),
     ] = "",
     memory_limit: Annotated[
         int,
         Field(
-            description="Cap memory entries returned (audit mode default 5, max 50). 0 = use mode default. "
-            "Forensic ignores the cap unless explicitly set."
+            description=(
+                "Cap on memory entries returned (audit default 5, max 50; 0 = mode default; forensic ignores it "
+                "unless set)."
+            )
         ),
     ] = 0,
     query: Annotated[
@@ -361,10 +337,8 @@ async def list_projects(
         Field(
             max_length=_QUERY_MAX_LENGTH,
             description=(
-                "Case-insensitive substring to search project name, id, description, "
-                "project_alias and taxonomy_alias (e.g. 'oauth', 'BE-1042'). Empty = no search. "
-                "The cheapest path from a half-remembered name -- or a phrase you recall from the "
-                "description -- to one project_id."
+                "Case-insensitive substring over project name, id, description, project_alias and taxonomy_alias "
+                "(e.g. 'oauth', 'BE-1042'): the cheapest path from a half-remembered name to one project_id."
             ),
         ),
     ] = "",
@@ -375,10 +349,8 @@ async def list_projects(
             le=LIST_PROJECTS_LIMIT_MAX,
             description=(
                 f"Max projects to return (default {LIST_PROJECTS_LIMIT_DEFAULT}, max "
-                f"{LIST_PROJECTS_LIMIT_MAX}). 0 = use the default. Values above the max are "
-                "REJECTED with a validation error, not clamped. A response cut by this bound "
-                "sets truncated=true and carries a truncation block naming it; read "
-                "counts.matched to see how many rows your filters actually match."
+                f"{LIST_PROJECTS_LIMIT_MAX}; 0 = default). Values above the max are rejected, not clamped. A cut "
+                "response sets truncated=true; counts.matched says how many rows match."
             ),
         ),
     ] = 0,
@@ -440,16 +412,11 @@ async def list_projects(
 @mcp.tool(
     title="Update Project",
     description=(
-        "Update project metadata (name, description, status, project_type, series_number, suffix, "
-        "successor_project_id). Only provided fields are updated. The reserved 'TSK' tag is not a "
-        "selectable project_type. status='completed' on a solo project runs the FULL archive "
-        "lifecycle (the same one the dashboard's Archive button runs): deactivate, terminal status "
-        "with completion date stamped, and spawned agents moved from 'complete' to 'closed'. This "
-        "is the supported way to finish a project over MCP. status='superseded' REQUIRES "
-        "successor_project_id in the SAME call (a valid active/completed/inactive project) -- "
-        "without one this returns a structured SUPERSEDE_REQUIRES_SUCCESSOR rejection, never a "
-        "500. To find a project to update, call list_projects first. See get_giljo_guide for chain "
-        "repositioning routing."
+        "Update a project's metadata (name, description, status, project_type, series_number, suffix, "
+        "successor_project_id); only the fields you pass change. status='completed' on a solo project "
+        "runs the full archive lifecycle (what the dashboard's Archive button does) and needs a closeout "
+        "first (see force). status='superseded' requires successor_project_id in the same call, else "
+        "SUPERSEDE_REQUIRES_SUCCESSOR. Find the project with list_projects first."
     ),
     annotations=_tool_hints("update_project", destructive=True),
 )
@@ -467,14 +434,10 @@ async def update_project(
         _UpdatableStatus,
         Field(
             description=(
-                "New status. Empty keeps the current one. 'active' / 'inactive' start and pause "
-                "work. 'parked' sets a project aside without cancelling it -- hidden from the "
-                "roadmap, resumable by setting it back to 'active' or 'inactive'. 'cancelled' "
-                "abandons it unfinished. 'completed' FINISHES a solo project and runs the whole "
-                "archive lifecycle, so it needs a closeout written first (see force). "
-                "'superseded' means another project replaced this work and REQUIRES "
-                "successor_project_id in the same call. A project inside a running chain is "
-                "finished by its conductor, not here."
+                "New status; empty keeps the current one. active/inactive start and pause work; parked sets a "
+                "project aside (resumable); cancelled abandons it; completed finishes a solo project and runs the"
+                " archive lifecycle (needs a closeout first, see force); superseded needs successor_project_id in"
+                " the same call. A chain member is finished by its conductor."
             )
         ),
     ] = "",
@@ -500,8 +463,8 @@ async def update_project(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "The project that replaced this one's work. Required with status='superseded' "
-                "and meaningless without it. Must be an active, completed, or inactive project."
+                "The project that replaced this one. Required with status='superseded'; must be an active, "
+                "completed or inactive project."
             ),
         ),
     ] = "",
@@ -509,10 +472,8 @@ async def update_project(
         bool,
         Field(
             description=(
-                "Only meaningful with status='completed'. Finishing a project normally requires "
-                "a closeout entry first (write_project_closeout); without one this is refused "
-                "with CLOSEOUT_BLOCKED naming what is outstanding. Pass true to finish it anyway, "
-                "deliberately abandoning it without a closeout record."
+                "Only with status='completed': finish without a closeout record (otherwise refused with "
+                "CLOSEOUT_BLOCKED naming what is outstanding)."
             )
         ),
     ] = False,
@@ -597,17 +558,13 @@ async def update_project_mission(
 @mcp.tool(
     title="Stage Project",
     description=(
-        "Prepares a project in your own private Giljo HQ workspace and returns its staging plan. "
-        "Staging also makes an inactive project active, so it shows on the dashboard Jobs board; "
-        "a completed, cancelled or otherwise closed project is refused. "
-        "Staging always ends at a human approval gate: nothing is implemented until the user "
-        "approves it with the Implement button in the dashboard or with launch_implementation. "
-        "Approving also makes an inactive project active. "
-        "Ask the user which `mode` to use (subagent or multi_terminal); if it is omitted and the "
-        "account has no default, the call is refused with EXECUTION_MODE_REQUIRED and names both "
-        "modes. Pass `mission` to set the project's goal at the same time; it is written through "
-        "update_project_mission, which is also where you change a mission on its own. This tool "
-        "only stages; to undo staging, use unstage_project. No outside service is contacted."
+        "Prepares a project in your own private Giljo HQ workspace and returns its staging plan; an "
+        "inactive project becomes active, a closed one is refused. Staging always ends at a human "
+        "approval gate: nothing is implemented until the user approves with the dashboard's Implement "
+        "button or launch_implementation, and approving also makes an inactive project active. Ask the "
+        "user which mode to use (subagent or multi_terminal); without one and without an account default "
+        "the call is refused with EXECUTION_MODE_REQUIRED. An optional mission is written through "
+        "update_project_mission. To undo staging use unstage_project. No outside service is contacted."
     ),
     annotations=_tool_hints("stage_project", destructive=True),
 )
@@ -686,19 +643,15 @@ async def get_implementation_prompt(
 @mcp.tool(
     title="Launch Implementation",
     description=(
-        "Release the implementation phase gate for a STAGED project -- the second of the two "
-        "human-authorized doors that flip implementation_launched_at (the first is the dashboard "
-        "'Implement' button). Reachable from any MCP client, not CLI-only; admission is keyed on "
-        "the tenant's Headless setting (off by default). Idempotent (a second call returns "
-        "already_launched=true). NOT offered to a platform-spawned worker on a narrower toolset, so "
-        "a worker cannot self-unlock. Turning Headless on signs your harness's own permission prompt "
-        "for THIS call as your approval -- run that harness with a bypass/skip-permissions flag and "
-        "nobody was actually asked. Launching also makes an inactive project active, so it shows in "
-        "the dashboard Jobs view; `project_active` in the response confirms it. A project launched "
-        "earlier, or one holding another status such as parked, is left as it is: `project_active` is "
-        "then false and `next_action` names what to do. Optional `mission` writes the goal via "
-        "update_project_mission (the same single writer the standalone tool uses) before the gate is "
-        "stamped; omit to launch with the mission already authored during staging."
+        "Release the implementation gate for a staged project: the second of the two human-authorized "
+        "doors that stamp implementation_launched_at (the first is the dashboard's Implement button). "
+        "Reachable from any MCP client; admission follows the tenant's Headless setting (off by default):"
+        " when on, your harness's own permission prompt for this call counts as the approval, so a bypass"
+        " flag means nobody was asked. Idempotent (a second call returns already_launched=true); not "
+        "offered to a platform-spawned worker, so a worker cannot self-unlock. Launching also makes an "
+        "inactive project active (project_active in the response confirms it; a project in another status"
+        " is left alone and next_action says what to do). An optional mission is written through "
+        "update_project_mission before the gate is stamped."
     ),
     annotations=_tool_hints("launch_implementation", destructive=True),
 )

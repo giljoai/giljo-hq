@@ -85,12 +85,14 @@ test.describe('Jobs board chain group', () => {
     // The member cards carry no staging buttons of their own.
     await expect(group.locator('[data-testid="jbf-stage"]')).toHaveCount(0)
 
-    // FE-9749: the chain's controls sit in the shared control area at the bottom;
-    // the header carries information only.
+    // Operator ruling 2026-10-19: the chain's control area sits under the title,
+    // above the goal and the members (it was at the bottom under FE-9749).
     const runAs = group.locator('[data-testid="chain-group-run-as"]')
     await expect(group.locator('[data-testid="sca-label"]')).toHaveText('Select execution mode')
     await expect(runAs.locator('[data-testid="radio-multi-terminal"]')).toHaveAttribute('aria-pressed', 'true')
-    await expect(group.locator('[data-testid="chain-group-header"] [data-testid="stage-chain-btn"]')).toHaveCount(0)
+    const areaBox = await group.locator('[data-testid="staging-control-area"]').boundingBox()
+    const firstMemberBox = await members.nth(0).boundingBox()
+    expect(areaBox && firstMemberBox && areaBox.y < firstMemberBox.y).toBeTruthy()
 
     // Stage the chain from its control area.
     await group.locator('[data-testid="stage-chain-btn"]').click()
@@ -127,6 +129,7 @@ test.describe('Jobs board chain group', () => {
     await expect(group.locator('[data-testid="chain-group-counter"]')).toHaveText('Step 2 of 2', { timeout: 15000 })
     await expect(members.nth(0)).toHaveAttribute('data-member-state', 'done')
     await expect(members.nth(1)).toHaveAttribute('data-member-state', 'current')
-    await expect(group.locator(`[data-testid="chain-member-review-${projectIds[0]}"]`)).toBeVisible()
+    // #1298: chain members carry the same Review project button as solo cards.
+    await expect(members.nth(0).locator('[data-testid="jb-btn-review"]')).toBeVisible()
   })
 })

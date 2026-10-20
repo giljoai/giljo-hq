@@ -165,7 +165,9 @@ class FieldPriorityConfig(BaseModel):
 
         invalid_categories = set(v.keys()) - valid_categories
         if invalid_categories:
-            raise ValueError(f"Invalid category names: {invalid_categories}. Valid categories: {valid_categories}")
+            raise ValueError(
+                f"priorities contains an unknown category name. Valid categories: {sorted(valid_categories)}"
+            )
 
         has_enabled = False
         for category, value in v.items():
@@ -181,7 +183,7 @@ class FieldPriorityConfig(BaseModel):
                     has_enabled = True
             else:
                 raise ValueError(  # noqa: TRY004  Pydantic validators must raise ValueError
-                    f"Invalid value for '{category}': {value}. Must be {{'toggle': true/false}} or a flat boolean"
+                    f"Invalid value for '{category}'. Must be {{'toggle': true/false}} or a flat boolean"
                 )
 
         always_on = {"product_core", "project_description"}

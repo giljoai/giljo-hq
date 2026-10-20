@@ -336,7 +336,9 @@ class TestOrchestratorSelfDecommissionGuard:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = make_project(id=project_id, tenant_key=tenant_key, product_id=product_id)
+        mock_project = make_project(
+            id=project_id, tenant_key=tenant_key, product_id=product_id, implementation_launched_at=datetime.now(UTC)
+        )
 
         mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
@@ -579,7 +581,9 @@ class TestOrchestratorSelfDecommissionGuard:
         tenant_key = "test-tenant"
         orch_job_id = str(uuid4())
 
-        mock_project = make_project(id=project_id, tenant_key=tenant_key, product_id=product_id)
+        mock_project = make_project(
+            id=project_id, tenant_key=tenant_key, product_id=product_id, implementation_launched_at=datetime.now(UTC)
+        )
 
         mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 

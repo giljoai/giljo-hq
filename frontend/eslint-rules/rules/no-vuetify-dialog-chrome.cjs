@@ -40,7 +40,7 @@ const VIOLATIONS = [
 ]
 
 function isFileAllowlisted(context) {
-  const src = context.sourceCode || (context.getSourceCode && context.getSourceCode())
+  const src = context.sourceCode
   if (!src || !src.text) return false
   return src.text.includes(ALLOWLIST_MARKER)
 }
@@ -123,9 +123,7 @@ module.exports = {
 
     return {
       Program(node) {
-        const src = context.getSourceCode
-          ? context.getSourceCode().getText()
-          : context.sourceCode.getText()
+        const src = context.sourceCode.getText()
 
         const dialogRanges = findDialogRanges(src)
         if (dialogRanges.length === 0) return // no dialogs in this file → nothing to flag

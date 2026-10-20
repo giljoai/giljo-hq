@@ -2,6 +2,39 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.9.0] — 2026-10-19
+
+### Changed
+
+- **Each agent tool now does exactly one thing.** Resuming or dismissing a held job are separate tools (resume_job, dismiss_job), removing a roadmap item has its own tool (remove_roadmap_items), and threads are renamed with update_thread. An agent that sends an old form gets a pointer to the new tool and nothing is changed.
+- **Starting a chain begins at the top of its card.** Choosing how the chain runs and Stage chain now sit right under the chain's title, above its goal and steps.
+- **Read-only tools are marked read-only.** Reading an agent's result or a project's workflow status no longer makes a connected client ask you to confirm.
+- **Agents load about a fifth less tool text per session.** Descriptions now say what each tool does and needs; the longer guidance moved to the guide agents fetch on demand.
+- **The Jobs page loads faster on busy boards.** It fetches every project's agents in one request.
+- **Terms of Service are checked when you sign in.** When new Terms need your agreement, your next action takes you to the Terms screen, and agreeing lets you carry on without signing in again. Agents, API keys and connected apps are not affected.
+- **The welcome tour is smoother.** "I'll fill it in myself" opens a blank product form, finishing the tour selects the product you just set up, and leaving the tour opens the product it already started instead of creating a second copy.
+- **Community Edition password recovery says what to expect.** The forgot-password dialog explains that no email is sent and asks for your 4-digit Recovery PIN; the Create Admin screen reminds you to keep that PIN safe.
+
+### Fixed
+
+- **Connecting an AI tool by sign-in no longer fails now and then.** About one sign-in in a hundred was refused with "Invalid input detected in query parameter: code_challenge"; it now goes through.
+- **A busy server answers right away instead of freezing.** When every database connection is in use, you get a clear "try again in a moment" within a few seconds.
+- **The Jobs page no longer stalls when it loads many items.**
+- **A chain shows as running as soon as its conductor starts work.**
+- **A post from an unknown sender id is refused** with a pointer to join the thread first, instead of adding a phantom participant. Role names and plain labels work as before.
+- **An agent created without a mission shows as working once it picks up its job.**
+- **An orchestrator shows as working while it plans a project,** and as waiting once the plan is ready for you to press Implement.
+- **The installers ask for the Node.js version the app needs.** Both installers now require Node.js 22.23.3 or newer, and the Linux installer downloads that version when it installs Node.js for you.
+- **The welcome tour waits for the vision analysis to finish** before reporting your agent as done.
+- **Brand guidelines entered when creating a product are saved.**
+- **Review in the decision banner works from the Jobs page,** and the decision window shows a loading message, or an error with Retry, instead of opening empty.
+- **A slow product load no longer switches your product.** You stay where you were and see a short notice.
+
+### Security
+
+- **Validation errors no longer repeat what you sent.** A refused request names the field and the rule it broke, never the rejected value, including passwords and PINs.
+- **The MCP protocol library is updated to 2.3.0.** This closes an upstream advisory that did not affect how Giljo HQ runs its connector. Your agents see the same tools, and a rejected call still tells the agent what to fix.
+
 ## [2.8.0] — 2026-10-14
 
 ### Added

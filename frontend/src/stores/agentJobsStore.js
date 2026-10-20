@@ -184,7 +184,7 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
 
 
   async function fetchWaitingCounts(projectId) {
-    let rows = []
+    let rows
     try {
       const response = await api.agentJobs.list(projectId)
       rows = extractJobsFromResponse(response?.data)

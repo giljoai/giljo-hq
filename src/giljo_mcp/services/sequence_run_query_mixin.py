@@ -18,6 +18,7 @@ from giljo_mcp.models.sequence_runs import (
     SequenceRun,
 )
 from giljo_mcp.services.sequence_run_live_filter import (
+    conductor_statuses,
     filter_runs_by_product,
     filter_runs_with_live_members,
     filter_runs_with_reviewable_members,
@@ -83,7 +84,8 @@ class SequenceRunQueryMixin:
 
     async def _serialize_listed(self, session, runs: list[SequenceRun], tenant_key: str) -> list[dict[str, Any]]:
         product_of = await member_product_ids(session=session, runs=runs, tenant_key=tenant_key)
-        return [{**_serialize(r), "product_id": product_of[r.id]} for r in runs]
+        conductor_of = await conductor_statuses(session=session, runs=runs, tenant_key=tenant_key)
+        return [{**_serialize(r), "product_id": product_of[r.id], "conductor_status": conductor_of[r.id]} for r in runs]
 
     async def _scope_runs_to_product(
         self,

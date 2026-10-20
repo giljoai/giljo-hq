@@ -156,11 +156,13 @@ def _get_database_url() -> str | None:
     with contextlib.suppress(Exception):
         from dotenv import load_dotenv
 
+        from src.giljo_mcp.db_url import normalize_database_url
+
         load_dotenv()
 
         database_url = os.getenv("DATABASE_URL")
         if database_url:
-            return database_url
+            return normalize_database_url(database_url, "sync")
 
         from urllib.parse import quote_plus
 
@@ -171,5 +173,5 @@ def _get_database_url() -> str | None:
         db_password = os.getenv("DB_PASSWORD") or os.getenv("POSTGRES_PASSWORD", "")
         if not db_password:
             return None
-        return f"postgresql://{db_user}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}"
+        return f"postgresql+psycopg2://{db_user}:{quote_plus(db_password)}@{db_host}:{db_port}/{db_name}"
     return None

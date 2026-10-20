@@ -78,14 +78,14 @@ def restored_global_client_resolver():
 
 
 @contextlib.contextmanager
-def restored_global_terms_accepted_check():
-    import giljo_mcp.auth.dependencies as dependencies_mod
+def restored_global_terms_gate():
+    from giljo_mcp.auth import terms_gate
 
-    original = dependencies_mod._terms_accepted_check
+    original = terms_gate._gate
     try:
         yield
     finally:
-        dependencies_mod._terms_accepted_check = original
+        terms_gate._gate = original
 
 
 class TestData:

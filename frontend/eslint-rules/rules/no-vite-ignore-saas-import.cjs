@@ -22,7 +22,7 @@ module.exports = {
     },
   },
   create(context) {
-    const src = context.getSourceCode()
+    const src = context.sourceCode
     return {
       ImportExpression(node) {
         // Check leading or inner comments for "@vite-ignore"

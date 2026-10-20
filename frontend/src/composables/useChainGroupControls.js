@@ -15,6 +15,7 @@ function errorText(err, fallback) {
 }
 
 const CHAIN_PROMPT_COPIED = 'Chain prompt copied. Paste it into your conductor session.'
+const NOT_PICKED_UP = new Set(['waiting', 'staged'])
 
 export function useChainGroupControls({ chainCtx, agentsByProject = () => ({}) }) {
   const sequenceRunStore = useSequenceRunStore()
@@ -55,6 +56,8 @@ export function useChainGroupControls({ chainCtx, agentsByProject = () => ({}) }
     const ctx = chainCtx.value
     if (!ctx) return null
     if (!chainScreenControls.value.showStopChain) return ctx.locked ? 'staged' : 'ready'
+    const conductorStatus = ctx.run?.conductor_status
+    if (conductorStatus && !NOT_PICKED_UP.has(conductorStatus)) return 'running'
     const byProject = agentsByProject() || {}
     const agents = (ctx.tabs || []).flatMap((tab) => byProject[tab.projectId] || [])
     return agents.every((agent) => agent?.status === 'waiting') ? 'pickup' : 'running'

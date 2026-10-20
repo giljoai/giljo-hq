@@ -25,9 +25,9 @@ from api.endpoints.mcp_tools._tool_annotations import _tool_hints
     description=(
         "Save the roadmap -- the ranked list of what to build next. YOU do the ranking; the "
         "server only validates and stores it. Send the items you want on the board and they "
-        "are written, replacing any earlier entry for the same project or task. See the items "
-        "and remove params for their shape. Defaults to your default product; pass product_id "
-        "for a specific one."
+        "are written, replacing any earlier entry for the same project or task; see items for "
+        "the shape. To take an item off the board call remove_roadmap_items. Defaults to your "
+        "default product; pass product_id for a specific one."
     ),
     annotations=_tool_hints("save_roadmap", destructive=True),
 )
@@ -37,16 +37,11 @@ async def save_roadmap(
         Field(
             max_length=LIST_ITEMS_MAX,
             description=(
-                "List of roadmap items to upsert. Each: {item_type: 'project'|'task', "
-                "project_id OR task_id, sort_order (int 0..100000), risk?: 'low'|'med'|'high', "
-                "complexity?: 'light'|'med'|'heavy', blocked?: bool (default false), "
-                "blocked_reason?: str (<=500 chars, the red BLOCKED-row note; dropped when "
-                "blocked is false)}. project_id / task_id take EITHER the row's id or its "
-                "taxonomy_alias -- the handle already shown everywhere else ('BE-0001', "
-                "'IMP-0086') -- so no list_projects/list_tasks lookup is needed. Must "
-                "reference a project/task of the resolved product; invalid "
-                "enums/lengths/ids are rejected with a ValidationError (422), never a DB 500, "
-                "and a rejection names EVERY bad row at once, not just the first."
+                "Roadmap items to upsert: {item_type: 'project'|'task', project_id OR task_id (the row's id or "
+                "its taxonomy_alias, 'BE-0001' or 'IMP-0086'), sort_order (0..100000), risk?: low|med|high, "
+                "complexity?: light|med|heavy, blocked?: bool, blocked_reason?: str (<=500 chars, dropped when "
+                "not blocked)}. Items must belong to the resolved product; a rejection names EVERY bad row at "
+                "once."
             ),
         ),
     ],
@@ -57,31 +52,14 @@ async def save_roadmap(
             description="One-sentence AI insight banner: why this order, not status notes. Empty=unchanged.",
         ),
     ] = "",
-    remove: Annotated[
-        list[dict[str, Any]] | None,
-        Field(
-            max_length=LIST_ITEMS_MAX,
-            description=(
-                "Optional list of items to remove from the roadmap. Each: "
-                "{item_type: 'project'|'task', project_id|task_id}. Idempotent; "
-                "removes only the roadmap entry, never the project/task itself."
-            ),
-        ),
-    ] = None,
     patch_fields: Annotated[
         bool,
         Field(
             description=(
-                "Partial update. Default false, which keeps the original behaviour: every "
-                "metadata field is written from the item you send, so a field you leave out "
-                "is reset. Set true and each item patches only what it carries -- a field you "
-                "OMIT keeps its stored value, and a field you send as null or an empty string "
-                "is CLEARed. Use it to move one item without resending its risk, complexity and "
-                "blocked note. Omitting a field and sending it empty are DIFFERENT instructions. "
-                "Two details worth knowing: 'blocked' and 'blocked_reason' patch together -- send "
-                "both or neither, because an unblocked item never keeps a note; and 'sort_order' is "
-                "always a number, so its empty value is 0 and null is still refused. A row that "
-                "does not exist yet is inserted with the usual defaults either way."
+                "Partial update. Default false writes every metadata field from each item (an omitted field is "
+                "reset). True patches only what you send: an omitted field keeps its value, null or '' clears it;"
+                " blocked and blocked_reason patch together; sort_order is always a number. New rows are inserted"
+                " either way."
             )
         ),
     ] = False,
@@ -97,10 +75,44 @@ async def save_roadmap(
     kwargs: dict[str, Any] = {"items": items}
     if summary:
         kwargs["summary"] = summary
-    if remove:
-        kwargs["remove"] = remove
     if patch_fields:
         kwargs["patch_fields"] = True
+    if product_id:
+        kwargs["product_id"] = product_id
+    return await _call_tool(ctx, "update_roadmap_metadata", kwargs)
+
+
+@mcp.tool(
+    title="Remove Roadmap Items",
+    description=(
+        "Take items off the roadmap. Removes only the roadmap entry, never the project or task "
+        "itself; an item that is not on the roadmap is a no-op. Defaults to your default "
+        "product; pass product_id for a specific one."
+    ),
+    annotations=_tool_hints("remove_roadmap_items", destructive=True),
+)
+async def remove_roadmap_items(
+    items: Annotated[
+        list[dict[str, Any]],
+        Field(
+            min_length=1,
+            max_length=LIST_ITEMS_MAX,
+            description=(
+                "Roadmap entries to remove. Each: {item_type: 'project'|'task', project_id OR "
+                "task_id}, by the row's id or its taxonomy_alias ('BE-0001', 'IMP-0086')."
+            ),
+        ),
+    ],
+    product_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=READ_PRODUCT_ID_DESC.format(what="remove roadmap entries from"),
+        ),
+    ] = "",
+    ctx: Context = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"items": [], "remove": items}
     if product_id:
         kwargs["product_id"] = product_id
     return await _call_tool(ctx, "update_roadmap_metadata", kwargs)

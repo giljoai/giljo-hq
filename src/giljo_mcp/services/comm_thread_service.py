@@ -207,10 +207,6 @@ class CommThreadService(
                 "participant_type": participant.participant_type,
             }
 
-    async def _rename_before_post(self, thread_id: str, rename_to: str | None, tenant_key: str) -> None:
-        if rename_to is not None:
-            await self.update_thread(thread_id=thread_id, subject=rename_to, tenant_key=tenant_key)
-
     async def post_to_thread(
         self,
         *,
@@ -230,14 +226,12 @@ class CommThreadService(
         as_user: bool = False,
         detected_harness: str | None = None,
         self_reported_status: str | None = None,
-        rename_to: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         tk = self._resolve_tenant(tenant_key)
         if not content or not content.strip():
             raise ValidationError("content is required", context={"operation": "comm_thread.post"})
         validate_post_vocabularies(set_status, self_reported_status)
-        await self._rename_before_post(thread_id, rename_to, tk)
         interval_to_persist = resolve_loop_interval(loop_directive, loop_interval_minutes)
 
         from_agent = validate_post_author_input(from_agent, as_user, _FROM_AGENT_MAX)

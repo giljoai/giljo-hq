@@ -33,6 +33,7 @@ from giljo_mcp.services.project_helpers import (
 )
 from giljo_mcp.services.sequence_chain_context import chain_predecessor_open_error, resolve_chain_launch_gate
 from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
+from giljo_mcp.services.staging_session import is_planning_session
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -118,7 +119,8 @@ class ProjectStagingService:
 
             orchestrator = await self._lifecycle_repo.find_existing_orchestrator(session, tenant_key, project_id)
 
-            if orchestrator and orchestrator.status not in ("waiting", "complete"):
+            planning = orchestrator and is_planning_session(orchestrator) and not project.implementation_launched_at
+            if orchestrator and orchestrator.status not in ("waiting", "complete") and not planning:
                 raise ProjectStateError(
                     message="Cannot restage: orchestrator agent is already active",
                     context={

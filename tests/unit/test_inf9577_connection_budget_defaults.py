@@ -171,3 +171,76 @@ class TestPostureConstantsMatchTheDeployedArtefact:
             f"changing this constant — more workers means smaller per-worker pools, not "
             f"a bigger budget."
         )
+
+
+class TestPoolWaitFailsFast:
+
+    FAKE_URL = "postgresql://u:p@localhost:5432/giljo_inf9799_fake"
+
+    def test_shipped_pool_timeout_is_five_seconds(self):
+        assert DatabaseConfig().pg_pool_timeout == 5
+
+    def test_async_engine_queue_pool_carries_the_timeout(self):
+        from giljo_mcp.database import DatabaseManager
+
+        assert DatabaseManager(self.FAKE_URL, is_async=True).async_engine.sync_engine.pool.timeout() == 5
+        manager = DatabaseManager(self.FAKE_URL, is_async=True, pool_timeout=2)
+        assert manager.async_engine.sync_engine.pool.timeout() == 2
+
+    def test_sync_engine_queue_pool_carries_the_timeout(self):
+        from giljo_mcp.database import DatabaseManager
+
+        assert DatabaseManager(self.FAKE_URL, is_async=False).engine.pool.timeout() == 5
+        assert DatabaseManager(self.FAKE_URL, is_async=False, pool_timeout=3).engine.pool.timeout() == 3
+
+    def test_env_overrides_the_timeout(self, monkeypatch, tmp_path):
+        from giljo_mcp.config_manager import ConfigManager
+
+        monkeypatch.setenv("DB_PASSWORD", "x")
+        monkeypatch.setenv("GILJO_PG_POOL_TIMEOUT", "7")
+        cfg = ConfigManager(config_path=tmp_path / "nonexistent.yaml", auto_reload=False)
+        assert cfg.database.pg_pool_timeout == 7
+
+    def test_config_yaml_postgres_pool_timeout_is_read(self, monkeypatch, tmp_path):
+        from giljo_mcp.config_manager import ConfigManager
+
+        monkeypatch.setenv("DB_PASSWORD", "x")
+        monkeypatch.delenv("GILJO_PG_POOL_TIMEOUT", raising=False)
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("database:\n  postgresql:\n    pool_timeout: 9\n", encoding="utf-8")
+        cfg = ConfigManager(config_path=config_file, auto_reload=False)
+        assert cfg.database.pg_pool_timeout == 9
+
+    def test_create_database_manager_passes_the_timeout(self, monkeypatch, tmp_path):
+        from giljo_mcp.config_manager import ConfigManager
+
+        monkeypatch.setenv("DB_PASSWORD", "x")
+        monkeypatch.setenv("GILJO_DATABASE_URL", self.FAKE_URL)
+        monkeypatch.setenv("GILJO_PG_POOL_TIMEOUT", "4")
+        cfg = ConfigManager(config_path=tmp_path / "nonexistent.yaml", auto_reload=False)
+        assert cfg.create_database_manager().async_engine.sync_engine.pool.timeout() == 4
+
+    @pytest.mark.asyncio
+    async def test_boot_path_passes_the_configured_timeout(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import api.startup.database as startup_db
+
+        captured: dict = {}
+
+        class _StopError(Exception):
+            pass
+
+        def _capture(*args, **kwargs):
+            captured.update(kwargs)
+            raise _StopError
+
+        monkeypatch.setenv("DATABASE_URL", self.FAKE_URL)
+        monkeypatch.setattr(
+            startup_db, "get_config", lambda: SimpleNamespace(database=DatabaseConfig(pg_pool_timeout=3))
+        )
+        monkeypatch.setattr(startup_db, "DatabaseManager", _capture)
+
+        with pytest.raises(_StopError):
+            await startup_db.init_database(SimpleNamespace())
+        assert captured["pool_timeout"] == 3

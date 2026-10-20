@@ -40,7 +40,8 @@
 
         <div v-if="stage === 'pin'">
           <p class="text-body-medium mb-4">
-            Enter your username and 4-digit recovery PIN to reset your password.
+            Community Edition does not send email. Enter your username and the 4-digit Recovery PIN
+            you set when you created your account.
           </p>
 
           <AppAlert
@@ -94,7 +95,7 @@
             />
 
             <AppAlert type="info" variant="tonal" density="compact" class="mb-4">
-              If you have forgotten both your password and PIN, please contact your administrator.
+              Forgot the PIN too? Another admin on this install can reset it from your user row under Users.
             </AppAlert>
 
             <v-btn

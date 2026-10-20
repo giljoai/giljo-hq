@@ -228,7 +228,7 @@ class SetupSelectedTools(BaseModel):
     def validate_items(cls, v: list[str]) -> list[str]:
         for item in v:
             if len(item) > 200:
-                raise ValueError(f"Tool name exceeds 200 characters: {item[:20]}...")
+                raise ValueError("Tool name exceeds 200 characters")
         return v
 
 
@@ -298,7 +298,7 @@ class OAuthClientRedirectUris(BaseModel):
             if not uri:
                 raise ValueError("redirect_uris items must be non-empty")
             if len(uri) > 2048:
-                raise ValueError(f"redirect_uri exceeds 2048 characters: {uri[:40]}...")
+                raise ValueError("redirect_uri exceeds 2048 characters")
         return v
 
 
@@ -317,7 +317,7 @@ class ContextIndexKeywords(BaseModel):
     def validate_items(cls, v: list[str]) -> list[str]:
         for item in v:
             if len(item) > 500:
-                raise ValueError(f"Keyword exceeds 500 characters: {item[:20]}...")
+                raise ValueError("Keyword exceeds 500 characters")
         return v
 
 
@@ -536,7 +536,7 @@ class VisionSummaryEntry(BaseModel):
         try:
             _uuid.UUID(v)
         except (ValueError, AttributeError) as exc:
-            raise ValueError(f"doc_id must be a valid UUID: {v[:32]}") from exc
+            raise ValueError("doc_id must be a valid UUID") from exc
         return v
 
 
@@ -611,5 +611,5 @@ class DeletionReceiptStorageKeyHashes(BaseModel):
     def validate_items(cls, v: list[str]) -> list[str]:
         for item in v:
             if not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item):
-                raise ValueError(f"invalid SHA-256 hex digest in storage_object_key_sha256s: {item!r}")
+                raise ValueError("storage_object_key_sha256s items must be 64-character lowercase SHA-256 hex digests")
         return v

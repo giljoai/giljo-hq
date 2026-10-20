@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 class InputValidationMiddleware:
 
-    TOKEN_LIKE_PARAMS: ClassVar[frozenset[str]] = frozenset({"token", "code", "state"})
+    TOKEN_LIKE_PARAMS: ClassVar[frozenset[str]] = frozenset(
+        {"token", "code", "state", "code_challenge", "code_verifier"}
+    )
 
     _SQL_COMMENT_MARKER_PATTERN: ClassVar[str] = r"(--|#|\/\*|\*\/)"
 

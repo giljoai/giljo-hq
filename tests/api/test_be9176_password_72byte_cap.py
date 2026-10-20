@@ -21,10 +21,13 @@ RECOVERY_PIN = "4242"
 
 LONG_ASCII_100 = "Aa1!" + "x" * 96
 EMOJI_OVER_72_BYTES = "Aa1!" + "\U0001f600" * 20
+ASCII_73_BYTES = "Aa1!" + "x" * 69
+MULTIBYTE_73_BYTES = "Aa1!" + "\u00e4" * 34 + "x"
 EXACT_72_BYTES_ASCII = "Aa1!" + "x" * 68
 EXACT_72_BYTES_EMOJI = "Aa1!" + "\U0001f600" * 17
 
-OVERSIZED = [LONG_ASCII_100, EMOJI_OVER_72_BYTES]
+OVERSIZED = [LONG_ASCII_100, EMOJI_OVER_72_BYTES, ASCII_73_BYTES, MULTIBYTE_73_BYTES]
+OVERSIZED_IDS = ["ascii-100", "emoji-84-bytes", "ascii-73", "multibyte-73"]
 EXACTLY_72 = [EXACT_72_BYTES_ASCII, EXACT_72_BYTES_EMOJI]
 
 _CSRF = secrets.token_urlsafe(32)
@@ -35,11 +38,15 @@ def test_password_constants_byte_math():
     assert len(EMOJI_OVER_72_BYTES) <= 72 and len(EMOJI_OVER_72_BYTES.encode("utf-8")) == 84
     assert len(EXACT_72_BYTES_ASCII.encode("utf-8")) == 72
     assert len(EXACT_72_BYTES_EMOJI) <= 72 and len(EXACT_72_BYTES_EMOJI.encode("utf-8")) == 72
+    assert len(ASCII_73_BYTES) == 73 and len(ASCII_73_BYTES.encode("utf-8")) == 73
+    assert len(MULTIBYTE_73_BYTES) <= 72 and len(MULTIBYTE_73_BYTES.encode("utf-8")) == 73
 
 
 
 
-async def _seed_user(db_manager, *, with_pin: bool = False, must_change_password: bool = False) -> tuple[str, str, str]:
+async def _seed_user(
+    db_manager, *, with_pin: bool = False, must_change_password: bool = False, role: str = "developer"
+) -> tuple[str, str, str]:
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -68,7 +75,7 @@ async def _seed_user(db_manager, *, with_pin: bool = False, must_change_password
                     bcrypt.hashpw(RECOVERY_PIN.encode("utf-8"), bcrypt.gensalt()).decode("utf-8") if with_pin else None
                 ),
                 tenant_key=tk,
-                role="developer",
+                role=role,
                 org_id=org.id,
                 is_active=True,
                 token_revocation_epoch=0,
@@ -88,11 +95,11 @@ def _cookie_headers(token: str) -> dict:
     }
 
 
-def _mint(user_id: str, username: str, tenant_key: str) -> str:
+def _mint(user_id: str, username: str, tenant_key: str, role: str = "developer") -> str:
     return JWTManager.create_access_token(
         user_id=user_id,
         username=username,
-        role="developer",
+        role=role,
         tenant_key=tenant_key,
         revocation_epoch=0,
     )
@@ -108,6 +115,18 @@ def _pin_route_patches(monkeypatch) -> None:
     monkeypatch.setattr("api.endpoints.auth_pin_recovery.get_rate_limiter", _NoopRateLimiter)
 
 
+def _spy_hashpw(monkeypatch) -> list:
+    calls: list = []
+    real = bcrypt.hashpw
+    monkeypatch.setattr(bcrypt, "hashpw", lambda pw, salt: calls.append(len(pw)) or real(pw, salt))
+    return calls
+
+
+def _assert_refused_on_password_fields(resp) -> None:
+    fields = {err["loc"][-1] for err in resp.json()["errors"]}
+    assert fields and fields <= {"password", "new_password", "confirm_password"}, fields
+
+
 async def _persisted_password_hash(db_manager, *, tenant_key: str, user_id: str) -> str:
     from giljo_mcp.models.auth import User
 
@@ -119,17 +138,20 @@ async def _persisted_password_hash(db_manager, *, tenant_key: str, user_id: str)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
 async def test_change_password_route_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, username, tk = await _seed_user(db_manager)
 
+    hashpw_calls = _spy_hashpw(monkeypatch)
     resp = await api_client.put(
         f"/api/v1/users/{user_id}/password",
         json={"old_password": OLD_PASSWORD, "new_password": bad_password},
         headers=_cookie_headers(_mint(user_id, username, tk)),
     )
     assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
 
 
 @pytest.mark.asyncio
@@ -152,12 +174,13 @@ async def test_change_password_route_exactly_72_bytes_succeeds(api_client, db_ma
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
 async def test_pin_reset_route_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     _pin_route_patches(monkeypatch)
     _, username, _ = await _seed_user(db_manager, with_pin=True)
 
+    hashpw_calls = _spy_hashpw(monkeypatch)
     resp = await api_client.post(
         "/api/auth/verify-pin-and-reset-password",
         json={
@@ -168,6 +191,8 @@ async def test_pin_reset_route_over_72_bytes_is_422(api_client, db_manager, monk
         },
     )
     assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
 
 
 @pytest.mark.asyncio
@@ -194,11 +219,12 @@ async def test_pin_reset_route_exactly_72_bytes_succeeds(api_client, db_manager,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
 async def test_complete_first_login_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, username, tk = await _seed_user(db_manager, must_change_password=True)
 
+    hashpw_calls = _spy_hashpw(monkeypatch)
     resp = await api_client.post(
         "/api/auth/complete-first-login",
         json={
@@ -209,6 +235,74 @@ async def test_complete_first_login_over_72_bytes_is_422(api_client, db_manager,
         headers=_cookie_headers(_mint(user_id, username, tk)),
     )
     assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
+
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
+async def test_update_user_route_password_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    user_id, username, tk = await _seed_user(db_manager)
+    hashpw_calls = _spy_hashpw(monkeypatch)
+
+    resp = await api_client.put(
+        f"/api/v1/users/{user_id}",
+        json={"password": bad_password},
+        headers=_cookie_headers(_mint(user_id, username, tk)),
+    )
+    assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
+
+
+@pytest.mark.asyncio
+async def test_update_user_route_exactly_72_bytes_reaches_the_hash(api_client, db_manager, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    user_id, username, tk = await _seed_user(db_manager)
+    hashpw_calls = _spy_hashpw(monkeypatch)
+
+    resp = await api_client.put(
+        f"/api/v1/users/{user_id}",
+        json={"password": EXACT_72_BYTES_EMOJI},
+        headers=_cookie_headers(_mint(user_id, username, tk)),
+    )
+    assert resp.status_code == 200, resp.text
+    assert hashpw_calls == [72]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/users/", "/api/auth/register"], ids=["users-create", "auth-register"])
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
+async def test_admin_create_user_routes_over_72_bytes_are_422(api_client, db_manager, monkeypatch, path, bad_password):
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    admin_id, admin_name, tk = await _seed_user(db_manager, role="admin")
+    hashpw_calls = _spy_hashpw(monkeypatch)
+
+    resp = await api_client.post(
+        path,
+        json={"username": f"sec9803_{uuid4().hex[:8]}", "password": bad_password},
+        headers=_cookie_headers(_mint(admin_id, admin_name, tk, role="admin")),
+    )
+    assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
+async def test_create_first_admin_route_over_72_bytes_is_422(api_client, monkeypatch, bad_password):
+    hashpw_calls = _spy_hashpw(monkeypatch)
+
+    resp = await api_client.post(
+        "/api/auth/create-first-admin",
+        json={"username": f"sec9803_{uuid4().hex[:8]}", "password": bad_password},
+    )
+    assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+    _assert_refused_on_password_fields(resp)
+    assert hashpw_calls == []
 
 
 
@@ -252,7 +346,7 @@ def _schema_cases():
     return build, schemas
 
 
-@pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
+@pytest.mark.parametrize("bad_password", OVERSIZED, ids=OVERSIZED_IDS)
 def test_all_password_set_schemas_reject_over_72_bytes(bad_password):
     build, schemas = _schema_cases()
     for schema in schemas:

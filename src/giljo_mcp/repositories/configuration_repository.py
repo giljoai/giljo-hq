@@ -7,7 +7,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import distinct, select, text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ class ConfigurationRepository:
         session: AsyncSession,
     ) -> list[str]:
         result = await session.execute(
-            select(distinct(Configuration.tenant_key)).where(Configuration.tenant_key.isnot(None))
+            select(Configuration.tenant_key).distinct().where(Configuration.tenant_key.isnot(None))
         )
         return [row[0] for row in result]
 

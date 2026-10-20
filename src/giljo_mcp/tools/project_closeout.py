@@ -30,6 +30,7 @@ from giljo_mcp.services.project_closeout_readiness import shape_readiness_blocke
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.services.project_helpers import broadcast_deferred_events
 from giljo_mcp.services.protocol_sections.closeout_sequence import build_required_sequence
+from giljo_mcp.services.staging_session import is_planning_session
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
 from giljo_mcp.tools._closeout_metrics import (
@@ -62,6 +63,7 @@ async def _handle_force_close(
     force: bool,
     blockers: list,
     closeout_service: ProjectCloseoutService,
+    launched: bool = True,
 ) -> list[AgentStatusChangeEvent]:
     if not blockers or not force:
         return []
@@ -82,7 +84,9 @@ async def _handle_force_close(
     active_orchestrator = orch_result.scalar_one_or_none()
 
     orchestrator_is_idle_leftover = False
-    if active_orchestrator is not None and active_orchestrator.status == "waiting":
+    if active_orchestrator is not None and (
+        active_orchestrator.status == "waiting" or (not launched and is_planning_session(active_orchestrator))
+    ):
         from giljo_mcp.repositories.mission_repository import MissionRepository
 
         _total, in_flight = await MissionRepository().count_non_orchestrator_agents_by_liveness(
@@ -355,6 +359,7 @@ async def close_project_and_update_memory(
                 force=force,
                 blockers=blockers,
                 closeout_service=closeout_service,
+                launched=project.implementation_launched_at is not None,
             )
 
             if decommission_events_out is not None:

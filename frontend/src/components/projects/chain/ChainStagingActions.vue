@@ -75,6 +75,6 @@ defineProps({
 @use '@/styles/design-tokens' as *;
 
 .chain-staging-actions {
-  margin-top: 16px;
+  margin: 12px 0 16px;
 }
 </style>

@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,12 +25,7 @@ from giljo_mcp.models.comm import (
 )
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
-from giljo_mcp.models.tasks import (
-    Message,
-    MessageAcknowledgment,
-    MessageCompletion,
-    MessageRecipient,
-)
+from giljo_mcp.models.tasks import Message, MessageAcknowledgment, MessageCompletion, MessageRecipient
 from giljo_mcp.repositories._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
 from giljo_mcp.repositories._comm_thread_directed_actions_mixin import CommThreadDirectedActionsMixin
 from giljo_mcp.repositories._comm_thread_keyset import (
@@ -526,7 +522,7 @@ class CommThreadRepository(
                 Message.thread_id.isnot(None),
             )
             .order_by(Message.thread_id, Message.created_at.desc(), Message.id.desc())
-            .distinct(Message.thread_id)
+            .ext(distinct_on(Message.thread_id))
             .subquery()
         )
         stmt = (

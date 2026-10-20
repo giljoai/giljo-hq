@@ -5,16 +5,20 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 const h = vi.hoisted(() => ({ getActive: vi.fn(), listAgentJobs: vi.fn() }))
 
-vi.mock('@/services/api', () => ({
-  api: {
-    projects: {
-      getActive: (...a) => h.getActive(...a),
+vi.mock('@/services/api', async () => {
+  const { listManyFrom } = await import('../../tests/helpers/agentJobsListMany')
+  return {
+    api: {
+      projects: {
+        getActive: (...a) => h.getActive(...a),
+      },
+      agentJobs: {
+        list: (...a) => h.listAgentJobs(...a),
+        listMany: (ids) => listManyFrom(h.listAgentJobs, ids),
+      },
     },
-    agentJobs: {
-      list: (...a) => h.listAgentJobs(...a),
-    },
-  },
-}))
+  }
+})
 
 const handleMessagesMock = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/useJobActions', () => ({

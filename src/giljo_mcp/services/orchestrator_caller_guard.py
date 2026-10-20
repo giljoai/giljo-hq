@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 ORCHESTRATOR_ONLY = "ORCHESTRATOR_ONLY"
-_NEVER_STARTED_STATUSES = frozenset({"waiting", "staged"})
+NEVER_STARTED_STATUSES = frozenset({"waiting", "staged"})
 
 
 async def require_project_orchestrator(
@@ -49,7 +49,7 @@ async def require_project_orchestrator(
 
 
 def warn_if_never_started(job: AgentJob, execution: AgentExecution, warnings: list[str]) -> None:
-    if job.job_type != "orchestrator" and execution.status in _NEVER_STARTED_STATUSES:
+    if job.job_type != "orchestrator" and execution.status in NEVER_STARTED_STATUSES:
         warnings.append(
             f"This job was never started (status '{execution.status}'): no agent called "
             "get_job_mission on it. It is now complete. If you meant your own job, check the job_id."

@@ -154,3 +154,18 @@ describe('ChainGroupHeader running state (FE-9793)', () => {
     expect(style).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
 })
+
+describe('ChainGroupHeader controls slot (operator ruling 2026-10-19)', () => {
+  it('renders the chain controls under the title row and above the chain goal', () => {
+    const wrapper = mount(ChainGroupHeader, {
+      props: { chainCtx: { ...chainCtx, locked: false }, controls: controlsFor({ chainPhase: 'staging' }) },
+      slots: { controls: '<div data-testid="slot-controls">controls</div>' },
+      global: { plugins: [vuetify], stubs: { BaseDialog: dialogStub } },
+    })
+    const header = wrapper.get('[data-testid="chain-group-header"]').element
+    const order = [...header.querySelectorAll('[data-testid="chain-group-name"], [data-testid="slot-controls"], .cgh-goal')].map(
+      (el) => el.getAttribute('data-testid') || 'goal',
+    )
+    expect(order).toEqual(['chain-group-name', 'slot-controls', 'goal'])
+  })
+})

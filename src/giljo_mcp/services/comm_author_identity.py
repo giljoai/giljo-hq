@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +56,26 @@ async def _label_collision_warning(repo, session, tenant_key, thread_id, from_ag
         from_agent,
     )
     return _LABEL_COLLISION_WARNING.format(label=from_agent, registered=registered) if registered else None
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+async def is_unknown_uuid_sender(
+    repo, user_repo, session: AsyncSession, tenant_key: str, thread_id: str, from_agent: str
+) -> bool:
+    if not from_agent or not _is_uuid(from_agent):
+        return False
+    if await repo.get_participant(session, tenant_key, thread_id, from_agent) is not None:
+        return False
+    if await repo.is_agent_identity(session, tenant_key, from_agent):
+        return False
+    return await user_repo.get_user_by_id(session, from_agent, tenant_key) is None
 
 
 @dataclass(frozen=True)

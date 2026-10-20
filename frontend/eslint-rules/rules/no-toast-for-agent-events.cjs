@@ -103,7 +103,7 @@ module.exports = {
   },
 
   create(context) {
-    const filename = context.filename || context.getFilename?.() || ''
+    const filename = context.filename || ''
     if (!isServerDrivenFile(filename)) return {}
 
     return {

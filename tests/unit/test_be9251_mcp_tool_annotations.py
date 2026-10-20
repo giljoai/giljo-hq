@@ -6,9 +6,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 from api.endpoints.mcp_tools._base import SCOPE_READ
-from api.endpoints.mcp_tools._tool_annotations import _READ_SCOPED_BUT_MUTATING, _tool_hints
+from api.endpoints.mcp_tools._tool_annotations import (
+    _AGENT_SCOPED_BUT_READ_ONLY,
+    _READ_SCOPED_BUT_MUTATING,
+    _tool_hints,
+)
 
 
 def _live_tools():
@@ -33,6 +39,8 @@ def test_read_only_hint_agrees_with_tool_scopes():
         assert tool.name in TOOL_SCOPES, f"{tool.name} has no TOOL_SCOPES entry"
         if tool.name in _READ_SCOPED_BUT_MUTATING:
             expected_read_only = False
+        elif tool.name in _AGENT_SCOPED_BUT_READ_ONLY:
+            expected_read_only = True
         else:
             expected_read_only = TOOL_SCOPES[tool.name] == SCOPE_READ
         actual = tool.annotations.read_only_hint if tool.annotations else None
@@ -48,6 +56,33 @@ def test_read_scoped_but_mutating_override_set_membership_is_locked():
     assert frozenset({"get_thread_history"}) == _READ_SCOPED_BUT_MUTATING
 
 
+def test_agent_scoped_but_read_only_override_set_membership_is_locked():
+    assert frozenset({"get_agent_result", "get_workflow_status"}) == _AGENT_SCOPED_BUT_READ_ONLY
+    assert not (_AGENT_SCOPED_BUT_READ_ONLY & _READ_SCOPED_BUT_MUTATING)
+
+
+@pytest.mark.parametrize("name", ["get_agent_result", "get_workflow_status"])
+def test_pure_reads_under_agent_scope_advertise_read_only_without_widening_auth(name):
+    tool = next(t for t in _live_tools() if t.name == name)
+    assert TOOL_SCOPES[name] == "mcp:agent", "DoD 2 forbids widening the auth scope"
+    assert tool.annotations.read_only_hint is True
+    assert tool.annotations.destructive_hint is False
+    assert tool.annotations.open_world_hint is False
+
+
+def test_get_implementation_prompt_stays_not_read_only_because_it_can_create_a_thread():
+    import inspect
+
+    from giljo_mcp import thin_prompt_lifecycle
+    from giljo_mcp.services import comm_thread_enrolment
+
+    assert "project_thread_ref" in inspect.getsource(thin_prompt_lifecycle)
+    assert "resolve_or_create_bound_thread" in inspect.getsource(comm_thread_enrolment.project_thread_ref)
+    tool = next(t for t in _live_tools() if t.name == "get_implementation_prompt")
+    assert tool.annotations.read_only_hint is False
+    assert tool.annotations.destructive_hint is False
+
+
 def test_every_tool_carries_an_explicit_destructive_hint():
     missing = sorted(t.name for t in _live_tools() if t.annotations is None or t.annotations.destructive_hint is None)
     assert not missing, f"tools with no explicit destructiveHint: {missing}"
@@ -61,6 +96,7 @@ EXPECTED_DESTRUCTIVE_TOOLS = frozenset(
         "launch_implementation",
         "report_progress",
         "save_roadmap",
+        "remove_roadmap_items",
         "stage_project",
         "unstage_project",
         "promote_task_to_project",

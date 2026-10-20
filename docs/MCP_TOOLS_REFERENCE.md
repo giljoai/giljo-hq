@@ -1,10 +1,10 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-10-09*
+*Last updated: 2026-10-18*
 
 ## Overview
 
-Giljo HQ, a GiljoAI product, registers **52 tools**. Two of them —
+Giljo HQ, a GiljoAI product, registers **54 tools**. Two of them —
 `launch_implementation` and `decide_approval` — respect your tenant's approval mode, so
 they may not be served to every session; see Settings. Several older tool names have
 been retired and are no longer registered — only the final names below are. Every tool call must be
@@ -26,20 +26,22 @@ Every tool carries one of three permission scopes:
 | Scope | Meaning | Count |
 |-------|---------|-------|
 | `mcp:read` | Reads. Fetches data without changing it, with one exception: `get_thread_history` with `mark_read=true` records your read position. | 13 |
-| `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 12 |
-| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 27 |
-| **Total** | | **52** |
+| `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 13 |
+| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 28 |
+| **Total** | | **54** |
 
 Every tool also carries MCP behaviour hints, which a client can use to decide when to
-ask you before a call runs. 12 tools are marked read-only: every `mcp:read` tool except
-`get_thread_history`, which is not, because of `mark_read`. 22 tools are marked
-destructive, meaning a call can overwrite or remove data you already have:
-`apply_context_tuning`, `complete_job`, `decide_approval`,
+ask you before a call runs. 14 tools are marked read-only: every `mcp:read` tool except
+`get_thread_history` (which is not, because of `mark_read`), plus two `mcp:agent` tools
+that only read -- `get_agent_result` and `get_workflow_status`. The hint describes what a
+call does; the scope decides who may call it. 23 tools are marked destructive, meaning a call can overwrite or remove
+data you already have: `apply_context_tuning`, `complete_job`, `decide_approval`,
 `finalize_job`, `get_staging_instructions`, `giljo_setup`, `launch_implementation`,
-`post_to_thread`, `promote_task_to_project`, `propose_template_change`, `report_progress`,
-`save_roadmap`, `stage_project`, `unlink_projects`, `unstage_project`,
-`update_job_mission`, `update_product_context`, `update_project`,
-`update_project_mission`, `update_task`, `update_thread` and `write_project_closeout`.
+`post_to_thread`, `promote_task_to_project`, `propose_template_change`,
+`remove_roadmap_items`, `report_progress`, `save_roadmap`, `stage_project`,
+`unlink_projects`, `unstage_project`, `update_job_mission`, `update_product_context`,
+`update_project`, `update_project_mission`, `update_task`, `update_thread` and
+`write_project_closeout`.
 No tool is marked idempotent, and no tool is marked open-world: none of them contacts an
 outside service.
 
@@ -251,7 +253,8 @@ has been approved to start. This RETURNS a prompt; it does not run anything. Two
 must already be true: the project finished staging, and a human approved the start (the
 dashboard's Implement button, or `launch_implementation`). If they are not, you get a
 structured refusal naming the exact next step — there is no bypass, the approval is
-deliberate. (Renamed from `implement_project`, which never implemented anything.)
+deliberate. Not marked read-only: if the project's coordination thread is missing, this
+call creates it. (Renamed from `implement_project`, which never implemented anything.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -449,15 +452,32 @@ through it.
 **Purpose:** Save the roadmap — the ranked list of what to build next. YOU do the
 ranking; the server only validates and stores it. Items you send are written, replacing
 any earlier entry for the same project or task. Defaults to your default product; pass
-`product_id` for a specific one. (Renamed from `update_roadmap_metadata`.)
+`product_id` for a specific one. Taking an item off the board is its own tool,
+`remove_roadmap_items`. (Renamed from `update_roadmap_metadata`.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | items | list[dict] | Yes | Roadmap items to upsert. Each: `{item_type: 'project'\|'task', project_id OR task_id, sort_order (0-100000), risk?: 'low'\|'med'\|'high', complexity?: 'light'\|'med'\|'heavy', blocked?: bool, blocked_reason?: str (<=500 chars)}`. `project_id` / `task_id` accept either the row id or its taxonomy alias (`BE-0001`, `IMP-0086`), so no lookup call is needed. A rejection names every bad row at once, as a 422, never a DB 500. At most 10000 items. |
 | summary | str | No | Roadmap narrative summary (the AI insight banner copy). Empty string leaves it unchanged. |
-| remove | list[dict] or null | No | Items to drop from the roadmap. Omit (or pass null) to remove nothing. Each: `{item_type, project_id\|task_id}`. Idempotent; removes the roadmap entry only, never the project/task. At most 10000 items. |
 | patch_fields | bool | No | Patch only the fields each item carries; omitted fields keep their stored value, explicitly empty ones are cleared. `blocked` and `blocked_reason` patch together. Default false. |
 | product_id | str | No | Product UUID to persist the roadmap for. Omit to use your default product — but pass it when you know it: the default is shared, mutable state another session can move mid-session. |
+
+---
+
+### remove_roadmap_items `mcp:write`
+
+**Purpose:** Take items off the roadmap. Removes only the roadmap entry, never the
+project or task itself; an item that is not on the roadmap is a no-op. Defaults to your
+default product; pass `product_id` for a specific one. Marked destructive: the roadmap
+entry is deleted. (Was the `remove` list on `save_roadmap`; a call that still sends it
+gets a `VALIDATION_ERROR` pointer naming this tool, and nothing is changed.)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| items | list[dict] | Yes | Roadmap entries to remove. Each: `{item_type: 'project'\|'task', project_id OR task_id}`, by the row's id or its taxonomy alias (`BE-0001`, `IMP-0086`). At least 1, at most 10000 items. |
+| product_id | str | No | Product UUID to remove roadmap entries from. Omit to use your default product; an id that is not yours is refused. |
+
+**Returns:** `{roadmap_id, product_id, items_upserted: 0, items_removed, summary}`.
 
 ---
 
@@ -578,22 +598,33 @@ acceptable state, this returns a structured error naming the outstanding require
 
 ---
 
-### resume_or_dismiss_job `mcp:agent`
+### resume_job `mcp:agent`
 
-**Purpose:** A finished job that receives a message needing action is put on hold. Use
-this to say what happens next: `resume` picks the work back up (then `report_progress`
-with `todo_append` to add new steps — do not overwrite completed ones), or `dismiss`
-acknowledges the message and leaves the job finished, when it was only for information.
-Only works while the job is on hold — the `blocked` status auto-set when a directed,
-action-required Hub post lands on a completed agent. (Renamed from
-`resolve_reactivation`; merges the former `reactivate_job` + `dismiss_reactivation`
-tools, BE-6225e.)
+**Purpose:** A finished job that receives a message needing action is put on hold (the
+`blocked` status auto-set when a directed, action-required Hub post lands on a completed
+agent). `resume_job` picks the work back up: the job returns to working so it can act on
+the message (then `report_progress` with `todo_append` to add new steps — do not overwrite
+completed ones). Only works while the job is on hold. (Split out of
+`resume_or_dismiss_job`, whose `action` switch is retired; a call to the old name is an
+unknown tool.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | job_id | str | Yes | The on-hold job's ID. |
-| action | str | Yes | `resume` (→ working) or `dismiss` (→ complete). |
-| reason | str | No | Why work is resuming / no action was taken. |
+| reason | str | No | Optional note about the decision, kept in the server log. |
+
+---
+
+### dismiss_job `mcp:agent`
+
+**Purpose:** Acknowledge the message that put a finished job on hold and set the job
+back to finished, when the message was only for information. Only works while the job is
+on hold. Nothing is deleted. (Split out of `resume_or_dismiss_job`.)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| job_id | str | Yes | The on-hold job's ID. |
+| reason | str | No | Optional note about the decision, kept in the server log. |
 
 ---
 
@@ -617,6 +648,7 @@ auto-wake when `report_progress()` is called. Cannot produce `awaiting_user` (on
 
 **Purpose:** Fetch the completion result of a finished agent job — the structured result
 stored when the agent called `complete_job`. Use to read what a predecessor accomplished.
+Advertised read-only: it writes nothing (the agent scope only decides who may call it).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -628,7 +660,7 @@ stored when the agent called `complete_job`. Use to read what a predecessor acco
 
 **Purpose:** Monitor workflow progress across all project agents. Returns counts by
 status (active/completed/blocked/closed/silent/decommissioned/pending) and a
-`progress_percent` (0-100).
+`progress_percent` (0-100). Advertised read-only: it writes nothing.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -727,7 +759,9 @@ by default, or direct-messages one via `to_participant`. Can optionally `set_sta
 Every post must declare its author: pass `from_agent` (posting as an agent) **or**
 `as_user=true` (posting in the human user's voice). The two are mutually exclusive, and
 a post that declares neither is refused with `FROM_AGENT_REQUIRED` before anything is
-written — attribution never falls back to the human user.
+written — attribution never falls back to the human user. Renaming a thread is
+`update_thread`'s job: a post that still sends the retired `rename_to` gets a
+`VALIDATION_ERROR` pointer naming it, and nothing is posted.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -742,7 +776,6 @@ written — attribution never falls back to the human user.
 | loop_interval_minutes | int | No | Auto-check-in cadence in minutes for the loop directive (0-1440), surfaced on `get_my_turn`/`get_thread_history` poll responses so the agent self-schedules its wake. `0` = unset (agent uses its own default). Only meaningful with `loop_directive=true`. |
 | pass_baton_to | str | No | Atomically hand the baton with this post: an `agent_id` \| `user_id` \| `all` \| `none`. An explicit value always wins; `none` posts without moving the baton. When omitted, a directed action-request (`requires_action=true` + `to_participant`) auto-passes the baton to that participant; every other post leaves the baton untouched. |
 | my_status | str | No | What you are doing right now, shown on your status dot in the Hub: one of `working` \| `waiting` \| `blocked` \| `idle` \| `sleeping` \| `complete`. Only useful for a headless/external agent that joined via `join_thread` — a platform-run agent already reports status automatically, and that always wins over this. Omit to leave your current status unchanged. |
-| rename_to | str | No | Rename the thread with this post. Empty leaves it unchanged. Refused on a project-bound thread (it takes its name from that project) — and a refused rename posts nothing, because the rename is applied before the post. |
 
 ---
 
@@ -1088,10 +1121,10 @@ proposal; orchestrator additions proposals need the admin role, the same as thei
 | Project Management | 2 write · 2 read · 1 agent | create_project, update_project, list_projects, update_project_mission, diagnose_project_state |
 | Project Lifecycle | 8 agent | stage_project, unstage_project, get_staging_instructions, get_implementation_prompt, launch_implementation, link_projects, unlink_projects, write_project_closeout |
 | Tasks | 3 write · 1 read | create_task, update_task, promote_task_to_project, list_tasks |
-| Roadmap | 1 write · 1 read | save_roadmap, get_roadmap |
-| Agent Jobs & Lifecycle | 12 agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, finalize_job, resume_or_dismiss_job, set_agent_status, get_agent_result, get_workflow_status, request_approval, decide_approval |
+| Roadmap | 2 write · 1 read | save_roadmap, remove_roadmap_items, get_roadmap |
+| Agent Jobs & Lifecycle | 13 agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, finalize_job, resume_job, dismiss_job, set_agent_status, get_agent_result, get_workflow_status, request_approval, decide_approval |
 | Agent Message Hub | 5 agent · 4 read | create_thread, join_thread, post_to_thread, set_next_actor, update_thread, get_my_turn, get_participant_liveness, list_threads, get_thread_history |
 | Context & Memory | 2 read · 1 agent | get_context, search_memory, write_memory_entry |
 | Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_document, update_product_context, apply_context_tuning |
 | Setup & Templates | 2 write | giljo_setup, propose_template_change |
-| **Total** | **13 read · 12 write · 27 agent** | **52** |
+| **Total** | **13 read · 13 write · 28 agent** | **54** |

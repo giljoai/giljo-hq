@@ -96,4 +96,54 @@ describe('DecisionModal', () => {
     await flushPromises()
     expect(api.approvals.listPending).toHaveBeenCalledTimes(1)
   })
+
+  describe('never an empty modal (FE-9796)', () => {
+    it('opening already-shown loads the pending decision and shows a loading state meanwhile', async () => {
+      let resolve
+      api.approvals.listPending.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+      const wrapper = mountModal()
+      await flushPromises()
+      expect(api.approvals.listPending).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('[data-testid="decision-modal-loading"]').exists()).toBe(true)
+
+      resolve({ data: { items: [approval] } })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="decision-modal-loading"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="decision-modal-card"]').exists()).toBe(true)
+    })
+
+    it('a failed load shows the error and a Retry that loads again', async () => {
+      api.approvals.listPending.mockRejectedValueOnce(new Error('timeout of 30000ms exceeded'))
+      const wrapper = mountModal()
+      await flushPromises()
+      expect(wrapper.find('[data-testid="decision-modal-error"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="decision-modal-loading"]').exists()).toBe(false)
+
+      api.approvals.listPending.mockResolvedValueOnce({ data: { items: [approval] } })
+      await wrapper.find('[data-testid="decision-modal-retry"]').trigger('click')
+      await flushPromises()
+      expect(api.approvals.listPending).toHaveBeenCalledTimes(2)
+      expect(wrapper.find('[data-testid="decision-modal-error"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="decision-modal-card"]').exists()).toBe(true)
+    })
+
+    it('a load that finds no pending decision for this job says so', async () => {
+      api.approvals.listPending.mockResolvedValueOnce({ data: { items: [] } })
+      const wrapper = mountModal()
+      await flushPromises()
+      expect(wrapper.find('[data-testid="decision-modal-card"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="decision-modal-empty"]').exists()).toBe(true)
+    })
+
+    it('after a decision the modal still closes through the parent as before', async () => {
+      api.approvals.listPending.mockResolvedValueOnce({ data: { items: [approval] } })
+      const wrapper = mountModal()
+      await flushPromises()
+      wrapper.findComponent({ name: 'ApprovalCard' }).vm.$emit('decided', { approvalId: approval.id, optionId: 'approve' })
+      await flushPromises()
+      expect(wrapper.emitted('approval-decided')).toHaveLength(1)
+      await wrapper.setProps({ show: false })
+      expect(api.approvals.listPending).toHaveBeenCalledTimes(1)
+    })
+  })
 })

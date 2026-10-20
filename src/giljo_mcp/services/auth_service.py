@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from giljo_mcp.api_key_utils import bust_api_key_cache, generate_api_key, get_key_prefix, hash_api_key
 from giljo_mcp.auth.jwt_manager import JWTManager
+from giljo_mcp.auth.terms_gate import session_terms_version, terms_gate_installed
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import (
     AuthenticationError,
@@ -111,12 +112,18 @@ class AuthService:
                 message="User account is inactive", context={"identifier": username, "user_id": user.id}
             )
 
+        terms_version = None
+        if terms_gate_installed():
+            async with self._get_session(user.tenant_key) as session:
+                terms_version = await session_terms_version(session, user.tenant_key)
+
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,
             role=user.role,
             tenant_key=user.tenant_key,
             revocation_epoch=user.token_revocation_epoch or 0,
+            terms_version=terms_version,
         )
 
         self._logger.info(

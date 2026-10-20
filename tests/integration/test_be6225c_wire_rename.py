@@ -101,7 +101,7 @@ async def test_apply_context_tuning_in_live_tool_surface():
     live = {t.name for t in mcp._tool_manager.list_tools()}
     assert "apply_context_tuning" in live
     assert "propose_product_context_update" not in live
-    assert len(live) == 52
+    assert len(live) == 54
 
 
 @pytest.mark.asyncio

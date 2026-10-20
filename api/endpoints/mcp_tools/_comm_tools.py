@@ -21,6 +21,7 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     _detected_harness,
     mcp,
+    validation_rejection,
 )
 from api.endpoints.mcp_tools._comm_broadcast_helpers import broadcast_thread_metadata_update
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
@@ -69,21 +70,33 @@ def _post_refusal(from_agent: str, as_user: bool, my_status: str) -> dict[str, A
     return None
 
 
+async def _unknown_sender_rejection(ctx: Context, thread_id: str, from_agent: str) -> dict[str, Any] | None:
+    service = _base._get_tool_accessor()._comm_thread_service
+    if not await service.is_unknown_sender(
+        thread_id=thread_id, from_agent=from_agent, tenant_key=_base._resolve_tenant(ctx)
+    ):
+        return None
+    return validation_rejection(
+        field="from_agent",
+        constraint="registered_sender",
+        message=(
+            "from_agent is a UUID that is not registered on this thread and is not an agent id or user of "
+            "this account. Pass your own agent_id (the identity get_job_mission gave you, not your job_id), "
+            "or register the id first with join_thread(thread_id, agent_id). Nothing was posted."
+        ),
+    )
+
+
 @mcp.tool(
     title="Create Thread",
     description=(
-        "Create a persistent message-board thread (chat) and get back its CHT-#### "
-        "chat id to share so other agents can join_thread. Threads are standalone by "
-        "default; pass project_id to anchor one to a project. The creator is registered "
-        "as the first participant and holds the baton (next_action_owner). Every OTHER "
-        "persona should join_thread before it is addressed: the baton (pass_baton_to / "
-        "set_next_actor) is refused for an id not registered on the thread, and a "
-        "to_participant post to a never-joined id is stored but read by nobody. "
-        "An omitted product_id is resolved for you (the same rule create_task/"
-        "create_project already follow) -- a single-product tenant binds silently, several "
-        "with none named comes back as PRODUCT_AMBIGUOUS naming the list to retry with. "
-        "The only thread that stays product-less on an omitted product_id is one created by "
-        "a chain conductor (sequence_run_id set) or on a tenant with zero products."
+        "Create a persistent message-board thread (chat) and get back its CHT-#### chat id to share. "
+        "Standalone by default: pass project_id to anchor it to a project, and product_id to file it "
+        "under a product (what list_threads(product_id=...) filters on; omitted, it is resolved like "
+        "create_task's, PRODUCT_AMBIGUOUS when several products match, product-less only for a chain "
+        "conductor or a tenant with no products). The creator is the first participant and holds the "
+        "baton; every other persona should join_thread before it is addressed, since the baton is refused"
+        " for an unregistered id."
     ),
     annotations=_tool_hints("create_thread"),
 )
@@ -97,10 +110,8 @@ async def create_thread(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Product UUID to file the thread under -- pass the product you are working "
-                "under. This is what list_threads(product_id=...) filters on. Omit to let the "
-                "server resolve it for you; it only stays unset for a chain-"
-                "conductor create or a tenant with no products at all."
+                "Product UUID to file the thread under (what list_threads(product_id=...) filters on). Omit to "
+                "let the server resolve it."
             ),
         ),
     ] = "",
@@ -119,9 +130,8 @@ async def create_thread(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Chain conductors only: the run UUID this thread is the coordination hub for. "
-                "Stamping it is what lets every sub-orchestrator find this hub via "
-                "get_context(categories=['chain']) — no subject convention required."
+                "Chain conductors only: the run UUID this thread is the coordination hub for, so "
+                "sub-orchestrators find it via get_context(categories=['chain'])."
             ),
         ),
     ] = "",
@@ -190,14 +200,12 @@ async def join_thread(
 @mcp.tool(
     title="Post to Thread",
     description=(
-        "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
-        "tool. Requires from_agent (or an explicit as_user=true for a post in the human "
-        "user's voice). Broadcasts by default; see to_participant, set_status, and "
-        "pass_baton_to for DM, status, and atomic baton hand-off. A post reopens a resolved "
-        "(not closed) thread. Etiquette: make sure a "
-        "persona has join_thread'ed before you name it -- pass_baton_to refuses an id not "
-        "registered on the thread, and a to_participant post to a never-joined id is stored "
-        "but nobody is polling for it."
+        "Post a message to a thread (append-only): the agent-to-agent messaging tool. from_agent is "
+        "required (or as_user=true to post in the human user's voice). Broadcasts by default; "
+        "to_participant direct-messages one participant, pass_baton_to hands the turn with the post, "
+        "set_status resolves or closes the thread. Name only personas that have join_thread'ed: the baton"
+        " is refused for an unregistered id, and a DM to a never-joined id is read by nobody. A post "
+        "reopens a resolved thread."
     ),
     annotations=_tool_hints("post_to_thread", destructive=True),
 )
@@ -208,18 +216,19 @@ async def post_to_thread(
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="Your agent role/id from your activated template (e.g. implementer, tester, "
-            "reviewer). Drives the Hub author badge. Needed on every post: an omitted from_agent is refused "
-            "(FROM_AGENT_REQUIRED) and is not attributed to the human user. To post "
-            "deliberately in the human user's voice, pass as_user=true instead.",
+            description=(
+                "Your agent role/id (e.g. implementer, tester). Required on every post; omitted is refused "
+                "(FROM_AGENT_REQUIRED). To post as the human user pass as_user=true instead."
+            ),
         ),
     ] = "",
     as_user: Annotated[
         bool,
         Field(
-            description="Post in the HUMAN USER's voice: attributes the post to the authenticated "
-            "person, not an agent. Deliberate and explicit — mutually exclusive with from_agent. "
-            "An agent posting on its own behalf never sets this."
+            description=(
+                "Post in the human user's voice (attributed to the authenticated person). Mutually exclusive with"
+                " from_agent."
+            )
         ),
     ] = False,
     to_participant: Annotated[
@@ -235,8 +244,10 @@ async def post_to_thread(
     loop_directive: Annotated[
         bool,
         Field(
-            description="Arm a loop/sleep directive: addressed agents are told to loop on this thread "
-            "(checking get_my_turn/get_thread_history every N min) until it is resolved or closed."
+            description=(
+                "Tell addressed agents to keep polling this thread (get_my_turn / get_thread_history) until it is"
+                " resolved or closed."
+            )
         ),
     ] = False,
     loop_interval_minutes: Annotated[
@@ -244,46 +255,39 @@ async def post_to_thread(
         Field(
             ge=0,
             le=1440,
-            description="Auto-check-in cadence in minutes for the loop directive. Surfaced on the "
-            "get_my_turn/get_thread_history poll responses so the agent self-schedules its wake. "
-            "0 = unset (agent uses its default). Only meaningful with loop_directive=true.",
+            description=(
+                "Check-in cadence in minutes for the loop directive (0 = the agent's default). Only meaningful "
+                "with loop_directive=true."
+            ),
         ),
     ] = 0,
     pass_baton_to: Annotated[
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="Hand the turn on with this post: an agent_id | user_id | 'all' | 'none'. "
-            "Explicit value always wins; 'none' posts WITHOUT changing who acts next -- NOTE that "
-            "set_next_actor uses 'none' the OTHER way round, where it CLEARS the actor. DEFAULT when omitted: a directed action-request (requires_action=true + "
-            "to_participant) auto-passes the baton to that participant; every other post leaves "
-            "the baton untouched.",
+            description=(
+                "Hand the turn on with this post: an agent_id, user_id, 'all' or 'none' (post without changing "
+                "who acts next; set_next_actor's 'none' CLEARS instead). Omitted: a directed action request "
+                "(requires_action=true + to_participant) passes the baton to that participant; other posts leave "
+                "it."
+            ),
         ),
     ] = "",
     my_status: Annotated[
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="What YOU are doing right now, shown on your dot in the Hub: one of "
-            "working | waiting | blocked | idle | sleeping | complete. Pass it on your status "
-            "posts — especially working when you start a unit and sleeping when you go into a "
-            "poll loop. Only useful if you are a headless/external agent that joined with "
-            "join_thread: agents the platform runs already report status automatically and that "
-            "always wins over this. Omit to leave your current status unchanged.",
-        ),
-    ] = "",
-    rename_to: Annotated[
-        str,
-        Field(
-            max_length=MCP_NAME_MAX,
-            description="Rename this thread with this post. Empty = unchanged. REFUSED on a "
-            "project-bound thread (one with a project_id: it belongs to that project) -- rename the project instead. "
-            "Applied BEFORE the post: a refused rename posts nothing.",
+            description=(
+                "Your own status for your Hub dot: working | waiting | blocked | idle | sleeping | complete. Only"
+                " for a headless agent that joined with join_thread; platform-run agents report automatically."
+            ),
         ),
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     refusal = _post_refusal(from_agent, as_user, my_status)
+    if refusal is None and from_agent:
+        refusal = await _unknown_sender_rejection(ctx, thread_id, from_agent)
     if refusal is not None:
         return refusal
     kwargs: dict[str, Any] = {
@@ -306,8 +310,6 @@ async def post_to_thread(
         kwargs["loop_interval_minutes"] = loop_interval_minutes
     if my_status:
         kwargs["self_reported_status"] = my_status
-    if rename_to:
-        kwargs["rename_to"] = rename_to
     effective_baton_to = _resolve_pass_baton_to(pass_baton_to, requires_action, to_participant)
     if effective_baton_to:
         kwargs["pass_baton_to"] = effective_baton_to
@@ -366,8 +368,6 @@ async def post_to_thread(
         )
     if result.get("thread_reopened"):
         await broadcast_thread_metadata_update(ctx, thread_id, update_type="status")
-    if rename_to:
-        await broadcast_thread_metadata_update(ctx, thread_id, update_type="updated", include_subject=True)
     return result
 
 
@@ -590,11 +590,12 @@ async def get_thread_history(
     mark_read: Annotated[
         bool,
         Field(
-            description="Acknowledge the returned posts and advance your persistent read cursor "
-            "(on a clean unread drain). Requires as_participant; join_thread first. This is a WRITE. "
-            "Combined with directed_only/action_required_only/tail/after_message_id/since it still "
-            "acks exactly the posts returned, but CANNOT advance the cursor — the response then says "
-            "cursor_advanced=false and unread_only keeps returning them until you re-read unfiltered."
+            description=(
+                "Acknowledge the returned posts and advance your read cursor: a WRITE (requires as_participant; "
+                "join_thread first). With a filter (directed_only, action_required_only, tail, after_message_id, "
+                "since) it acks what it returned but cannot advance the cursor, and the response says "
+                "cursor_advanced=false."
+            )
         ),
     ] = False,
     directed_only: Annotated[

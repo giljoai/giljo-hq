@@ -19,7 +19,7 @@
 const ALLOWLIST_MARKER = 'eslint-allow giljo-internal/no-manual-api-url-composition'
 
 function isFileAllowlisted(context) {
-  const src = context.sourceCode || (context.getSourceCode && context.getSourceCode())
+  const src = context.sourceCode
   if (!src || !src.text) return false
   return src.text.includes(ALLOWLIST_MARKER)
 }

@@ -20,7 +20,7 @@ RETIRED_PHRASES: dict[str, str] = {
     ),
 }
 
-TOOL_SURFACE_CHAR_CEILING = 60_500
+TOOL_SURFACE_CHAR_CEILING = 47_500
 
 
 
@@ -92,6 +92,42 @@ def test_no_retired_tool_name_is_referenced_on_the_surface() -> None:
         "renaming a tool, grep the whole surface for the old name -- the registry entry is "
         "never the only place it appears."
     )
+
+
+def _title_keys(schema: object, path: str = "") -> list[str]:
+    hits: list[str] = []
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key == "title" and isinstance(value, str):
+                hits.append(f"{path}.title={value!r}")
+            else:
+                hits.extend(_title_keys(value, f"{path}.{key}"))
+    elif isinstance(schema, list):
+        for index, value in enumerate(schema):
+            hits.extend(_title_keys(value, f"{path}[{index}]"))
+    return hits
+
+
+def test_input_schemas_carry_no_title_metadata() -> None:
+    from api.endpoints.mcp_tools import mcp
+
+    async def _schemas() -> list[tuple[str, dict]]:
+        return [(tool.name, tool.input_schema or {}) for tool in await mcp.list_tools()]
+
+    hits = [f"{name}{hit}" for name, schema in asyncio.run(_schemas()) for hit in _title_keys(schema)]
+    assert not hits, "JSON-schema title metadata is back on the advertised surface:\n  " + "\n  ".join(hits[:20])
+
+
+def test_the_title_guard_can_actually_fire_and_spares_a_parameter_named_title() -> None:
+    schema = {
+        "title": "create_taskArguments",
+        "properties": {"title": {"type": "string", "title": "Title"}, "x": {"type": "integer"}},
+        "$defs": {"_Nested": {"title": "_Nested", "properties": {}}},
+    }
+    hits = _title_keys(schema)
+    assert len(hits) == 3, hits
+    assert any("properties.title.title=" in h for h in hits), "the metadata INSIDE the title property must be found"
+    assert not any(h.endswith(".properties.title") for h in hits), "the property named title must not be flagged"
 
 
 def test_the_retired_name_guard_can_actually_fire() -> None:

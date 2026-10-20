@@ -53,7 +53,7 @@ export function maybeReloadForChunkError(key, deps = {}) {
   const nowFn = deps.now || (() => Date.now())
   const sentinelKey = SENTINEL_PREFIX + pathKey
 
-  let last = 0
+  let last
   try {
     last = storage ? Number(storage.getItem(sentinelKey)) || 0 : 0
   } catch {

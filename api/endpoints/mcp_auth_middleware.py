@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -40,6 +41,7 @@ from api.endpoints.mcp_transport import (
     _wrap_send_with_session_id,
     announces_client,
 )
+from api.exception_handlers import server_busy_response
 from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scope
 from giljo_mcp.signals import SIGNAL_ACCOUNT_ACCESS_OBSERVED, SIGNAL_POST_AUTH_GATE_FAILED, publish_signal
 
@@ -261,6 +263,9 @@ class MCPAuthMiddleware:
         if gate is not None:
             try:
                 block_message = await gate(tenant_key)
+            except PoolTimeoutError:
+                await server_busy_response(request)(scope, receive, send)
+                return
             except Exception:  # noqa: BLE001 - gate errors are handled per the registering deployment's policy
                 logger.warning("mcp_post_auth_gate_failed tenant=%s", tenant_key, exc_info=True)
                 publish_signal(SIGNAL_POST_AUTH_GATE_FAILED, {"tenant_key": tenant_key})

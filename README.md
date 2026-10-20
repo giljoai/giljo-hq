@@ -37,7 +37,7 @@ Define your product once. Every agent that connects gets the full picture.
 <br>
 
 <div align="center">
-<img src="docs/images/staging-view.png" alt="Giljo HQ staging view: your description becomes a mission, agents are assigned automatically" width="100%">
+<img src="docs/images/staging-view.png" alt="Giljo HQ Jobs board: a staged chain of two linked projects, with the execution mode and Implement chain at the top" width="100%">
 <br>
 <sub>The Staging view: write what you want done. GiljoAI generates the mission and assigns agents from your templates.</sub>
 </div>
@@ -77,7 +77,7 @@ cd giljo-hq
 python install.py
 python startup.py
 ```
-Requires Python 3.12+, PostgreSQL 18+, Node.js 22+.
+Requires Python 3.12+, PostgreSQL 18+, Node.js 22.23.3+.
 </details>
 
 **Using VS Code?** This repo ships a `.vscode/mcp.json` pointing at your local
@@ -137,7 +137,7 @@ Each completed project writes to 360 Memory automatically: what was built, key d
 ### Dashboard and Monitoring
 
 <div align="center">
-<img src="docs/images/implementation-view.png" alt="Implementation view showing agents with status, progress, and messages" width="100%">
+<img src="docs/images/implementation-view.png" alt="Jobs board during implementation: agents working, complete and silent, a project ready for review and one waiting for your decision" width="100%">
 </div>
 
 The Jobs page shows real-time agent activity: status, step progress, duration, and messages waiting. A message composer lets you talk directly to the orchestrator or broadcast to the entire agent team. All messages are logged in the MCP message system for auditability.
@@ -173,7 +173,7 @@ This is the **Giljo HQ Community Edition**, free for single-user use under the [
 
 | Layer | Technology |
 |---|---|
-| **Backend** | Python 3.12+, FastAPI, SQLAlchemy 2.0 (async), Alembic |
+| **Backend** | Python 3.12+, FastAPI, SQLAlchemy 2.1 (async), Alembic |
 | **Database** | PostgreSQL 18 (required) |
 | **Frontend** | Vue 3 (Composition API), Vuetify 4, Vite |
 | **Real-time** | WebSocket via PostgresNotifyBroker |
@@ -229,7 +229,7 @@ python startup.py --verbose    # Detailed logging
 | [Product Overview](docs/PRODUCT_OVERVIEW.md) | What it is, who it is for, the Six Pillars |
 | [Getting Started](docs/GETTING_STARTED.md) | Post-install walkthrough, from setup wizard to first project |
 | [Installation Guide](docs/INSTALLATION_GUIDE.md) | Complete installation reference |
-| [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) | All 46 MCP tools with parameters and return values |
+| [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) | All 54 MCP tools with parameters and return values |
 | [Architecture](docs/ARCHITECTURE.md) | System design, network topology, component overview |
 
 **API docs** are served at runtime: Swagger UI at `/docs`, ReDoc at `/redoc`.
