@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.3.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "giljo-mcp"
-version = "2.8.0"
+version = "2.9.0"
 description = "Giljo HQ Coding Orchestrator - Multi-agent orchestration system"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,79 +36,82 @@ dependencies = [
     # (route-introspection tests flatten _IncludedRouter via tests/helpers/route_surface). starlette 1.3.1
     # clears 4 CVEs (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two in lockstep.
     # 2026-09-24: pair bumped to fastapi 0.141.1 / starlette 1.7.0 (see requirements.txt).
-    "fastapi==0.141.1",
-    "starlette==1.7.0",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
-    "uvicorn[standard]>=0.23.0",
-    "pydantic>=2.0.0",
+    "fastapi==0.143.0",
+    "starlette==1.8.0",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
+    "uvicorn[standard]>=0.54.0",
+    "pydantic>=2.14.1",
 
     # Database (PostgreSQL Only - Required)
-    "sqlalchemy>=2.0.0",
-    "alembic>=1.12.0",
-    "psycopg2-binary>=2.9.0",
-    "asyncpg>=0.29.0",
-    "greenlet>=3.5.1",  # Required by SQLAlchemy async on macOS arm64 (transitive dep not auto-installed)
+    "sqlalchemy>=2.1.0,<2.2",  # >=2.1: postgresql.distinct_on; engines pin psycopg2/asyncpg explicitly
+    "alembic>=1.20.0",
+    "psycopg2-binary>=2.9.13",
+    "asyncpg>=0.32.0",
+    "greenlet>=3.5.6",  # Required by SQLAlchemy async on macOS arm64 (transitive dep not auto-installed)
 
     # Authentication & Security
-    "bcrypt>=4.0.0",
-    "cryptography>=50.0.0",  # Fernet encryption for auth tokens (auth_manager.py)
-    "python-multipart>=0.0.6",
-    "PyJWT>=2.14.0",
-    "email-validator>=2.1.0",  # Required by Pydantic EmailStr (auth.py, users.py)
+    "bcrypt>=5.0.0",
+    "cryptography>=50.0.2",  # Fernet encryption for auth tokens (auth_manager.py)
+    "python-multipart>=0.0.32",
+    "PyJWT>=2.15.1",
+    "email-validator>=2.3.0",  # Required by Pydantic EmailStr (auth.py, users.py)
 
     # MCP SDK (Model Context Protocol)
     # Upper bound: minor bumps require re-running
-    # tests/integration/test_mcp_wire_contract_dict_serialization.py (wire contract).
-    # Patch bumps allowed. The 2.x floor supersedes the CVE-2025-66416 floor
-    # (DNS rebinding, fixed in 1.27.1). <2.1 also fences the provisional
-    # MCPServer.middleware signature our SEC-9126 gate rides on.
-    "mcp>=2.0.0,<2.1",
+    # tests/integration/test_mcp_wire_contract_dict_serialization.py (wire contract)
+    # and diffing the tools/list surface. Patch bumps allowed. <2.4 fences the
+    # provisional MCPServer.middleware signature our SEC-9126 gate rides on and
+    # the SDK-internal Tool.fn that mcp_tools/_tool_error_surface.py wraps (2.1+
+    # hides the text of any non-ToolError exception). The 2.x floor supersedes
+    # the CVE-2025-66416 floor (DNS rebinding, fixed in 1.27.1); 2.2+ closes
+    # CVE-2026-59951.
+    "mcp>=2.3.0,<2.4",
 
     # Core Utilities
-    "python-dotenv>=1.0.0",
-    "pyyaml>=6.0.0",
-    "click>=8.1.0",
+    "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
+    "click>=8.5.0",
     "colorama>=0.4.6",
-    "httpx>=0.25.0",
-    "packaging>=23.0",  # Version parsing for the CE update checker (api/startup/update_checker.py)
-    "psutil>=5.9.0",
-    "tiktoken>=0.5.0",
-    "structlog>=25.0.0",
-    "watchdog>=3.0.0",
+    "httpx>=0.28.1",
+    "packaging>=26.3",  # Version parsing for the CE update checker (api/startup/update_checker.py)
+    "psutil>=7.2.2",
+    "tiktoken>=0.14.0",
+    "structlog>=26.1.0",
+    "watchdog>=6.0.0",
 
     # SaaS Dependencies (only used when GILJO_MODE=saas or demo).
     # CE installer paths never touch these; SaaS-gated by GILJO_MODE.
-    "resend>=2.30.1",  # Transactional email via Resend API
-    "aiosmtplib>=5.1.1",  # Async SMTP client for SmtpProvider (Mailpit/local capture)
+    "resend>=2.49.1",  # Transactional email via Resend API
+    "aiosmtplib>=5.1.3",  # Async SMTP client for SmtpProvider (Mailpit/local capture)
     "jinja2>=3.1.6",  # Templating for Ops Panel HTML views (ops_panel/main.py)
-    "sentry-sdk[fastapi]>=2.60.0",  # Backend error tracking for SaaS/Demo (INF-5063)
+    "sentry-sdk[fastapi]>=2.72.0",  # Backend error tracking for SaaS/Demo (INF-5063)
 
     # SaaS Edition: per-tenant rate limiting backed by Redis.
     # CE installer paths never touch Redis; guarded by GILJO_MODE=saas in both
     # the runtime store (saas/rate_limiting/store.py) and the installer.
-    "redis>=5.0",
+    "redis>=8.1.0",
 
     # SaaS Edition: durable per-tenant backup object storage (S3-compatible
     # Railway bucket). Imported LAZILY inside saas/backup/backends.py so CE
     # self-hosters without boto3 never fail importing the module (INF-6139).
-    "boto3>=1.35.0",
+    "boto3>=1.43.113",
 
     # SaaS Edition: OAuth 2.0/OIDC client for social-login provider adapters
     # (BE-1001/1002/1003). CE never imports saas/auth/social/.
-    "authlib>=1.7.2",
+    "authlib>=1.8.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.1.0",
-    "black>=23.0.0",
-    "mypy>=1.5.0",
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "pytest-timeout>=2.2.0",
-    "pytest-xdist>=3.5.0",  # parallel test workers (-n); CI unit step runs -n 6 with per-worker DBs
-    "fakeredis>=2.20.0",
-    "pre-commit>=3.4.0",
+    "ruff==0.15.0",
+    "black>=26.10.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",  # parallel test workers (-n); CI unit step runs -n 6 with per-worker DBs
+    "fakeredis>=2.39.0",
+    "pre-commit>=4.7.0",
     "types-PyYAML",
 ]
 
@@ -272,6 +275,7 @@ addopts = [
     "--timeout-method=thread",
 ]
 timeout_func_only = true
+asyncio_default_fixture_loop_scope = "function"
 # This file ships to CE, so it must not name operator-only directories. The
 # operator-tooling suites are collected by CI explicit pytest paths (INF-9310),
 # not from here; a bare local pytest needs those paths passed explicitly.

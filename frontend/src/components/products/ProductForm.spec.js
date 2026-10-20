@@ -925,3 +925,64 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     wrapper.unmount()
   })
 })
+
+describe('ProductForm.vue — FE-9795 initial blank mode', () => {
+  let pinia
+
+  beforeEach(() => {
+    pinia = createPinia()
+    setActivePinia(pinia)
+  })
+
+  const LOCKABLE_LABELS = ['Product Info', 'Tech Stack', 'Architecture', 'Testing']
+
+  function tabButton(wrapper, label) {
+    return wrapper.findAll('button').find((b) => b.text().includes(label))
+  }
+
+  async function openForm(props = {}) {
+    const wrapper = mount(ProductForm, {
+      global: { plugins: [pinia] },
+      props: { modelValue: false, isEdit: false, product: null, existingVisionDocuments: [], ...props },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await nextTick()
+    return wrapper
+  }
+
+  it('opens in blank mode with every detail tab enabled when asked to', async () => {
+    const wrapper = await openForm({ initialCreateBlank: true })
+
+    expect(wrapper.vm.createBlank).toBe(true)
+    for (const label of LOCKABLE_LABELS) {
+      const btn = tabButton(wrapper, label)
+      expect(btn, `tab "${label}" should render`).toBeDefined()
+      expect(btn.attributes('disabled'), `tab "${label}" should be enabled in blank mode`).toBeUndefined()
+    }
+    expect(wrapper.find('[data-test="create-blank-undo"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('"Add a document instead" still switches back and relocks the tabs', async () => {
+    const wrapper = await openForm({ initialCreateBlank: true })
+
+    await wrapper.find('[data-test="create-blank-undo"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.createBlank).toBe(false)
+    for (const label of LOCKABLE_LABELS) {
+      expect(tabButton(wrapper, label).attributes('disabled'), `tab "${label}" relocks`).toBeDefined()
+    }
+    wrapper.unmount()
+  })
+
+  it('without the flag the form still opens AI-first with the tabs locked', async () => {
+    const wrapper = await openForm()
+
+    expect(wrapper.vm.createBlank).toBe(false)
+    for (const label of LOCKABLE_LABELS) {
+      expect(tabButton(wrapper, label).attributes('disabled'), `tab "${label}" stays locked`).toBeDefined()
+    }
+    wrapper.unmount()
+  })
+})

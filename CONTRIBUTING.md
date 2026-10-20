@@ -69,6 +69,8 @@ Open `http://127.0.0.1:7274` for the frontend (proxies API calls to 7272).
 
 To switch from production back to dev mode, simply re-run with `--dev`. No build step needed.
 
+If you ran `python startup.py` without `--dev` first, the frontend was installed without its test and lint tools (`npm ci --omit=dev`) and `--dev` keeps that install: run `cd frontend && npm ci && cd ..` once before `npm run test` or `npm run lint`.
+
 ## Code Style
 
 - **Python**: Enforced by [ruff](https://docs.astral.sh/ruff/) (linting and formatting)

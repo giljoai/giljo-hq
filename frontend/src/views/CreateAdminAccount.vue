@@ -172,6 +172,11 @@
 
             <v-card-text class="pa-6 pt-0">
               <v-form ref="step2Form" v-model="step2Valid" @submit.prevent="createAdmin">
+                <p class="text-body-small text-muted-a11y mb-3">
+                  This PIN is the only way to reset a forgotten password on Community Edition. Keep it
+                  safe.
+                </p>
+
                 <v-text-field
                   v-model="recoveryPin"
                   label="Recovery PIN (4 digits)"

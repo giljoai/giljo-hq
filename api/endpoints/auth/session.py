@@ -20,6 +20,7 @@ from api.middleware.auth_rate_limiter import get_rate_limiter
 from api.middleware.auth_rate_limits import limit_for
 from giljo_mcp.auth.dependencies import get_db_session
 from giljo_mcp.auth.jwt_manager import JWTManager
+from giljo_mcp.auth.terms_gate import session_terms_version
 from giljo_mcp.config_manager import get_config
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import AuthenticationError
@@ -364,25 +365,32 @@ async def refresh_token(
     if (user.token_revocation_epoch or 0) > token_epoch:
         raise HTTPException(status_code=401, detail="Token has been revoked")
 
+    await issue_browser_session_cookie(request, response, db, user, prior_jti=jti)
+
+    logger.info(f"Token refreshed for user: {sanitize(user.username)}")
+    return {"message": "Token refreshed", "username": user.username}
+
+
+async def issue_browser_session_cookie(
+    request: Request, response: Response, db: AsyncSession, user: User, *, prior_jti: str | None
+) -> None:
     new_token = JWTManager.create_access_token(
         user_id=user.id,
         username=user.username,
         role=user.role,
         tenant_key=user.tenant_key,
         revocation_epoch=user.token_revocation_epoch or 0,
+        terms_version=await session_terms_version(db, user.tenant_key),
     )
 
-    if jti:
+    if prior_jti:
         from giljo_mcp.services.oauth_revocation_service import rotate_access_token_jti
 
-        await rotate_access_token_jti(db, tenant_key=tenant_key, jti=jti)
+        await rotate_access_token_jti(db, tenant_key=user.tenant_key, jti=prior_jti)
 
-    db_cookie_domains = await _load_db_cookie_domains(db, tenant_key)
+    db_cookie_domains = await _load_db_cookie_domains(db, user.tenant_key)
     cookie_params = _build_cookie_params(request, db_cookie_domains)
     response.set_cookie(value=new_token, **cookie_params)
-
-    logger.info(f"Token refreshed for user: {sanitize(user.username)}")
-    return {"message": "Token refreshed", "username": user.username}
 
 
 @router.get("/me", tags=["auth"])

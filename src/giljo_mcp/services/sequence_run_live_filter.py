@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES
+from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
@@ -118,3 +119,22 @@ async def member_product_ids(
         )
         product_of = {str(pid): str(product) for pid, product in rows.all() if product}
     return {run.id: next((product_of[pid] for pid in _run_member_ids(run) if pid in product_of), None) for run in runs}
+
+
+async def conductor_statuses(
+    *,
+    session: AsyncSession,
+    runs: list[SequenceRun],
+    tenant_key: str,
+) -> dict[str, str | None]:
+    agent_ids = {run.conductor_agent_id for run in runs if run.conductor_agent_id}
+    status_of: dict[str, str] = {}
+    if agent_ids:
+        rows = await session.execute(
+            select(AgentExecution.agent_id, AgentExecution.status).where(
+                AgentExecution.tenant_key == tenant_key,
+                AgentExecution.agent_id.in_(agent_ids),
+            )
+        )
+        status_of = {str(agent_id): status for agent_id, status in rows.all()}
+    return {run.id: status_of.get(run.conductor_agent_id or "") for run in runs}

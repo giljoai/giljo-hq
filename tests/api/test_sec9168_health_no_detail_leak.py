@@ -80,15 +80,15 @@ async def _get(app, path: str):
 
 
 @pytest.mark.asyncio
-async def test_anonymous_health_db_failure_carries_no_exception_text(monkeypatch):
+async def test_anonymous_health_never_reads_the_database(monkeypatch):
     app = _build_app(monkeypatch, giljo_mode="ce", db_manager=_FailingDbManager())
 
     response = await _get(app, "/health")
     body = response.json()
 
     assert DB_SENTINEL not in response.text
-    assert body["checks"]["database"] == "unhealthy: database"
-    assert body["status"] == "degraded"
+    assert "database" not in body["checks"]
+    assert body["status"] == "healthy"
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,13 @@ async def test_authenticated_system_status_carries_a_fixed_code_not_raw_text(mon
 
     from giljo_mcp.auth.dependencies import get_current_active_user
 
-    app = _build_app(monkeypatch, giljo_mode="saas", db_manager=_FailingDbManager())
+    app = _build_app(
+        monkeypatch,
+        giljo_mode="saas",
+        db_manager=_HealthyDbManager(),
+        redis_mode="connected",
+        redis_client=_DyingRedisClient(),
+    )
     app.dependency_overrides[get_current_active_user] = object
 
     with caplog.at_level(logging.WARNING, logger="api.app"):
@@ -123,13 +129,18 @@ async def test_authenticated_system_status_carries_a_fixed_code_not_raw_text(mon
     response = await _get(app, "/api/system/status")
     body = response.json()
 
-    assert DB_SENTINEL not in response.text, (
+    assert REDIS_SENTINEL not in response.text, (
         f"raw exception text leaked to an authenticated non-operator SaaS user: {response.text}"
     )
-    assert body["health_detail"]["database"] == "unreachable"
-    assert DB_SENTINEL in caplog.text, "the original exception text must still be logged server-side"
+    assert body["health_detail"]["redis"] == "unreachable"
+    assert REDIS_SENTINEL in caplog.text, "the original exception text must still be logged server-side"
     assert "pending_migration" in body
     assert "update_available" in body
+
+
+class _HealthyRedisClient:
+    async def ping(self):
+        return True
 
 
 @pytest.mark.asyncio
@@ -137,9 +148,15 @@ async def test_health_recovery_clears_the_stashed_detail(monkeypatch):
     from api.app_state import state
     from giljo_mcp.auth.dependencies import get_current_active_user
 
-    app = _build_app(monkeypatch, giljo_mode="ce", db_manager=_HealthyDbManager())
+    app = _build_app(
+        monkeypatch,
+        giljo_mode="saas",
+        db_manager=_HealthyDbManager(),
+        redis_mode="connected",
+        redis_client=_HealthyRedisClient(),
+    )
     app.dependency_overrides[get_current_active_user] = object
-    state.health_detail["database"] = "stale detail from a previous outage"
+    state.health_detail["redis"] = "stale detail from a previous outage"
 
     await _get(app, "/health")
     response = await _get(app, "/api/system/status")

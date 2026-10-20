@@ -30,6 +30,7 @@ function normalizeRun(raw) {
     conductor_agent_id: raw.conductor_agent_id ?? null,
     conductor_project_id: raw.conductor_project_id ?? null,
     conductor_label: raw.conductor_label ?? null,
+    conductor_status: raw.conductor_status ?? null,
     product_id: raw.product_id ?? null,
     created_at: raw.created_at ?? null,
     updated_at: raw.updated_at ?? null,

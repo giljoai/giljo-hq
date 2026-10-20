@@ -146,7 +146,12 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "save_roadmap": {
         "fn": "save_roadmap",
-        "params": ["items", "patch_fields", "product_id", "remove", "summary"],
+        "params": ["items", "patch_fields", "product_id", "summary"],
+        "scope": "mcp:write",
+    },
+    "remove_roadmap_items": {
+        "fn": "remove_roadmap_items",
+        "params": ["items", "product_id"],
         "scope": "mcp:write",
     },
     "get_roadmap": {
@@ -187,7 +192,6 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "loop_interval_minutes",
             "my_status",
             "pass_baton_to",
-            "rename_to",
             "requires_action",
             "set_status",
             "thread_id",
@@ -265,9 +269,14 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["caller_job_id", "job_id"],
         "scope": "mcp:agent",
     },
-    "resume_or_dismiss_job": {
-        "fn": "resume_or_dismiss_job",
-        "params": ["action", "job_id", "reason"],
+    "resume_job": {
+        "fn": "resume_job",
+        "params": ["job_id", "reason"],
+        "scope": "mcp:agent",
+    },
+    "dismiss_job": {
+        "fn": "dismiss_job",
+        "params": ["job_id", "reason"],
         "scope": "mcp:agent",
     },
     "set_agent_status": {
@@ -434,7 +443,7 @@ def test_registered_tool_set_is_exactly_preserved():
         f"Tool registry drift. Missing: {sorted(expected_names - live_names)}; "
         f"Unexpected: {sorted(live_names - expected_names)}"
     )
-    assert len(live_names) == 52
+    assert len(live_names) == 54
 
 
 def test_every_tool_fn_params_and_scope_preserved():

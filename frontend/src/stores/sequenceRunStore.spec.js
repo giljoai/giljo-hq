@@ -281,3 +281,19 @@ describe('sequenceRunStore.isProjectStartable (FE-9629)', () => {
     expect(store.isProjectStartable(null)).toBe(false)
   })
 })
+
+describe('normalizeRun — conductor_status carried (BE-9813)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('keeps the listed conductor status, null when the server sent none', () => {
+    const store = useSequenceRunStore()
+    store._testSeedRuns([
+      { id: 'r1', project_ids: ['pA'], resolved_order: ['pA'], status: 'running', conductor_status: 'working' },
+      { id: 'r2', project_ids: ['pB'], resolved_order: ['pB'], status: 'running' },
+    ])
+    expect(store.runsById.get('r1').conductor_status).toBe('working')
+    expect(store.runsById.get('r2').conductor_status).toBeNull()
+  })
+})

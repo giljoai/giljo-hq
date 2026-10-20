@@ -34,9 +34,21 @@
           data-testid="decision-modal-card"
           @decided="handleDecided"
         />
-        <p v-else-if="approvalsStore.error" class="text-body-small" data-testid="decision-modal-error">
-          <v-icon size="16" color="error" class="mr-1" icon="mdi-alert-circle" />
-          Could not load the pending decision: {{ approvalsStore.error }}
+        <div v-else-if="loading" class="decision-modal-state" data-testid="decision-modal-loading">
+          <v-progress-circular indeterminate size="20" width="2" color="primary" />
+          <span class="text-body-small">Loading the pending decision...</span>
+        </div>
+        <div v-else-if="loadError" class="decision-modal-state" data-testid="decision-modal-error">
+          <span class="text-body-small">
+            <v-icon size="16" color="error" class="mr-1" icon="mdi-alert-circle" />
+            Could not load the pending decision: {{ loadError }}
+          </span>
+          <v-btn variant="text" size="small" data-testid="decision-modal-retry" @click="loadPending">
+            Retry
+          </v-btn>
+        </div>
+        <p v-else class="text-body-small" data-testid="decision-modal-empty">
+          No decision is waiting on this project right now. It may already have been answered.
         </p>
       </div>
 
@@ -84,14 +96,29 @@ watch(
   { immediate: true },
 )
 
+const loading = ref(false)
+const loadError = ref(null)
+
+async function loadPending() {
+  loading.value = true
+  loadError.value = null
+  try {
+    await approvalsStore.fetchPending()
+  } catch {
+    loadError.value = approvalsStore.error || 'the request failed'
+  } finally {
+    loading.value = false
+  }
+}
+
 watch(
   () => props.show,
-  (open) => {
-    if (open) {
-      stickyApproval.value = null
-      approvalsStore.fetchPending().catch(() => {})
-    }
+  (open, wasOpen) => {
+    if (!open) return
+    if (wasOpen === false) stickyApproval.value = null
+    loadPending()
   },
+  { immediate: true },
 )
 
 function handleCancel() {
@@ -106,6 +133,12 @@ function handleDecided(payload) {
 <style scoped lang="scss">
 .decision-modal-card {
   background: rgb(var(--v-theme-surface));
+}
+
+.decision-modal-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .decision-modal-body {

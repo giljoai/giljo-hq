@@ -173,9 +173,22 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
     if (!productId || productId !== currentProductId) return
 
     analysisHintVisible.value = false
+    clearHintTimer()
+
+    if (event.detail?.vision_analysis_complete !== true) {
+      let row = null
+      try {
+        row = await productStore.fetchProductById(productId)
+      } catch (err) {
+        console.warn('[useVisionAnalysis] intermediate-write fetch failed:', err)
+      }
+      if (row?.vision_analysis_complete === true) completeAnalysis(row)
+      return
+    }
+
     completionSignalled = true
 
-    let updated = null
+    let updated
     try {
       updated = await productStore.fetchProductById(productId)
     } finally {

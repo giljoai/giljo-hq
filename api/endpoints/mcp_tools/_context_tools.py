@@ -99,13 +99,10 @@ def _merge_group(kwargs: dict[str, Any], group: BaseModel | None) -> None:
 @mcp.tool(
     title="Get Context",
     description=(
-        "Unified context fetcher: retrieves product/project context by category, with depth "
-        "control. Pass one or more categories in a single call. For one project's "
-        "description/mission use categories=['project'] -- its payload names the project two "
-        "ways: project_alias is the short permanent share code (e.g. A1B2C3), taxonomy_alias "
-        "the human-readable serial (e.g. BE-0007). Never pass tenant_key. See the "
-        "categories param for the full category list + token costs, and get_giljo_guide for "
-        "read-vs-write routing."
+        "Fetch product/project context by category in one call (pass a list). categories=['project'] "
+        "returns one project's description and mission and names it two ways: project_alias is the short "
+        "permanent share code (e.g. A1B2C3), taxonomy_alias the human-readable serial (e.g. BE-0007). "
+        "Token costs per category: see categories. Never pass tenant_key."
     ),
     annotations=_tool_hints("get_context"),
 )
@@ -115,11 +112,9 @@ async def get_context(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Product UUID. Optional when project_id is supplied — the server resolves the "
-                "product from the project (tenant-scoped). Also optional for tenant-scoped-only "
-                "categories (products, threads, project, chain, self_identity, todos) — omit it "
-                "entirely when you have no product_id yet, e.g. calling categories=['products'] "
-                "to resolve one."
+                "Product UUID. Optional when project_id is given (the product is resolved from it) and for "
+                "tenant-scoped categories (products, threads, project, chain, self_identity, todos); omit it to "
+                "resolve a product with categories=['products']."
             ),
         ),
     ] = "",
@@ -133,32 +128,21 @@ async def get_context(
     ] = "",
     job_id: Annotated[
         str,
-        Field(
-            max_length=MCP_ID_MAX,
-            description="Agent job UUID. Needed for the 'todos' category (read-back of an agent's TODO list — sequence + content + status). Ignored by other categories.",
-        ),
+        Field(max_length=MCP_ID_MAX, description=("Agent job UUID; needed only for the todos category.")),
     ] = "",
     categories: Annotated[
         list[Annotated[str, Field(max_length=MCP_ID_MAX)]] | None,
         Field(
             max_length=MCP_LIST_ITEMS_MAX,
             description=(
-                "List of categories to fetch (required, must be a list, e.g. ['tech_stack', "
-                "'architecture']): product_core (~100 tokens), vision_documents (0-24K), "
-                "tech_stack (200-400), architecture (300-1.5K), testing (0-400), memory_360 "
-                "(500-5K, most recent N closeouts by sequence DESC, default N=3; tune via "
-                "depth_config={'memory_360': <int>} or {'memory_360': {'last_n_projects': N, "
-                "'shape': 'full'|'headlines'}}), git_history (500-5K), agent_templates (400-2.4K), "
-                "project (~300), self_identity (agent template content), tasks (open task list), "
-                "todos (TODO content for a job — pass job_id, used for force-recovery), "
-                "chain (the caller's active chain run: run_id, chain_mission, resolved_order, "
-                "current_index, project_statuses — "
-                "requires project_id; empty + error='no_active_chain_run' outside a chain), "
-                "threads (the tenant's Hub threads, read-only, up to 25 most recent; not "
-                "depth-tunable), products (~25 tokens/product: id, name, is_active for every "
-                "product owned by the calling tenant — resolve a product name to its id before "
-                "any product_id-taking call; works even with no product_id/default product set; "
-                "names are NOT guaranteed unique per tenant, so more than one match is possible)."
+                "Categories to fetch (a list, required). Light: product_core (~100 tokens), tech_stack (200-400),"
+                " architecture (300-1.5K), testing (0-400), project (~300), products (~25 per product: id, name, "
+                "is_active; resolves a name to an id, works with no product set, names may repeat), tasks (open "
+                "tasks), todos (a job's TODO list; pass job_id), chain (the caller's active chain run; needs "
+                "project_id, error no_active_chain_run outside one), threads (25 most recent Hub threads), "
+                "self_identity (agent template content). Heavy: vision_documents (0-24K), memory_360 (500-5K; "
+                "latest 3 closeouts by sequence DESC, tune with depth_config={'memory_360': N} or {'memory_360': {'last_n_projects':"
+                " N, 'shape': 'full'|'headlines'}}), git_history (500-5K), agent_templates (400-2.4K)."
             ),
         ),
     ] = None,
@@ -166,11 +150,9 @@ async def get_context(
         dict | None,
         Field(
             description=(
-                "Optional depth overrides, keyed by CATEGORY name, e.g. {'vision_documents': 'full', "
-                "'git_history': 'summary'}. Keys must be category names (as in `categories`), NOT user "
-                "depth-setting names -- 'memory_360' not 'memory_last_n_projects', 'tech_stack' not "
-                "'tech_stack_sections'. An unrecognized key is rejected with the accepted list; it is "
-                "never silently ignored. Omit entirely to use the user's saved depth settings."
+                "Per-category depth overrides keyed by category name, e.g. {'vision_documents': 'full', "
+                "'git_history': 'summary'}. An unknown key is rejected with the accepted list. Omit to use the "
+                "saved depth settings."
             )
         ),
     ] = None,
@@ -380,12 +362,10 @@ async def get_vision_document(
     name="update_product_context",
     title="Update Product Context",
     description=(
-        "Write structured product fields extracted from vision document analysis. Merge-write: "
-        "only provided fields are updated, and it is SAFE TO CALL IN STAGES -- split a large "
-        "analysis across several calls and set emit_completion=true on the last one. Every "
-        "response reports vision_analysis_complete, missing_for_completion, and fields_skipped, "
-        "so you never have to infer what landed. See the tech_stack/architecture/quality/testing "
-        "param groups, project_path, and vision_summaries/consolidated_vision for field detail."
+        "Write structured product fields extracted from vision-document analysis. Merge-write: only the "
+        "fields you pass change, so it is safe to call in stages; set emit_completion=true on the last "
+        "call. Every response reports vision_analysis_complete, missing_for_completion and "
+        "fields_skipped."
     ),
     annotations=_tool_hints("update_product_context", destructive=True),
 )
@@ -405,10 +385,8 @@ async def update_product_context(
         Field(
             max_length=MCP_DESCRIPTION_MAX,
             description=(
-                "Absolute path of the user's local codebase folder you are operating from (your "
-                "working directory); OMIT if you have no filesystem access inside the user's "
-                "repository — never guess. Like product_name, it is user-owned and skipped when "
-                "already set."
+                "Absolute path of the local codebase you operate from; omit if you have no filesystem access to "
+                "the user's repository. User-owned: skipped when already set."
             ),
         ),
     ] = "",
@@ -417,9 +395,8 @@ async def update_product_context(
         Field(
             max_length=MCP_DESCRIPTION_MAX,
             description=(
-                "Custom instructions steering future vision-document extraction for this "
-                "product (e.g. 'focus on backend architecture'). Same field the dashboard's "
-                "product form writes via PUT /products/{id}."
+                "Instructions steering future vision-document extraction for this product (e.g. 'focus on backend"
+                " architecture')."
             ),
         ),
     ] = "",
@@ -453,10 +430,9 @@ async def update_product_context(
         bool,
         Field(
             description=(
-                "Updating a product field that is already populated is rejected with 'Fields "
-                "already populated: <detail>' unless force=True. Reviewing an existing product "
-                "is the COMMON case, so most calls that touch tech_stack, architecture, or "
-                "quality on a product that already has values need force=True."
+                "force=true is required to overwrite a product field that is already populated (otherwise refused"
+                " with 'Fields already populated'). Reviewing an existing product is the common case, so most "
+                "tech_stack, architecture or quality updates need it."
             )
         ),
     ] = False,
@@ -464,8 +440,8 @@ async def update_product_context(
         bool,
         Field(
             description=(
-                "Set true on your FINAL staged call. Re-checks the completion state and signals "
-                "the dashboard even when this call writes no new fields."
+                "Set true on your final staged call: re-checks completion and signals the dashboard even if "
+                "nothing new was written."
             )
         ),
     ] = False,
@@ -481,12 +457,9 @@ async def update_product_context(
         bool | None,
         Field(
             description=(
-                "Show (true) or hide (false) this product's tab -- the MCP twin of the "
-                "dashboard's show/hide button. Omit to leave it unchanged. SEVERAL products "
-                "may be shown at once and showing one never hides another. This does NOT "
-                "change which product an unscoped read resolves to: that is the separate "
-                "default product, chosen from the dashboard. To work on a specific product, "
-                "pass its product_id to each call rather than showing it here."
+                "Show (true) or hide (false) this product's tab, like the dashboard's show/hide button; omit to "
+                "leave it. Several products can be shown at once, and this never changes which product an "
+                "unscoped read resolves to (the default product, set in the dashboard)."
             )
         ),
     ] = None,

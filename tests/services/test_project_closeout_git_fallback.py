@@ -28,6 +28,7 @@ class _FakeProject:
         self.name = "Test Project"
         self.created_at = None
         self.completed_at = None
+        self.implementation_launched_at = None
 
 
 class _FakeProduct:

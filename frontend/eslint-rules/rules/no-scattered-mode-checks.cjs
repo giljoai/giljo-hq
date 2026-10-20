@@ -81,7 +81,7 @@ module.exports = {
     },
   },
   create(context) {
-    const filename = context.filename || context.getFilename()
+    const filename = context.filename
     if (isAllowlistedFilename(filename)) return {}
 
     function checkBinary(node) {
@@ -105,7 +105,7 @@ module.exports = {
     // For .vue files, also walk the <template> body so v-if / v-show / bound
     // prop expressions are inspected (they live in a separate AST that a plain
     // script visitor never reaches).
-    const sourceCode = context.sourceCode || context.getSourceCode()
+    const sourceCode = context.sourceCode
     const services =
       (sourceCode && sourceCode.parserServices) || context.parserServices || {}
     if (typeof services.defineTemplateBodyVisitor === 'function') {

@@ -18,7 +18,6 @@ from giljo_mcp.models.auth import User
 from giljo_mcp.models.comm import CommThread
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.projects import TaxonomyType
-from giljo_mcp.models.tasks import Message
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
@@ -96,44 +95,7 @@ async def _create_thread(new_client, subject: str) -> str:
     return _payload(res)["thread_id"]
 
 
-async def test_rename_to_lands_with_the_post(rename_mcp_client):
-    new_client, _tenant_key, session = rename_mcp_client
-    tid = await _create_thread(new_client, "original subject")
-
-    async with new_client() as s:
-        res = await s.call_tool(
-            "post_to_thread",
-            {"thread_id": tid, "content": "renaming this thread", "from_agent": "alpha", "rename_to": "new subject"},
-        )
-    assert res.is_error is False, _error_text(res)
-
-    row = (await session.execute(select(CommThread).where(CommThread.id == tid))).scalar_one()
-    assert row.subject == "new subject"
-
-    posted = (
-        await session.execute(
-            select(Message).where(Message.thread_id == tid, Message.content == "renaming this thread")
-        )
-    ).scalar_one_or_none()
-    assert posted is not None, "the message must still post alongside a successful rename"
-
-
-async def test_rename_omitted_leaves_the_subject_untouched(rename_mcp_client):
-    new_client, _tenant_key, session = rename_mcp_client
-    tid = await _create_thread(new_client, "untouched subject")
-
-    async with new_client() as s:
-        res = await s.call_tool(
-            "post_to_thread",
-            {"thread_id": tid, "content": "just a message", "from_agent": "alpha"},
-        )
-    assert res.is_error is False, _error_text(res)
-
-    row = (await session.execute(select(CommThread).where(CommThread.id == tid))).scalar_one()
-    assert row.subject == "untouched subject"
-
-
-async def test_rename_on_a_project_bound_thread_is_refused_and_posts_nothing(rename_mcp_client):
+async def test_rename_on_a_project_bound_thread_is_refused_through_update_thread(rename_mcp_client):
     from giljo_mcp.models.products import Product
     from giljo_mcp.models.projects import Project
 
@@ -164,20 +126,21 @@ async def test_rename_on_a_project_bound_thread_is_refused_and_posts_nothing(ren
     original_subject = bound["subject"]
 
     async with new_client() as s:
-        res = await s.call_tool(
-            "post_to_thread",
-            {
-                "thread_id": tid,
-                "content": "should not post",
-                "from_agent": "alpha",
-                "rename_to": "hijacked subject",
-            },
-        )
+        res = await s.call_tool("update_thread", {"thread_id": tid, "subject": "hijacked subject"})
     assert res.is_error is True
     assert "project" in _error_text(res).lower()
 
     row = (await session.execute(select(CommThread).where(CommThread.id == tid))).scalar_one()
     assert row.subject == original_subject
 
-    posted = (await session.execute(select(Message).where(Message.thread_id == tid))).scalar_one_or_none()
-    assert posted is None, "a refused rename must not leave the message posted"
+
+async def test_rename_of_a_plain_thread_lands_through_update_thread(rename_mcp_client):
+    new_client, _tenant_key, session = rename_mcp_client
+    tid = await _create_thread(new_client, "original subject")
+
+    async with new_client() as s:
+        res = await s.call_tool("update_thread", {"thread_id": tid, "subject": "new subject"})
+    assert res.is_error is False, _error_text(res)
+
+    row = (await session.execute(select(CommThread).where(CommThread.id == tid))).scalar_one()
+    assert row.subject == "new subject"

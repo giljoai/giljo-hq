@@ -52,6 +52,7 @@ async def test_init_database_uses_env_url_first():
         mock_config = MagicMock()
         mock_config.database.pg_pool_size = 10
         mock_config.database.pg_max_overflow = 10
+        mock_config.database.pg_pool_timeout = 5
         mock_config.database.pg_slot_budget = 90
         mock_get_config.return_value = mock_config
 
@@ -61,7 +62,7 @@ async def test_init_database_uses_env_url_first():
 
         await init_database(state)
 
-        mock_db_manager.assert_called_once_with(env_url, is_async=True, pool_size=10, max_overflow=10)
+        mock_db_manager.assert_called_once_with(env_url, is_async=True, pool_size=10, max_overflow=10, pool_timeout=5)
 
 
 @pytest.mark.asyncio
@@ -80,6 +81,7 @@ async def test_init_database_uses_config_url_when_no_env():
         mock_config.database.get_connection_string.return_value = config_url
         mock_config.database.pg_pool_size = 10
         mock_config.database.pg_max_overflow = 10
+        mock_config.database.pg_pool_timeout = 5
         mock_config.database.pg_slot_budget = 90
         mock_get_config.return_value = mock_config
 
@@ -90,7 +92,9 @@ async def test_init_database_uses_config_url_when_no_env():
         await init_database(state)
 
         mock_config.database.get_connection_string.assert_called_once()
-        mock_db_manager.assert_called_once_with(config_url, is_async=True, pool_size=10, max_overflow=10)
+        mock_db_manager.assert_called_once_with(
+            config_url, is_async=True, pool_size=10, max_overflow=10, pool_timeout=5
+        )
 
 
 @pytest.mark.asyncio

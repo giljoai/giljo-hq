@@ -42,7 +42,7 @@ Use this if you prefer to clone the repository and run the installer yourself.
 |-------------|---------|-------|
 | Python | 3.12 or higher | The installer refuses older versions |
 | PostgreSQL | 16 minimum, 18 recommended | Must be accessible via PATH or common location |
-| Node.js | 22 LTS | Required for the frontend dashboard; optional for backend-only use |
+| Node.js | 22.23.3 or newer | Required for the frontend dashboard; optional for backend-only use |
 | npm | Bundled with Node.js | Used to build the frontend |
 | Disk space | 500 MB minimum | For dependencies and database |
 
@@ -334,5 +334,5 @@ Browser Configuration".
 ### Frontend not available
 
 If Node.js was not found during installation, the frontend build was skipped. Install
-Node.js 22 LTS from https://nodejs.org/, then run `npm install && npm run build`
+Node.js 22.23.3 or newer from https://nodejs.org/, then run `npm install && npm run build`
 inside the `frontend/` directory and restart the API server.

@@ -169,6 +169,33 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
 - **Roadmap** -> `get_roadmap(product_id?)` reads the ranked board; `save_roadmap
   (items=[...])` bulk-upserts sort_order/risk/complexity (agent does the ranking, server
   just validates + stores). `patch_fields=true` touches only the fields you send.
+  `remove_roadmap_items(items=[{item_type, project_id|task_id}])` takes entries off the
+  board (the entry only, never the project or task; an item not on the board is a no-op).
+- **How the list reads page and count** (`list_projects`, `list_tasks`): the default
+  `list_projects` view shows active-lifecycle projects only (`include_completed=true` or an
+  explicit `status` widens it; `include_superseded=true` adds replaced work). Every
+  response carries `counts`: totals for the WHOLE board, `matched` (rows your filters hit,
+  constant across a walk), `remaining` (still ahead of the cursor) and `returned`. When the
+  default view looks emptier than expected, `counts.advice` names the true count for YOUR
+  filters and how to see the rest; that is a note, not a truncation. A response cut by
+  `limit` or the size ceiling sets `truncated=true`, a `truncation` block naming which
+  bound cut it, and `truncation.next_cursor`: pass it back as `cursor` with the SAME
+  filters until `truncated` is false, and every row comes back exactly once (a changed
+  filter mid-walk is refused). Prefer `mode` over numeric `depth`; `summary_only` is the
+  legacy switch and `status_filter` the legacy status (a disagreement with `status` is
+  refused, never guessed). `hidden` is UI declutter only; agents see hidden rows alike.
+- **`get_context` categories and their cost:** product_core (~100 tokens), tech_stack
+  (200-400), architecture (300-1.5K), testing (0-400), project (~300; carries
+  `next_action`), products (~25 per product; names are NOT unique per tenant, so more
+  than one match is possible), tasks (open task list), todos (pass `job_id`; a job's TODO
+  list with sequence + status, used for recovery), chain (requires `project_id`; outside a
+  chain it returns empty with error='no_active_chain_run'), threads (the 25 most recent
+  Hub threads, not depth-tunable), self_identity (agent template content, pass
+  `agent_name`), vision_documents (0-24K), memory_360 (500-5K; most recent closeouts,
+  default 3; `depth_config={'memory_360': N}` or `{'memory_360': {'last_n_projects': N,
+  'shape': 'full'|'headlines'}}`), git_history (500-5K), agent_templates (400-2.4K).
+  `depth_config` keys are CATEGORY names ('memory_360', not 'memory_last_n_projects'); an
+  unknown key is rejected with the accepted list.
 - **Serials -- the prefix tells task from project:** **`TSK-nnnn` and `HND-nnnn` are
   both TASKS** -- `TSK` an ordinary one, `HND` a session handover, and those are the
   only two tags `create_task` accepts.
@@ -194,6 +221,16 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
   `list_tasks`) fall back to the default product when `product_id` is omitted, and
   never refuse -- pass `product_id` explicitly when you mean a different one.
 - On success, the dashboard updates live via WebSocket -- do NOT fabricate a URL.
+- **`update_project` status moves:** `active`/`inactive` start and pause work; `parked`
+  sets a project aside without cancelling it (hidden from the roadmap, resumable);
+  `cancelled` abandons it; `completed` FINISHES a solo project and runs the whole archive
+  lifecycle (section 7), so it needs a closeout first or `force=true` to abandon without
+  one (refused with `CLOSEOUT_BLOCKED` otherwise); `superseded` means another project
+  replaced this work and REQUIRES `successor_project_id` (an active, completed or
+  inactive project) in the same call, else `SUPERSEDE_REQUIRES_SUCCESSOR`. A project
+  inside a running chain is finished by its conductor, never here. `series_number` and
+  `suffix` reposition a project inside a chain; `project_type` retags it ('TSK' is
+  task-only and never valid).
 - **Status vocabulary** (the only values the update tools accept):
 
   | Entity  | Values |
@@ -288,6 +325,37 @@ NOT need to know which phase you are in -- the response tells you via its `phase
 - **deliverable** (`phase='deliverable'`): a worker agent (implementer/tester/...) recording
   its result. No phase magic -- the orchestrator reviews and closes your job.
 
+**What the closeout writers take** (`write_project_closeout`, `write_memory_entry`):
+- `git_commits`: `{sha, message, author?, pr_url?}` dicts, or tab-separated lines from
+  `git log --format='%H%x09%s%x09%an' <base>..HEAD`; `[]` means checked, none to report;
+  `no_code_changes="<why>"` is the honest alternative, and sending both is refused.
+- `tags`: 1-5 from the 16-tag vocabulary -- change-type `feature, bug-fix, refactor, perf,
+  security, docs, test, chore`; domain `frontend, backend, database, api, infrastructure,
+  ui-ux, integration`; operational `migration`. Pick 1-3 of each axis; an unknown tag is
+  rejected with the allowed enum.
+- `summary` (2-3 sentences), `key_outcomes` and `decisions_made` are capped server-side;
+  send `summary` LAST in your call, because anything ordered after a long free-text
+  argument can be silently absorbed into it.
+- `force=true` on `write_project_closeout` auto-decommissions every agent still in flight
+  (recorded as failed/replaced/abandoned) and is refused only while the CALLING
+  orchestrator is still active. Use it only when `CLOSEOUT_BLOCKED` names a leftover
+  'waiting' orchestrator; an agent whose work you ACCEPTED gets `complete_job(job_id,
+  result={...})` then `finalize_job(job_id)` instead (if that completion returns
+  `COMPLETION_BLOCKED`, settle its ledger with `report_progress(..., replace=true)`, drain
+  its action-required posts, retry).
+- `write_memory_entry.entry_type`: `baseline`, `decision`, `architecture`, `discovery`
+  (any agent); `project_completion` is orchestrator-only. A handover is an HND task, not
+  a memory entry.
+
+**`spawn_job` details:** omit `mission` for a two-phase spawn (a 'staged', messageable
+agent now; `update_job_mission` writes the mission later and moves it to 'waiting').
+`phase` is ordering metadata (same phase = parallel siblings, higher = depends on lower;
+it groups Play buttons in multi_terminal mode and is informational in subagent modes);
+`predecessor_job_id` renders the predecessor's completion record into the mission (chain
+vs replacement is detected from its status; skipped in subagent modes, where your CLI
+already returned the result inline). In multi_terminal mode the returned prompt is a
+dashboard Copy pointer unless `inline_seed=true`.
+
 ## 8. Agent Message Hub -- the persistent chat board (BBS)
 A tenant-isolated message board for agent<->agent<->user chat that outlives any one job.
 Use it for cross-session / cross-PC coordination and standalone topics not tied to a
@@ -326,7 +394,26 @@ Nine tools:
   participant, or message content.
 - **Loop on a chat:** to have addressed agents keep checking a chat until it is
   resolved/closed, post with `loop_directive=true` -- they loop/sleep on their normal
-  wake interval until you set the thread `resolved`/`closed` (which stops them).
+  wake interval until you set the thread `resolved`/`closed` (which stops them);
+  `loop_interval_minutes` sets the cadence they self-schedule (0 = their default).
+- **Other `post_to_thread` details:** `from_agent` is your own agent id on every post and
+  an omitted one is refused (`FROM_AGENT_REQUIRED`); `as_user=true` posts in the human
+  user's voice instead (never both). `my_status` (working | waiting | blocked | idle |
+  sleeping | complete) paints your Hub dot and matters only for a headless agent that
+  joined with `join_thread`; platform-run agents report automatically. A post reopens a
+  resolved (not closed) thread.
+- **Reading a thread:** `get_thread_history(thread_id)` returns the last 200 posts by
+  default; `tail=0` is the full timeline, `tail=N` the last N, and `after_message_id` /
+  `since` return only the delta. With `as_participant=<your id>` you get the per-participant
+  cursor: `unread_only=true` returns what you have not acknowledged, `directed_only=true`
+  only posts delivered to you, `action_required_only=true` only posts that need action.
+  `mark_read=true` is the one WRITE here: it acknowledges exactly the posts returned and,
+  on a clean unread drain, advances your cursor; combined with a filter it still acks
+  what it returned but cannot advance the cursor (the response says
+  `cursor_advanced=false`), so drain unfiltered. `create_thread` resolves an omitted
+  `product_id` like `create_task` does (`PRODUCT_AMBIGUOUS` when several products match;
+  a chain conductor's hub, created with `sequence_run_id`, and a tenant with no products
+  stay product-less).
 
 **Hub etiquette (five rules):**
 1. `join_thread` BEFORE anyone names you -- the baton is refused for an id not registered
@@ -367,6 +454,42 @@ choice (closeout with deferred findings, an ambiguous decision) -- `options` is 
   answer in the terminal (the inline choice or `decide_approval`). Headless OFF: only the
   dashboard can answer; `request_approval` returns `decide_in: "dashboard"` with no inline
   choice, and you wait. Do not ask the user in chat.
+
+## 10. Product context, tuning, setup -- the parameter details
+- **`update_product_context`** is a merge-write of structured product fields: only the
+  fields you pass change, so split a large analysis across several calls and set
+  `emit_completion=true` on the last one (it re-checks completion and signals the
+  dashboard even when nothing new is written). Grouped params: `tech_stack`
+  (programming_languages, frontend_frameworks, backend_frameworks, databases,
+  infrastructure, dev_tools, target_platforms), `architecture` (architecture_pattern,
+  design_patterns, api_style, architecture_notes, coding_conventions, brand_guidelines),
+  `quality` (quality_standards), `testing` (testing_strategy, testing_frameworks,
+  test_coverage_target); plus `product_name`, `product_description`, `core_features`,
+  `project_path` (your absolute local codebase path; omit without filesystem access),
+  `extraction_custom_instructions`, `vision_summaries` (`[{doc_id, light, medium}]`) and
+  `consolidated_vision` (`{light, medium}`). A field that already holds a value is refused
+  with 'Fields already populated' unless `force=true`; reviewing an existing product is the
+  common case, so expect to pass it. `is_active` shows or hides the product's dashboard
+  tab (several may be shown at once) and never changes which product an unscoped read
+  resolves to; that is the DEFAULT product, chosen in the dashboard.
+- **`apply_context_tuning`** writes reviewed proposals straight to the product. Each
+  proposal is `{section, drift_detected, proposed_value, confidence?}`; `proposed_value`
+  is required when `drift_detected=true`. Flat sections (`description`, `core_features`,
+  `brand_guidelines`, `quality_standards`, `target_platforms`) take a string (a list for
+  target_platforms); the structured sections `tech_stack` and `architecture` take ONE
+  field via a dotted sub-key (`tech_stack.infrastructure`) or a dict keyed by field name,
+  never a plain string. The per-string cap applies per sub-key, an unknown section is
+  rejected with the allowed list, and every problem across every proposal comes back in
+  one rejection. `force=true` is needed to overwrite populated fields, as above.
+- **`giljo_setup`** installs the /giljo skill and writes the Giljo-managed marker block
+  (primer + product binding) into CLAUDE.md / AGENTS.md; text outside that block is never
+  touched, and local files are only rewritten after the user agrees. Pass `platform`
+  naming your own coding tool (the tool's own parameter lists the values); the wrong one
+  installs skills where your tool never reads them. Pass `harness` (web_sandbox |
+  desktop_app | chat) when there is no home directory, to get the primer inline. Agent
+  templates are not installed: every spawned agent receives its profile from
+  `get_job_mission`. Every tool response carries `_meta.skills_version`; when it is ahead of
+  what is installed, offer to re-run this tool.
 """
 
 

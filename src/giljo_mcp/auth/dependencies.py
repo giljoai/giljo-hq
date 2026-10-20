@@ -5,7 +5,6 @@
 
 
 import logging
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
@@ -14,7 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.principal import PrincipalValidationError, validate_principal
-from giljo_mcp.exceptions import AuthorizationError
+from giljo_mcp.auth.terms_gate import terms_claim_violation
+from giljo_mcp.exceptions import AuthorizationError, BaseGiljoError
 from giljo_mcp.models import APIKey, User
 from giljo_mcp.signals import SIGNAL_ACCOUNT_ACCESS_OBSERVED, publish_signal
 
@@ -106,7 +106,7 @@ async def get_current_user(
         try:
             principal = await validate_principal(db, jwt_token=access_token, prefetched_user=prefetched)
             logger.debug("[AUTH] JWT cookie SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
-            _stamp_auth_credential(request, "cookie")
+            _stamp_auth_credential(request, "cookie", terms_version=principal.terms_version)
             return principal.user
         except PrincipalValidationError as exc:
             logger.warning("[AUTH] JWT cookie rejected (%s)", exc.reason.value)
@@ -115,7 +115,7 @@ async def get_current_user(
         try:
             principal = await validate_principal(db, jwt_token=bearer_token, prefetched_user=prefetched)
             logger.debug("[AUTH] Bearer JWT SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
-            _stamp_auth_credential(request, "bearer")
+            _stamp_auth_credential(request, "bearer", terms_version=principal.terms_version)
             return principal.user
         except PrincipalValidationError as exc:
             logger.warning("[AUTH] Bearer JWT rejected (%s)", exc.reason.value)
@@ -165,15 +165,17 @@ async def get_current_active_user(
 
     route = request.scope.get("route")
     route_name = getattr(route, "name", None) or request.url.path
-    violation = await act_first_gate_violation(
+    violation = act_first_gate_violation(
         must_change_password=current_user.must_change_password,
-        tenant_key=current_user.tenant_key,
-        db=db,
         route=route_name,
-        browser_session=is_browser_session(request),
+        terms_gated=_terms_gate_applies(request),
+        terms_version=getattr(getattr(request, "state", None), "terms_version", None),
     )
     if violation is not None:
         raise violation
+
+    if db.in_transaction():
+        await db.commit()
 
     from api.observability.sentry_init import set_tenant_context
 
@@ -192,23 +194,14 @@ ACT_FIRST_GATE_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-TermsAcceptedCheck = Callable[[AsyncSession, str], Awaitable[bool]]
-_terms_accepted_check: TermsAcceptedCheck | None = None
 
-
-def register_terms_accepted_check(check: TermsAcceptedCheck) -> None:
-    global _terms_accepted_check  # noqa: PLW0603
-    _terms_accepted_check = check
-
-
-async def act_first_gate_violation(
+def act_first_gate_violation(
     *,
     must_change_password: bool,
-    tenant_key: str,
-    db: AsyncSession | None,
     route: str,
-    browser_session: bool,
-) -> AuthorizationError | None:
+    terms_gated: bool = False,
+    terms_version: str | None = None,
+) -> BaseGiljoError | None:
     if route in ACT_FIRST_GATE_ALLOWLIST:
         return None
     if must_change_password:
@@ -216,13 +209,8 @@ async def act_first_gate_violation(
             message="A password change is required before continuing.",
             error_code="PASSWORD_CHANGE_REQUIRED",
         )
-    if browser_session and _terms_accepted_check is not None:
-        accepted = await _terms_accepted_check(db, tenant_key=tenant_key)
-        if not accepted:
-            return AuthorizationError(
-                message="Updated Terms of Service must be accepted before continuing.",
-                error_code="TERMS_REACCEPTANCE_REQUIRED",
-            )
+    if terms_gated:
+        return terms_claim_violation(terms_version)
     return None
 
 
@@ -245,9 +233,17 @@ async def require_ce_mode() -> None:
 SENSITIVE_ACCOUNT_FIELDS: frozenset[str] = frozenset({"password", "email", "is_active", "recovery_pin"})
 
 
-def _stamp_auth_credential(request: Request, credential: str) -> None:
+def _stamp_auth_credential(request: Request, credential: str, *, terms_version: str | None = None) -> None:
     if request is not None and hasattr(request, "state"):
         request.state.auth_method = credential
+        request.state.terms_version = terms_version
+
+
+def _terms_gate_applies(request: Request) -> bool:
+    state = getattr(request, "state", None)
+    if is_browser_session(request):
+        return True
+    return getattr(state, "auth_method", None) == "bearer" and getattr(state, "terms_version", None) is not None
 
 
 def is_browser_session(request: Request) -> bool:

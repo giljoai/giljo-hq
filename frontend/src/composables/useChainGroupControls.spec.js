@@ -188,6 +188,25 @@ describe('chainPhase (FE-9749)', () => {
   })
 })
 
+describe('chainPhase reads the conductor (BE-9813)', () => {
+  const tabs = [{ projectId: 'head' }, { projectId: 'tail' }]
+  const waiting = () => ({ head: [{ status: 'waiting' }], tail: [] })
+
+  it.each([
+    ['working', 'running'],
+    ['blocked', 'running'],
+    ['complete', 'running'],
+    ['waiting', 'pickup'],
+    ['staged', 'pickup'],
+    [null, 'pickup'],
+    [undefined, 'pickup'],
+  ])('conductor %s with every member waiting reads %s', (conductorStatus, phase) => {
+    store._testSeedRuns([{ id: 'run-1', resolved_order: ['head', 'tail'], project_ids: ['head', 'tail'], status: 'running' }])
+    const ctx = ctxFor({ status: 'running', conductor_status: conductorStatus }, { tabs })
+    expect(useChainGroupControls({ chainCtx: ctx, agentsByProject: waiting }).chainPhase.value).toBe(phase)
+  })
+})
+
 describe('prompt copies', () => {
   it('copies the conductor chain prompt verbatim', async () => {
     h.chainImplementation.mockResolvedValue({ data: { prompt: 'MASTER' } })

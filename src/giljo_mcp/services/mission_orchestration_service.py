@@ -52,6 +52,7 @@ from giljo_mcp.services.protocol_survival import staging_orchestrator_actions
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
 from giljo_mcp.services.sequence_run_service import active_chain_run
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
+from giljo_mcp.services.staging_session import is_planning_session, start_staging_session
 from giljo_mcp.tenant import TenantManager
 
 
@@ -72,7 +73,8 @@ ORCHESTRATOR_AVAILABLE_TOOLS: tuple[str, ...] = (
     "update_job_mission",
     "complete_job",
     "finalize_job",
-    "resume_or_dismiss_job",
+    "resume_job",
+    "dismiss_job",
     "write_memory_entry",
     "write_project_closeout",
     "get_agent_result",
@@ -143,8 +145,14 @@ class MissionOrchestrationService:
                     session, job_id, tenant_key, preset=preset, detected_harness=detected_harness
                 )
 
-                if ctx.get("early_return"):
-                    return ctx["early_return"]
+                early = ctx.get("early_return")
+                if early is not None:
+                    if early.get("status") == "CHAIN_CONDUCTOR_STAGING":
+                        conductor = await self._repo.get_execution_with_job(session, tenant_key, job_id)
+                        await start_staging_session(
+                            session, conductor, conductor.job, tenant_key, self._websocket_manager
+                        )
+                    return early
 
                 directive = self._maybe_build_ctx_self_close_directive(ctx)
                 if directive is not None:
@@ -156,7 +164,11 @@ class MissionOrchestrationService:
                         tenant_key=tenant_key,
                     )
 
-                return self._build_orchestrator_response(ctx, job_id, tenant_key)
+                response = self._build_orchestrator_response(ctx, job_id, tenant_key)
+                await start_staging_session(
+                    session, ctx["execution"], ctx["agent_job"], tenant_key, self._websocket_manager
+                )
+                return response
 
         except (ValidationError, ResourceNotFoundError):
             raise
@@ -367,7 +379,7 @@ class MissionOrchestrationService:
             )
             project_type_abbreviation = tt_result.scalar_one_or_none()
 
-        is_staging = execution.status == "waiting"
+        is_staging = execution.status == "waiting" or is_planning_session(execution)
         chain_ctx = await self._chain.resolve(
             session,
             project_id=str(project.id),
@@ -568,7 +580,7 @@ class MissionOrchestrationService:
         protocol_tool = tool_for_mode(execution_mode)
         if resolved_harness in HARNESS_CLI_TOOL_TYPES:
             protocol_tool = resolved_harness
-        is_staging = execution.status == "waiting"
+        is_staging = execution.status == "waiting" or is_planning_session(execution)
 
         auto_checkin_enabled = getattr(project, "auto_checkin_enabled", False)
         auto_checkin_interval = ctx.get("checkin_cadence_minutes") or (

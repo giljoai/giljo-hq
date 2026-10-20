@@ -43,10 +43,14 @@ from api.endpoints.mcp_tools._base import (
     logger,
     mcp,
 )
+from api.endpoints.mcp_tools._schema_helpers import strip_schema_titles
 from api.endpoints.mcp_tools._tool_annotations import sync_annotation_titles
+from api.endpoints.mcp_tools._tool_error_surface import preserve_tool_rejections
 
 
 sync_annotation_titles(mcp._tool_manager.list_tools())
+preserve_tool_rejections(mcp._tool_manager.list_tools())
+strip_schema_titles(mcp._tool_manager.list_tools())
 
 
 __all__ = [
@@ -85,5 +89,6 @@ __all__ = [
     "_task_tools",
     "logger",
     "mcp",
+    "strip_schema_titles",
     "sync_annotation_titles",
 ]

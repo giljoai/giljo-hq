@@ -10,6 +10,8 @@ from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from giljo_mcp.db_url import normalize_database_url
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,8 @@ def _missing_heads(state) -> tuple[set[str], set[str]] | None:
 
         raw_url = state.db_manager.database_url
         if not raw_url:
-            raw_url = str(state.db_manager.async_engine.url).replace("+asyncpg", "")
-        engine = create_engine(raw_url)
+            raw_url = str(state.db_manager.async_engine.url)
+        engine = create_engine(normalize_database_url(raw_url, "sync"))
         try:
             with engine.connect() as conn:
                 current_heads = set(MigrationContext.configure(conn).get_current_heads())

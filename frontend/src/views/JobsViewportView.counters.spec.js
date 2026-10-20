@@ -14,7 +14,10 @@ vi.mock('@/services/api', () => {
       getOrchestrator: () => ok({ orchestrator: null }),
     },
     sequenceRuns: { list: () => ok(server.runs) },
-    agentJobs: { list: () => ok({ jobs: [], total: 0, limit: 50, offset: 0 }) },
+    agentJobs: {
+      list: () => ok({ jobs: [], total: 0, limit: 50, offset: 0 }),
+      listMany: () => ok({ jobs: [], total: 0, limit: 500, offset: 0 }),
+    },
     settings: { getHeadlessLaunch: () => ok({ allow_headless_launch: true }) },
   }
   return { default: api, api }

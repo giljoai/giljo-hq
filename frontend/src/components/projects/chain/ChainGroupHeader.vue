@@ -8,6 +8,8 @@
       </span>
     </div>
 
+    <slot name="controls" />
+
     <ChainMissionWindow :mission="chainCtx.chainMission" class="cgh-goal">
       <template v-if="running" #actions>
         <div class="cgh-actions" data-testid="chain-header-actions">

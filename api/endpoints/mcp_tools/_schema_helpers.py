@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+from collections.abc import Iterable
 from typing import Any
 
 
@@ -24,3 +25,19 @@ def enum_schema_without_default(values: list[str]):
         schema.pop("default", None)
 
     return _apply
+
+
+def _drop_title_metadata(schema: Any) -> None:
+    if isinstance(schema, dict):
+        if isinstance(schema.get("title"), str):
+            del schema["title"]
+        for value in schema.values():
+            _drop_title_metadata(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            _drop_title_metadata(value)
+
+
+def strip_schema_titles(tools: Iterable[Any]) -> None:
+    for tool in tools:
+        _drop_title_metadata(tool.parameters)

@@ -6,7 +6,11 @@
     :data-run-id="chainCtx.runId"
     data-testid="chain-group"
   >
-    <ChainGroupHeader :chain-ctx="chainCtx" :controls="controls" />
+    <ChainGroupHeader :chain-ctx="chainCtx" :controls="controls">
+      <template #controls>
+        <ChainStagingActions :chain-ctx="chainCtx" :controls="controls" :agent-count="agentCount" />
+      </template>
+    </ChainGroupHeader>
 
     <div class="cg-members">
       <div
@@ -87,8 +91,6 @@
         </p>
       </div>
     </div>
-
-    <ChainStagingActions :chain-ctx="chainCtx" :controls="controls" :agent-count="agentCount" />
 
     <CloseoutModal
       v-if="chainReviewTab"

@@ -53,7 +53,7 @@
               <TutorialDoneScreen
                 v-else-if="s.screen === 'done'"
                 :router-choice="s.path"
-                @close="handleSkip"
+                @close="finishTour"
               />
             </div>
 
@@ -105,6 +105,7 @@ import TutorialReviewScreen from './TutorialReviewScreen.vue'
 import TutorialDoneScreen from './TutorialDoneScreen.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { armActivateBreadcrumb, useTutorialState } from '@/composables/useTutorialState'
+import { useProductStore } from '@/stores/products'
 
 defineProps({
   modelValue: {
@@ -116,6 +117,7 @@ defineProps({
 const emit = defineEmits(['update:modelValue', 'dismiss'])
 
 const router = useRouter()
+const productStore = useProductStore()
 
 const {
   s,
@@ -154,6 +156,15 @@ function handleSkip() {
   close()
 }
 
+function finishTour() {
+  const tourProductId = s.productId
+  handleSkip()
+  if (!tourProductId) return
+  productStore.openTab(tourProductId).catch((error) => {
+    console.warn('[tutorial] could not select the product the tour created:', error)
+  })
+}
+
 const showDoorCConfirm = ref(false)
 
 function onPick(path) {
@@ -168,21 +179,32 @@ function cancelDoorC() {
   showDoorCConfirm.value = false
 }
 
-function leaveForManualForm() {
+const BLANK_PRODUCT_FORM = '/Products?create=blank'
+
+function leaveForManualForm(target) {
   armActivateBreadcrumb()
   markComplete()
   close()
-  router.push('/Products?create=true')
+  router.push(target)
 }
 
 function confirmDoorC() {
   showDoorCConfirm.value = false
   pick('C')
-  leaveForManualForm()
+  leaveForManualForm(BLANK_PRODUCT_FORM)
 }
 
-function goManual() {
-  leaveForManualForm()
+let leavingForManual = false
+
+async function goManual() {
+  if (leavingForManual) return
+  leavingForManual = true
+  try {
+    await releaseAbandonedDraft()
+    leaveForManualForm(s.productId ? `/Products?edit=${encodeURIComponent(s.productId)}` : BLANK_PRODUCT_FORM)
+  } finally {
+    leavingForManual = false
+  }
 }
 </script>
 

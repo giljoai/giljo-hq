@@ -33,7 +33,8 @@ describe('useVisionAnalysis -- completion signalled while the product read faile
     vi.useRealTimers()
   })
 
-  const event = () => new CustomEvent('vision-analysis-complete', { detail: { product_id: PRODUCT_ID } })
+  const event = () =>
+    new CustomEvent('vision-analysis-complete', { detail: { product_id: PRODUCT_ID, vision_analysis_complete: true } })
 
   it('advances on the first successful poll read after the event read failed, even with the flag false', async () => {
     const analysis = useVisionAnalysis(patchProductForm, { copyPromptOnStage: false })

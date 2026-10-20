@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
+from giljo_mcp.db_url import normalize_database_url
 from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 
 
@@ -72,7 +73,9 @@ def _build_env(url: str) -> dict[str, str]:
 def _ensure_scratch_database_exists() -> None:
     scratch = _scratch_db_url()
     prefix, _, _ = scratch.rpartition("/")
-    eng = sa.create_engine(f"{prefix}/postgres", poolclass=sa.pool.NullPool, isolation_level="AUTOCOMMIT")
+    eng = sa.create_engine(
+        normalize_database_url(f"{prefix}/postgres", "sync"), poolclass=sa.pool.NullPool, isolation_level="AUTOCOMMIT"
+    )
     try:
         with eng.connect() as conn:
             existing = conn.execute(
@@ -89,7 +92,7 @@ def _ensure_scratch_database_exists() -> None:
 def migrated_engine() -> sa.Engine:
     _ensure_scratch_database_exists()
     url = _scratch_db_url()
-    engine = sa.create_engine(url, poolclass=sa.pool.NullPool)
+    engine = sa.create_engine(normalize_database_url(url, "sync"), poolclass=sa.pool.NullPool)
     with engine.connect() as conn:
         conn.execute(text("DROP SCHEMA public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))

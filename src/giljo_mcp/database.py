@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
 
+from .db_url import normalize_database_url
 from .logging.error_codes import ErrorCode
 from .models import (
     Base,
@@ -29,6 +30,7 @@ POOL_RECYCLE_SECONDS = 3600
 
 DEFAULT_POOL_SIZE = 5
 DEFAULT_MAX_OVERFLOW = 5
+DEFAULT_POOL_TIMEOUT = 5
 
 
 def _pgbouncer_connect_args() -> dict | None:
@@ -66,6 +68,7 @@ class DatabaseManager:
         pool_size: int | None = None,
         max_overflow: int | None = None,
         use_null_pool: bool = False,
+        pool_timeout: int | None = None,
     ):
         if not database_url:
             raise ValueError("Database URL is required")
@@ -81,6 +84,7 @@ class DatabaseManager:
 
         self.pool_size = pool_size
         self.max_overflow = max_overflow
+        self.pool_timeout = DEFAULT_POOL_TIMEOUT if pool_timeout is None else pool_timeout
 
         if "postgresql" not in self.database_url:
             raise ValueError("Only PostgreSQL databases are supported")
@@ -95,26 +99,24 @@ class DatabaseManager:
     def _create_sync_engine(self) -> Engine:
         if self.use_null_pool:
             return create_engine(
-                self.database_url,
+                normalize_database_url(self.database_url, "sync"),
                 poolclass=NullPool,
                 pool_pre_ping=True,
                 echo=False,
             )
         return create_engine(
-            self.database_url,
+            normalize_database_url(self.database_url, "sync"),
             poolclass=QueuePool,
             pool_size=self.pool_size,
             max_overflow=self.max_overflow,
+            pool_timeout=self.pool_timeout,
             pool_pre_ping=True,
             pool_recycle=POOL_RECYCLE_SECONDS,
             echo=False,
         )
 
     def _create_async_engine(self) -> AsyncEngine:
-        async_url = self.database_url
-
-        if async_url.startswith("postgresql://"):
-            async_url = async_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        async_url = normalize_database_url(self.database_url, "async")
 
         pgbouncer_args = _pgbouncer_connect_args()
         extra_args = {"connect_args": pgbouncer_args} if pgbouncer_args else {}
@@ -131,6 +133,7 @@ class DatabaseManager:
             async_url,
             pool_size=self.pool_size,
             max_overflow=self.max_overflow,
+            pool_timeout=self.pool_timeout,
             pool_pre_ping=True,
             pool_recycle=POOL_RECYCLE_SECONDS,
             echo=False,

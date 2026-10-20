@@ -105,7 +105,7 @@ describe('useVisionAnalysis', () => {
     productStore.fetchProductById = vi.fn(() => Promise.resolve(mockUpdated))
 
     const event = new CustomEvent('vision-analysis-complete', {
-      detail: { product_id: 'prod-123' },
+      detail: { product_id: 'prod-123', vision_analysis_complete: true },
     })
 
     await onVisionAnalysisComplete(event, 'prod-123')
@@ -309,7 +309,7 @@ describe('useVisionAnalysis', () => {
       useProductStore().fetchProductById = vi.fn(() => Promise.reject(new Error('network down')))
 
       const event = new CustomEvent('vision-analysis-complete', {
-        detail: { product_id: PRODUCT_ID },
+        detail: { product_id: PRODUCT_ID, vision_analysis_complete: true },
       })
       await onVisionAnalysisComplete(event, PRODUCT_ID).catch(() => {})
 
@@ -343,7 +343,7 @@ describe('useVisionAnalysis', () => {
     productStore.fetchProductById = vi.fn(() => Promise.resolve(null))
 
     const event = new CustomEvent('vision-analysis-complete', {
-      detail: { product_id: 'prod-123' },
+      detail: { product_id: 'prod-123', vision_analysis_complete: true },
     })
 
     await onVisionAnalysisComplete(event, 'prod-123')

@@ -1,6 +1,7 @@
 import { jobsBoardLifecycleColor } from './jobsBoardLifecycle'
 import { describe, it, expect } from 'vitest'
 import { jobsSectionLabelFor, isReadyForReview, JOBS_SECTION_LABELS } from './jobsSectionLabel'
+import { jobStatusLabel } from './jobStatusWord'
 
 describe('jobsSectionLabelFor', () => {
   it('returns Staged when implementation has not been launched', () => {
@@ -23,6 +24,14 @@ describe('jobsSectionLabelFor', () => {
     expect(
       jobsSectionLabelFor({ staging_status: 'staging', implementation_launched_at: null }, []),
     ).toBe(JOBS_SECTION_LABELS.PLANNING)
+  })
+
+  it('returns Planning while the staging orchestrator is working', () => {
+    const orchestrator = { agent_display_name: 'orchestrator', agent_name: 'orchestrator', status: 'working' }
+    expect(
+      jobsSectionLabelFor({ staging_status: 'staging', implementation_launched_at: null }, [orchestrator]),
+    ).toBe(JOBS_SECTION_LABELS.PLANNING)
+    expect(jobStatusLabel(orchestrator)).toBe('Working')
   })
 
   it('returns Staged when staging_status is "staging_complete" and implementation has not launched', () => {

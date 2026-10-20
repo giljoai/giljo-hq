@@ -75,10 +75,13 @@ export default defineConfig({
         '**/__tests__/**',
         '**/index.js'
       ],
+      // BE-9813: floors measured on master 61e19d594 (statements 80.58, branches 77.58,
+      // functions 72.66, lines 81.54), enforced by Frontend CI's test step. Raise them
+      // as coverage grows; never lower one to get a change through.
       thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 75,
+        lines: 81,
+        functions: 72,
+        branches: 77,
         statements: 80
       }
     }

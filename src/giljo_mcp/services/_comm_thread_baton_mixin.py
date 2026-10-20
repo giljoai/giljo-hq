@@ -11,6 +11,7 @@ from typing import Any
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.comm import CHT_TAXONOMY_ABBR
 from giljo_mcp.schemas.comm_serializers import thread_dict
+from giljo_mcp.services.comm_author_identity import is_unknown_uuid_sender
 from giljo_mcp.services.comm_baton_targets import (
     HubTargetRefusedError,
     _is_tenant_user,
@@ -27,6 +28,11 @@ class CommThreadBatonMixin:
         tk = self._resolve_tenant(tenant_key)
         async with self._scoped_session(tk) as session:
             return await self._repo.has_active_loop_directive(session, tk, agent_id)
+
+    async def is_unknown_sender(self, *, thread_id: str, from_agent: str, tenant_key: str | None = None) -> bool:
+        tk = self._resolve_tenant(tenant_key)
+        async with self._scoped_session(tk) as session:
+            return await is_unknown_uuid_sender(self._repo, self._user_repo, session, tk, thread_id, from_agent)
 
     async def get_my_turn(self, *, agent_id: str, tenant_key: str | None = None) -> dict[str, Any]:
         tk = self._resolve_tenant(tenant_key)

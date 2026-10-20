@@ -183,7 +183,7 @@ class TestRestage:
     async def test_restage_rejects_when_orchestrator_active(self, lifecycle_service, mock_db_manager):
         _, session = mock_db_manager
         project = _make_project(staging_status="staging")
-        orchestrator = _make_orchestrator_execution(status="working")
+        orchestrator = _make_orchestrator_execution(status="blocked")
 
         mock_project_result = MagicMock()
         mock_project_result.scalar_one_or_none = MagicMock(return_value=project)

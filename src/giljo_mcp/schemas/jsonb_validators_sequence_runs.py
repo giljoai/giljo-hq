@@ -23,7 +23,7 @@ class SequenceRunProjectIds(BaseModel):
             if not isinstance(item, str):
                 raise TypeError(f"project_ids items must be strings, got {type(item).__name__}")
             if len(item) > 36:
-                raise ValueError(f"project_id exceeds 36 characters: {item[:36]!r}")
+                raise ValueError("project_id exceeds 36 characters")
         return v
 
 
@@ -45,11 +45,10 @@ class SequenceRunProjectStatuses(BaseModel):
             if not isinstance(project_id, str):
                 raise TypeError(f"project_statuses keys must be strings, got {type(project_id).__name__}")
             if len(project_id) > 36:
-                raise ValueError(f"project_id key exceeds 36 characters: {project_id[:36]!r}")
+                raise ValueError("project_id key exceeds 36 characters")
             if status not in VALID_PROJECT_STATUSES:
                 raise ValueError(
-                    f"project_statuses[{project_id!r}]: invalid status {status!r}. "
-                    f"Valid: {sorted(VALID_PROJECT_STATUSES)}"
+                    f"project_statuses has an invalid status value. Valid: {sorted(VALID_PROJECT_STATUSES)}"
                 )
         return data
 
@@ -71,7 +70,7 @@ class SequenceRunReviewedProjectIds(BaseModel):
             if not isinstance(item, str):
                 raise TypeError(f"reviewed_project_ids items must be strings, got {type(item).__name__}")
             if len(item) > 36:
-                raise ValueError(f"reviewed project_id exceeds 36 characters: {item[:36]!r}")
+                raise ValueError("reviewed project_id exceeds 36 characters")
         return v
 
 
@@ -98,9 +97,9 @@ class SequenceRunReviewedVia(BaseModel):
             if not isinstance(project_id, str):
                 raise TypeError(f"reviewed_via keys must be strings, got {type(project_id).__name__}")
             if len(project_id) > 36:
-                raise ValueError(f"project_id key exceeds 36 characters: {project_id[:36]!r}")
+                raise ValueError("project_id key exceeds 36 characters")
             if via not in VALID_REVIEWED_VIA:
-                raise ValueError(f"reviewed_via value must be one of {sorted(VALID_REVIEWED_VIA)}, got {via!r}")
+                raise ValueError(f"reviewed_via value must be one of {sorted(VALID_REVIEWED_VIA)}")
         return data
 
 

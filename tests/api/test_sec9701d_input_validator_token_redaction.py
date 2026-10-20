@@ -74,3 +74,13 @@ async def test_token_param_still_blocks_a_real_sql_injection_pattern():
         response = await client.get("/api/setup/status", params={"token": "x UNION SELECT password FROM users"})
 
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("param", ["code_challenge", "code_verifier"])
+async def test_pkce_param_with_double_dash_is_not_blocked(param):
+    app = _build_app()
+    transport = ASGITransport(app=app)
+    async with HTTPXAsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/setup/status", params={param: "CUGKRy0FC--N5MyXbLEdVBn671Bs-aVhB9v64If7abc"})
+    assert response.status_code == 200

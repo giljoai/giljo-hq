@@ -263,7 +263,7 @@ async def test_update_roadmap_metadata_bad_blocked_type_surfaces_error(roadmap_m
     assert "blocked" in _error_text(result).lower()
 
 
-async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roadmap_mcp_client, db_session):
+async def test_remove_roadmap_items_evicts_through_transport(roadmap_mcp_client, db_session):
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
@@ -278,11 +278,8 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
             },
         )
         result = await session.call_tool(
-            "save_roadmap",
-            {
-                "items": [],
-                "remove": [{"item_type": "project", "project_id": seed["project_id"]}],
-            },
+            "remove_roadmap_items",
+            {"items": [{"item_type": "project", "project_id": seed["project_id"]}]},
         )
         read = await session.call_tool("get_roadmap", {})
 
@@ -295,14 +292,14 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
     assert {item["item_type"] for item in read_payload["items"]} == {"task"}
 
 
-async def test_update_roadmap_metadata_remove_bad_shape_surfaces_error(roadmap_mcp_client, db_session):
+async def test_remove_roadmap_items_bad_shape_surfaces_error(roadmap_mcp_client, db_session):
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
     async with new_client() as session:
         result = await session.call_tool(
-            "save_roadmap",
-            {"items": [], "remove": [{"item_type": "epic", "project_id": seed["project_id"]}]},
+            "remove_roadmap_items",
+            {"items": [{"item_type": "epic", "project_id": seed["project_id"]}]},
         )
 
     assert result.is_error is True
@@ -335,8 +332,8 @@ async def test_removing_last_item_clears_summary_through_transport(roadmap_mcp_c
         assert _payload(write)["roadmap"]["summary"] == "Ships the foundation project first."
 
         await session.call_tool(
-            "save_roadmap",
-            {"items": [], "remove": [{"item_type": "project", "project_id": seed["project_id"]}]},
+            "remove_roadmap_items",
+            {"items": [{"item_type": "project", "project_id": seed["project_id"]}]},
         )
         read = await session.call_tool("get_roadmap", {})
 

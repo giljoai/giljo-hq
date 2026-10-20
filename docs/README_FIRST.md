@@ -13,7 +13,7 @@
 
 ## Reference
 
-- [MCP Tools Reference](MCP_TOOLS_REFERENCE.md): All 52 MCP tools with parameters, descriptions, and examples.
+- [MCP Tools Reference](MCP_TOOLS_REFERENCE.md): All 54 MCP tools with parameters, descriptions, and examples.
 - [Architecture](ARCHITECTURE.md): Tech stack, system diagram, and developer-facing technical overview.
 - [MCP Spec Conformance](CONFORMANCE.md): Which Model Context Protocol versions the server supports and how that is verified.
 - [Security Posture](SECURITY_POSTURE.md): A plain-English summary of what the server does and does not do with your content.

@@ -15,6 +15,7 @@ from sqlalchemy import engine_from_config, pool
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from giljo_mcp.db_url import normalize_database_url
 from giljo_mcp.models import Base
 
 
@@ -43,7 +44,7 @@ if not db_url:
             "Note: PostgreSQL 18+ is required."
         )
 
-config.set_main_option("sqlalchemy.url", db_url)
+config.set_main_option("sqlalchemy.url", normalize_database_url(db_url, "sync"))
 
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)

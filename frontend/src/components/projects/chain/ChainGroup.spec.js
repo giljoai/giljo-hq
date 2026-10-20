@@ -164,17 +164,20 @@ describe('ChainGroup header (FE-9655d)', () => {
     expect(w.find('[data-testid="chain-group-name"]').text()).toBe('FE-0001 → FE-0002 → FE-0003')
   })
 
-  it('FE-9749: the header carries information only; the controls sit below the members', async () => {
+  it('the control area sits under the title, above the goal and every member (operator ruling 2026-10-19)', async () => {
     seed(makeRun({ status: 'pending', locked: false, current_index: 0, project_statuses: { p1: 'pending', p2: 'pending', p3: 'pending' } }))
     const w = await mountGroup()
-    const header = w.find('[data-testid="chain-group-header"]')
-    for (const id of ['radio-multi-terminal', 'stage-chain-btn', 'implement-chain-btn', 'stop-chain-btn', 'chain-group-deactivate']) {
-      expect(header.find(`[data-testid="${id}"]`).exists(), id).toBe(false)
-    }
     const area = w.find('[data-testid="staging-control-area"]')
     expect(area.exists()).toBe(true)
-    const lastMember = w.findAll('[data-testid="chain-group-member"]').at(-1)
-    expect(lastMember.element.compareDocumentPosition(area.element) & 4).toBe(4)
+    const name = w.find('[data-testid="chain-group-name"]').element
+    const goal = w.find('[data-testid="chain-mission-window"]').element
+    const firstMember = w.findAll('[data-testid="chain-group-member"]').at(0).element
+    expect(name.compareDocumentPosition(area.element) & 4).toBe(4)
+    expect(goal.compareDocumentPosition(area.element) & 2).toBe(2)
+    expect(firstMember.compareDocumentPosition(area.element) & 2).toBe(2)
+    for (const id of ['radio-multi-terminal', 'stage-chain-btn']) {
+      expect(area.find(`[data-testid="${id}"]`).exists(), id).toBe(true)
+    }
   })
 
   it('puts the Conductor Generated badge on its own line directly above the goal box', async () => {
@@ -269,6 +272,20 @@ describe('ChainGroup control area (FE-9749)', () => {
     expect(h.chainImplementation).toHaveBeenCalledWith('run-1')
     expect(h.copy).toHaveBeenCalledWith('MASTER PROMPT')
     expect(h.launch).not.toHaveBeenCalled()
+  })
+
+  it('BE-9813: a conductor that picked the chain up makes it running while every member still waits', async () => {
+    seed(makeRun({ current_index: 0, conductor_status: 'working', project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }))
+    const w = await mountGroup({ agentsByProject: WAITING_AGENTS })
+    expect(w.find('[data-testid="staging-control-area"]').exists()).toBe(false)
+    expect(w.find('[data-testid="sca-pickup-hint"]').exists()).toBe(false)
+    expect(w.find('[data-testid="chain-group-header"]').find('[data-testid="stop-chain-btn"]').exists()).toBe(true)
+  })
+
+  it('BE-9813: a conductor still waiting leaves the chain waiting for pickup', async () => {
+    seed(makeRun({ current_index: 0, conductor_status: 'waiting', project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }))
+    const w = await mountGroup({ agentsByProject: WAITING_AGENTS })
+    expect(w.find('[data-testid="staging-control-area"]').attributes('data-phase')).toBe('pickup')
   })
 
   it('running (FE-9793): Stop chain sits on the header row, confirms, then posts the stop path without leaving the board', async () => {

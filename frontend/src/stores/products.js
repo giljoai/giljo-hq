@@ -5,6 +5,9 @@ import { useProjectStore } from './projects'
 import { useTaskStore } from './tasks'
 import { useCommHubStore } from './commHubStore'
 import { immutableObjectPatch, immutableObjectDelete } from './immutableHelpers'
+import { useToast } from '@/composables/useToast'
+
+const isNotFound = (err) => err?.response?.status === 404
 
 export const useProductStore = defineStore('products', () => {
   const projectStore = useProjectStore()
@@ -37,9 +40,11 @@ export const useProductStore = defineStore('products', () => {
     try {
       const response = (await api.products?.list()) || { data: [] }
       products.value = response.data
+      return true
     } catch (err) {
       error.value = err.message
       console.error('Failed to fetch products:', err)
+      return false
     } finally {
       loading.value = false
     }
@@ -49,7 +54,14 @@ export const useProductStore = defineStore('products', () => {
     if (!productId) {
       return null
     }
+    try {
+      return await _readProduct(productId)
+    } catch {
+      return null
+    }
+  }
 
+  async function _readProduct(productId) {
     loading.value = true
     error.value = null
     try {
@@ -64,7 +76,7 @@ export const useProductStore = defineStore('products', () => {
     } catch (err) {
       error.value = err.message
       console.error('Failed to fetch product:', err)
-      return null
+      throw err
     } finally {
       loading.value = false
     }
@@ -91,7 +103,11 @@ export const useProductStore = defineStore('products', () => {
       return
     }
 
-    await fetchProducts()
+    const listed = await fetchProducts()
+    if (!listed && products.value.length === 0) {
+      _notifyProductReadFailed()
+      return
+    }
 
     if (products.value.length === 0) {
       _clearCurrentProduct()
@@ -100,7 +116,15 @@ export const useProductStore = defineStore('products', () => {
     }
     if (!productId) productId = products.value[0].id
 
-    const product = await fetchProductById(productId)
+    let product = null
+    try {
+      product = await _readProduct(productId)
+    } catch (err) {
+      if (!isNotFound(err)) {
+        _notifyProductReadFailed()
+        return
+      }
+    }
     if (product) {
       await _applyCurrentProduct(productId, product)
       return
@@ -110,6 +134,13 @@ export const useProductStore = defineStore('products', () => {
     const fallbackId = products.value[0].id
     const fallbackProduct = await fetchProductById(fallbackId)
     if (fallbackProduct) await _applyCurrentProduct(fallbackId, fallbackProduct)
+  }
+
+  function _notifyProductReadFailed() {
+    useToast().showToast({
+      message: 'Could not load the product. You are still on the current one; try again in a moment.',
+      type: 'error',
+    })
   }
 
   async function createProduct(productData) {
@@ -251,7 +282,7 @@ export const useProductStore = defineStore('products', () => {
   }
 
   async function migrateLocalTabsToServer() {
-    let storedOpenIds = null
+    let storedOpenIds
     try {
       const raw = localStorage.getItem('openProductTabIds')
       storedOpenIds = raw ? JSON.parse(raw) : null

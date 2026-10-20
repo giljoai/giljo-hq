@@ -12,9 +12,11 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from api.exception_handlers import server_busy_response
 from giljo_mcp.logging import ErrorCode
 from giljo_mcp.tenant import TenantManager, current_tenant
 
@@ -85,6 +87,9 @@ class AuthMiddleware:
 
         try:
             auth_result = await auth_manager.authenticate_request(request)
+        except PoolTimeoutError:
+            await server_busy_response(request)(scope, receive, send)
+            return
         except SQLAlchemyError:
             logger.exception("authentication_database_unavailable path=%s", request.url.path)
             response = JSONResponse(

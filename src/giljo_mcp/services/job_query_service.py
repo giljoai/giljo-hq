@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.job_activity import activity_word
-from giljo_mcp.exceptions import OrchestrationError, ResourceNotFoundError
+from giljo_mcp.exceptions import OrchestrationError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models import AgentExecution, AgentJob, Project
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
@@ -27,6 +27,8 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
+
+PROJECT_IDS_MAX = 200
 
 
 class JobQueryService:
@@ -53,7 +55,15 @@ class JobQueryService:
         agent_display_name: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        project_ids: list[str] | None = None,
     ) -> JobListResult:
+        if project_ids is not None:
+            if project_id is not None:
+                raise ValidationError(message="Pass project_id or project_ids, not both")
+            if not project_ids:
+                raise ValidationError(message="project_ids must name at least one project")
+            if len(project_ids) > PROJECT_IDS_MAX:
+                raise ValidationError(message=f"project_ids is limited to {PROJECT_IDS_MAX} projects")
         try:
             ops_repo = AgentOperationsRepository()
             async with self._get_session(tenant_key) as session:
@@ -65,6 +75,7 @@ class JobQueryService:
                     agent_display_name,
                     limit,
                     offset,
+                    project_ids=project_ids,
                 )
 
                 live_project_ids = [str(job.project_id) for _ex, job in rows if job.project_id]

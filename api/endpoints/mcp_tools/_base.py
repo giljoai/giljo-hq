@@ -94,17 +94,14 @@ GIT_COMMITS_DESC = (
 )
 
 CURSOR_DESC = (
-    "Continue where a previous list stopped: pass back the `next_cursor` from that "
-    "response, with the SAME filters. Keep going until `truncated` is false and every "
-    "row will have been returned exactly once. Changing a filter mid-walk is refused "
-    "rather than silently answered from the wrong set; start over instead."
+    "Continue a previous list: pass back its next_cursor with the SAME filters until truncated "
+    "is false; every row is returned once. A changed filter mid-walk is refused; start over."
 )
 
 READ_PRODUCT_ID_DESC = (
-    "Product UUID to {what}. Omit to use your default product. PASS IT WHEN YOU KNOW "
-    "YOUR PRODUCT: the default is shared, mutable state -- another session, or the user "
-    "changing it in the dashboard, moves it mid-session. An id that is not one of your "
-    "own products is rejected; it never falls back to the default."
+    "Product UUID to {what}. Omit to use your default product; pass it when you know it, since "
+    "the default is shared and can change under you mid-session. An id that is not one of your "
+    "own products is rejected, never redirected."
 )
 
 _POSTHOOK_DEBOUNCE_SECONDS = 30

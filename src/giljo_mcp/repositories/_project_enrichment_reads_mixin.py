@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -278,11 +279,11 @@ class ProjectEnrichmentReadsMixin:
                 ProductMemoryEntry.deleted_by_user.is_(False),
                 ProductMemoryEntry.summary.is_not(None),
             )
-            .distinct(ProductMemoryEntry.project_id)
+            .ext(distinct_on(ProductMemoryEntry.project_id))
             .order_by(ProductMemoryEntry.project_id, ProductMemoryEntry.sequence.desc())
         )
         result = await session.execute(query)
-        return dict(result.tuples().all())
+        return dict(result.all())
 
 
     async def get_agent_status_counts(

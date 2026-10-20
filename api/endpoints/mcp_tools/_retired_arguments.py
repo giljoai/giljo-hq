@@ -15,6 +15,8 @@ from api.endpoints.mcp_tools._base import validation_rejection
 
 CONSTRAINT_RETIRED_ARGUMENT = "retired_argument"
 
+ANY_VALUE = object()
+
 
 @dataclass(frozen=True)
 class RetiredArgument:
@@ -22,6 +24,7 @@ class RetiredArgument:
     argument: str
     replacements: Mapping[Any, str]
     accepted: frozenset[Any] = field(default_factory=frozenset)
+    accept_falsy: bool = False
 
 
 RETIRED_ARGUMENTS: dict[str, tuple[RetiredArgument, ...]] = {
@@ -43,6 +46,16 @@ RETIRED_ARGUMENTS: dict[str, tuple[RetiredArgument, ...]] = {
             accepted=frozenset({False}),
         ),
     ),
+    "save_roadmap": (
+        RetiredArgument(argument="remove", replacements={ANY_VALUE: "remove_roadmap_items"}, accept_falsy=True),
+    ),
+    "post_to_thread": (
+        RetiredArgument(
+            argument="rename_to",
+            replacements={ANY_VALUE: "update_thread with subject=<the new name>"},
+            accept_falsy=True,
+        ),
+    ),
 }
 
 
@@ -51,6 +64,8 @@ def retired_argument_rejection(tool_name: str, arguments: Mapping[str, Any]) -> 
         if spec.argument not in arguments:
             continue
         value = arguments[spec.argument]
+        if spec.accept_falsy and not value:
+            continue
         hashable = isinstance(value, Hashable)
         if hashable and value in spec.accepted:
             continue
@@ -59,6 +74,11 @@ def retired_argument_rejection(tool_name: str, arguments: Mapping[str, Any]) -> 
             message = (
                 f"{tool_name} no longer takes {spec.argument}={value!r}. "
                 f"Call {replacement} instead. Nothing was changed."
+            )
+        elif ANY_VALUE in spec.replacements:
+            message = (
+                f"{tool_name} no longer takes a {spec.argument} argument. "
+                f"Call {spec.replacements[ANY_VALUE]} instead. Nothing was changed."
             )
         else:
             names = ", ".join(dict.fromkeys(spec.replacements.values()))

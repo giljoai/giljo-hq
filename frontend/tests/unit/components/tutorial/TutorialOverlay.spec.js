@@ -194,7 +194,7 @@ describe('TutorialOverlay', () => {
       expect(mockUpdateSetupState).not.toHaveBeenCalledWith({ learning_complete: true })
     })
 
-    it('confirm arms the breadcrumb, finishes the tutorial, and opens the ProductForm', async () => {
+    it('confirm arms the breadcrumb, finishes the tutorial, and opens the ProductForm in blank mode', async () => {
       const wrapper = mountOverlay()
       await openDoorC(wrapper)
       await clickDialogButton(wrapper, 'Open the product form')
@@ -204,7 +204,9 @@ describe('TutorialOverlay', () => {
         '1',
       )
       expect(mockUpdateSetupState).toHaveBeenCalledWith({ learning_complete: true })
-      expect(mockPush).toHaveBeenCalledWith('/Products?create=true')
+      // FE-9795: the user already said they will fill it in themselves, so the
+      // form opens doc-less with the detail tabs unlocked (?create=blank).
+      expect(mockPush).toHaveBeenCalledWith('/Products?create=blank')
       expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([false])
       expect(wrapper.emitted('dismiss')).toBeTruthy()
     })

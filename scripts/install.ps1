@@ -92,7 +92,8 @@ if ($env:GILJO_INSTALL_TOKEN) {
 $script:DEFAULT_INSTALL   = Join-Path $HOME "GiljoAI_MCP"
 $script:MIN_PYTHON_MAJOR  = 3
 $script:MIN_PYTHON_MINOR  = 12
-$script:MIN_NODE_MAJOR    = 22
+# The frontend/package.json engines.node floor (BE-9813; a test keeps them equal).
+$script:MIN_NODE_VERSION  = "22.23.3"
 $script:SERVER_PORT       = 7272
 $script:BRAND_COLOR       = "Yellow"
 $script:SUCCESS_COLOR     = "Green"
@@ -241,6 +242,20 @@ function Get-ParsedVersion {
     return $null
 }
 
+function Test-NodeVersionMeetsFloor {
+    <#
+    .SYNOPSIS
+        True when a "node --version" string (e.g. "v22.23.3") is at least
+        $script:MIN_NODE_VERSION, compared as major.minor.patch.
+    #>
+    param([string]$VersionString)
+
+    if ($VersionString -match '(\d+)\.(\d+)\.(\d+)') {
+        return ([version]$Matches[0]) -ge ([version]$script:MIN_NODE_VERSION)
+    }
+    return $false
+}
+
 function Refresh-PathEnv {
     <#
     .SYNOPSIS
@@ -316,11 +331,10 @@ function Test-Prerequisites {
     Write-Step "Checking Node.js..."
     if (Test-RealCommand "node") {
         $nodeVersionRaw = & node --version 2>&1
-        $nodeVersion = Get-ParsedVersion $nodeVersionRaw
-        if ($nodeVersion -and $nodeVersion.Major -ge $script:MIN_NODE_MAJOR) {
-            Write-Ok "Node.js $($nodeVersion.Major).$($nodeVersion.Minor) found"
+        if (Test-NodeVersionMeetsFloor "$nodeVersionRaw") {
+            Write-Ok "Node.js $("$nodeVersionRaw".Trim()) found"
         } else {
-            Write-Warn "Node.js found but version too old: $nodeVersionRaw (need $($script:MIN_NODE_MAJOR)+)"
+            Write-Warn "Node.js found but version too old: $nodeVersionRaw (need $($script:MIN_NODE_VERSION)+)"
             $missing += "node"
         }
     } else {

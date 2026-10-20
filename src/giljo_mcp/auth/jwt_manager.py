@@ -49,6 +49,7 @@ class JWTManager:
         audience: str | None = None,
         scope: str | None = None,
         revocation_epoch: int = 0,
+        terms_version: str | None = None,
     ) -> str:
         secret_key = cls._get_secret_key()
 
@@ -68,6 +69,8 @@ class JWTManager:
             payload["aud"] = audience
         if scope is not None:
             payload["scope"] = scope
+        if terms_version is not None:
+            payload["tos"] = terms_version
         return jwt.encode(payload, secret_key, algorithm=cls.ALGORITHM)
 
     @classmethod

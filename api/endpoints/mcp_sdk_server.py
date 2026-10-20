@@ -219,13 +219,7 @@ async def _act_first_gate_reason(name: str) -> str | None:
 
     from giljo_mcp.auth.dependencies import act_first_gate_violation
 
-    violation = await act_first_gate_violation(
-        must_change_password=must_change_password,
-        tenant_key=state.get("tenant_key") or "",
-        db=None,
-        route=name,
-        browser_session=False,
-    )
+    violation = act_first_gate_violation(must_change_password=must_change_password, route=name)
     return f"{violation.error_code}: {violation.message}" if violation is not None else None
 
 

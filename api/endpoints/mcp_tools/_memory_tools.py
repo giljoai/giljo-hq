@@ -31,9 +31,8 @@ from giljo_mcp.tools._memory_helpers import NO_CODE_CHANGES_MAX
 _SUMMARY_CAP_TEXT = f"Max {MEMORY_SUMMARY_MAX} chars (server-enforced)."
 
 _SUMMARY_ORDER_TEXT = (
-    "Send this argument LAST in your call -- anything ordered after a long "
-    "free-text argument like this one can be silently absorbed into it and "
-    "never arrive as its own argument."
+    "Send this argument LAST in your call: anything ordered after a long free-text argument "
+    "can be silently absorbed into it."
 )
 _OUTCOMES_CAP_TEXT = (
     f"Max {MEMORY_KEY_OUTCOMES_COUNT} items, each max {MEMORY_KEY_OUTCOME_MAX} chars (server-enforced)."
@@ -98,14 +97,10 @@ async def write_project_closeout(
         list[str] | None,
         Field(
             description=(
-                "Send 1-5 tags from the 16-entry controlled "
-                "vocabulary. Change-type axis: feature, bug-fix, refactor, perf, "
-                "security, docs, test, chore. Domain axis: frontend, backend, "
-                "database, api, infrastructure, ui-ux, integration. Operational: "
-                "migration. Pick 1-3 from change-type AND 1-3 from domain. "
-                "Invalid tags are rejected with a structured error carrying the "
-                "offending tag and the full allowed enum. None or [] persists "
-                "with empty tags (no auto-extraction)."
+                "1-5 tags from the 16-tag vocabulary. Change-type: feature, bug-fix, refactor, perf, security, "
+                "docs, test, chore. Domain: frontend, backend, database, api, infrastructure, ui-ux, integration."
+                " Operational: migration. Pick 1-3 of each axis; an unknown tag is rejected with the allowed "
+                "enum. None or [] = no tags."
             )
         ),
     ] = None,
@@ -113,22 +108,10 @@ async def write_project_closeout(
         bool,
         Field(
             description=(
-                "Force-close: auto-decommission remaining agents before closing. "
-                "Use when the CLOSEOUT_BLOCKED hint says so — e.g. a leftover "
-                "'waiting' orchestrator after work was executed outside a staged "
-                "session. Refused only while the CALLING orchestrator itself is "
-                "still active; it does NOT refuse on account of a specialist. "
-                "Any specialist still in flight — including one the health "
-                "monitor marked 'silent' — is DECOMMISSIONED, which records it "
-                "as failed/replaced/abandoned. So never reach for force to "
-                "retire an agent whose work you ACCEPTED: call "
-                "complete_job(job_id, result={...}) on it and then "
-                "finalize_job(job_id), which reaches 'closed' from any "
-                "non-terminal status, 'silent' included. If that complete_job "
-                "returns COMPLETION_BLOCKED, the stalled agent left TODOs or "
-                "unread messages behind: settle its ledger with "
-                "report_progress(job_id, todo_items=[...], replace=true) and "
-                "drain its action-required messages, then retry."
+                "Auto-decommission remaining agents and close anyway. Use only when CLOSEOUT_BLOCKED says so (a "
+                "leftover 'waiting' orchestrator); refused while the calling orchestrator is still active. An "
+                "agent whose work you accepted should be finished with complete_job then finalize_job instead, "
+                "since force records it as abandoned."
             )
         ),
     ] = False,
@@ -185,11 +168,8 @@ async def write_memory_entry(
         _EntryType,
         Field(
             description=(
-                "Entry type. Workers may write: baseline (foundation context); "
-                "decision (a choice with rationale); architecture (structural notes); "
-                "discovery (surprising finding worth remembering). project_completion "
-                "is orchestrator-only (workers get ORCHESTRATOR_ONLY_ENTRY_TYPE). "
-                "To hand a session over, create a task of type HND instead."
+                "baseline, decision, architecture or discovery (any agent); project_completion is "
+                "orchestrator-only. For a session handover create a task of type HND instead."
             )
         ),
     ] = "project_completion",
@@ -204,24 +184,15 @@ async def write_memory_entry(
     tags: Annotated[
         list[str] | None,
         Field(
-            description=(
-                "Tags for categorization. Max 8 tags, each from the controlled 16-tag vocabulary "
-                "(server-enforced): change-type [feature, bug-fix, refactor, perf, security, docs, test, chore], "
-                "domain [frontend, backend, database, api, infrastructure, ui-ux, integration], "
-                "operational [migration]."
-            ),
+            description=("Up to 8 tags from the 16-tag vocabulary (the same axes as write_project_closeout.tags)."),
         ),
     ] = None,
     acknowledge_closeout_todo: Annotated[
         bool,
         Field(
             description=(
-                "When True, auto-complete YOUR OWN self-referential closeout TODOs "
-                "(e.g. 'Write series summary') before the closeout-readiness gate "
-                "evaluates. Resolves the chicken-and-egg where the TODO this write "
-                "satisfies blocks the write. Non-closeout TODOs still block. (This "
-                "flag is live HERE; complete_job needs no equivalent -- its closeout "
-                "TODO auto-completes structurally.)"
+                "Auto-complete your own self-referential closeout TODO before the readiness gate runs; other open"
+                " TODOs still block."
             )
         ),
     ] = False,

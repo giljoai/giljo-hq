@@ -272,7 +272,7 @@ Implementation phase (all agents, post-staging-complete):
   working →[set_agent_status("sleeping")]→ sleeping
   idle / sleeping / blocked →[report_progress or any active MCP]→ working
   complete →[message received]→ blocked (auto, HO0827b)
-  blocked →[resume_or_dismiss_job(action="resume" | "dismiss")]→ working | complete
+  blocked →[resume_job | dismiss_job]→ working | complete
 
 Note: spawned non-orchestrator agents bypass the staging lock entirely.
 
@@ -534,7 +534,7 @@ Call: post_to_thread(thread_id=<your coordination thread>, to_participant="<comp
 This auto-blocks the completed agent (server-side).
 
 ── STEP 2: Reactivate the job ─────────────────────────────────────────────
-Call: resume_or_dismiss_job(job_id="<completed-agent-job-id>", action="resume")
+Call: resume_job(job_id="<completed-agent-job-id>")
 Transitions the agent from blocked→working and increments reactivation_count.
 
 ── STEP 3: Launch a fresh local agent for the same role ───────────────────
@@ -552,7 +552,7 @@ Reactivation targets the job_id, not the terminal session.
 WHEN NOT TO REACTIVATE:
 - Completed agent's work is fine and the issue is in a different agent → fix there
 - Post-completion message is purely informational (no action needed)
-  → call resume_or_dismiss_job(job_id="...", action="dismiss") to return agent to 'complete'
+  → call dismiss_job(job_id="...") to return agent to 'complete'
 - Agent was decommissioned (failed/replaced) → spawn a new job instead
 
 HANDLING POST-COMPLETION MESSAGES:
@@ -561,7 +561,7 @@ When a completed agent receives a message and gets auto-blocked:
 1. Check get_thread_history(as_participant="<agent_id>") on the coordination thread for that agent's pending messages
 2. Read the message content
 3. If informational (another agent sharing results, no action needed):
-   → Call resume_or_dismiss_job(job_id="...", action="dismiss") — agent returns to 'complete'
+   → Call dismiss_job(job_id="...") — agent returns to 'complete'
 4. If it requires rework:
    → Follow the Reactivation Protocol above (Steps 1-4)
 

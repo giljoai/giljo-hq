@@ -229,8 +229,11 @@ class OrchestrationService:
         agent_display_name: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        project_ids: list[str] | None = None,
     ) -> JobListResult:
-        return await self._job_query.list_jobs(tenant_key, project_id, status_filter, agent_display_name, limit, offset)
+        return await self._job_query.list_jobs(
+            tenant_key, project_id, status_filter, agent_display_name, limit, offset, project_ids=project_ids
+        )
 
     async def get_job_detail(self, job_id: str, tenant_key: str) -> dict:
         return await self._job_query.get_job_detail(tenant_key=tenant_key, job_id=job_id)

@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, inspect, pool, text
 from sqlalchemy.engine import make_url
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.db_url import normalize_database_url
 from tests.helpers.test_db_helper import create_database_lock, worker_suffix
 
 
@@ -30,7 +31,9 @@ def _db_url(database: str) -> str:
 
 def _admin_exec(sql: str) -> None:
     admin_url = _db_url("postgres")
-    eng = create_engine(admin_url, poolclass=pool.NullPool, isolation_level="AUTOCOMMIT")
+    eng = create_engine(
+        normalize_database_url(admin_url, "sync"), poolclass=pool.NullPool, isolation_level="AUTOCOMMIT"
+    )
     try:
         with eng.connect() as conn:
             conn.execute(text(sql))
@@ -39,7 +42,9 @@ def _admin_exec(sql: str) -> None:
 
 
 def _admin_create_db(name: str) -> None:
-    eng = create_engine(_db_url("postgres"), poolclass=pool.NullPool, isolation_level="AUTOCOMMIT")
+    eng = create_engine(
+        normalize_database_url(_db_url("postgres"), "sync"), poolclass=pool.NullPool, isolation_level="AUTOCOMMIT"
+    )
     try:
         with eng.connect() as conn, create_database_lock(conn):
             conn.execute(text(f'CREATE DATABASE "{name}"'))
@@ -63,7 +68,7 @@ def throwaway_db():
 
 
 def _has_table(url: str, table: str) -> bool:
-    eng = create_engine(url, poolclass=pool.NullPool)
+    eng = create_engine(normalize_database_url(url, "sync"), poolclass=pool.NullPool)
     try:
         return inspect(eng).has_table(table)
     finally:
@@ -85,7 +90,7 @@ async def test_create_tables_async_bootstraps_fresh_db(throwaway_db):
 
 @pytest.mark.asyncio
 async def test_create_tables_async_skips_when_alembic_managed(throwaway_db):
-    eng = create_engine(throwaway_db, poolclass=pool.NullPool)
+    eng = create_engine(normalize_database_url(throwaway_db, "sync"), poolclass=pool.NullPool)
     try:
         with eng.begin() as conn:
             conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL PRIMARY KEY)"))

@@ -1,0 +1,241 @@
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('@/services/api', async (importOriginal) => await importOriginal())
+
+import * as apiModule from '@/services/api'
+
+const MODULE_EXPORTS = [
+  '__resetRequestDedupe',
+  'api',
+  'apiClient',
+  'dedupedRequest',
+  'default',
+  'getErrorMessage',
+  'parseErrorResponse',
+  'setTenantKey',
+  'updateApiBaseURL',
+]
+
+const GROUPS = {
+  products: [
+    'list',
+    'get',
+    'getDefault',
+    'setDefault',
+    'create',
+    'update',
+    'delete',
+    'purge',
+    'getCascadeImpact',
+    'activate',
+    'deactivate',
+    'getDeletedProducts',
+    'restoreProduct',
+    'getMemoryEntries',
+    'getTuningSections',
+    'generateTuningPrompt',
+    'getContextUpdateProject',
+  ],
+  taxonomyTypes: ['list', 'create', 'update', 'delete'],
+  projectStatuses: ['list'],
+  taskStatuses: ['list'],
+  projects: [
+    'list',
+    'get',
+    'review',
+    'getOrchestrator',
+    'getActive',
+    'markReviewed',
+    'create',
+    'update',
+    'delete',
+    'fetchDeleted',
+    'getNextSeries',
+    'getAvailableSeries',
+    'checkSeries',
+    'usedSubseries',
+    'activate',
+    'deactivate',
+    'complete',
+    'cancel',
+    'restore',
+    'purgeDeleted',
+    'purgeAllDeleted',
+    'restoreCompleted',
+    'cancelStaging',
+    'restage',
+    'reset',
+    'unstage',
+    'completeWithData',
+    'archive',
+    'closeoutWithoutSummary',
+    'launchImplementation',
+  ],
+  tasks: [
+    'list',
+    'get',
+    'create',
+    'update',
+    'delete',
+    'changeStatus',
+    'convertToProject',
+    'getDeleted',
+    'restore',
+  ],
+  users: ['update', 'getFieldToggleConfig'],
+  account: ['exportMyData'],
+  visionDocuments: [
+    'listByProduct',
+    'upload',
+    'get',
+    'getAiSummary',
+    'delete',
+    'getDeletedByProduct',
+    'restore',
+  ],
+  settings: [
+    'get',
+    'getDatabase',
+    'testDatabase',
+    'getGeneral',
+    'updateCloseoutMode',
+    'getAgentSilenceThreshold',
+    'updateAgentSilenceThreshold',
+    'getAgentCheckinCadence',
+    'updateAgentCheckinCadence',
+    'getCookieDomains',
+    'addCookieDomain',
+    'removeCookieDomain',
+    'getExecutionModeDefault',
+    'updateExecutionModeDefault',
+    'getHandoverTemplate',
+    'updateHandoverTemplate',
+    'resetHandoverTemplate',
+    'getNotificationPrefs',
+    'updateNotificationPrefs',
+    'getHeadlessLaunch',
+    'updateHeadlessLaunch',
+  ],
+  health: ['check'],
+  setup: ['status'],
+  templates: [
+    'list',
+    'get',
+    'create',
+    'update',
+    'delete',
+    'history',
+    'restore',
+    'preview',
+    'reset',
+    'factoryDefault',
+    'resetAll',
+    'activeCount',
+    'profileDownloadUrl',
+    'importDefaults',
+  ],
+  assignments: ['list', 'toggle'],
+  templateProposals: ['list', 'count', 'apply', 'reject'],
+  auth: [
+    'login',
+    'logout',
+    'me',
+    'register',
+    'createFirstAdmin',
+    'listUsers',
+    'updateUser',
+    'changePassword',
+    'checkFirstLogin',
+    'completeFirstLogin',
+    'verifyPin',
+    'verifyPinAndResetPassword',
+    'updateSetupState',
+  ],
+  apiKeys: ['list', 'getActive', 'create', 'delete'],
+  connect: ['credentialStatus', 'removeConnection'],
+  git: ['getSettings', 'toggle'],
+  agentJobs: ['list', 'listMany', 'get', 'spawn', 'status', 'updateMission', 'messages'],
+  organizations: [
+    'list',
+    'get',
+    'create',
+    'update',
+    'delete',
+    'listMembers',
+    'inviteMember',
+    'changeMemberRole',
+    'removeMember',
+    'transferOwnership',
+  ],
+  orchestrator: ['launchProject'],
+  prompts: [
+    'staging',
+    'agentPrompt',
+    'implementation',
+    'chainStaging',
+    'chainImplementation',
+    'chainMember',
+    'chainMemberFallback',
+  ],
+  system: ['getOrchestratorPrompt', 'updateOrchestratorPrompt', 'resetOrchestratorPrompt'],
+  approvals: ['listPending', 'decide'],
+  notifications: ['list', 'markRead', 'markDismissed'],
+  threads: [
+    'list',
+    'myTurn',
+    'markRead',
+    'attention',
+    'search',
+    'chainHub',
+    'history',
+    'participants',
+    'create',
+    'update',
+    'post',
+    'passBaton',
+    'delete',
+    'getDeleted',
+    'restore',
+  ],
+  stats: ['getCallCounts', 'getDashboard'],
+  roadmap: ['get', 'reorder', 'removeItem'],
+  sequenceRuns: [
+    'create',
+    'get',
+    'update',
+    'list',
+    'release',
+    'deactivate',
+    'stop',
+    'markReviewed',
+  ],
+}
+
+describe('BE-9808 api surface is unchanged by the split', () => {
+  const api = apiModule.default
+
+  it('keeps the same named exports, and the default export is the named api', () => {
+    expect(Object.keys(apiModule).sort()).toEqual(MODULE_EXPORTS)
+    expect(apiModule.default).toBe(apiModule.api)
+  })
+
+  it('keeps every group, in the same order', () => {
+    expect(Object.keys(api)).toEqual(Object.keys(GROUPS))
+  })
+
+  it.each(Object.entries(GROUPS))(
+    'api.%s keeps the same methods, in the same order',
+    (group, methods) => {
+      expect(Object.keys(api[group])).toEqual(methods)
+    },
+  )
+
+  it('every method is callable', () => {
+    const notFunctions = Object.entries(api).flatMap(([group, members]) =>
+      Object.entries(members)
+        .filter(([, value]) => typeof value !== 'function')
+        .map(([name]) => `${group}.${name}`),
+    )
+    expect(notFunctions).toEqual([])
+  })
+})

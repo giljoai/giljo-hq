@@ -5,10 +5,11 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 const h = vi.hoisted(() => ({ getActive: vi.fn(), listAgentJobs: vi.fn() }))
 
-vi.mock('@/services/api', () => {
+vi.mock('@/services/api', async () => {
+  const { listManyFrom } = await import('../../tests/helpers/agentJobsListMany')
   const api = {
     projects: { getActive: (...a) => h.getActive(...a) },
-    agentJobs: { list: (...a) => h.listAgentJobs(...a) },
+    agentJobs: { list: (...a) => h.listAgentJobs(...a), listMany: (ids) => listManyFrom(h.listAgentJobs, ids) },
     integrations: { getStatus: () => Promise.resolve({ data: {} }) },
   }
   return { api, default: api }
@@ -49,7 +50,11 @@ const stubs = {
       <slot /><button class="dialog-confirm" @click="$emit('confirm')">go</button></div>`,
   },
   CloseoutModal: { props: ['show', 'projectId'], template: '<div v-if="show" data-testid="closeout-stub">{{ projectId }}</div>' },
-  DecisionModal: { props: ['show', 'orchestratorJobId'], template: '<div v-if="show" data-testid="decision-stub">{{ orchestratorJobId }}</div>' },
+  DecisionModal: {
+    props: ['show', 'orchestratorJobId'],
+    emits: ['close'],
+    template: '<div v-if="show" data-testid="decision-stub">{{ orchestratorJobId }}<button data-testid="decision-stub-close" @click="$emit(\'close\')" /></div>',
+  },
 }
 
 function envelope(jobs) {
@@ -128,6 +133,34 @@ describe('JobsViewportView arrivals from the retired project page (FE-9681)', ()
     expect(wrapper.find('[data-testid="jb-detail-modal"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="jb-detail-modal"]').text()).toContain('Running one')
     expect(router.currentRoute.value.query.detail).toBeUndefined()
+  })
+
+  it('already on the board, a new ?project=<id>&decide=1 opens the decision modal and is consumed once', async () => {
+    const wrapper = await mountAt({})
+    expect(wrapper.find('[data-testid="decision-stub"]').exists()).toBe(false)
+
+    await router.push({ name: 'JobsViewport', query: { project: 'p-run', decide: '1' } })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="decision-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="decision-stub"]').text()).toBe('rj-or')
+    expect(router.currentRoute.value.query.decide).toBeUndefined()
+    expect(router.currentRoute.value.query.project).toBe('p-run')
+
+    await wrapper.find('[data-testid="decision-stub-close"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="decision-stub"]').exists()).toBe(false)
+  })
+
+  it('already on the board, a new ?project=<id>&review=1 opens the closeout modal', async () => {
+    const wrapper = await mountAt({})
+    await router.push({ name: 'JobsViewport', query: { project: 'p-done', review: '1' } })
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="closeout-stub"]').text()).toBe('p-done')
+    expect(router.currentRoute.value.query.review).toBeUndefined()
   })
 
   it('a card\'s Review control opens the closeout modal here, without leaving the board', async () => {

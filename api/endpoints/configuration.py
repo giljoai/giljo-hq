@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -193,6 +194,9 @@ async def get_network_info(
     )
 
 
+DATABASE_HEALTH_TIMEOUT_SECONDS = 2
+
+
 @router.get("/health/database")
 async def check_database_health(
     current_user: User = Depends(get_current_active_user),
@@ -211,12 +215,17 @@ async def check_database_health(
             db_manager=state.db_manager,
             tenant_key=current_user.tenant_key,
         )
-        is_healthy = await config_service.execute_health_check()
+        is_healthy = await asyncio.wait_for(
+            config_service.execute_health_check(), timeout=DATABASE_HEALTH_TIMEOUT_SECONDS
+        )
 
         if is_healthy:
             return SuccessResponse(message="Database connection successful")
         raise HTTPException(status_code=503, detail="Database health check failed")
 
+    except TimeoutError as e:
+        logger.warning("Database health check exceeded %ss", DATABASE_HEALTH_TIMEOUT_SECONDS)
+        raise HTTPException(status_code=503, detail="Database health check timed out") from e
     except (RuntimeError, OSError, ValueError) as e:
         logger.error("Database connection failed: %s", e, exc_info=True)
         raise HTTPException(status_code=503, detail="Database connection failed. Check server logs.") from e

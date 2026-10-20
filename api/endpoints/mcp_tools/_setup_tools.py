@@ -82,22 +82,17 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
 @mcp.tool(
     title="Set Up GiljoAI",
     description=(
-        "First-time setup: installs the /giljo command/skill and writes the Giljo HQ marker "
-        "block (primer + product binding) into your harness file (CLAUDE.md / AGENTS.md). "
-        "Following the returned instructions replaces previously installed Giljo HQ "
-        "skills/commands and the Giljo-managed block in your instruction file; text outside "
-        "that block is untouched. Run once after connecting; re-run when skills are outdated. "
-        "It no longer installs agent templates: every spawned agent receives its profile from "
-        "get_job_mission's agent_profile. Pass platform naming your own tool "
-        "('claude_code'|'codex_cli'|'opencode'|'generic'), not the default: the wrong platform "
-        "installs skills where your tool never reads them, and nothing errors. With no home "
-        "directory (web sandbox / pure chat), pass harness to get the primer returned inline. "
-        "Pass product_id to bind this repository to a product via a per-repo marker block in "
-        "CLAUDE.md and AGENTS.md, so later calls never hit PRODUCT_AMBIGUOUS. Omit it on a "
-        "tenant with zero or several products; the response says what to do next. Every tool "
-        "response carries `_meta.skills_version`; when it is ahead of what was installed here, "
-        "tell the user their skills are outdated and offer to re-run this tool. Local skill "
-        "files are only rewritten after the user agrees."
+        "First-time setup: installs the /giljo command/skill and writes the Giljo HQ marker block (primer"
+        " and product binding) into your harness file (CLAUDE.md / AGENTS.md); following the returned "
+        "instructions replaces earlier Giljo HQ skills and the Giljo-managed block, nothing outside it. "
+        "Run once after connecting; re-run when skills are outdated. Pass platform naming your own tool "
+        "('claude_code'|'codex_cli'|'opencode'|'generic'): the wrong one installs skills where your tool "
+        "never reads them. With no home directory (web sandbox, chat) pass harness to get the primer "
+        "inline. Pass product_id to bind this repository to a product so later calls never hit "
+        "PRODUCT_AMBIGUOUS; omit it on a tenant with zero or several products. No agent files are "
+        "installed: each spawned agent gets its profile from get_job_mission's agent_profile. Every tool "
+        "response carries _meta.skills_version; when it is ahead of what is installed, tell the user and "
+        "offer to re-run this tool. Local skill files are only rewritten after the user agrees."
     ),
     annotations=_tool_hints("giljo_setup", destructive=True),
 )
@@ -307,9 +302,8 @@ class _TuningProposal(BaseModel):
 @mcp.tool(
     title="Apply Context Tuning",
     description=(
-        "Apply reviewed product context tuning directly to product fields, comparing current "
-        "context against recent project history. Approved proposals are written immediately -- no "
-        "separate dashboard review step. See the proposals param for its exact per-item shape."
+        "Apply reviewed product-context tuning proposals straight to the product's fields (no dashboard "
+        "review step). See proposals for the per-item shape."
     ),
     annotations=_tool_hints("apply_context_tuning", destructive=True),
 )
@@ -320,20 +314,14 @@ async def apply_context_tuning(
         Field(
             max_length=MCP_LIST_ITEMS_MAX,
             description=(
-                "Per-section proposals. Each item: {section: str, drift_detected: bool "
-                "(required), proposed_value: str|dict|list (required when drift_detected=True), "
-                "confidence: 'high'|'medium'|'low' (optional)}. FLAT sections take a plain "
-                "string (list[str] for target_platforms): 'description', 'core_features', "
-                "'brand_guidelines', 'quality_standards', 'target_platforms'. STRUCTURED "
-                "sections -- 'tech_stack', 'architecture' -- hold multiple fields, so a plain "
-                "string is REJECTED for them: address one field per proposal via a dotted "
-                "sub-key ('tech_stack.infrastructure', 'architecture.primary_pattern', ...), or "
-                "pass proposed_value as a dict keyed by field name to update several fields at "
-                "once. An unknown section is rejected with the full allowed list. "
-                f"proposed_value is capped at {TUNING_PROPOSED_VALUE_MAX} chars PER STRING (per "
-                "sub-key inside a dict, not the whole submission). Every problem across every "
-                "proposal is reported together in one rejection. Updating a field that already "
-                "holds a value needs force=true -- see the force param."
+                "Per-section proposals. Each: {section, drift_detected (required), proposed_value (required "
+                "when drift_detected=true), confidence?: 'high'|'medium'|'low'}. FLAT sections take a plain "
+                "string (list[str] for target_platforms): description, core_features, brand_guidelines, "
+                "quality_standards, target_platforms. STRUCTURED sections tech_stack and architecture take a "
+                "dotted sub-key ('tech_stack.infrastructure') or a dict keyed by field name, never a plain "
+                "string. An unknown section is rejected with the allowed list; each string is capped at "
+                f"{TUNING_PROPOSED_VALUE_MAX} chars per sub-key; every problem is reported in one rejection. "
+                "Overwriting a populated field needs force=true."
             ),
         ),
     ],
@@ -345,10 +333,9 @@ async def apply_context_tuning(
         bool,
         Field(
             description=(
-                "Updating a product field that is already populated is rejected with 'Fields "
-                "already populated: <detail>' unless force=True. Reviewing an existing product "
-                "is the COMMON case, so most calls that touch tech_stack, architecture, or "
-                "quality_standards on a product that already has values need force=True."
+                "force=true is required to overwrite a product field that is already populated (otherwise refused"
+                " with 'Fields already populated'). Reviewing an existing product is the common case, so most "
+                "tech_stack, architecture or quality_standards updates need it."
             )
         ),
     ] = False,

@@ -52,6 +52,7 @@ from giljo_mcp.services.mission_implementation_gate import (
     promote_chain_member_on_first_worker_start,
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
+from giljo_mcp.services.orchestrator_caller_guard import NEVER_STARTED_STATUSES
 from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
 from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_staging_complete
 from giljo_mcp.services.protocol_sections.team_context import JobLinks, job_dependency_link
@@ -156,7 +157,7 @@ class MissionService:
                     chain_execution_mode=chain_execution_mode,
                 )
 
-                if execution.status == "waiting":
+                if execution.status in NEVER_STARTED_STATUSES:
                     now = datetime.now(UTC)
                     old_status = execution.status
                     execution.status = "working"

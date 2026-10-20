@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { describe, it, expect, vi, afterEach } from 'vitest'
@@ -27,11 +27,13 @@ describe('FE-9604 api.assignments hits the /api/v1/products router', () => {
 
   it('guard: api.js never uses the un-versioned /api/products/ prefix', () => {
     const here = dirname(fileURLToPath(import.meta.url))
-    const source = readFileSync(resolve(here, '../api.js'), 'utf8')
-    const offenders = source
-      .split('\n')
-      .map((line, i) => ({ line, n: i + 1 }))
-      .filter(({ line }) => /['"`]\/api\/products\//.test(line))
+    const files = ['../api.js', ...readdirSync(resolve(here, '../api')).map((f) => `../api/${f}`)]
+    const offenders = files.flatMap((file) =>
+      readFileSync(resolve(here, file), 'utf8')
+        .split('\n')
+        .map((line, i) => ({ file, line, n: i + 1 }))
+        .filter(({ line }) => /['"`]\/api\/products\//.test(line)),
+    )
     expect(offenders, `un-versioned product paths: ${JSON.stringify(offenders)}`).toEqual([])
   })
 })

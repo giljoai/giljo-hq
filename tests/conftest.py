@@ -46,7 +46,7 @@ from tests.fixtures.base_fixtures import (  # noqa: E402
     restored_app_state,
     restored_global_client_resolver,
     restored_global_protected_surface_patterns,
-    restored_global_terms_accepted_check,
+    restored_global_terms_gate,
     restored_global_wake_relay,
     test_project,
 )
@@ -223,8 +223,8 @@ def _restore_global_client_resolver():
 
 
 @pytest.fixture(autouse=True)
-def _restore_global_terms_accepted_check():
-    with restored_global_terms_accepted_check():
+def _restore_global_terms_gate():
+    with restored_global_terms_gate():
         yield
 
 

@@ -59,6 +59,7 @@ class DatabaseConfig:
     pg_pool_size: int = 5
     pg_max_overflow: int = 5
     pg_slot_budget: int = 90
+    pg_pool_timeout: int = 5
 
     def get_connection_string(self, tenant_key: str | None = None) -> str:
         if self.database_url:
@@ -321,6 +322,7 @@ class ConfigManager:
                     self.database.pg_pool_size = pg.get("pool_size", self.database.pg_pool_size)
                     self.database.pg_max_overflow = pg.get("max_overflow", self.database.pg_max_overflow)
                     self.database.pg_slot_budget = pg.get("slot_budget", self.database.pg_slot_budget)
+                    self.database.pg_pool_timeout = pg.get("pool_timeout", self.database.pg_pool_timeout)
 
                 self.database.host = db.get("host", self.database.host)
                 self.database.port = db.get("port", self.database.port)
@@ -425,6 +427,7 @@ class ConfigManager:
             ("GILJO_PG_POOL_SIZE", "pg_pool_size"),
             ("GILJO_PG_MAX_OVERFLOW", "pg_max_overflow"),
             ("GILJO_DB_SLOT_BUDGET", "pg_slot_budget"),
+            ("GILJO_PG_POOL_TIMEOUT", "pg_pool_timeout"),
         ):
             if raw := os.getenv(env_name):
                 try:
@@ -549,6 +552,7 @@ class ConfigManager:
                     "pool_size": self.database.pg_pool_size,
                     "max_overflow": self.database.pg_max_overflow,
                     "slot_budget": self.database.pg_slot_budget,
+                    "pool_timeout": self.database.pg_pool_timeout,
                 },
             },
             "logging": {
@@ -594,6 +598,7 @@ class ConfigManager:
             is_async=True,
             pool_size=self.database.pg_pool_size,
             max_overflow=self.database.pg_max_overflow,
+            pool_timeout=self.database.pg_pool_timeout,
         )
 
     @classmethod

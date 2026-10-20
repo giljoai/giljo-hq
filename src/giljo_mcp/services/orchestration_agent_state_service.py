@@ -200,8 +200,9 @@ class OrchestrationAgentStateService:
                 "instruction": (
                     "You were COMPLETE and a directed, action-required post reactivated you. "
                     "Review the post(s) above, then call "
-                    f'resume_or_dismiss_job(job_id="{execution.job_id}", action="resume" to pick the '
-                    'work back up | "dismiss" if no action is needed, reason="brief reason").'
+                    f'resume_job(job_id="{execution.job_id}", reason="brief reason") to pick the work '
+                    f'back up, or dismiss_job(job_id="{execution.job_id}", reason="brief reason") if no '
+                    "action is needed."
                 ),
             }
 

@@ -185,6 +185,7 @@ async def init_database(state: APIState) -> None:
             is_async=True,
             pool_size=state.config.database.pg_pool_size,
             max_overflow=state.config.database.pg_max_overflow,
+            pool_timeout=state.config.database.pg_pool_timeout,
         )
         logger.info("Database manager created successfully")
 

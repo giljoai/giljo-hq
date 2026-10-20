@@ -62,6 +62,7 @@ async def authenticate_websocket(websocket: WebSocket, db: AsyncSession = None) 
 
     token = websocket.query_params.get("token")
     api_key = websocket.query_params.get("api_key")
+    token_from_cookie = False
 
     if not token and not api_key:
         headers = dict(websocket.headers)
@@ -77,6 +78,7 @@ async def authenticate_websocket(websocket: WebSocket, db: AsyncSession = None) 
 
             token = cookies.get("access_token")
             if token:
+                token_from_cookie = True
                 logger.debug("WebSocket: Found JWT token in httpOnly cookie")
 
     if not token and not api_key:
@@ -97,6 +99,8 @@ async def authenticate_websocket(websocket: WebSocket, db: AsyncSession = None) 
     if token:
         validated_user = await validate_jwt_token(token, db)
         if validated_user:
+            if token_from_cookie or validated_user.get("terms_version") is not None:
+                await _refuse_session_below_terms(validated_user, db)
             logger.info(f"WebSocket authenticated via JWT: {validated_user.get('user_id')}")
             return {"authenticated": True, "user": validated_user}
 
@@ -130,6 +134,17 @@ async def authenticate_websocket(websocket: WebSocket, db: AsyncSession = None) 
     )
 
 
+async def _refuse_session_below_terms(validated_user: dict[str, Any], db: AsyncSession | None) -> None:
+    from giljo_mcp.auth.terms_gate import session_terms_version, terms_claim_violation
+
+    terms_version = validated_user.get("terms_version")
+    if terms_version is None and db is not None:
+        terms_version = await session_terms_version(db, validated_user["tenant_key"])
+    if terms_claim_violation(terms_version) is not None:
+        logger.info("WebSocket connection rejected: Terms re-acceptance required")
+        raise WebSocketException(code=1008, reason="Terms re-acceptance required")
+
+
 async def validate_jwt_token(token: str, db: AsyncSession = None) -> dict[str, Any] | None:
     if db is not None:
         from giljo_mcp.auth.principal import PrincipalValidationError, validate_principal
@@ -143,6 +158,7 @@ async def validate_jwt_token(token: str, db: AsyncSession = None) -> dict[str, A
             "tenant_key": principal.tenant_key,
             "role": principal.role,
             "permissions": ["*"],
+            "terms_version": principal.terms_version,
         }
 
     try:
@@ -159,6 +175,7 @@ async def validate_jwt_token(token: str, db: AsyncSession = None) -> dict[str, A
             "tenant_key": payload["tenant_key"],
             "role": payload.get("role"),
             "permissions": ["*"],
+            "terms_version": payload["tos"] if isinstance(payload.get("tos"), str) else None,
         }
     except (ImportError, ValueError, KeyError):
         logger.exception("JWT validation failed")

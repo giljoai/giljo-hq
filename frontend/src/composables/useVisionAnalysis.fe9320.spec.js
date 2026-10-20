@@ -39,7 +39,7 @@ describe('useVisionAnalysis — the finish state can actually arrive (FE-9320)',
   }
 
   function completionEvent() {
-    return new CustomEvent('vision-analysis-complete', { detail: { product_id: PRODUCT_ID } })
+    return new CustomEvent('vision-analysis-complete', { detail: { product_id: PRODUCT_ID, vision_analysis_complete: true } })
   }
 
   it('recovers when the product fetch REJECTS during the completion event', async () => {

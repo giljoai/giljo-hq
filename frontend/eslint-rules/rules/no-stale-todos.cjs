@@ -45,7 +45,7 @@ module.exports = {
   create(context) {
     const opts = context.options[0] || {}
     const now = opts.now ? new Date(opts.now) : new Date()
-    const sourceCode = context.getSourceCode()
+    const sourceCode = context.sourceCode
     return {
       Program() {
         for (const c of sourceCode.getAllComments()) {

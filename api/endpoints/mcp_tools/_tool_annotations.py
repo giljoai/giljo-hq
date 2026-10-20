@@ -16,10 +16,12 @@ from api.endpoints.mcp_tools._base import SCOPE_READ, TOOL_SCOPES
 
 _READ_SCOPED_BUT_MUTATING: frozenset[str] = frozenset({"get_thread_history"})
 
+_AGENT_SCOPED_BUT_READ_ONLY: frozenset[str] = frozenset({"get_agent_result", "get_workflow_status"})
+
 
 def _tool_hints(name: str, *, destructive: bool = False, open_world: bool = False) -> ToolAnnotations:
     scope = TOOL_SCOPES[name]
-    read_only = name not in _READ_SCOPED_BUT_MUTATING and scope == SCOPE_READ
+    read_only = name in _AGENT_SCOPED_BUT_READ_ONLY or (name not in _READ_SCOPED_BUT_MUTATING and scope == SCOPE_READ)
     return ToolAnnotations(
         read_only_hint=read_only,
         destructive_hint=False if read_only else destructive,

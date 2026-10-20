@@ -74,16 +74,12 @@ def _handover_shape_rejection_from(exc: ValidationError) -> dict[str, Any] | Non
 @mcp.tool(
     title="Create Task",
     description=(
-        "Create a new task (technical debt/TODO/bug/small fix). PASS product_id: in a bound repo "
-        "it is already in your boot context, and get_context(categories=['products']) resolves an "
-        "unknown one. Omitting it falls back to the default product only for a single-product "
-        "tenant; a tenant that owns more than one product gets a structured PRODUCT_AMBIGUOUS "
-        "rejection instead (the product list is in the error) -- nothing is created on a bare "
-        "guess. task_type is 'TSK' (default) or 'HND' (a session handover -- see that "
-        "parameter); the serial auto-assigns from one shared counter. The response names the "
-        "product the task landed on. "
-        "Use create_project instead for actionable multi-step work. See get_giljo_guide for the "
-        "full task-vs-project routing recipe."
+        "Create a task (technical debt, a TODO, a bug, a small fix). Pass product_id when you know it (a "
+        "bound repo carries it; get_context(categories=['products']) resolves a name); omitted, it falls "
+        "back to the default product only for a single-product tenant, otherwise PRODUCT_AMBIGUOUS and "
+        "nothing is created. task_type is 'TSK' (default) or 'HND' (a session handover). Serials "
+        "auto-assign; the response names the product. Multi-step work is a project: use create_project. "
+        "Routing: get_giljo_guide."
     ),
     annotations=_tool_hints("create_task"),
 )
@@ -115,14 +111,9 @@ async def create_task(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Optional product UUID to bind the task to. PASS IT WHEN YOU KNOW YOUR PRODUCT -- "
-                "a bound repo already carries it in your boot context. Omit only for a "
-                "single-product tenant, where it falls back to the default product; a tenant with "
-                "more than one product gets a structured PRODUCT_AMBIGUOUS rejection instead "
-                "(carrying the full product list) rather than a silent guess at the active one, "
-                "which is shared, mutable state another session or the user can change under you. "
-                "A product_id that does not belong to your account is rejected and nothing is "
-                "created; it never falls back to the active or default product."
+                "Product UUID to bind the task to. Pass it when you know your product; omitted, it falls back to "
+                "the default product only for a single-product tenant, otherwise a PRODUCT_AMBIGUOUS rejection "
+                "lists the products and nothing is created. An id that is not yours is rejected."
             ),
         ),
     ] = "",
@@ -270,24 +261,11 @@ async def promote_task_to_project(
 @mcp.tool(
     title="List Tasks",
     description=(
-        "List tasks for your default product. mode='index' (leanest: id, alias, name, status, type, "
-        "dates), 'summary' (default) or 'full' (all columns; description is untruncated unless "
-        "memory_limit is passed). BOUNDED: at most `limit` rows and a response-size ceiling, and "
-        "the response always carries `truncated` plus a `truncation` block naming which bound cut "
-        "it -- treat a truncated list as INCOMPLETE. A cut response also carries "
-        "`truncation.next_cursor`: pass it back as `cursor` with the SAME filters to walk the "
-        "rest page by page until `truncated` is false, which is how you read every task without "
-        "guessing at slices. Every response also carries `counts`: the "
-        "totals for the WHOLE board (ignoring your filters), `matched` (rows your filters hit, "
-        "constant across a walk -- ignores `cursor`), `remaining` (rows still ahead of `cursor` "
-        "that match, only when walking; equals `matched` on the first page) and `returned` (rows "
-        "here) -- so you can size a request before making it. Use `query` to "
-        "find a task by a word in its title, description or TSK-nnnn alias. task_type filters by "
-        "tag: 'TSK' (ordinary) or 'HND' (session handovers); any other value is refused. "
-        "hidden is UI declutter "
-        "only (does not affect default visibility). Defaults to your default product; pass "
-        "product_id to list a specific product's tasks instead. See "
-        "get_giljo_guide for read-vs-write routing."
+        "List tasks for your default product (pass product_id for another). mode='index' (leanest), "
+        "'summary' (default) or 'full'. query finds a task by a word in its title, description or alias; "
+        "task_type filters 'TSK' (ordinary) or 'HND' (session handovers). Bounded: a cut response says so"
+        " (truncated + truncation) and carries truncation.next_cursor to walk the rest; counts sizes the "
+        "whole board, your match and this page. Details: get_giljo_guide."
     ),
     annotations=_tool_hints("list_tasks"),
 )
@@ -296,12 +274,8 @@ async def list_tasks(
         Literal["", "index", "summary", "full"],
         Field(
             description=(
-                "Projection mode. 'index' is the lean list-and-sort row, typically 35-40% smaller "
-                "than 'summary' -- the exact saving depends on how long your task titles are, "
-                "since the fields it drops are a fixed cost. 'full' carries every column. "
-                "'' (default) = 'summary', unless summary_only says otherwise. When mode is passed "
-                "explicitly (non-empty), it WINS over summary_only -- pass one or the other, not "
-                "both, unless you deliberately want mode's answer."
+                "'index' is the lean list row (about a third smaller than 'summary'), 'full' carries every "
+                "column, '' = 'summary'. An explicit mode wins over summary_only."
             )
         ),
     ] = "",
@@ -311,8 +285,8 @@ async def list_tasks(
         str,
         Field(
             description=(
-                "Filter by task tag: 'TSK' (ordinary) or 'HND' (session handovers -- how you "
-                "find the handover left for you). Any other value is refused."
+                "'TSK' (ordinary) or 'HND' (session handovers: how you find the one left for you). Any other "
+                "value is refused."
             )
         ),
     ] = "",
@@ -327,9 +301,8 @@ async def list_tasks(
             ge=0,
             le=LIST_TASKS_LIMIT_MAX,
             description=(
-                f"Max tasks to return (default {LIST_TASKS_LIMIT_DEFAULT}, max {LIST_TASKS_LIMIT_MAX}). "
-                "0 = use the default. Raise it deliberately to ask for more; the response still says "
-                "whether it was cut, and a response-size ceiling applies independently of this value."
+                f"Max tasks to return (default {LIST_TASKS_LIMIT_DEFAULT}, max {LIST_TASKS_LIMIT_MAX}; 0 = "
+                "default). A response-size ceiling applies as well; the response says whether it was cut."
             ),
         ),
     ] = 0,
@@ -338,8 +311,7 @@ async def list_tasks(
         Field(
             max_length=MCP_NAME_MAX,
             description=(
-                "Case-insensitive substring to search title, description and taxonomy_alias "
-                "(e.g. 'oauth', 'TSK-9438'). Empty = no search filter."
+                "Case-insensitive substring over title, description and taxonomy_alias (e.g. 'oauth', 'TSK-9438')."
             ),
         ),
     ] = "",
