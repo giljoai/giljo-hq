@@ -176,20 +176,21 @@ def _stamp_bridge(db_url: str, current: str, head: str) -> bool:
 
 
 def _ensure_dependencies() -> bool:
-    try:
-        import alembic  # noqa: F401
-        import sqlalchemy  # noqa: F401
-
-        return True
-    except ImportError:
-        pass
+    from startup_support.requirements_drift import unsatisfied_requirements
 
     req_file = ROOT / "requirements.txt"
     if not req_file.exists():
-        err("requirements.txt not found. Cannot install missing dependencies.")
+        err("requirements.txt not found. Cannot check or install dependencies.")
         return False
 
-    info("Installing missing dependencies (first run after update)...")
+    drifted = unsatisfied_requirements(req_file)
+    if not drifted:
+        return True
+
+    info("Requirements changed since the last install:")
+    for line in drifted:
+        info(f"  {line}")
+    info("Installing dependencies (first run after update)...")
     cmd = [sys.executable, "-m", "pip", "install", "-q", "-r", str(req_file)]
     lock_file = ROOT / "requirements.lock"
     if lock_file.exists():
@@ -197,6 +198,13 @@ def _ensure_dependencies() -> bool:
     proc = subprocess.run(cmd, check=False)
     if proc.returncode != 0:
         err("Failed to install dependencies. Run manually: pip install -r requirements.txt")
+        return False
+    remaining = unsatisfied_requirements(req_file)
+    if remaining:
+        err("Dependencies are still not satisfied after pip install:")
+        for line in remaining:
+            err(f"  {line}")
+        err("Run manually: pip install -r requirements.txt")
         return False
     ok("Dependencies installed.")
     return True

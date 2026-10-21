@@ -645,8 +645,9 @@ class TestNothingThatWorksTodayStopsWorking:
 
         try:
             payload = _payload(await _list_tasks(client))
-            for key in ("tasks", "count", "mode", "tenant_key", "product_id"):
+            for key in ("tasks", "count", "mode", "product_id"):
                 assert key in payload, f"the shipped key {key!r} must survive; got {sorted(payload)!r}"
+            assert "tenant_key" not in payload, "the internal account id is not part of any MCP reply"
             assert isinstance(payload["tasks"], list)
             assert isinstance(payload["count"], int)
             assert payload["mode"] == "summary"
