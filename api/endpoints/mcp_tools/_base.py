@@ -30,6 +30,7 @@ from api.endpoints.mcp_tools._harness import (  # noqa: F401
     _resolve_preset_name,
     get_session_capabilities,
 )
+from api.endpoints.mcp_tools._reply_scrub import scrub_tenant_key
 
 from api.endpoints.mcp_tools._silence_scope import NON_SILENCE_CLEARING_TOOLS, SILENCE_CLEARING_TOOLS  # noqa: F401
 from giljo_mcp import __version__ as _giljo_version
@@ -395,6 +396,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
 
     if isinstance(result, BaseModel):
         result = result.model_dump(mode="json")
+    result = scrub_tenant_key(result)
 
     if isinstance(result, dict):
         meta = result.get("_meta")

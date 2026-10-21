@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from startup_support import requirements_drift
 from startup_support.console import print_error, print_header, print_info, print_success, print_warning
 
 
@@ -359,26 +360,21 @@ def install_requirements() -> bool:
 
     print_info("Checking if requirements are already installed...")
 
-    all_installed = True
-    for module_name, _package_name in critical_packages:
-        try:
-            __import__(module_name)
-        except ImportError:
-            all_installed = False
-            break
-
-    if all_installed:
-        print_success("Requirements already installed")
-        return True
-
-    print_info("Installing requirements from requirements.txt...")
-
     requirements_path = Path.cwd() / "requirements.txt"
     if not requirements_path.exists():
         print_error("requirements.txt not found")
         print_info(f"Expected at: {requirements_path}")
         return False
 
+    drifted = requirements_drift.unsatisfied_requirements(requirements_path)
+    if not drifted:
+        print_success("Requirements already installed")
+        return True
+
+    print_warning("Requirements changed since the last install:")
+    for line in drifted:
+        print_info(f"  {line}")
+    print_info("Installing requirements from requirements.txt...")
     print_warning("This may take 2-3 minutes on first install...")
 
     try:
@@ -395,8 +391,15 @@ def install_requirements() -> bool:
         print_success("Requirements installed successfully")
 
         print_info("Verifying installation...")
-        failed_packages = []
+        remaining = requirements_drift.unsatisfied_requirements(requirements_path)
+        if remaining:
+            print_error("Requirements are still not satisfied after pip install:")
+            for line in remaining:
+                print_info(f"  {line}")
+            print_info("Try installing manually: pip install -r requirements.txt")
+            return False
 
+        failed_packages = []
         for module_name, package_name in critical_packages:
             try:
                 __import__(module_name)

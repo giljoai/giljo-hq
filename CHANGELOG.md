@@ -2,6 +2,22 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.9.1] — 2026-10-21
+
+### Changed
+
+MCP tool replies no longer include the internal account identifier; agents never needed it.
+
+### Fixed
+
+After an update, the installer now notices when a required package is older than the new minimum and upgrades it, instead of starting with the old version and failing later.
+The web app's package list is now written so that the npm bundled with Node 22 accepts it; updates no longer stop at the frontend install step.
+
+### Security
+
+Trusted certificate list updated to certifi 2026.10.19, which removes compromised intermediate certificates (PYSEC-2026-4320).
+Updated the follow-redirects package in the web app build to 1.16.1, which closes two credential-handling advisories.
+
 ## [2.9.0] — 2026-10-19
 
 ### Changed
