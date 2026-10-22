@@ -233,35 +233,15 @@ async def lifespan(app: FastAPI):
 
     _deletion_reaper_task = None
     if GILJO_MODE == "saas" and should_run_background_jobs():
-        try:
-            import importlib as _il
+        from api.startup.saas_enforcement_gate import start_deletion_reaper_phase
 
-            _del_reaper_mod = _il.import_module("giljo_mcp.saas.deletion.reaper")
-            _del_restore_svc_mod = _il.import_module("giljo_mcp.saas.restore.service")
-            _deletion_reaper_task = await _del_reaper_mod.start_deletion_reaper(
-                state.db_manager.AsyncSessionLocal,
-                _del_restore_svc_mod.build_storage_adapter_from_env(),
-            )
-            logger.info("Deletion reaper background task started")
-        except Exception as e:
-            logger.warning("Optional startup phase [deletion_reaper] failed: %s — running without deletion reaper", e)
-            state.degraded_services.append("deletion_reaper")
+        _deletion_reaper_task = await start_deletion_reaper_phase(state)
 
     _backup_scheduler_task = None
     if GILJO_MODE == "saas" and should_run_background_jobs():
-        try:
-            import importlib as _il
+        from api.startup.saas_enforcement_gate import start_backup_scheduler_phase
 
-            _backup_sched_mod = _il.import_module("giljo_mcp.saas.backup.scheduler")
-            _restore_svc_mod = _il.import_module("giljo_mcp.saas.restore.service")
-            _backup_adapter = _restore_svc_mod.build_storage_adapter_from_env()
-            _backup_scheduler_task = await _backup_sched_mod.start_backup_scheduler(
-                state.db_manager.AsyncSessionLocal, _backup_adapter
-            )
-            logger.info("Backup snapshot scheduler background task started")
-        except Exception as e:
-            logger.warning("Optional startup phase [backup_scheduler] failed: %s — running without backup scheduler", e)
-            state.degraded_services.append("backup_scheduler")
+        _backup_scheduler_task = await start_backup_scheduler_phase(state)
 
     await install_access_log(state, giljo_mode=GILJO_MODE)
 

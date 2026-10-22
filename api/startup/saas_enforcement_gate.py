@@ -30,6 +30,52 @@ def register_saas_tenant_scoped_models(*, giljo_mode: str) -> None:
         raise
 
 
+def _is_backup_key_error(exc: BaseException) -> bool:
+    errors = importlib.import_module("giljo_mcp.saas.backup.errors")
+    return isinstance(exc, errors.BackupEncryptionKeyInvalidError | errors.BackupEncryptionKeyMissingError)
+
+
+async def start_deletion_reaper_phase(state):
+    try:
+        reaper_mod = importlib.import_module("giljo_mcp.saas.deletion.reaper")
+        restore_mod = importlib.import_module("giljo_mcp.saas.restore.service")
+        task = await reaper_mod.start_deletion_reaper(
+            state.db_manager.AsyncSessionLocal,
+            restore_mod.build_storage_adapter_from_env(),
+        )
+    except Exception as exc:
+        if _is_backup_key_error(exc):
+            logger.critical(
+                "SaaS Phase 10 [deletion_reaper] backup encryption key is invalid — aborting boot (SEC-9817)"
+            )
+            raise
+        logger.warning("Optional startup phase [deletion_reaper] failed: %s — running without deletion reaper", exc)
+        state.degraded_services.append("deletion_reaper")
+        return None
+    logger.info("Deletion reaper background task started")
+    return task
+
+
+async def start_backup_scheduler_phase(state):
+    try:
+        sched_mod = importlib.import_module("giljo_mcp.saas.backup.scheduler")
+        restore_mod = importlib.import_module("giljo_mcp.saas.restore.service")
+        task = await sched_mod.start_backup_scheduler(
+            state.db_manager.AsyncSessionLocal, restore_mod.build_storage_adapter_from_env()
+        )
+    except Exception as exc:
+        if _is_backup_key_error(exc):
+            logger.critical(
+                "SaaS Phase 10.6 [backup_scheduler] backup encryption key is invalid — aborting boot (SEC-9817)"
+            )
+            raise
+        logger.warning("Optional startup phase [backup_scheduler] failed: %s — running without backup scheduler", exc)
+        state.degraded_services.append("backup_scheduler")
+        return None
+    logger.info("Backup snapshot scheduler background task started")
+    return task
+
+
 def require_public_base_url(*, giljo_mode: str) -> None:
     is_saas = giljo_mode == "saas"
     if not is_saas:
