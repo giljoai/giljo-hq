@@ -31,8 +31,8 @@ class TestEventNamesTheHarness:
 
     def test_emit_site_resolves_the_harness_from_client_info(self) -> None:
         src = MIDDLEWARE.read_text(encoding="utf-8")
-        assert "harness_from_client_info" in src
-        assert "_announce_client_connected(tenant_key, user_id, client_info)" in src, (
+        assert "harness_for_connection" in src
+        assert re.search(r"_announce_client_connected\(\s*tenant_key, user_id, client_info\b", src), (
             "client_info is not passed to _announce_client_connected -- the resolver "
             "would receive nothing and every connect would report 'generic'."
         )

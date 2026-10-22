@@ -28,6 +28,7 @@ from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.oauth import OAuthAuthorizationCode
 from giljo_mcp.services import oauth_token_idempotency as _idem
+from giljo_mcp.services.oauth_cimd import is_cimd_client_id, resolve_cimd_client
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class ResolvedClient:
     client_name: str
     redirect_uris: list[str] | None
     client_secret_hash: str | None
+    redirect_matcher: Callable[[str], bool] | None = None
 
 
 ClientResolver = Callable[
@@ -93,6 +95,8 @@ def get_client_resolver() -> ClientResolver:
 
 
 async def _resolve_client(client_id: str, tenant_key: str) -> ResolvedClient | None:
+    if is_cimd_client_id(client_id):
+        return await resolve_cimd_client(client_id)
     resolved = _resolver(client_id, tenant_key)
     return await resolved if inspect.isawaitable(resolved) else resolved
 
@@ -200,6 +204,8 @@ class OAuthService:
 
     @staticmethod
     def _redirect_uri_matches(resolved: ResolvedClient, redirect_uri: str) -> bool:
+        if resolved.redirect_matcher is not None:
+            return resolved.redirect_matcher(redirect_uri)
         if resolved.redirect_uris is None:
             return OAuthService.validate_redirect_uri(redirect_uri)
         if not redirect_uri:
@@ -377,6 +383,7 @@ class OAuthService:
                 audience=token_audience,
                 scope=auth_code.scope,
                 revocation_epoch=user.token_revocation_epoch or 0,
+                client_id=client_id if is_cimd_client_id(client_id) else None,
             )
 
             logger.info(

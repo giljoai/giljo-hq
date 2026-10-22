@@ -151,6 +151,7 @@ class OAuthMetadataResponse(BaseModel):
         description="Client auth methods supported by /token (RFC 8414 §3.2).",
     )
     registration_endpoint: str | None = None
+    client_id_metadata_document_supported: bool = True
     revocation_endpoint: str | None = None
     mcp_spec_versions_supported: list[str] = Field(
         default_factory=list,
