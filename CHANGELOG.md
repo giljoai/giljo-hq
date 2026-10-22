@@ -2,6 +2,16 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.10.0] — 2026-10-22
+
+### Added
+
+- Sign in from Claude Code, Claude Desktop, claude.ai, ChatGPT, Codex and VS Code without a registration step. These apps identify themselves with a client metadata document (CIMD), the sign-in method the current MCP standard recommends. Apps that still register first, such as Cursor and OpenCode, work exactly as before.
+
+### Changed
+
+- Self-hosted servers now also accept sign-in from hosted apps such as Claude and ChatGPT that identify themselves with a client metadata document. This works when your server is reachable over HTTPS. Loopback sign-in for desktop and command-line tools is unchanged.
+
 ## [2.9.1] — 2026-10-21
 
 ### Changed
