@@ -20,7 +20,7 @@
 # The hash below is the canonical direct-dep set of requirements.txt. The CI
 # drift gate (tests/unit/test_requirements_lock_drift.py) REDs if it no longer
 # matches — i.e. requirements.txt was changed without regenerating this lock.
-# requirements-txt-hash: sha256:06d692f099b37d40d427b41471f56e3bbd2797c04e47276cbd57b114b96e72b9
+# requirements-txt-hash: sha256:0e8183c032f0183e6f0d7b754573d02e2aea73734e9c62af59c0f08312e847c8
 aiosmtplib==5.1.3
     # via -r requirements.txt
 alembic==1.20.0
@@ -91,7 +91,9 @@ h11==0.16.0
     #   httpcore2
     #   uvicorn
 httpcore==1.0.9
-    # via httpx
+    # via
+    #   -r requirements.txt
+    #   httpx
 httpcore2==2.15.1
     # via httpx2
 httptools==0.9.0

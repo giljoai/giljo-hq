@@ -50,6 +50,7 @@ pyyaml>=6.0.3              # YAML configuration parsing
 click>=8.5.0               # CLI interface builder
 colorama>=0.4.6            # Cross-platform colored terminal output (required by startup.py)
 httpx>=0.28.1              # Modern async HTTP client
+httpcore>=1.0.9            # Imported directly by the CIMD client-metadata fetcher (services/oauth_cimd.py); httpx bounds it to 1.x
 packaging>=26.3            # Version parsing for the CE update checker (api/startup/update_checker.py); previously transitive-only (INF-8000f)
 psutil>=7.2.2              # Process and system utilities (required for network detection and statistics)
 tiktoken>=0.14.0            # Token counting for Context Management System (context prioritization and orchestration)

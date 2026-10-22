@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,24 @@ _HARNESS_BY_CLIENT_NAME: dict[str, str] = {
     "codex-mcp-client": HARNESS_CODEX,
     "opencode": HARNESS_OPENCODE,
 }
+
+
+CIMD_CLIENT_HARNESSES: dict[str, str] = {
+    "https://claude.ai/oauth/claude-code-client-metadata": HARNESS_CLAUDE_CODE,
+    "https://claude.ai/oauth/mcp-oauth-client-metadata": GENERIC_HARNESS,
+    "https://chatgpt.com/oauth/client.json": GENERIC_HARNESS,
+    "https://chatgpt.com/oauth/codex/client.json": HARNESS_CODEX,
+    "https://vscode.dev/oauth/client-metadata.json": GENERIC_HARNESS,
+    "https://insiders.vscode.dev/oauth/client-metadata.json": GENERIC_HARNESS,
+    "https://opencode.ai/oauth/opencode/client.json": HARNESS_OPENCODE,
+    "https://cursor.com/oauth/mcp-client.json": GENERIC_HARNESS,
+}
+
+CIMD_CLIENT_HARNESS_PATTERNS: dict[str, str] = {
+    "https://chatgpt.com/oauth/{callback_id}/client.json": GENERIC_HARNESS,
+    "https://chatgpt.com/oauth/codex/{callback_id}/client.json": HARNESS_CODEX,
+}
+_CALLBACK_ID = r"[A-Za-z0-9._~-]+"
 
 
 _KNOWN_GENERIC_CLIENT_NAMES: frozenset[str] = frozenset(
@@ -50,6 +69,26 @@ _PRESET_BY_CLIENT_NAME: dict[str, str] = {
 
 def preset_from_client_info(name: str | None, version: str | None = None) -> str | None:
     return _PRESET_BY_CLIENT_NAME.get((name or "").strip())
+
+
+def harness_from_oauth_client_id(client_id: str | None) -> str | None:
+    if not client_id:
+        return None
+    exact = CIMD_CLIENT_HARNESSES.get(client_id)
+    if exact is not None:
+        return exact
+    for template, harness in CIMD_CLIENT_HARNESS_PATTERNS.items():
+        regex = re.escape(template).replace(re.escape("{callback_id}"), _CALLBACK_ID)
+        if re.fullmatch(regex, client_id):
+            return harness
+    return None
+
+
+def harness_for_connection(client_info: dict | None, oauth_client_id: str | None) -> str:
+    info = client_info or {}
+    return harness_from_oauth_client_id(oauth_client_id) or harness_from_client_info(
+        info.get("name"), info.get("version")
+    )
 
 
 def harness_from_client_info(name: str | None, version: str | None = None) -> str:

@@ -111,14 +111,15 @@ class AuthRepository:
         return list(result.scalars().all())
 
     async def connected_harnesses(self, session: AsyncSession, tenant_key: str) -> dict[str, str]:
-        from giljo_mcp.harness_resolver import harness_from_client_info
+        from giljo_mcp.harness_resolver import harness_for_connection
 
         stmt = select(MCPSession.session_data, MCPSession.last_accessed).where(MCPSession.tenant_key == tenant_key)
         result = await session.execute(stmt)
         seen: dict[str, str] = {}
         for session_data, last_accessed in result.all():
-            client_info = (session_data or {}).get("client_info") or {}
-            harness = harness_from_client_info(client_info.get("name"), client_info.get("version"))
+            harness = harness_for_connection(
+                (session_data or {}).get("client_info"), (session_data or {}).get("oauth_client_id")
+            )
             stamp = last_accessed.isoformat() if last_accessed else ""
             if stamp > seen.get(harness, ""):
                 seen[harness] = stamp

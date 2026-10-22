@@ -1,6 +1,6 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-10-18*
+*Last updated: 2026-10-22*
 
 ## Overview
 
@@ -11,6 +11,20 @@ been retired and are no longer registered — only the final names below are. Ev
 authenticated, either by a browser sign-in (OAuth) or by an API key passed as a Bearer
 token. Community Edition's Connect tab gives you an API key command. Tenant isolation is enforced server-side; agents
 cannot cross tenant boundaries.
+
+### Signing in from an OAuth client
+
+An OAuth client can identify itself in two ways: by registering with the server first
+(Dynamic Client Registration), or by sending the HTTPS address of a client metadata
+document as its client ID. In the second case the server fetches that document (HTTPS on
+the standard port, public hosts only, no redirects, at most 16 KiB, within 5 seconds),
+requires the client ID inside it to match the address, and requires the redirect address of
+the sign-in request to be listed there. Loopback redirect addresses match whatever port the
+client picked. The client is treated as a public client that proves possession with PKCE.
+The server's OAuth discovery document advertises this with
+`client_id_metadata_document_supported`. Both ways work on hosted and self-hosted servers;
+a self-hosted server must be reachable over HTTPS for hosted apps such as Claude and
+ChatGPT to use it.
 
 Tool names match the exact MCP registrations at the time of the date above. The MCP
 registry itself is roster-locked by

@@ -26,6 +26,7 @@ from giljo_mcp.models.auth import User
 from giljo_mcp.models.oauth import OAuthRefreshToken
 from giljo_mcp.services._idem_crypto import decrypt_payload, encrypt_payload
 from giljo_mcp.services.cache_backends import OAUTH_REFRESH_BACKEND_NAME, get_cache_backend
+from giljo_mcp.services.oauth_cimd import is_cimd_client_id
 
 
 if TYPE_CHECKING:
@@ -395,6 +396,7 @@ async def _refresh_grant_after_lookup(
         audience=row.aud or None,
         scope=row.scope,
         revocation_epoch=user.token_revocation_epoch or 0,
+        client_id=row.client_id if is_cimd_client_id(row.client_id) else None,
     )
     new_refresh = await issue_refresh_token(
         db,

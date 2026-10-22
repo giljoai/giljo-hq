@@ -85,6 +85,7 @@ def _initialize_capture(scope: Scope) -> dict[str, Any]:
     return {
         "protocol_version": request_state.get("mcp_protocol_version"),
         "capabilities": request_state.get("mcp_client_capabilities"),
+        "oauth_client_id": request_state.get("oauth_client_id"),
     }
 
 
@@ -96,7 +97,10 @@ class MCPAuthMiddleware:
 
     @staticmethod
     async def _announce_client_connected(
-        tenant_key: str | None, user_id: str | None, client_info: dict | None = None
+        tenant_key: str | None,
+        user_id: str | None,
+        client_info: dict | None = None,
+        oauth_client_id: str | None = None,
     ) -> None:
         from api.app_state import state as app_state
 
@@ -104,9 +108,9 @@ class MCPAuthMiddleware:
         if ws_manager and tenant_key:
             from giljo_mcp.events.schemas import EventFactory
 
-            from giljo_mcp.harness_resolver import harness_from_client_info
+            from giljo_mcp.harness_resolver import harness_for_connection
 
-            harness = harness_from_client_info((client_info or {}).get("name"), (client_info or {}).get("version"))
+            harness = harness_for_connection(client_info, oauth_client_id)
             event = EventFactory.setup_tool_connected(
                 tenant_key=tenant_key,
                 user_id=str(user_id) if user_id else "unknown",
@@ -171,6 +175,7 @@ class MCPAuthMiddleware:
                     user_id = principal.user_id
                     auth_method = "jwt"
                     must_change_password = principal.user.must_change_password
+                    scope.setdefault("state", {})["oauth_client_id"] = principal.oauth_client_id
                     token_scopes = principal.scopes if principal.scopes is not None else ["mcp:read", "mcp:write"]
                 except PrincipalValidationError as exc:
                     if exc.reason in JWT_FALLBACK_REASONS:
@@ -276,7 +281,9 @@ class MCPAuthMiddleware:
                 return
 
         if announces_client(method):
-            await self._announce_client_connected(tenant_key, user_id, client_info)
+            await self._announce_client_connected(
+                tenant_key, user_id, client_info, scope.get("state", {}).get("oauth_client_id")
+            )
 
         send = await self._apply_session_lifecycle(
             scope=scope,
@@ -454,6 +461,7 @@ class MCPAuthMiddleware:
         client_info: dict[str, Any] | None = None,
         protocol_version: str | None = None,
         capabilities: dict[str, Any] | None = None,
+        oauth_client_id: str | None = None,
     ) -> None:
         if not tenant_key:
             return
@@ -472,6 +480,7 @@ class MCPAuthMiddleware:
                     auth_method="oauth_jwt" if auth_method == "jwt" else auth_method,
                     protocol_version=protocol_version,
                     capabilities=capabilities,
+                    oauth_client_id=oauth_client_id,
                 )
         except SQLAlchemyError:
             logger.warning("BE-9586d: could not record announced client (non-fatal)", exc_info=True)
@@ -485,6 +494,7 @@ class MCPAuthMiddleware:
         client_info: dict[str, Any] | None = None,
         protocol_version: str | None = None,
         capabilities: dict[str, Any] | None = None,
+        oauth_client_id: str | None = None,
     ) -> str | None:
         if auth_method != "jwt" or not user_id:
             return None
@@ -502,5 +512,6 @@ class MCPAuthMiddleware:
                 auth_method="oauth_jwt",
                 protocol_version=protocol_version,
                 capabilities=capabilities,
+                oauth_client_id=oauth_client_id,
             )
             return session.session_id
