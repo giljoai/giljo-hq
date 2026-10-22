@@ -64,6 +64,7 @@ class Principal:
     exp: int | None = None
     jti: str | None = None
     terms_version: str | None = None
+    oauth_client_id: str | None = None
 
 
 async def _resolve_api_key(db: AsyncSession, api_key: str) -> tuple[APIKey, User] | None:
@@ -171,6 +172,7 @@ async def _validate_jwt(
         exp=payload.get("exp"),
         jti=jti,
         terms_version=payload["tos"] if isinstance(payload.get("tos"), str) else None,
+        oauth_client_id=payload["cid"] if isinstance(payload.get("cid"), str) else None,
     )
 
 

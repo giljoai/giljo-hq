@@ -26,7 +26,7 @@ class OAuthAuthorizationCode(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     code = Column(String(128), unique=True, nullable=False, index=True)
-    client_id = Column(String(64), nullable=False)
+    client_id = Column(String(256), nullable=False)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     tenant_key = Column(String(64), nullable=False)
     redirect_uri = Column(String(2048), nullable=False)
@@ -56,7 +56,7 @@ class OAuthRefreshToken(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     token_hash = Column(String(64), nullable=False, unique=True)
     family_id = Column(PG_UUID(as_uuid=False), nullable=False)
-    client_id = Column(String(64), nullable=False)
+    client_id = Column(String(256), nullable=False)
     tenant_key = Column(String(64), nullable=False)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     scope = Column(Text, nullable=True)

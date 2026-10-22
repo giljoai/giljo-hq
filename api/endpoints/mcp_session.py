@@ -14,9 +14,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.harness_resolver import preset_from_client_info
+from giljo_mcp.harness_resolver import harness_for_connection, preset_from_client_info
 from giljo_mcp.models import MCPSession
-from giljo_mcp.platform_registry import harness_from_client_info
 from giljo_mcp.services.debounce import should_run
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -28,11 +27,13 @@ def _client_info_patch(
     client_info: dict[str, Any] | None,
     protocol_version: str | None = None,
     capabilities: dict[str, Any] | None = None,
+    oauth_client_id: str | None = None,
 ) -> dict[str, Any]:
     info = client_info or {}
     return {
         "client_info": info,
-        "resolved_harness": harness_from_client_info(info.get("name"), info.get("version")),
+        "oauth_client_id": oauth_client_id,
+        "resolved_harness": harness_for_connection(info, oauth_client_id),
         "resolved_preset": preset_from_client_info(info.get("name"), info.get("version")),
         "protocol_version": protocol_version,
         "client_capabilities": capabilities,
@@ -118,12 +119,13 @@ class MCPSessionManager:
         session_id: str | None = None,
         protocol_version: str | None = None,
         capabilities: dict[str, Any] | None = None,
+        oauth_client_id: str | None = None,
     ) -> MCPSession:
         self.db.info["tenant_key"] = tenant_key
         session_data: dict[str, Any] = {
             "initialized": False,
             "capabilities": {},
-            **_client_info_patch(client_info, protocol_version, capabilities),
+            **_client_info_patch(client_info, protocol_version, capabilities, oauth_client_id),
             "tool_call_history": [],
         }
         if auth_method:
@@ -160,6 +162,7 @@ class MCPSessionManager:
         auth_method: str | None = None,
         protocol_version: str | None = None,
         capabilities: dict[str, Any] | None = None,
+        oauth_client_id: str | None = None,
     ) -> MCPSession | None:
         name = (client_info or {}).get("name")
         if not isinstance(name, str) or not name:
@@ -182,7 +185,7 @@ class MCPSessionManager:
         )
 
         if existing is not None:
-            patch = _client_info_patch(client_info, protocol_version, capabilities)
+            patch = _client_info_patch(client_info, protocol_version, capabilities, oauth_client_id)
             await self.update_session_data(existing.session_id, patch, merge=True, tenant_key=tenant_key)
             await self.db.refresh(existing)
             return existing
@@ -195,6 +198,7 @@ class MCPSessionManager:
             auth_method=auth_method,
             protocol_version=protocol_version,
             capabilities=capabilities,
+            oauth_client_id=oauth_client_id,
         )
 
     async def resurrect_session(
@@ -303,8 +307,6 @@ class MCPSessionManager:
         return True
 
     async def delete_sessions_for_harness(self, *, tenant_key: str, harness: str) -> int:
-        from giljo_mcp.platform_registry import harness_from_client_info
-
         self.db.info["tenant_key"] = tenant_key
 
         rows = (await self.db.execute(select(MCPSession).where(MCPSession.tenant_key == tenant_key))).scalars().all()
@@ -312,9 +314,8 @@ class MCPSessionManager:
         doomed = [
             row
             for row in rows
-            if harness_from_client_info(
-                ((row.session_data or {}).get("client_info") or {}).get("name"),
-                ((row.session_data or {}).get("client_info") or {}).get("version"),
+            if harness_for_connection(
+                (row.session_data or {}).get("client_info"), (row.session_data or {}).get("oauth_client_id")
             )
             == harness
         ]
