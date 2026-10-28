@@ -92,18 +92,17 @@ def test_ce_0035_staging_prompt_includes_toolsearch_bootstrap_for_claude_code():
     rendered = _render_staging_prompt(tool="claude-code")
     assert "STEP 0 — TOOLSEARCH BOOTSTRAP" in rendered
     assert "select:" in rendered
-    from giljo_mcp.branding import MCP_ALIAS
-
-    assert f"mcp__{MCP_ALIAS}__" in rendered
+    assert "select:get_giljo_guide," in rendered
+    assert "mcp__" not in rendered.split("ToolSearch(")[1].split(")")[0]
 
 
 def test_ce_0035_staging_prompt_toolsearch_precedes_start_now_workflow():
     rendered = _render_staging_prompt(tool="claude-code")
     bootstrap_idx = rendered.index("STEP 0 — TOOLSEARCH BOOTSTRAP")
     start_now_idx = rendered.index("START NOW:")
-    health_check_idx = rendered.index("health_check()", start_now_idx)
-    assert bootstrap_idx < start_now_idx < health_check_idx, (
-        "Bootstrap order broken: STEP 0 must precede START NOW + health_check"
+    first_call_idx = rendered.index("get_staging_instructions(job_id=", start_now_idx)
+    assert bootstrap_idx < start_now_idx < first_call_idx, (
+        "Bootstrap order broken: STEP 0 must precede START NOW + its first call"
     )
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import GateRefusalError, ValidationError
 
 
 if TYPE_CHECKING:
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 
 ORCHESTRATOR_ONLY = "ORCHESTRATOR_ONLY"
+NEVER_STARTED = "JOB_NEVER_STARTED"
 NEVER_STARTED_STATUSES = frozenset({"waiting", "staged"})
 
 
@@ -48,9 +49,15 @@ async def require_project_orchestrator(
     )
 
 
-def warn_if_never_started(job: AgentJob, execution: AgentExecution, warnings: list[str]) -> None:
+def refuse_if_never_started(job: AgentJob, execution: AgentExecution) -> None:
     if job.job_type != "orchestrator" and execution.status in NEVER_STARTED_STATUSES:
-        warnings.append(
-            f"This job was never started (status '{execution.status}'): no agent called "
-            "get_job_mission on it. It is now complete. If you meant your own job, check the job_id."
+        raise GateRefusalError(
+            message=(
+                f"This job was never started (status '{execution.status}'): no agent called "
+                "get_job_mission on it, so it cannot be marked complete. If the job is not needed, "
+                "call dismiss_job(job_id). If it is, have its worker call get_job_mission(job_id) "
+                "first. If you meant a different job, check the job_id. The job was NOT changed."
+            ),
+            error_code=NEVER_STARTED,
+            context={"job_id": job.job_id, "agent_status": execution.status, "next_action": "dismiss_job"},
         )

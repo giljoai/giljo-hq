@@ -234,7 +234,9 @@ class TestServedContentIsUnchanged:
         identity, source, scope = await self._served(db_manager, db_session, test_tenant_key, product_id=product_id)
 
         assert (
-            identity == compose_orchestrator_identity(PRODUCT_TEXT, tool="multi_terminal", role=None) + f"\n\n{source}"
+            identity
+            == compose_orchestrator_identity(PRODUCT_TEXT, tool="multi_terminal", role=None, phase="staging")
+            + f"\n\n{source}"
         )
         assert source.startswith(f"identity source: product override ({PRODUCT_NAME}), saved ")
         assert scope == SCOPE_PRODUCT
@@ -244,7 +246,9 @@ class TestServedContentIsUnchanged:
             db_manager, db_session, test_tenant_key, product_id=str(uuid.uuid4())
         )
 
-        assert identity == compose_orchestrator_identity(None, tool="multi_terminal", role=None) + f"\n\n{source}"
+        assert identity == compose_orchestrator_identity(None, tool="multi_terminal", role=None, phase="staging") + (
+            f"\n\n{source}"
+        )
         assert source == "identity source: built-in default"
         assert scope == SCOPE_DEFAULT
 

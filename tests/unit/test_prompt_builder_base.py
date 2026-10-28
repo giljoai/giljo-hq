@@ -102,16 +102,14 @@ class TestSharedSections:
     def agent_jobs(self):
         return [_make_agent_job()]
 
-    def test_all_builders_contain_health_check(self, project, agent_jobs):
+    def test_no_builder_mandates_health_check(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
 
         for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
-            assert "health_check()" in result, f"{builder_cls.__name__} missing health_check"
-            assert "mcp__giljo_mcp__health_check()" not in result, (
-                f"{builder_cls.__name__} still prefixes health_check (should be bare for all platforms)"
-            )
+            assert "health_check" not in result, f"{builder_cls.__name__} still mentions health_check"
+            assert "get_job_mission(" in result, f"{builder_cls.__name__} missing get_job_mission"
 
     def test_all_builders_contain_identity(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder

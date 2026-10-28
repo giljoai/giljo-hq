@@ -57,7 +57,7 @@ class TestAgentProtocolFormat:
 
         assert "**Your Identifiers:**" in protocol
         identifiers_start = protocol.index("**Your Identifiers:**")
-        identifiers_end = protocol.index("**When to Check Messages:**")
+        identifiers_end = len(protocol)
         identifiers_section = protocol[identifiers_start:identifiers_end]
 
         assert "job-123" in identifiers_section, "job_id should be job-123"
@@ -74,8 +74,8 @@ class TestAgentProtocolFormat:
 
         get_thread_history_calls = re.findall(r"get_thread_history\([^)]+\)", protocol)
 
-        assert len(get_thread_history_calls) >= 4, (
-            f"Expected at least 4 get_thread_history examples, found {len(get_thread_history_calls)}"
+        assert len(get_thread_history_calls) >= 2, (
+            f"Expected at least 2 get_thread_history examples, found {len(get_thread_history_calls)}"
         )
 
         for call in get_thread_history_calls:
@@ -117,6 +117,6 @@ class TestCH2ProgressTracking:
         from giljo_mcp.services.protocol_builder import _build_ch2_startup
 
         ch2 = _build_ch2_startup(orchestrator_id="orch-123", project_id="proj-456")
-        assert "STEP 1b" in ch2, "CH2 should contain Step 1b for progress tracking"
-        assert "report_progress" in ch2, "Step 1b should reference report_progress"
-        assert "PROJECT OUTCOME" in ch2, "Step 1b should scope to project outcomes, not orchestrator actions"
+        assert "STEP 1: Plan Implementation Deliverables" in ch2
+        assert "report_progress(job_id='orch-123'" in ch2, "the step carries the explicit call line"
+        assert "PROJECT OUTCOME" in ch2, "the step scopes to project outcomes, not orchestrator actions"

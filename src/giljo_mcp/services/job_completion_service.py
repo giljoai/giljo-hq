@@ -48,7 +48,7 @@ from giljo_mcp.services.job_completion_staging import (  # noqa: F401 — consta
     is_staging_phase_orchestrator,
     staging_directive_for,
 )
-from giljo_mcp.services.orchestrator_caller_guard import warn_if_never_started
+from giljo_mcp.services.orchestrator_caller_guard import refuse_if_never_started
 from giljo_mcp.services.project_helpers import broadcast_deferred_events
 from giljo_mcp.services.protocol_survival import build_complete_job_footer
 from giljo_mcp.services.sequence_run_service import active_chain_run
@@ -152,6 +152,7 @@ class JobCompletionService:
 
                 if execution:
                     job = await self._fetch_job_for_completion(session, job_id, tenant_key)
+                    refuse_if_never_started(job, execution)
 
                     is_staging_end, staging_end_project = await self._is_staging_end_orchestrator_call(
                         session, job, execution, tenant_key
@@ -189,7 +190,6 @@ class JobCompletionService:
                         is_closeout_phase=is_closeout_phase,
                     )
 
-                    warn_if_never_started(job, execution, warnings)
                     old_status, duration_seconds = await self.apply_completion(
                         session, job, execution, result, tenant_key, is_staging_end=is_staging_end
                     )

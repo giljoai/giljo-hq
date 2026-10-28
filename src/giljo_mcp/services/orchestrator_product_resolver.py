@@ -77,6 +77,14 @@ async def resolve_orchestrator_override(
         return ResolvedOverride(content=None)
 
 
+def identity_phase(project: Any | None, role: str | None) -> str | None:
+    if role is not None or project is None:
+        return None
+    from giljo_mcp.services.sequence_chain_context import chain_member_phase
+
+    return chain_member_phase(project)
+
+
 async def compose_identity_with_provenance(
     service: Any,
     session: AsyncSession,
@@ -97,7 +105,9 @@ async def compose_identity_with_provenance(
         product_name=await resolve_product_name(service, session, tenant_key, resolved.product_id),
         mode=resolved.mode,
     )
-    composed = compose_orchestrator_identity(resolved.content, tool=tool, role=role)
+    composed = compose_orchestrator_identity(
+        resolved.content, tool=tool, role=role, phase=identity_phase(project, role)
+    )
     return append_identity_source(composed, identity_source), identity_source, resolved.scope
 
 

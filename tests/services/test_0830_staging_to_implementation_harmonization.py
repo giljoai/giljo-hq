@@ -88,9 +88,9 @@ class TestThinPromptStrippedToFifteenLines:
         line_count = len(prompt.strip().splitlines())
         assert line_count <= 15, f"Prompt has {line_count} lines, expected <=15"
 
-    def test_contains_health_check(self, sample_project):
+    def test_does_not_mandate_health_check(self, sample_project):
         prompt = self._generate_prompt(sample_project)
-        assert "health_check" in prompt
+        assert "health_check" not in prompt
 
     def test_contains_job_id_and_project_id(self, sample_project):
         prompt = self._generate_prompt(sample_project)
@@ -164,6 +164,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_enabled=True,
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
+            staging_status="staging_complete",
             series_number=random.randint(1, 9000),
         )
 
@@ -232,6 +233,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_enabled=True,
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
+            staging_status="staging_complete",
             series_number=random.randint(1, 9000),
         )
 
@@ -301,6 +303,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_enabled=True,
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
+            staging_status="staging_complete",
             series_number=random.randint(1, 9000),
         )
 
@@ -334,7 +337,7 @@ class TestOrchestratorIdentityPopulated:
 
         identity = response.agent_identity
         assert "coordinate" in identity.lower(), "Identity must mention coordination"
-        assert "mission breakdown" in identity.lower() or "agent coordination" in identity.lower(), (
+        assert "## Writing Missions" in identity and "## Accepting Deliverables" in identity, (
             "Identity must describe orchestrator responsibilities"
         )
 

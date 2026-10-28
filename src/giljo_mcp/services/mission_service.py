@@ -133,7 +133,7 @@ class MissionService:
                 if gate_response is not None:
                     return gate_response
 
-                comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key) or {}
+                comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key, detected_harness) or {}
 
                 all_project_executions, mission_lookup, current_team_state, job_links = await self._fetch_team_context(
                     session, job, execution, job_id, tenant_key

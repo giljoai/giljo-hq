@@ -26,6 +26,8 @@ from giljo_mcp.schemas.service_responses import (
     SoftDeleteResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.chain_member_detach import detach_chain_member
+from giljo_mcp.services.project_helpers import broadcast_deferred_events
 from giljo_mcp.tenant import TenantManager
 
 
@@ -82,6 +84,7 @@ class ProjectDeletionService:
 
             await self._cancel_sequence_membership(session, project_id, tenant_key)
             await session.commit()
+            await broadcast_deferred_events(session)
 
             self._logger.info(
                 f"Soft deleted project {project_id} for tenant {tenant_key} "
@@ -120,7 +123,14 @@ class ProjectDeletionService:
             return
         run_id = run.get("id")
         if run.get("status") in ("running", "stalled"):
-            await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
+            await detach_chain_member(
+                db_manager=self.db_manager,
+                tenant_manager=self.tenant_manager,
+                project_id=project_id,
+                tenant_key=tenant_key,
+                test_session=session,
+                websocket_manager=self._websocket_manager,
+            )
             return
         try:
             await seq_service.remove_member(run_id=run_id, project_id=project_id, tenant_key=tenant_key)

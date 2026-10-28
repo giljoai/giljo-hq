@@ -115,6 +115,7 @@ export function useChainContext({ runId = () => null, projectId = () => null } =
       const proj = projects.value.find((p) => p.id === pid)
       const status = statusFor(pid)
       const isCompleted = status === 'completed'
+      const isDetached = status === 'detached'
       const isWorking = WORKING_STATUSES.has(status)
       const isPlanning = PLANNING_STATUSES.has(status) && !isCompleted && !isWorking
       return {
@@ -127,6 +128,7 @@ export function useChainContext({ runId = () => null, projectId = () => null } =
         status,
         isCurrent: pid === currentPid.value,
         isCompleted,
+        isDetached,
         needsReview: isCompleted && !sequenceRunStore.isReviewed(run.value?.id, pid),
         isStarted: status !== '' && status !== 'pending',
         isWorking,

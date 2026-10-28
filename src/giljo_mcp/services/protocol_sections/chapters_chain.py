@@ -450,18 +450,20 @@ order, do these IN ORDER:
          mark_read cursor returns only what's new since your last read.
       2. get_workflow_status(project_id=<P_i>) -> read ready_to_advance (the advance gate).
     {not_ready}
-    ready_to_advance True → P_i is DONE — that is the server's ONE authoritative advance signal
+    ready_to_advance True → P_i is DONE (closed out, or parked/cancelled/superseded/deleted and
+    DETACHED from the chain: skip it) — that is the server's ONE authoritative advance signal
     (the companion project_closeout_at is the commit-SHA timestamp, log evidence only, NOT the
     trigger). Do NOT advance on status "complete" alone, nor on a sub-orch's Hub "clear to
     advance" note (advisory — it can lead the gate). Then go to STEP A for P_(i+1): advancing IS
     spawning the next project. Auto-continue WITHOUT waiting for per-card review (async).
 
-── ENDING THE CHAIN EARLY: DASHBOARD ONLY ────────────────────────
-There is no MCP tool and no inbox directive that ends the run. To end/unwind early, the user
-uses the dashboard back-out controls (Deactivate Chain, Reset, Cancel, Delete). If the user
-asks you to stop, finish the current project's closeout naturally, stop advancing, and point
-them at those controls. Your own complete_job stays refused (CONDUCTOR_CHAIN_INCOMPLETE) until
-the FINAL project closes out or the user backs the chain out.
+── DROPPING A MEMBER, OR ENDING THE CHAIN EARLY ───────────────────
+A member that is parked, cancelled, superseded or deleted after the chain started is DETACHED:
+the server skips it, opens the next member and the chain carries on. Your own complete_job
+works once every remaining member has closed out. To unwind the whole run, the user uses the
+dashboard back-out controls (Deactivate Chain, Reset, Cancel, Delete). If the user asks you to stop,
+finish the current project's closeout naturally and stop advancing. Until then your
+complete_job stays refused (CONDUCTOR_CHAIN_INCOMPLETE).
 
 ── CRASH-RESUME ──────────────────────────────────────────────────
 If your session is interrupted, a fresh conductor session re-reads this chapter on

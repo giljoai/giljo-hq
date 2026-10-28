@@ -263,7 +263,7 @@ def test_thin_prompt_is_inline_safe() -> None:
     assert _RUN in prompt
     assert "<SUB_ORCH_JOB_ID>" in prompt
     assert "get_job_mission" in prompt
-    assert "health_check" in prompt
+    assert "health_check" not in prompt
 
 
 

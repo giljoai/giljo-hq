@@ -17,11 +17,11 @@ from giljo_mcp.template_seeder import (
 _TOOLS = ("multi_terminal", "claude-code", "codex", "gemini", "antigravity")
 
 _SOLO_IDENTITY_SHA256 = {
-    "multi_terminal": "5fa7eb555ef373acc28e41a5908373c65e6fa6fb54f5639b084b0e5ae9f3bf19",
-    "claude-code": "712e2adecfbc81cda5796fd3dc326f6d9b7a500463e1c029cb5b5092a4f621b3",
-    "codex": "5fa7eb555ef373acc28e41a5908373c65e6fa6fb54f5639b084b0e5ae9f3bf19",
-    "gemini": "5fa7eb555ef373acc28e41a5908373c65e6fa6fb54f5639b084b0e5ae9f3bf19",
-    "antigravity": "5fa7eb555ef373acc28e41a5908373c65e6fa6fb54f5639b084b0e5ae9f3bf19",
+    "multi_terminal": "4e6a23c9ab068b92a0eb37fb3c0e59f0c329829040dc5c95ef63f44626220670",
+    "claude-code": "b00739084773a6b210b12ca10c5a3024e076142274606301f477e9185ecdf18a",
+    "codex": "4e6a23c9ab068b92a0eb37fb3c0e59f0c329829040dc5c95ef63f44626220670",
+    "gemini": "4e6a23c9ab068b92a0eb37fb3c0e59f0c329829040dc5c95ef63f44626220670",
+    "antigravity": "4e6a23c9ab068b92a0eb37fb3c0e59f0c329829040dc5c95ef63f44626220670",
 }
 
 _BEFORE_CLOSEOUT = "## Before Closeout"
@@ -75,10 +75,8 @@ def test_conductor_role_trims_identity_blocks() -> None:
     )
     assert _RESPONDING not in cond, "conductor identity must drop '### RESPONDING TO CONTEXT REQUESTS'"
     assert _SPAWN_JOB_BULLET not in cond, "conductor identity must drop the worker-spawn 'spawn_job' tool-index bullet"
-    assert _BEHAVIORAL_PRINCIPLES in cond, "the '## Behavioral Principles' END anchor (slice C) must be retained"
     assert _RIGHT_SIZING in cond, "the '## Right-Sizing Your Work' END anchor (slice D) must be retained"
     assert _COORDINATION_PRINCIPLES in cond, "the coordination-principles END anchor (slice A) must be retained"
-    assert _REPORT_PROGRESS_BULLET in cond, "the report_progress bullet (slice B END anchor) must be retained"
     assert _get_orchestrator_system_harness(tool="multi_terminal").strip() in cond, (
         "the conductor must keep the full system harness (tool gating + check-in)"
     )
@@ -88,11 +86,11 @@ def test_conductor_identity_diff_is_exactly_the_trims_reverse_splice() -> None:
     solo = compose_orchestrator_identity(None, tool="multi_terminal")
     cond = compose_orchestrator_identity(None, tool="multi_terminal", role="conductor")
 
+    for absent in (_THREE_PHASE, _BEHAVIORAL_PRINCIPLES, _SPAWN_JOB_BULLET, _REPORT_PROGRESS_BULLET):
+        assert absent not in solo, absent
     spans = [
-        (_THREE_PHASE, _BEHAVIORAL_PRINCIPLES),
         (_IF_REQUIREMENTS, _RIGHT_SIZING),
         (_BEFORE_CLOSEOUT, _COORDINATION_PRINCIPLES),
-        (_SPAWN_JOB_BULLET, _REPORT_PROGRESS_BULLET),
     ]
 
     restored = cond
@@ -107,7 +105,7 @@ def test_conductor_identity_diff_is_exactly_the_trims_reverse_splice() -> None:
         span = solo[start:end]
         restored = restored.replace(end_anchor, span + end_anchor, 1)
 
-    assert restored == solo, "conductor trim must remove ONLY the four anchored spans, nothing else"
+    assert restored == solo, "conductor trim must remove ONLY the anchored spans, nothing else"
 
 
 def test_conductor_role_noops_on_admin_override_lacking_anchors() -> None:

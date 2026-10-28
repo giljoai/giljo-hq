@@ -77,9 +77,8 @@ class TestCH2InlineFetchCalls:
 
     def test_ch2_implementation_todo_hoisted_to_step_1c(self):
         ch2 = self._build_ch2()
-        assert "STEP 1c" in ch2
-        assert "Plan Implementation Deliverables" in ch2
-        assert "STEP 1b: Defer Progress Tracking" in ch2
+        assert "STEP 1: Plan Implementation Deliverables" in ch2
+        assert "STEP 1b" not in ch2 and "STEP 1c" not in ch2
         assert "PROJECT OUTCOME" in ch2
 
     def test_ch2_contains_context_fetch_philosophy(self):
@@ -223,7 +222,6 @@ class TestCH2InlineFetchCalls:
         ch2 = self._build_ch2()
         assert "STEP 0" in ch2
         assert "STEP 1:" in ch2
-        assert "STEP 1b" in ch2
         assert "STEP 3" in ch2
         assert "STEP 4" in ch2
 

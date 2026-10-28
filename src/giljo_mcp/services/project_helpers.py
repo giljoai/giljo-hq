@@ -156,11 +156,20 @@ def _next_member_after(run: dict[str, Any], project_id: str) -> tuple[str | None
     order: list[str] = run.get("resolved_order") or []
     if project_id not in order:
         return None, None
+    statuses: dict[str, str] = run.get("project_statuses") or {}
     next_index = order.index(project_id) + 1
+    while next_index < len(order) and statuses.get(order[next_index]) == "detached":
+        next_index += 1
     if next_index >= len(order):
         return None, None
     advance_to = next_index if next_index > (run.get("current_index") or 0) else None
     return order[next_index], advance_to
+
+
+def _is_in_flight_member(run: dict[str, Any], project_id: str) -> bool:
+    order: list[str] = run.get("resolved_order") or []
+    index = run.get("current_index") or 0
+    return index < len(order) and order[index] == project_id
 
 
 async def _open_member_gate(session: Any, project_id: str, tenant_key: str, websocket_manager: Any | None) -> None:
@@ -230,7 +239,8 @@ async def mark_chain_member_status(
         return False
 
     merged_statuses[project_id] = status
-    next_project_id, advance_to = _next_member_after(run, project_id) if status == "completed" else (None, None)
+    advances = status == "completed" or (status == "detached" and _is_in_flight_member(run, project_id))
+    next_project_id, advance_to = _next_member_after(run, project_id) if advances else (None, None)
     await svc.update(
         run_id=run["id"],
         tenant_key=tenant_key,
@@ -254,7 +264,7 @@ async def mark_chain_member_status(
         await broadcast_deferred_events(gate_session)
 
     conductor_agent_id = run.get("conductor_agent_id")
-    if status == "completed" and conductor_agent_id:
+    if status in ("completed", "detached") and conductor_agent_id:
         await _wake_conductor_on_member_closeout(
             db_manager=db_manager,
             tenant_manager=tenant_manager,
@@ -376,7 +386,9 @@ async def heal_chain_member_statuses(
         if row is None:
             continue
         real_status, deleted_at = row
-        if deleted_at is not None or real_status in ("deleted", "cancelled"):
+        if real_status in ("parked", "superseded"):
+            healed[pid] = "detached"
+        elif deleted_at is not None or real_status in ("deleted", "cancelled"):
             healed[pid] = "terminated"
         elif real_status in ("completed", "terminated"):
             healed[pid] = real_status

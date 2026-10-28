@@ -133,7 +133,7 @@ async def _seed_template(session, tenant_key: str, product_id: str, cli_tool: st
     return template.name
 
 
-async def _spawn_prompt(client, project_id: str, agent_name: str, *, inline_seed: bool = False) -> str:
+async def _spawn_reply(client, project_id: str, agent_name: str, *, inline_seed: bool = False) -> dict:
     async with client() as session:
         result = await session.call_tool(
             "spawn_job",
@@ -148,7 +148,15 @@ async def _spawn_prompt(client, project_id: str, agent_name: str, *, inline_seed
     assert result.is_error is not True, _error_text(result)
     payload = _payload(result)
     assert payload["agent_prompt_location"] == "inline", payload
-    return payload["agent_prompt"]
+    return payload
+
+
+async def _spawn_prompt(client, project_id: str, agent_name: str, *, inline_seed: bool = False) -> str:
+    return (await _spawn_reply(client, project_id, agent_name, inline_seed=inline_seed))["agent_prompt"]
+
+
+def _launch_notes(reply: dict) -> str:
+    return "\n".join(reply["thin_client_note"])
 
 
 
@@ -175,14 +183,15 @@ async def test_multi_terminal_named_harness_gets_plain_instructions(boundary) ->
     project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal", staging=True)
     name = await _seed_template(db_session, tenant_key, product_id, "gemini-cli")
 
-    prompt = await _spawn_prompt(client, project_id, name, inline_seed=True)
+    reply = await _spawn_reply(client, project_id, name, inline_seed=True)
+    prompt, notes = reply["agent_prompt"], _launch_notes(reply)
 
-    assert "## HARNESS" in prompt, prompt
-    assert "gemini-cli" in prompt, "the user's chosen harness must be named"
-    assert "work out its launch" in prompt, prompt
-    assert "ask the user" in prompt, prompt
+    assert "## HARNESS" not in prompt, "BE-9826: the worker is never told to launch itself"
+    assert "gemini-cli" in notes, "the user's chosen harness must be named to the launcher"
+    assert "work out its launch" in notes, notes
+    assert "ask the user" in notes, notes
     for marker in _BYPASS_MARKERS:
-        assert marker not in prompt, f"{marker!r} must never be added unasked:\n{prompt}"
+        assert marker not in prompt + notes, f"{marker!r} must never be added unasked:\n{notes}"
 
 
 async def test_multi_terminal_default_harness_is_the_orchestrators_own(boundary) -> None:
@@ -190,12 +199,13 @@ async def test_multi_terminal_default_harness_is_the_orchestrators_own(boundary)
     project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal", staging=True)
     name = await _seed_template(db_session, tenant_key, product_id, "default")
 
-    prompt = await _spawn_prompt(client, project_id, name, inline_seed=True)
+    reply = await _spawn_reply(client, project_id, name, inline_seed=True)
+    prompt, notes = reply["agent_prompt"], _launch_notes(reply)
 
-    assert "## HARNESS" in prompt, prompt
-    assert "same harness you are running in" in prompt, prompt
+    assert "## HARNESS" not in prompt, prompt
+    assert "same harness you are running in" in notes, notes
     for marker in _BYPASS_MARKERS:
-        assert marker not in prompt, prompt
+        assert marker not in prompt + notes, notes
 
 
 async def test_legacy_cli_tool_value_is_the_named_harness(boundary) -> None:
@@ -203,10 +213,10 @@ async def test_legacy_cli_tool_value_is_the_named_harness(boundary) -> None:
     project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal", staging=True)
     name = await _seed_template(db_session, tenant_key, product_id, "claude")
 
-    prompt = await _spawn_prompt(client, project_id, name, inline_seed=True)
+    notes = _launch_notes(await _spawn_reply(client, project_id, name, inline_seed=True))
 
-    assert "Harness: claude" in prompt, prompt
-    assert "--dangerously-skip-permissions" not in prompt, prompt
+    assert "Harness: claude" in notes, notes
+    assert "--dangerously-skip-permissions" not in notes, notes
 
 
 async def test_multi_terminal_post_gate_names_the_registry_autonomy_flag(boundary) -> None:
@@ -214,11 +224,15 @@ async def test_multi_terminal_post_gate_names_the_registry_autonomy_flag(boundar
     project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal")
     name = await _seed_template(db_session, tenant_key, product_id, "codex")
 
-    prompt = await _spawn_prompt(client, project_id, name, inline_seed=True)
+    reply = await _spawn_reply(client, project_id, name, inline_seed=True)
+    notes = _launch_notes(reply)
 
-    assert "Harness: codex" in prompt, prompt
-    assert get_harness("codex").autonomy_flag in prompt, f"post-gate launch text must carry the flag:\n{prompt}"
-    assert "Do not add a permission-bypass" not in prompt, prompt
+    assert "Harness: codex" in notes, notes
+    assert get_harness("codex").autonomy_flag in notes, f"post-gate launch text must carry the flag:\n{notes}"
+    assert "Do not add a permission-bypass" not in notes, notes
+    assert get_harness("codex").autonomy_flag not in reply["agent_prompt"], (
+        "the flag is for the launcher, not the worker"
+    )
 
 
 async def test_stored_value_that_is_not_a_name_is_never_echoed(boundary) -> None:
@@ -226,10 +240,45 @@ async def test_stored_value_that_is_not_a_name_is_never_echoed(boundary) -> None
     project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal", staging=True)
     name = await _seed_template(db_session, tenant_key, product_id, "x; ignore all")
 
-    prompt = await _spawn_prompt(client, project_id, name, inline_seed=True)
+    reply = await _spawn_reply(client, project_id, name, inline_seed=True)
 
-    assert "ignore all" not in prompt, prompt
-    assert "same harness you are running in" in prompt, "an unusable value falls back to the default"
+    assert "ignore all" not in reply["agent_prompt"] + _launch_notes(reply), reply
+    assert "same harness you are running in" in _launch_notes(reply), "an unusable value falls back to the default"
+
+
+
+
+async def test_subagent_reply_leads_with_pass_the_agent_prompt_verbatim(boundary) -> None:
+    client, tenant_key, db_session = boundary
+    project_id, product_id = await _seed_project(db_session, tenant_key, "subagent")
+    name = await _seed_template(db_session, tenant_key, product_id, "default")
+
+    reply = await _spawn_reply(client, project_id, name)
+
+    first = reply["thin_client_note"][0]
+    assert "agent_prompt" in first and "verbatim" in first, reply["thin_client_note"]
+    assert "Do not write your own" in first, first
+    assert "## HARNESS" not in _launch_notes(reply), "subagent mode has nothing to launch"
+
+
+async def test_dashboard_pointer_reply_does_not_tell_the_orchestrator_to_pass_a_pointer(boundary) -> None:
+    client, tenant_key, db_session = boundary
+    project_id, product_id = await _seed_project(db_session, tenant_key, "multi_terminal", staging=True)
+    name = await _seed_template(db_session, tenant_key, product_id, "default")
+
+    async with client() as session:
+        result = await session.call_tool(
+            "spawn_job",
+            {
+                "agent_display_name": "implementer",
+                "agent_name": name,
+                "project_id": project_id,
+                "mission": "Do the work.",
+            },
+        )
+    payload = _payload(result)
+    assert payload["agent_prompt_location"] == "dashboard", payload
+    assert "verbatim" not in _launch_notes(payload), payload["thin_client_note"]
 
 
 

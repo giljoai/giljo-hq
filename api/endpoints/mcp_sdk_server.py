@@ -169,8 +169,6 @@ async def _launch_gate_blocked(request: StarletteRequest | None) -> bool:
     if request is None:
         return False
     state = request.scope.get("state", {}) if hasattr(request, "scope") else {}
-    if state.get("auth_method") != "jwt":
-        return False
     tenant_key = state.get("tenant_key")
     if not tenant_key:
         return True

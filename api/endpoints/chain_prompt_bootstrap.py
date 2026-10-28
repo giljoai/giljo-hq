@@ -10,14 +10,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.services.protocol_sections.orchestrator_body import CHAIN_DRIVER_MODEL
 
 
-_TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 logger = logging.getLogger(__name__)
 
 CHAIN_MEMBER_FALLBACK_PREAMBLE = (
@@ -78,22 +76,21 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
         project_line = "  Project ID: none (project-less)"
         returns_note = None
 
-    fetch_tool = _TOOL_PREFIX if harness_is_claude else ""
     if phase == "staging" and project_id:
-        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_job_mission(job_id='{job_id}')"
+        fetch_line = f"1. Fetch your chain protocol: get_job_mission(job_id='{job_id}')"
         protocol_note = (
             f"{returns_note}\n"
-            f"3. Fetch your staging details: {fetch_tool}get_staging_instructions(job_id='{job_id}')\n"
+            f"2. Fetch your staging details: get_staging_instructions(job_id='{job_id}')\n"
             "   -> Returns the agent templates, project description and toggles for staging."
         )
     elif phase == "staging":
-        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_staging_instructions(job_id='{job_id}')"
+        fetch_line = f"1. Fetch your chain protocol: get_staging_instructions(job_id='{job_id}')"
         protocol_note = returns_note or (
             "   -> Returns your full chain protocol (CH_CAPABILITY + CH_CHAIN_STAGING):\n"
             "      how each project is spawned and the authoritative staging script."
         )
     else:
-        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_job_mission(job_id='{job_id}')"
+        fetch_line = f"1. Fetch your chain protocol: get_job_mission(job_id='{job_id}')"
         protocol_note = returns_note or (
             "   -> Returns your full chain-drive protocol (CH_CHAIN_DRIVE): the\n"
             "      auto-continue loop that advances the chain project by project."
@@ -107,16 +104,13 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
     if harness_is_claude:
         toolsearch_bootstrap = (
             "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
-            "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-            f"{_TOOL_PREFIX}* tool (including health_check) until its schema\n"
-            "is loaded. Fire this single call before the START NOW workflow below:\n"
+            "Claude Code defers MCP tool schemas. You CANNOT call any Giljo HQ tool\n"
+            "until its schema is loaded. Fire this single call before the START NOW\n"
+            "workflow below (bare names match your MCP server's name):\n"
             f"  {render_toolsearch_call_one_line()}\n"
             "After that, every tool in the canonical orchestrator set is callable.\n"
             "\n"
         )
-        tool_prefix_line = f"  Tool Prefix: {_TOOL_PREFIX}"
-
-    health_check_call = f"{_TOOL_PREFIX}health_check()" if harness_is_claude else "health_check()"
 
     return f"""{role_line}
 
@@ -131,8 +125,7 @@ MCP CONNECTION:
 {tool_prefix_line}
 
 {toolsearch_bootstrap}START NOW:
-1. Verify MCP: {health_check_call}
-   -> Expected: {{"status": "healthy"}} - If failed, STOP and report error
 {fetch_line}
+   -> If the call fails, STOP and report the error: the MCP connection is down
 {protocol_note}
 """

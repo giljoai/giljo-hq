@@ -4,43 +4,20 @@
 # [CE] Community Edition.
 
 
-from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.platform_registry import Platform
-from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
+from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line, render_worker_toolsearch_call
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
-
-_PREFIX = f"mcp__{MCP_ALIAS}__"
-
-_AGENT_SEED_TOOLS = (
-    f"{_PREFIX}health_check",
-    f"{_PREFIX}get_job_mission",
-    f"{_PREFIX}report_progress",
-    f"{_PREFIX}complete_job",
-)
 
 _TOOLSEARCH_HARNESS_TOOLS = frozenset({"claude", HARNESS_CLAUDE_CODE})
 
 
 def build_agent_seed_lines(cli_tool: str, job_id: str) -> list[str]:
     lines: list[str] = []
-    is_claude = (cli_tool or "claude") in _TOOLSEARCH_HARNESS_TOOLS
-    if is_claude:
-        lines.append('ToolSearch(query="select:' + ",".join(_AGENT_SEED_TOOLS) + '", max_results=10)')
-        lines.extend(
-            [
-                f"{_PREFIX}health_check()",
-                f'{_PREFIX}get_job_mission(job_id="{job_id}")',
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "health_check()",
-                f'get_job_mission(job_id="{job_id}")',
-            ]
-        )
+    if (cli_tool or "claude") in _TOOLSEARCH_HARNESS_TOOLS:
+        lines.append(render_worker_toolsearch_call())
+    lines.append(f'get_job_mission(job_id="{job_id}")')
     lines.append("# Execute the returned mission. Report via report_progress; complete_job when done.")
     return lines
 
@@ -72,7 +49,7 @@ class MultiTerminalPromptBuilder:
                 [
                     "## STEP 0: TOOLSEARCH BOOTSTRAP (Claude Code only — first action)",
                     "",
-                    "Claude Code defers MCP tool schemas behind `ToolSearch`. Before health_check,",
+                    "Claude Code defers MCP tool schemas behind `ToolSearch`. Before any other MCP call,",
                     "fire this single call to load the canonical orchestrator tool set:",
                     "```",
                     render_toolsearch_call_one_line(),
@@ -80,26 +57,14 @@ class MultiTerminalPromptBuilder:
                     "",
                 ]
             )
-        health_check_call = f"{_PREFIX}health_check()" if tool == HARNESS_CLAUDE_CODE else "health_check()"
-        get_job_mission_call = (
-            f'{_PREFIX}get_job_mission(job_id="{orchestrator_id}")'
-            if tool == HARNESS_CLAUDE_CODE
-            else f'get_job_mission(job_id="{orchestrator_id}")'
-        )
         lines.extend(
             [
-                "## FIRST ACTION (MANDATORY)",
-                "Verify MCP connection:",
-                "```",
-                health_check_call,
-                "```",
-                "",
                 f"You are the ORCHESTRATOR for project '{_project_title(project)}'.",
                 f"Job ID: `{orchestrator_id}` | Project ID: `{project.id}`",
                 "",
                 "Call `get_job_mission` to receive your current team state and operating protocol:",
                 "```",
-                get_job_mission_call,
+                f'get_job_mission(job_id="{orchestrator_id}")',
                 "```",
             ]
         )
@@ -118,8 +83,8 @@ class MultiTerminalPromptBuilder:
             "",
             "Open a NEW SESSION with your AI — a new conversation, tab, or terminal window — and",
             "paste its block. Each agent self-fetches its mission on boot — no mission text is",
-            "baked in. The initiation protocol is: connect MCP -> health_check ->",
-            "get_job_mission(job_id) -> execute the returned mission.",
+            "baked in. The initiation protocol is: get_job_mission(job_id) -> execute the",
+            "returned mission.",
         ]
         for job in agent_jobs:
             display = getattr(job, "agent_display_name", None) or "agent"
@@ -136,8 +101,8 @@ class MultiTerminalPromptBuilder:
             "",
             "Open a NEW SESSION with your AI (a new conversation / tab / window) for each agent",
             "below and paste its block. Each agent self-fetches its mission on boot — no mission",
-            "text is baked in. The initiation protocol is: connect MCP -> health_check ->",
-            "get_job_mission(job_id) -> execute the returned mission.",
+            "text is baked in. The initiation protocol is: get_job_mission(job_id) -> execute",
+            "the returned mission.",
         ]
         if not preset.has_shell:
             out.extend(

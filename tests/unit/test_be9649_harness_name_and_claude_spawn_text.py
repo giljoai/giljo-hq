@@ -79,31 +79,16 @@ def test_subagent_prompt_with_inherit_hints_is_just_the_bootstrap() -> None:
     assert "hint" not in prompt.lower()
 
 
-def test_multi_terminal_prompt_named_harness_golden() -> None:
-    prompt = build_agent_prompt("impl", "implementer", "P", "job-1", _Template("codex"), multi_terminal=True)
-    assert prompt.endswith(
-        "## HARNESS\n"
-        "Harness: codex (the user chose it for this agent). Find it on this machine, work out its launch\n"
-        "syntax (its --help usually says), and open it in a new terminal seeded with this prompt.\n"
-        "If you cannot find it or are unsure how to launch it, ask the user.\n"
-        "Do not add a permission-bypass or autonomy flag unless the user asked for one.\n"
-    ), prompt
+def test_worker_prompt_never_carries_launch_text_in_any_mode() -> None:
+    for cli_tool in ("codex", "default", "claude"):
+        prompt = build_agent_prompt("impl", "implementer", "P", "job-1", _Template(cli_tool))
+        assert "## HARNESS" not in prompt, prompt
+        assert "new terminal" not in prompt, prompt
+        assert "seeded with this prompt" not in prompt, prompt
 
 
-def test_multi_terminal_prompt_default_harness_golden() -> None:
-    prompt = build_agent_prompt("impl", "implementer", "P", "job-1", _Template("default"), multi_terminal=True)
-    assert prompt.endswith(
-        "## HARNESS\n"
-        "Harness: default. Open a new terminal running the same harness you are running in,\n"
-        "seeded with this prompt.\n"
-        "Do not add a permission-bypass or autonomy flag unless the user asked for one.\n"
-    ), prompt
-
-
-def test_orchestrator_prompt_is_unchanged_by_mode() -> None:
+def test_orchestrator_prompt_carries_staging_rules_and_no_launch_text() -> None:
     a = build_agent_prompt("orchestrator", "orchestrator", "P", "job-1", None)
-    b = build_agent_prompt("orchestrator", "orchestrator", "P", "job-1", None, multi_terminal=True)
-    assert a == b
     assert "STAGING RULES" in a
     assert "## HARNESS" not in a
 
@@ -149,19 +134,16 @@ def test_registry_spawn_syntax_names_the_generic_worker() -> None:
 _GOLDEN = Path(__file__).parent / "_be9664_golden_worker_bootstrap.txt"
 
 _GOLDEN_CASES = (
-    ("multi_terminal worker, harness named by the template", "implementer", _Template("codex"), True),
-    ("multi_terminal worker, no harness elected", "implementer", _Template("default"), True),
-    ("subagent worker, model and effort hints set", "implementer", _Template("codex", "opus", "high"), False),
-    ("subagent worker, hints inherited", "implementer", _Template("default"), False),
-    ("orchestrator, identical in both modes", "orchestrator", None, True),
+    ("worker, model and effort hints set", "implementer", _Template("codex", "opus", "high")),
+    ("worker, hints inherited", "implementer", _Template("default")),
+    ("orchestrator", "orchestrator", None),
 )
 
 
 def test_worker_bootstrap_matches_the_golden() -> None:
     rendered = "\n".join(
-        f"<<<CASE:{label}>>>\n"
-        + build_agent_prompt(name, name, "Golden Project", "JOB-GOLDEN", template, multi_terminal=mt)
-        for label, name, template, mt in _GOLDEN_CASES
+        f"<<<CASE:{label}>>>\n" + build_agent_prompt(name, name, "Golden Project", "JOB-GOLDEN", template)
+        for label, name, template in _GOLDEN_CASES
     )
     assert rendered == _GOLDEN.read_text(encoding="utf-8"), (
         "The shared worker bootstrap drifted from its golden. This text is what BOTH doors "

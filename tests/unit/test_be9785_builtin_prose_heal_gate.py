@@ -38,7 +38,7 @@ WORKER_VERSION_PINS: dict[str, str] = {
     "documenter": "1.1.0",
 }
 
-LATEST_HEAL_AT_PIN = "ce_0090_heal_giljo_hq_orchestrator_identity"
+LATEST_HEAL_AT_PIN = "ce_0112_heal_worker_bootstrap_first_call"
 
 GRANDFATHERED_HEALS: frozenset[str] = frozenset(
     {
@@ -231,8 +231,8 @@ _BYTE_EQUALITY_HEAL = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "ce_0110_heal_tester_rules"
-down_revision = "ce_0109_be9755_template_proposals"
+revision = "ce_0113_heal_tester_rules"
+down_revision = "ce_0112_heal_worker_bootstrap_first_call"
 
 _OLD = "You are the testing specialist (old generation)."
 _NEW = "You are the testing specialist (new generation)."
@@ -264,8 +264,8 @@ _SUBSTRING_REPLACE_HEAL = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "ce_0110_heal_tool_rename"
-down_revision = "ce_0109_be9755_template_proposals"
+revision = "ce_0113_heal_tool_rename"
+down_revision = "ce_0112_heal_worker_bootstrap_first_call"
 _NAMES = "'implementer', 'tester'"
 
 
@@ -285,7 +285,7 @@ _NAME_ONLY_GUARD_HEAL = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "ce_0110_heal_tester_rules"
+revision = "ce_0113_heal_tester_rules"
 
 
 def upgrade() -> None:
@@ -299,7 +299,7 @@ _EDITED_ROWS_HEAL = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "ce_0110_heal_tester_rules"
+revision = "ce_0113_heal_tester_rules"
 
 
 def upgrade() -> None:
@@ -317,7 +317,7 @@ from alembic import op
 from sqlalchemy import update
 from giljo_mcp.models import AgentTemplate
 
-revision = "ce_0110_heal_tester_rules"
+revision = "ce_0113_heal_tester_rules"
 
 
 def upgrade() -> None:
@@ -341,13 +341,13 @@ def test_gate_fails_on_prose_change_without_a_heal():
 
 def test_gate_passes_prose_change_with_a_newer_heal_naming_the_role():
     hashes = _current_hashes()
-    heals = {**heals_in_tree(), "ce_0110_heal_tester_rules": _BYTE_EQUALITY_HEAL}
+    heals = {**heals_in_tree(), "ce_0113_heal_tester_rules": _BYTE_EQUALITY_HEAL}
     assert prose_pin_violations(_perturbed(hashes, "tester"), WORKER_PROSE_PINS, heals, LATEST_HEAL_AT_PIN) == []
 
 
 def test_gate_ignores_a_newer_heal_that_names_another_role():
     hashes = _current_hashes()
-    heals = {**heals_in_tree(), "ce_0110_heal_tester_rules": _BYTE_EQUALITY_HEAL}
+    heals = {**heals_in_tree(), "ce_0113_heal_tester_rules": _BYTE_EQUALITY_HEAL}
     violations = prose_pin_violations(_perturbed(hashes, "reviewer"), WORKER_PROSE_PINS, heals, LATEST_HEAL_AT_PIN)
     assert [v.split(":")[0] for v in violations] == ["reviewer"]
 

@@ -28,73 +28,38 @@ from giljo_mcp.services.protocol_sections.orchestrator_body import (
 
 _CH3_CODEX = (
     "agent_name → the agent_profile in that job's get_job_mission response",
-    """Codex CLI Note:
-  - spawn_agent(agent='gil-X') where X = agent_name (NOT display_name)
-  - agent_name binds the MCP DB record to the job; the role arrives from the server
-  - The server returns agent_name WITHOUT 'gil-' prefix — you MUST prepend it""",
+    """Codex CLI Note: spawn_agent(agent='gil-X') where X = agent_name (NOT display_name); the server
+returns agent_name WITHOUT the 'gil-' prefix, so you MUST prepend it.""",
     """── YOUR PLATFORM: CODEX CLI ────────────────────────────────────────────────
 spawn_agent syntax (IMPLEMENTATION PHASE ONLY - not during staging):
   spawn_agent(agent='gil-{agent_name}', instructions='...')
 
-CRITICAL: ALL GiljoAI agents use the 'gil-' prefix in Codex CLI.
-The server returns agent_name WITHOUT the prefix. You MUST prepend 'gil-'.
-
-WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
-returned carries this agent's model/effort hints when they are set, and
-get_job_mission returns its role instructions in agent_identity and its
-agent_profile (role, model, effort, harness, rules, success criteria). There is no
-agent template file to install, look up, or keep in sync — so do NOT re-explain
-the role in instructions=, and do NOT hunt for a catalogue entry.
-
-Example:
-  spawn_job(agent_name='implementer',
-                  agent_display_name='implementer', ...)
-
-  Later in implementation:
-  spawn_agent(agent='gil-implementer', instructions='...')  # gil- prefix!
-
-Built-in Codex roles shadow unprefixed names — always use gil- prefix. Never use
-agent='worker', agent='implementer', agent='tester', or any unprefixed built-in
-name, and never instruct a generic worker to "act as" a GiljoAI agent.
-If no gil-* agent resolves, do NOT stop: spawn Codex's DEFAULT subagent for that
-job and state once:
+CRITICAL: ALL GiljoAI agents use the 'gil-' prefix in Codex CLI. Built-in Codex roles shadow
+unprefixed names: never agent='worker', agent='implementer', agent='tester' or any unprefixed
+built-in name, and never instruct a generic worker to "act as" a GiljoAI agent. If no gil-* agent
+resolves, do NOT stop: spawn Codex's DEFAULT subagent for that job and state once:
   """
     + MISSING_AGENT_TEMPLATES_NOTICE
     + """
-The instructions= parameter should contain ONLY the agent_prompt spawn_job
-returned for that job, verbatim (it carries the job_id and the get_job_mission call).
-The agent_identity and agent_profile in that response handle everything else.
-
+WHERE THE ROLE COMES FROM: the server, not your disk: the thin prompt spawn_job returned carries
+the agent's model/effort hints, and get_job_mission returns agent_identity and agent_profile, so
+instructions= carries ONLY the agent_prompt spawn_job returned, verbatim (do NOT re-explain the
+role, do NOT hunt for a catalogue entry).
 DO NOT invoke spawn_agent() during staging - this is planning reference only
 """,
 )
 
 _CH3_CLAUDE = (
     "agent_name → the agent_profile in that job's get_job_mission response",
-    """Claude Code CLI Note:
-  - Task(subagent_type="general-purpose") for every agent: Claude Code's generic worker
-  - agent_name binds the DB record to the job; the role arrives from the server
-  - The Task instructions are the agent_prompt spawn_job returned for that job, verbatim""",
+    """Claude Code CLI Note: Task(subagent_type="general-purpose") for every agent; agent_name only
+labels the job record, and the role arrives from the server.""",
     """── YOUR PLATFORM: CLAUDE CODE CLI ─────────────────────────────────────────
 Task tool syntax (IMPLEMENTATION PHASE ONLY - not during staging):
   Task(subagent_type="general-purpose",
        instructions="<the agent_prompt spawn_job returned for that job, verbatim>")
-
-WHERE THE ROLE COMES FROM: the server, not your disk. get_job_mission returns the
-agent's role instructions in agent_identity and its agent_profile (role, model,
-effort, harness). There is no
-agent file to install or look up: spawn Claude Code's generic worker and let it
-fetch its own mission. agent_name only labels the job record.
-
-Example:
-  spawn_job(agent_name='implementer',
-                  agent_display_name='implementer', ...)
-
-  Later in implementation:
-  Task(subagent_type="general-purpose",
-       instructions="<the agent_prompt that spawn_job call returned, verbatim>")
-
-DO NOT invoke Task() during staging - this is planning reference only
+WHERE THE ROLE COMES FROM: the server, not your disk. get_job_mission returns the agent's role
+in agent_identity and agent_profile (role, model, effort, harness); there is no agent file to
+install or look up. DO NOT invoke Task() during staging - this is planning reference only
 """,
 )
 
@@ -174,51 +139,27 @@ def _build_ch3_spawning_rules(tool: str = "multi_terminal", preset: Platform | N
         else " Multi-terminal mode gates on\nphase via the dashboard Play buttons; subagent modes do not."
     )
 
-    return f"""════════════════════════════════════════════════════════════════════════════
-                    CH3: AGENT SPAWNING RULES
-════════════════════════════════════════════════════════════════════════════
+    return f"""══ CH3: AGENT SPAWNING RULES ══
 
 {execution_mode_block}
 
 PARAMETER REQUIREMENTS:
-
-── agent_name (CRITICAL) ───────────────────────────────────────────────────
-Use an agent_name EXACTLY as it appears in the agent_templates list in this
-response — copy the agent_name field verbatim. It often equals the display_name
-(e.g. 'implementer'); some templates differ. NEVER invent a name that is not in
-the list. Role source: {role_source}.
-
-── agent_display_name ──────────────────────────────────────────────────────
-UI label only — implementer | tester | analyzer | documenter | reviewer.
-
-── mission ─────────────────────────────────────────────────────────────────
-Focused agent-specific instructions, 200-500 tokens target.
-
-── phase (optional, ordering metadata) ────────────────────────────────────
-Same phase number = parallel siblings. Higher phase number = waits on lower
-phases. Pair with predecessor_job_id when a successor needs prior output
-(server renders the preamble in multi_terminal mode; subagent modes splice
-inline).
-
-⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex subagent execution
-modes the server does NOT block higher-phase jobs from starting before
-lower-phase jobs finish. The `phase` value is informational ordering
-metadata — the orchestrator is responsible for spawning agents in phase
-order and waiting on each phase before invoking the next (via Task() /
-spawn_agent() / @-syntax invocation order).{note_mode_tail}
-
-⚠ predecessor_job_id is REQUIRED for phase > 1 when the successor consumes
-a prior agent's output. Empty string is rejected (ValidationError). Pass
-the predecessor's job_id, not its agent_id.
+── agent_name (CRITICAL): copy it EXACTLY from the agent_templates list in this response; it
+   often equals the display name, some differ. NEVER invent one. Role source: {role_source}.
+── agent_display_name: UI label only — implementer | tester | analyzer | documenter | reviewer.
+── mission: focused agent-specific instructions, 200-500 tokens target.
+── phase (optional, ordering metadata): Same phase number = parallel siblings;
+   Higher phase number = waits on lower phases. ⚠ SUBAGENT-MODE NOTE: the server does NOT block
+   a higher phase from starting; you spawn in phase order and wait on each phase.{note_mode_tail}
+── ⚠ predecessor_job_id is REQUIRED for phase > 1 when the successor consumes a prior agent's
+   output (empty string is rejected): the predecessor's job_id, not its agent_id.
 
 {platform_note}
 
 VERIFICATION AGENT DEFERRAL: tester/reviewer are NOT spawned in staging. In implementation,
-after deliverable agents complete: call get_agent_result(job_id) for each, build the
-verification mission from REAL artifacts (files, commits, APIs), then spawn_job. Skip
-verification entirely for doc-only / analysis-only projects. The full implementation
-sequence is spawn_job (mint the job_id + dashboard record) BEFORE launching the agent — in
-EVERY mode, including subagent mode — never Agent/Task/@-syntax without a preceding spawn_job.
+after the deliverable agents complete, build their missions from get_agent_result(job_id), and
+spawn_job BEFORE launching the agent in EVERY mode (never Agent/Task/@-syntax without a
+preceding spawn_job). Skip verification for doc-only / analysis-only projects.
 
 VALIDATE BEFORE SPAWNING: agent_name exists in agent_templates, project_id
 correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_names.
@@ -226,66 +167,22 @@ correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_nam
 
 
 def _build_ch4_error_handling() -> str:
-    return """════════════════════════════════════════════════════════════════════════════
-                       CH4: ERROR HANDLING
-════════════════════════════════════════════════════════════════════════════
+    return """══ CH4: ERROR HANDLING ══
 
-COMMON ERRORS:
+COMMON ERRORS — Staging phase (orchestrator): set_agent_status is SERVER-LOCKED (403
+STAGING_LOCK), so tell the USER inline instead (see "If Requirements Are Unclear" in your identity).
+- MCP Connection Lost / Spawn Failure → stop and tell the user inline; do NOT keep spawning
+  (partial spawns create incomplete teams).
+- Invalid Agent Name ("agent not found") → re-check agent_name against agent_templates (exact, case).
+- Mission Too Large (>10K tokens) → condense; reference vision docs instead of embedding. Target <5K.
+- Agent Templates Empty → this product has no agents assigned: work with your harness default,
+  and tell the user they can assign agents on the Agents screen.
 
-── MCP Connection Lost ─────────────────────────────────────────────────────
-Tools not responding / timeouts. Abort staging; tell the user inline (staging-
-phase set_agent_status is server-locked, 403 STAGING_LOCK, so the inline ask
-IS the notification). Do NOT continue spawning agents.
-
-── Invalid Agent Name ──────────────────────────────────────────────────────
-spawn_job "agent not found" → re-check agent_name against agent_templates;
-exact match, not display_name; mind case.
-
-── Spawn Failure ───────────────────────────────────────────────────────────
-spawn_job fails → tell the USER inline, do NOT continue; partial spawns create
-incomplete teams. set_agent_status is locked during staging.
-
-── Mission Too Large ───────────────────────────────────────────────────────
-Mission >10K tokens → condense, reference vision docs instead of embedding.
-Target <5K.
-
-── Agent Templates Empty ──────────────────────────────────────────────────
-agent_templates list empty → this product has no agents assigned. Work with
-your harness default; do not block. Tell the user they can assign agents to
-this product on the Agents screen.
-
-── STATUS TRANSITIONS ──────────────────────────────────────────────────────
-
-Staging phase (orchestrator only, project.staging_status != 'staging_complete'):
-  waiting →[get_job_mission]→ working   working →[report_progress]→ working
-  working →[complete_job]→ complete
-  ⚠ set_agent_status is SERVER-LOCKED for the orchestrator during staging
-    (403 STAGING_LOCK). Use the inline-ask + report_progress pattern instead —
-    see "If Requirements Are Unclear" in your identity prompt.
-
-Implementation phase (all agents, post-staging-complete):
-  waiting →[get_job_mission]→ working   working →[report_progress]→ working
-  working →[complete_job]→ complete     (a worker's last call; it never finalizes)
-  complete →[finalize_job, orchestrator only, after review]→ closed
-  working →[set_agent_status("blocked")]→ blocked
-  working →[set_agent_status("idle")]→ idle
-  working →[set_agent_status("sleeping")]→ sleeping
-  idle / sleeping / blocked →[report_progress or any active MCP]→ working
-  complete →[message received]→ blocked (auto, HO0827b)
-  blocked →[resume_job | dismiss_job]→ working | complete
-
-Note: spawned non-orchestrator agents bypass the staging lock entirely.
-
-GENERAL ERROR PROTOCOL:
-1. Log error with context (agent_id, job_id).
-2. Persist error state:
-   - Implementation phase OR not the orchestrator → set_agent_status("blocked", reason).
-   - Staging phase AND you are the orchestrator → tell the USER inline; set_agent_status
-     is locked (403 STAGING_LOCK) until staging completes.
-3. Do NOT continue workflow after critical errors. Wait for user intervention.
-
-Severity: CRITICAL (MCP/DB lost) → abort. HIGH (spawn/agent-name) → stop and report.
-MEDIUM (mission size) → log and continue. LOW (context hints) → continue.
+GENERAL ERROR PROTOCOL — Staging phase (orchestrator): tell the USER inline, as above.
+Implementation phase (all agents): an error you cannot clear is set_agent_status("blocked") with
+a reason; set_agent_status("idle") / set_agent_status("sleeping") are resting states, and
+report_progress moves you back to working. After a critical error (MCP/DB lost) do NOT
+continue — wait for the user.
 """
 
 

@@ -142,6 +142,10 @@ VALID_UPDATE_STATUSES: frozenset[ProjectStatus] = frozenset(
 )
 VALID_PROJECT_STATUSES: frozenset[ProjectStatus] = frozenset(ProjectStatus)
 
+CHAIN_DETACHING_STATUSES: frozenset[ProjectStatus] = frozenset(
+    {ProjectStatus.PARKED, ProjectStatus.SUPERSEDED, ProjectStatus.CANCELLED, ProjectStatus.DELETED}
+)
+
 
 def is_review_pending(status: str, reviewed_at: object | None) -> bool:
     return status == ProjectStatus.COMPLETED and reviewed_at is None

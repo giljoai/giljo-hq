@@ -186,7 +186,7 @@ class TestOrchestratorTodoWriteScoping:
 
     def test_agent_todowrite_unchanged(self):
         protocol = _gen_protocol(job_type="agent")
-        assert "Break mission into 3-7" in protocol
+        assert "Break mission into 2-7" in protocol
 
     def test_job_type_default_backward_compat(self):
         protocol_default = _gen_protocol()

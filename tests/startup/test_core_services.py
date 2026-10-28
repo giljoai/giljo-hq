@@ -124,7 +124,7 @@ async def test_init_core_services_loads_api_key_from_env():
         patch("api.startup.core_services.ToolAccessor"),
         patch("api.startup.core_services.AuthManager") as mock_auth,
         patch("api.startup.core_services.asyncio.create_task"),
-        patch.dict(os.environ, {"API_KEY": api_key}),
+        patch.dict(os.environ, {"API_KEY": api_key, "GILJO_MODE": "ce"}),
     ):
         mock_auth_instance = MagicMock()
         mock_auth_instance.api_keys = {}
@@ -153,7 +153,7 @@ async def test_init_core_services_loads_giljo_mcp_api_key():
         patch("api.startup.core_services.ToolAccessor"),
         patch("api.startup.core_services.AuthManager") as mock_auth,
         patch("api.startup.core_services.asyncio.create_task"),
-        patch.dict(os.environ, {"GILJO_MCP_API_KEY": api_key}),
+        patch.dict(os.environ, {"GILJO_MCP_API_KEY": api_key, "GILJO_MODE": "ce"}),
     ):
         mock_auth_instance = MagicMock()
         mock_auth_instance.api_keys = {}
@@ -257,3 +257,80 @@ async def test_auth_manager_failure_aborts_boot_and_leaves_state_auth_unset():
         await init_core_services(state)
 
     assert state.auth is None
+
+
+async def _boot_core_services_with_installer_key(monkeypatch, tmp_path, *, mode: str, variable: str, key: str):
+    from api.startup.core_services import init_core_services
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("JWT_SECRET", "sec9824_test_secret")
+    monkeypatch.setenv("GILJO_MODE", mode)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("GILJO_MCP_API_KEY", raising=False)
+    monkeypatch.setenv(variable, key)
+
+    state = APIState()
+    state.db_manager = MagicMock()
+    state.config = MagicMock()
+    with (
+        patch("api.startup.core_services.TenantManager"),
+        patch("api.startup.core_services.WebSocketManager"),
+        patch("api.startup.core_services.ToolAccessor"),
+        patch("api.startup.core_services.asyncio.create_task"),
+    ):
+        await init_core_services(state)
+    return state
+
+
+def _request_with_x_api_key(key: str):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/anything",
+        "headers": [(b"x-api-key", key.encode())],
+        "app": MagicMock(state=MagicMock(db_manager=None)),
+    }
+    return Request(scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variable", ["API_KEY", "GILJO_MCP_API_KEY"])
+async def test_saas_mode_refuses_the_static_installer_key(monkeypatch, tmp_path, caplog, variable):
+    key = "sec9824_static" + "_key_value_0001"
+    with caplog.at_level("WARNING"):
+        state = await _boot_core_services_with_installer_key(
+            monkeypatch, tmp_path, mode="saas", variable=variable, key=key
+        )
+
+    assert key not in state.auth.api_keys
+    assert state.auth.validate_api_key(key) is None
+    result = await state.auth.authenticate_request(_request_with_x_api_key(key))
+    assert result["authenticated"] is False
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and variable in r.getMessage()]
+    assert len(warnings) == 1
+    assert all(key not in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variable", ["API_KEY", "GILJO_MCP_API_KEY"])
+async def test_ce_mode_still_accepts_the_static_installer_key(monkeypatch, tmp_path, variable):
+    key = "sec9824_static" + "_key_value_0002"
+    state = await _boot_core_services_with_installer_key(monkeypatch, tmp_path, mode="ce", variable=variable, key=key)
+
+    assert state.auth.validate_api_key(key) is not None
+
+
+def test_config_manager_ignores_the_static_installer_key_in_saas(monkeypatch):
+    from giljo_mcp.config_manager import ConfigManager
+
+    monkeypatch.setenv("GILJO_MCP_API_KEY", "sec9824_cfg" + "_key_value_0003")
+    monkeypatch.setenv("GILJO_MODE", "saas")
+    saas = ConfigManager()
+    monkeypatch.setenv("GILJO_MODE", "ce")
+    ce = ConfigManager()
+
+    assert saas.server.api_key is None
+    assert ce.server.api_key == "sec9824_cfg" + "_key_value_0003"

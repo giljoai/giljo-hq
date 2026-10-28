@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.job_activity import HOLDING, SILENT, WORKING, activity_word
+from giljo_mcp.domain.project_status import CHAIN_DETACHING_STATUSES
 from giljo_mcp.exceptions import DatabaseError, ResourceNotFoundError
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
@@ -136,7 +137,10 @@ class WorkflowStatusService:
                     checkin_cadence_minutes,
                 )
 
-                ready_to_advance = getattr(project, "closeout_executed_at", None) is not None
+                ready_to_advance = (
+                    getattr(project, "closeout_executed_at", None) is not None
+                    or project.status in CHAIN_DETACHING_STATUSES
+                )
                 next_action: dict[str, Any] | None = None
                 if blocked_count > 0 or silent_count > 0:
                     next_action = build_next_action(

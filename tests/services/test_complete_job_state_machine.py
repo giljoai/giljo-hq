@@ -718,3 +718,36 @@ async def test_todos_bypass_does_not_fire_when_impl_launched_at_set(
             tenant_key=test_tenant_key,
         )
     assert "COMPLETION_BLOCKED" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["waiting", "staged"])
+async def test_never_started_worker_cannot_be_completed(
+    db_session: AsyncSession,
+    completion_service: JobCompletionService,
+    test_tenant_key: str,
+    test_product: Product,
+    status: str,
+):
+    from giljo_mcp.exceptions import GateRefusalError
+
+    project = await _seed_project(db_session, test_tenant_key, test_product.id, staging_status="staging_complete")
+    job, execution = await _seed_deliverable_job(
+        db_session, test_tenant_key, project.id, job_type="implementer", project_phase="implementation"
+    )
+    execution.status = status
+    execution.started_at = None
+    await db_session.commit()
+
+    with pytest.raises(GateRefusalError) as excinfo:
+        await completion_service.complete_job(job_id=job.job_id, result={"summary": "x"}, tenant_key=test_tenant_key)
+    assert excinfo.value.code == "JOB_NEVER_STARTED"
+
+    await db_session.refresh(execution)
+    assert execution.status == status
+
+    execution.status = "working"
+    await db_session.commit()
+    done = await completion_service.complete_job(job_id=job.job_id, result={"summary": "x"}, tenant_key=test_tenant_key)
+    assert done.status == "success"
+    assert not any("never started" in w for w in done.warnings)

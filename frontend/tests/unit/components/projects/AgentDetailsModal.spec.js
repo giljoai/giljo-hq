@@ -8,7 +8,7 @@
  * - Props: modelValue (Boolean), agent (Object)
  * - Emits: update:modelValue
  * - Orchestrator check: agent.agent_display_name === 'orchestrator'
- * - Regular agents: fetches via templates.list() then templates.preview()
+ * - Regular agents: previews the job's template_id (else exact name in the job's product)
  * - Orchestrator: fetches via system.getOrchestratorPrompt()
  * - Title: "System Orchestrator Prompt" or "Agent Details: {agent_name}"
  */
@@ -260,19 +260,26 @@ describe('AgentDetailsModal Component', () => {
       expect(wrapper.text()).toContain('Failed to load')
     })
 
-    it('handles missing template_id by searching templates list', async () => {
+    it('handles missing template_id by searching the job product for the exact name', async () => {
+      api.projects.get.mockResolvedValue({ data: { id: 'project-1', product_id: 'product-1' } })
+      api.templates.list.mockResolvedValue({
+        data: [{ id: 'template-456', name: 'Implementer Template', role: 'implementer' }],
+      })
+
       createWrapper({
         agent: {
           agent_display_name: 'implementer',
-          agent_name: 'Implementer',
+          agent_name: 'Implementer Template',
+          project_id: 'project-1',
           template_id: null,
         },
       })
 
       await flushPromises()
 
-      // Without template_id, component searches templates.list by name
-      expect(api.templates.list).toHaveBeenCalled()
+      // FE-9818: without template_id, only the job's own product is searched, by exact name
+      expect(api.templates.list).toHaveBeenCalledWith({ is_active: true, product_id: 'product-1' })
+      expect(api.templates.preview).toHaveBeenCalledWith('template-456', {})
     })
   })
 

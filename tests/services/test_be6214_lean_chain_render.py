@@ -85,7 +85,7 @@ def _b(text: str) -> int:
 def test_conductor_render_is_lean_with_floor() -> None:
     render_bytes = _b(_conductor_render())
     assert render_bytes >= 12_000, f"conductor render fell below the irreducible floor: {render_bytes}"
-    assert render_bytes <= 23_400, f"conductor render regressed above the lean ceiling: {render_bytes}"
+    assert render_bytes <= 23_600, f"conductor render regressed above the lean ceiling: {render_bytes}"
 
 
 def test_conductor_embedded_trim_removes_meaningful_span() -> None:
@@ -98,8 +98,8 @@ def test_conductor_embedded_trim_removes_meaningful_span() -> None:
 
 def test_suborch_render_band() -> None:
     render_bytes = _b(_suborch_render())
-    assert render_bytes >= 19_500, f"sub-orch render fell below the band: {render_bytes}"
-    assert render_bytes <= 22_600, f"sub-orch render regressed above the band: {render_bytes}"
+    assert render_bytes >= 15_500, f"sub-orch render fell below the band: {render_bytes}"
+    assert render_bytes <= 18_500, f"sub-orch render regressed above the band: {render_bytes}"
 
 
 

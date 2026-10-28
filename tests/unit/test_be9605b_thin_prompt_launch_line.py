@@ -17,13 +17,14 @@ _GOLDENS = {
     "codex": (
         "## HARNESS\n"
         "Harness: codex (the user chose it for this agent). Find it on this machine, work out its launch\n"
-        "syntax (its --help usually says), and open it in a new terminal seeded with this prompt.\n"
+        "syntax (its --help usually says), and open it in a new terminal seeded with the worker's\n"
+        "agent_prompt, verbatim.\n"
         "If you cannot find it or are unsure how to launch it, ask the user.\n" + _NO_BYPASS
     ),
     None: (
         "## HARNESS\n"
-        "Harness: default. Open a new terminal running the same harness you are running in,\n"
-        "seeded with this prompt.\n" + _NO_BYPASS
+        "Harness: default. Launch this worker in a new terminal running\n"
+        "the same harness you are running in, seeded with its agent_prompt, verbatim.\n" + _NO_BYPASS
     ),
 }
 

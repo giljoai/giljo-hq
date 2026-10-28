@@ -93,7 +93,7 @@ class TestResetSystemInstructionsCanonical:
         service = TemplateService(db_manager, tenant_manager)
         await service.reset_system_instructions(session, template)
 
-        assert "health_check" in template.system_instructions
+        assert "health_check" not in template.system_instructions
         assert "get_job_mission" in template.system_instructions
         assert "full_protocol" in template.system_instructions
         from giljo_mcp.branding import PRODUCT_NAME

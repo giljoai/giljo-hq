@@ -30,7 +30,7 @@
           @click="activeTab = 'mission'"
         >
           <v-icon size="18">mdi-text-box-outline</v-icon>
-          Mission
+          Job
         </button>
         <button
           class="pill-btn"
@@ -50,7 +50,7 @@
           <v-window-item value="mission">
             <div v-if="displayAgent" class="mission-section">
               <v-card variant="flat" class="pa-3 smooth-border">
-                <pre class="mission-text">{{ displayAgent.mission || 'No mission assigned yet.' }}</pre>
+                <pre class="mission-text">{{ displayAgent.mission || 'No job assigned yet.' }}</pre>
               </v-card>
             </div>
             <div v-else class="text-center py-4 text-muted-a11y">
@@ -67,6 +67,9 @@
             </div>
 
             <div v-else class="todo-items-list">
+              <div v-if="handedOffCount" class="text-body-small text-muted-a11y px-3" data-test="plan-counter">
+                {{ planCounterText }}
+              </div>
               <div
                 v-for="(item, index) in todoItems"
                 :key="`todo-${index}`"
@@ -81,6 +84,11 @@
                   size="20"
                 />
                 <span class="todo-item-content">{{ item.content }}</span>
+                <span
+                  v-if="item.status === 'skipped'"
+                  class="todo-handed-off ml-2"
+                  data-test="todo-handed-off"
+                >Handed off</span>
               </div>
             </div>
           </v-window-item>
@@ -148,6 +156,16 @@ const formattedCreatedAt = computed(() => {
 
 const todoItemsCount = computed(() => todoItems.value.length)
 
+const doneCount = computed(() => todoItems.value.filter((item) => item.status === 'completed').length)
+const handedOffCount = computed(() => todoItems.value.filter((item) => item.status === 'skipped').length)
+
+const planCounterText = computed(() => {
+  const parts = [`${doneCount.value} done`, `${handedOffCount.value} handed off`]
+  const toDo = todoItemsCount.value - doneCount.value - handedOffCount.value
+  if (toDo > 0) parts.push(`${toDo} to do`)
+  return parts.join(', ')
+})
+
 watch(
   () => props.initialTab,
   (newTab) => {
@@ -186,6 +204,8 @@ function getStatusIcon(status) {
       return 'mdi-checkbox-marked'
     case 'in_progress':
       return 'mdi-progress-clock'
+    case 'skipped':
+      return 'mdi-account-arrow-right'
     case 'pending':
     default:
       return 'mdi-checkbox-blank-outline'
@@ -198,6 +218,8 @@ function getStatusColor(status) {
       return 'success'
     case 'in_progress':
       return 'warning'
+    case 'skipped':
+      return STATUS_COLORS.HANDED_OVER
     case 'pending':
     default:
       return STATUS_COLORS.PENDING
@@ -252,6 +274,12 @@ function getStatusColor(status) {
 .todo-item-content {
   font-size: 0.875rem;
   line-height: 1.4;
+}
+
+.todo-handed-off {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: $color-status-handed-over;
 }
 
 /* Pulse animation for in_progress items */

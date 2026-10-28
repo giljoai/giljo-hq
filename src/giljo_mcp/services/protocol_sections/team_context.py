@@ -130,13 +130,10 @@ This project has {headcount}:
 """
 
     coordination_section = f"""## COORDINATION
-- **UUID-ONLY MESSAGING**: Always use agent_id UUIDs from the team table above when addressing agents
-- Use `post_to_thread(thread_id=<your coordination thread>, content="...", from_agent="{agent_id}", to_participant="<agent_id>", ...)` with UUID values
-- Use `get_thread_history(thread_id=<your coordination thread>, as_participant="{agent_id}", unread_only=true, mark_read=true)` to check for instructions or updates
-- When you complete a deliverable, post a brief status message to downstream agents using their agent_id UUIDs as `to_participant`
-- Omit `to_participant` for a broadcast to the entire team
-- NEVER use display names (e.g., "orchestrator", "implementer") in to_participant - use the UUID from the team table
-- Check `full_protocol` for detailed messaging and progress reporting guidance
+- **UUID-ONLY MESSAGING**: address agents by the team table's agent_id UUIDs, NEVER a display
+  name; omit `to_participant` to broadcast. Your `from_agent` is `{agent_id}`.
+- Post a status message to the agents that depend on you when a deliverable is ready; the exact
+  `get_thread_history` / `post_to_thread` calls are in `full_protocol`.
 
 ---
 

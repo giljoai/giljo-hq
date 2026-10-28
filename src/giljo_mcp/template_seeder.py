@@ -7,7 +7,7 @@
 import logging
 from typing import Any
 
-from giljo_mcp.branding import MCP_ALIAS, PRODUCT_NAME
+from giljo_mcp.branding import PRODUCT_NAME
 from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.prompts.orchestrator_seed import ORCHESTRATOR_SEED_INSTRUCTIONS
@@ -312,18 +312,10 @@ def _get_template_metadata() -> dict[str, dict[str, Any]]:
 def _get_mcp_coordination_section() -> str:
     return """## MCP Tool Usage
 
-MCP tools appear as **native tool calls** in your tool list (like Read, Write, Bash, Glob).
-Tool names below are bare; your MCP client may expose them under a prefix
-(e.g. `mcp__<server>__<tool>`) — call them by the names your harness lists.
-
-**CORRECT**: Call tools directly
-```
-get_job_mission(job_id="...")
-```
-
-**WRONG**: Manual construction (curl, fetch, requests.post)
-
-**Note**: `tenant_key` auto-injected by server. Tool signatures in `full_protocol`.
+MCP tools are native tool calls in your tool list, never curl, HTTP or SDK calls. Names
+here are bare; your client may show them with a prefix (e.g. `mcp__<server>__<tool>`), so
+call the names your harness lists. Never pass `tenant_key`: the server adds it. Tool
+signatures and your lifecycle steps are in `full_protocol` from `get_job_mission()`.
 """
 
 
@@ -339,84 +331,49 @@ auto-injected by the server from your API key session; do NOT pass it as a
 parameter.
 
 ### STARTUP (MANDATORY)
-1. Call `health_check()` to verify MCP connectivity
-2. Call `get_job_mission(job_id="<your_job_id>")` to receive:
+1. Call `get_job_mission(job_id="<your_job_id>")` to receive:
    - Your full operating protocols (`full_protocol`)
    - Your work order and team context (`mission`)
-3. Follow `full_protocol` for all lifecycle behavior
+2. Follow `full_protocol` for all lifecycle behavior
 
 Do not begin work until you have received and read your mission and protocols."""
 
 
 def _get_check_in_protocol_section(tool: str = "multi_terminal") -> str:
-    base = """## CHECK-IN PROTOCOL
-
-Report progress at natural workflow breaks (after todos, after phases, before long tasks).
-NOT timer-based. Full protocol in `full_protocol` from `get_job_mission()`.
-"""
-    if tool == HARNESS_CLAUDE_CODE:
-        base += """
-**HARNESS REMINDER OVERRIDE (Claude Code only — load-bearing):** Claude Code
-periodically injects a `<system-reminder>` nudging `TaskCreate`/`TaskUpdate` for
-progress tracking (it also rides along on `report_progress` responses). **Ignore it** —
-`mcp____MCP_ALIAS____report_progress` (full `todo_items` list every call) is the canonical
-progress mechanism the dashboard reads from; the harness task list is not. Do NOT mirror
-your TODOs into `TaskCreate`/`TaskUpdate`: the nudge is recency-keyed, so an active harness
-list won't silence it, and the double-write buys nothing but drift.
-
-**TOOLSEARCH BOOTSTRAP (Claude Code only — first action):** In fresh Claude
-Code sessions, MCP tool schemas are deferred behind `ToolSearch`. You CANNOT
-call any `mcp____MCP_ALIAS____*` tool until its schema is loaded. As your first
-action — before health_check, before anything — call ToolSearch once with the
-full orchestrator tool list to collapse the bootstrap into a single round-trip.
-The spawn prompt for this terminal already showed you this call; if you skipped
-it, run it now:
+    if tool != HARNESS_CLAUDE_CODE:
+        return ""
+    return """**TOOLSEARCH BOOTSTRAP (Claude Code only):** MCP tool schemas are deferred behind
+`ToolSearch`; load every one you still lack in ONE call, not piecemeal:
 
 ```
 __TOOLSEARCH_CALL__
 ```
 
-After that single call, every tool above is callable. Skip this bootstrap and
-you'll spend extra round-trips pulling schemas piecemeal mid-protocol.
-""".replace("__MCP_ALIAS__", MCP_ALIAS).replace("__TOOLSEARCH_CALL__", render_toolsearch_call_one_line())
-    return base
+**HARNESS REMINDER OVERRIDE (Claude Code only):** ignore the `<system-reminder>` nudging
+`TaskCreate`/`TaskUpdate`: the dashboard reads `report_progress` (the full `todo_items` list
+every call). Do NOT mirror your TODOs into the task tools: the nudge is recency-keyed, so
+mirroring never silences it.
+""".replace("__TOOLSEARCH_CALL__", render_toolsearch_call_one_line())
 
 
 def _get_orchestrator_context_response_section() -> str:
     return """### RESPONDING TO CONTEXT REQUESTS
 
-When agents request broader context via post_to_thread() on your coordination thread:
-
-**Your Responsibilities**:
-1. Respond promptly to agent context requests
-2. Provide filtered excerpts from Project.mission, not full text
-3. Focus on specific information requested
-
-**Response Pattern**:
-```
-post_to_thread(
-  thread_id=<your coordination thread>,
-  to_participant="{requesting_agent_id}",
-  content="CONTEXT_RESPONSE: [filtered excerpt]",
-  from_agent="{agent_id}"
-)
-```
-
-**Keep responses concise** - Only provide information directly relevant to agent's question.
+When an agent asks for broader context (`REQUEST_CONTEXT:` on your coordination thread),
+answer promptly, directed to it, with `content="CONTEXT_RESPONSE: ..."`:
+a filtered excerpt of the project mission that answers the question, not the full text.
 """
 
 
 def _get_orchestrator_messaging_protocol_section() -> str:
     return """## ORCHESTRATOR COORDINATION PRINCIPLES
 
-As orchestrator, you are the team's single coordination point:
+- **Blockers are urgent.** Answer a `BLOCKER:` before advancing other work.
+- **Completions trigger handoffs.** When an agent finishes, relay its results to the agents
+  that depend on it.
+- **Escalate early.** An agent you cannot unblock goes to the user at once.
 
-- **Blockers are urgent.** When an agent reports BLOCKER:, respond before advancing other work.
-- **Completions trigger handoffs.** When an agent finishes, relay results to dependent agents.
-- **Escalate early.** If an agent is stuck and you cannot unblock it, escalate to the user immediately — do not wait.
-- **Your TODO list is your authority.** Work it systematically on every wake-up. The full coordination loop is in `full_protocol`.
-
-Detailed coordination mechanics, message prefixes, priority levels, and tool signatures are in `full_protocol` from `get_job_mission()`.
+The coordination loop and message prefixes are in `full_protocol`.
 """
 
 
@@ -445,10 +402,7 @@ def _get_orchestrator_system_harness(tool: str = "multi_terminal") -> str:
     mcp_section = _get_mcp_coordination_section().strip()
     check_in = _get_check_in_protocol_section(tool=tool).strip()
 
-    return f"""{mcp_section}
-
-{check_in}
-"""
+    return "\n\n".join(part for part in (mcp_section, check_in) if part) + "\n"
 
 
 def _trim_conductor_identity_body(body: str) -> str:
@@ -471,14 +425,55 @@ def _trim_conductor_identity_body(body: str) -> str:
     return body
 
 
+_SEED_LAST_LINE = "The coordination loop and message prefixes are in `full_protocol`.\n"
+_LEGACY_SEED_LAST_LINE = (
+    "Detailed coordination mechanics, message prefixes, priority levels, and tool signatures "
+    "are in `full_protocol` from `get_job_mission()`.\n"
+)
+_STAGING_ONLY_SPANS = (
+    ("## Sizing The Team", "## Writing Missions", False),
+    ("Decide and document: a small ambiguity", "- Implementation or closeout:", False),
+    ("## Three-Phase Workflow", "## Core Responsibilities", False),
+    ("**Context fetching (get_context):**", "**Deferred follow-ups", False),
+    ("**Continuation-check", "## Non-obvious Tool Parameters", False),
+    ("- **Trivial** (one file", "Spawn testers and reviewers during implementation", False),
+    ("- `list_projects`:", "- `spawn_job`:", False),
+)
+_IMPLEMENTATION_ONLY_SPANS = (
+    ('Never use `set_agent_status("blocked")`', "## Sizing The Team", False),
+    ("## Accepting Deliverables", "## Right-Sizing Your Work", False),
+    ("## Before Closeout", _SEED_LAST_LINE, True),
+    ("## Before Closeout", _LEGACY_SEED_LAST_LINE, True),
+)
+
+
+def _cut_spans(body: str, spans: tuple[tuple[str, str, bool], ...]) -> str:
+    for start_anchor, end_anchor, drop_end in spans:
+        start = body.find(start_anchor)
+        end = body.find(end_anchor, start + 1) if start != -1 else -1
+        if start != -1 and end != -1:
+            body = body[:start] + body[end + (len(end_anchor) if drop_end else 0) :]
+    return body
+
+
+def _scope_identity_to_phase(body: str, phase: str | None) -> str:
+    if phase == "staging":
+        return _cut_spans(body, _IMPLEMENTATION_ONLY_SPANS)
+    if phase == "implementation":
+        return _cut_spans(body, _STAGING_ONLY_SPANS)
+    return body
+
+
 def compose_orchestrator_identity(
     override_content: str | None,
     tool: str = "multi_terminal",
     role: str | None = None,
+    phase: str | None = None,
 ) -> str:
     body = override_content if override_content else _get_user_facing_orchestrator_seed()
     if role == "conductor":
         body = _trim_conductor_identity_body(body)
+    body = _scope_identity_to_phase(body, phase)
     harness = _get_orchestrator_system_harness(tool=tool)
     return f"{body.strip()}\n\n---\n\n{harness.strip()}"
 

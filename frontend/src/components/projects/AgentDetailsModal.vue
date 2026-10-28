@@ -54,6 +54,12 @@
         </v-card>
       </div>
 
+      <div v-else-if="!isOrchestrator && templateNotFound">
+        <v-alert type="info" variant="tonal" density="compact">
+          Template not found. The template this job was started with is not on record.
+        </v-alert>
+      </div>
+
       <div v-else-if="!isOrchestrator && !previewContent && !loading">
         <v-alert type="info" variant="tonal" density="compact">
           No template information available for this agent.
@@ -99,6 +105,7 @@ const apiClient = instance?.appContext.config.globalProperties.$api || api
 const loading = ref(false)
 const error = ref(null)
 const previewContent = ref(null)
+const templateNotFound = ref(false)
 const orchestratorPrompt = ref(null)
 
 const isOpen = computed({
@@ -124,51 +131,39 @@ const getAgentDisplayNameColor = (agentEntity) => {
   return getAgentColorConfig(getAgentColorKey(agentEntity)).hex
 }
 
-const fetchTemplateData = async () => {
-  const hasTemplateId = !!props.agent?.template_id
-  const displayName = props.agent?.agent_display_name
+const findTemplateInJobProduct = async () => {
   const agentName = props.agent?.agent_name
+  const projectId = props.agent?.project_id
+  if (!agentName || !projectId) return null
 
-  if (!hasTemplateId && !displayName && !agentName) {
-    error.value = null
-    return
-  }
+  const project = await apiClient.projects.get(projectId)
+  const productId = project?.data?.product_id
+  if (!productId) return null
 
+  const response = await apiClient.templates.list({ is_active: true, product_id: productId })
+  const matches = (response?.data || []).filter((t) => t.name === agentName)
+  return matches.length === 1 ? matches[0].id : null
+}
+
+const fetchTemplateData = async () => {
   loading.value = true
   error.value = null
   previewContent.value = null
+  templateNotFound.value = false
 
   try {
-    let templateId = null
-
-    if (hasTemplateId) {
-      templateId = props.agent.template_id
-    } else {
-      const response = await apiClient.templates.list({ is_active: true })
-      const templates = response.data
-
-      const searchTerms = [displayName, agentName].filter(Boolean).map(s => s.toLowerCase())
-      const match = templates.find(t => {
-        const templateName = (t.name || '').toLowerCase()
-        const templateRole = (t.role || '').toLowerCase()
-        return searchTerms.some(term =>
-          templateName === term ||
-          templateRole === term ||
-          templateName.includes(term) ||
-          term.includes(templateName)
-        )
-      })
-
-      if (match) {
-        templateId = match.id
-      }
+    const templateId = props.agent?.template_id || (await findTemplateInJobProduct())
+    if (!templateId) {
+      templateNotFound.value = true
+      return
     }
-
-    if (templateId) {
-      const previewResponse = await apiClient.templates.preview(templateId, {})
-      previewContent.value = previewResponse.data.preview
-    }
+    const previewResponse = await apiClient.templates.preview(templateId, {})
+    previewContent.value = previewResponse.data.preview
   } catch (err) {
+    if (err?.response?.status === 404) {
+      templateNotFound.value = true
+      return
+    }
     console.error('[AgentDetailsModal] Failed to fetch template:', err)
     error.value = parseErrorResponse(err).message || 'Failed to fetch template data'
   } finally {
@@ -197,6 +192,7 @@ watch(
   (newValue) => {
     if (newValue && props.agent) {
       previewContent.value = null
+      templateNotFound.value = false
       orchestratorPrompt.value = null
       error.value = null
 

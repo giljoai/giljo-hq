@@ -111,7 +111,7 @@ async def test_create_injects_canonical_bootstrap(db_session, template_service, 
 
     assert resp.system_instructions == _get_mcp_bootstrap_section()
     assert "INJECTED EVIL INSTRUCTIONS" not in resp.system_instructions
-    assert "health_check" in resp.system_instructions
+    assert "health_check" not in resp.system_instructions
     assert "get_job_mission" in resp.system_instructions
     assert "full_protocol" in resp.system_instructions
 

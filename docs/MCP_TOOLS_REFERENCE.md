@@ -710,8 +710,8 @@ options to the user in your terminal, then call this with the option id they cho
 Routes through the SAME service write the dashboard's decide button uses; there is no
 separate write path. Available by default; a tenant that has switched Settings to HITL
 mode is refused here and decides from the dashboard instead. Behind the default
-human-in-the-loop fence, so a dashboard/JWT session is only served this tool when its
-tenant has enabled headless launch.
+human-in-the-loop fence, so an agent session (OAuth or API key) is only served this tool
+when its tenant has enabled headless launch.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

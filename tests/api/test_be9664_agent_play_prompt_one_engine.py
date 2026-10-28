@@ -161,16 +161,14 @@ async def test_play_prompt_is_byte_identical_to_the_shared_generator(api_client,
         seed["project_name"],
         seed["job_id"],
         _Hints(cli_tool="codex", model="opus", effort="high"),
-        multi_terminal=True,
-        launched=launched,
     )
     assert resp.json()["prompt"] == expected, (
         "BE-9664: the Play prompt has drifted from the shared generator -- "
         "a hand-built prompt path is forbidden by the one-prompt-engine rule"
     )
-    assert "## HARNESS" in expected, "guard the guard: this fixture must exercise the launch block"
-    flag = get_harness("codex").autonomy_flag
-    assert (flag in expected) is launched, "the autonomy flag is named after the human gate and never before"
+    assert "Model hint: opus" in expected, "guard the guard: this fixture must exercise the template hints"
+    assert "## HARNESS" not in expected, "BE-9826: a worker prompt never tells the worker to launch itself"
+    assert get_harness("codex").autonomy_flag not in expected, "the autonomy flag is for the launcher, not the worker"
 
 
 @pytest.mark.asyncio
@@ -207,15 +205,6 @@ async def test_play_prompt_ignores_a_trashed_template(api_client, auth_headers, 
     assert prompt, "the prompt must still render"
     assert "codex" not in prompt, f"the binned template's harness still reached the prompt: {prompt!r}"
     assert "opus" not in prompt, f"the binned template's model hint still reached the prompt: {prompt!r}"
-    assert "Harness: default" in prompt, (
-        f"a trashed template must degrade to the default harness, not vanish the block: {prompt!r}"
-    )
     assert prompt == build_agent_prompt(
-        "implementer-backend",
-        "implementer",
-        seed["project_name"],
-        seed["job_id"],
-        None,
-        multi_terminal=True,
-        launched=True,
+        "implementer-backend", "implementer", seed["project_name"], seed["job_id"], None
     ), "one engine still: the degraded prompt is the generator's no-template output"

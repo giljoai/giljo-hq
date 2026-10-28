@@ -251,20 +251,63 @@ class TestToggleAdmitsWithNoDeclaration:
 
 
 
-class TestApiKeyBypassUnaffected:
+def _api_key_state(tenant_key: str) -> dict:
+    return {"auth_method": "api_key", "tenant_key": tenant_key}
+
+
+class TestApiKeyFencedLikeJwt:
     @pytest.mark.asyncio
-    async def test_api_key_sees_and_can_call_launch_even_with_headless_off(self, gate_client):
+    async def test_headless_off_hides_launch_from_tools_list(self, gate_client):
         new_client, holder = gate_client
-        holder.state = {"auth_method": "api_key", "tenant_key": holder.tenant_key}
+        holder.state = _api_key_state(holder.tenant_key)
 
         async with new_client() as session:
-            listed = await session.list_tools()
-            advertised = {t.name for t in listed.tools}
+            advertised = {t.name for t in (await session.list_tools()).tools}
+
+        assert "launch_implementation" not in advertised
+        assert "decide_approval" not in advertised
+        assert "spawn_job" in advertised
+
+    @pytest.mark.asyncio
+    async def test_headless_off_refuses_launch_with_the_jwt_structured_refusal(self, gate_client):
+        new_client, holder = gate_client
+        holder.state = _api_key_state(holder.tenant_key)
+        jwt_holder_state = _jwt_orchestrator_state(holder.tenant_key)
+
+        async with new_client() as session:
+            api_key_result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+            holder.state = jwt_holder_state
+            jwt_result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+
+        assert not api_key_result.is_error
+        parsed = _parse_content_dict(api_key_result)
+        assert parsed.get("error") == "VALIDATION_ERROR"
+        assert parsed.get("field") == "allow_headless_launch"
+        assert parsed == _parse_content_dict(jwt_result)
+
+    @pytest.mark.asyncio
+    async def test_headless_off_refuses_decide_approval(self, gate_client):
+        new_client, holder = gate_client
+        holder.state = _api_key_state(holder.tenant_key)
+
+        async with new_client() as session:
+            result = await session.call_tool("decide_approval", {"approval_id": str(uuid4()), "option_id": "approve"})
+
+        assert "gated by the human Implement step" in _content_text(result)
+
+    @pytest.mark.asyncio
+    async def test_headless_on_advertises_and_allows_launch(self, gate_client, db_manager):
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        holder.state = _api_key_state(holder.tenant_key)
+
+        async with new_client() as session:
+            advertised = {t.name for t in (await session.list_tools()).tools}
             call = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert "launch_implementation" in advertised, "api_key operator must still see the launch gate"
-        joined = "\n".join(getattr(b, "text", "") for b in call.content)
-        assert "HITL mode" not in joined, "api_key operator must never be HITL-fenced"
+        assert {"launch_implementation", "decide_approval"} <= advertised
+        assert "allow_headless_launch" not in _content_text(call)
+        assert "HITL mode" not in _content_text(call)
 
 
 
@@ -317,11 +360,10 @@ class TestFencePredicate:
         assert await _launch_gate_blocked(None) is False
 
     @pytest.mark.asyncio
-    async def test_api_key_state_is_never_fenced(self):
+    async def test_api_key_without_tenant_fails_safe_blocked(self):
         from api.endpoints.mcp_sdk_server import _launch_gate_blocked
 
-        blocked = await _launch_gate_blocked(_FakeRequest({"auth_method": "api_key", "tenant_key": "T"}))
-        assert blocked is False
+        assert await _launch_gate_blocked(_FakeRequest({"auth_method": "api_key"})) is True
 
     @pytest.mark.asyncio
     async def test_jwt_without_tenant_fails_safe_blocked(self):

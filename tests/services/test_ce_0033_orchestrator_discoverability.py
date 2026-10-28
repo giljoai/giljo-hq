@@ -90,9 +90,10 @@ class TestTask1ListProjectsGuidance:
         assert "completed_after" in identity or "created_after" in identity
         assert "spill" in identity.lower()
 
-    def test_identity_includes_continuation_check_section(self):
+    def test_identity_keeps_the_filtered_duplicate_check_for_every_tool(self):
         identity = compose_orchestrator_identity(None, tool="multi_terminal")
-        assert "Continuation-check" in identity
+        assert "Continuation-check" not in identity
+        assert 'a bare\n  `list_projects(mode="planning")`' in identity
 
 
 
@@ -122,23 +123,29 @@ class TestTask2ProductIdInIdentity:
 
 
 class TestTask3CheatSheet:
-    def test_cheat_sheet_section_header_present(self):
-        identity = compose_orchestrator_identity(None, tool="claude-code")
-        assert "Non-obvious Tool Parameters" in identity, (
-            "Identity must contain the discoverability cheat-sheet header (CE-0033 Task 3)"
-        )
 
-    def test_cheat_sheet_lists_high_value_knobs(self):
+    def test_cheat_sheet_is_not_repeated_in_the_identity(self):
         identity = compose_orchestrator_identity(None, tool="claude-code")
-        expected_bullets = [
-            "taxonomy_alias_prefix",
-            "depth_config",
-            "predecessor_job_id",
-            "todo_append",
-            "exclude_job_id",
-        ]
-        for needle in expected_bullets:
-            assert needle in identity, f"Cheat-sheet missing high-value parameter: {needle!r}"
+        assert "Non-obvious Tool Parameters" not in identity
+
+    @pytest.mark.asyncio
+    async def test_each_high_value_knob_is_in_its_tool_definition(self):
+        from api.endpoints.mcp_tools import _base
+        from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+
+        async with create_connected_server_and_client_session(_base.mcp) as session:
+            tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+        expected = {
+            "list_projects": ("taxonomy_alias_prefix", "completed_after", "summary_only"),
+            "get_context": ("depth_config",),
+            "spawn_job": ("predecessor_job_id", "phase"),
+            "report_progress": ("todo_append", "replace"),
+            "get_workflow_status": ("exclude_job_id",),
+        }
+        for name, knobs in expected.items():
+            definition = json.dumps(tools[name].model_dump(mode="json"))
+            for knob in knobs:
+                assert knob in definition, f"{name} definition lost {knob!r}"
 
 
 
@@ -170,7 +177,7 @@ class TestTask5SpawnPromptBootstrap:
         project.series_number = None
         return project
 
-    def test_claude_code_spawn_prompt_contains_toolsearch_before_health_check(self):
+    def test_claude_code_spawn_prompt_contains_toolsearch_before_get_job_mission(self):
         builder = ClaudePromptBuilder()
         prompt = builder.build_execution_prompt(
             orchestrator_id="orch-1",
@@ -179,10 +186,9 @@ class TestTask5SpawnPromptBootstrap:
             git_enabled=False,
         )
         ts_idx = prompt.find("ToolSearch(query=")
-        hc_idx = prompt.find("health_check()")
         gm_idx = prompt.find("get_job_mission(")
         assert ts_idx >= 0, "Claude Code spawn prompt missing ToolSearch bootstrap"
-        assert hc_idx > ts_idx, "ToolSearch must precede health_check in the spawn prompt"
+        assert "health_check" not in prompt
         assert gm_idx > ts_idx, "ToolSearch must precede get_job_mission in the spawn prompt"
 
     def test_multi_terminal_default_spawn_prompt_omits_bootstrap(self):
@@ -208,14 +214,8 @@ class TestTask5SpawnPromptBootstrap:
         identity = compose_orchestrator_identity(None, tool="claude-code")
         rendered_call = render_toolsearch_call_one_line()
         assert rendered_call in identity, "Identity ToolSearch call must use the canonical helper output"
-        from giljo_mcp.branding import MCP_ALIAS
-
-        for tool_name in (
-            f"mcp__{MCP_ALIAS}__health_check",
-            f"mcp__{MCP_ALIAS}__spawn_job",
-            f"mcp__{MCP_ALIAS}__report_progress",
-            f"mcp__{MCP_ALIAS}__complete_job",
-        ):
+        assert "mcp__" not in rendered_call
+        for tool_name in ("spawn_job", "report_progress", "complete_job"):
             assert tool_name in rendered_call
             assert tool_name in CANONICAL_ORCHESTRATOR_TOOLS
 
@@ -593,12 +593,9 @@ class TestCE0034StagingSpawnPromptToolSearch:
     def test_claude_code_staging_spawn_toolsearch_appears_before_health_check(self):
         prompt = self._build_thin_prompt(tool="claude-code")
         ts_idx = prompt.find("ToolSearch(query=")
-        hc_idx = prompt.find("health_check()", ts_idx)
         gm_idx = prompt.find("get_staging_instructions(", ts_idx)
         assert ts_idx >= 0
-        assert hc_idx > ts_idx, (
-            "CE-0034: ToolSearch must appear BEFORE health_check in the rendered staging spawn prompt"
-        )
+        assert "health_check()" not in prompt, "BE-9822: staging spends no call on health_check"
         assert gm_idx > ts_idx, (
             "CE-0034: ToolSearch must appear BEFORE get_staging_instructions in the rendered staging spawn prompt"
         )

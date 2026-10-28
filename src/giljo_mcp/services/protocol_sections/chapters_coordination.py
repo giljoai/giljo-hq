@@ -150,12 +150,9 @@ armed thread is closed.)
 def _build_ch_orchestrator_authority(cli_mode: bool) -> str:
     if cli_mode:
         mode_rule = """── CLI SUBAGENT MODE: DRAIN INBOX AT WRITE TIME ───────────────────────────
-There is no live dashboard roster and verification agents are deferred to
-implementation. When you AUTHOR a downstream agent's mission (especially a
-tester or reviewer), FIRST call get_thread_history() on your coordination thread
-and drain your inbox, then splice the relevant peer findings + predecessor
-artifacts directly into that mission text at write time. The subagent will not
-see a live roster after it starts — what you write into its mission is what it gets."""
+Before you AUTHOR a downstream mission (a tester's or reviewer's above all), call
+get_thread_history() on your coordination thread and splice the peer findings and
+predecessor artifacts into it: what you write into its mission is what it gets."""
     else:
         mode_rule = """── MULTI-TERMINAL MODE: CREATE ALL AGENTS FIRST, THEN WRITE JOBS ──────────
 Two-phase staging. FIRST create every agent on the project (spawn them
@@ -166,16 +163,11 @@ unlocks its Play button. Creating all agents up front lets you wire peer
 agent_ids into each mission and lets agents message each other before any
 mission is authored. Do NOT write a mission before its agent exists."""
 
-    return f"""════════════════════════════════════════════════════════════════════════════
-          CH_AUTHORITY: YOU AUTHOR WORK (orchestrator)
-════════════════════════════════════════════════════════════════════════════
+    return f"""══ CH_AUTHORITY: YOU AUTHOR WORK (orchestrator) ══
 
-AUTHORITY RULE: You, the orchestrator, are the ONLY agent that authors WORK.
-Specialists exchange INFO with each other but never hand work to a peer. Any
-scope-change a specialist discovers is surfaced UP to you (requires_action=true);
-you decide and re-task. Peers do not redirect peers — every WORK decision is
-yours.
+AUTHORITY RULE: You, the orchestrator, are the ONLY agent that authors WORK. Specialists
+exchange INFO but never hand work to a peer; a scope-change surfaces UP to you
+(requires_action=true), and you decide and re-task.
 
 {mode_rule}
-────────────────────────────────────────────────────────────────────────────
 """

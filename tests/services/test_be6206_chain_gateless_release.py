@@ -18,10 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.platform_registry import get_harness
-from giljo_mcp.prompts.spawn_prompt import build_agent_prompt, launch_gate_passed
+from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block
+from giljo_mcp.prompts.spawn_prompt import launch_gate_passed
 from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.template_validation import resolve_harness_name
 from giljo_mcp.tenant import TenantManager
 
 
@@ -398,14 +400,8 @@ async def test_be9670a_chain_member_two_worker_names_autonomy_flag_without_secon
     flag = get_harness("claude-code").autonomy_flag
 
     def _render(project: Project) -> str:
-        return build_agent_prompt(
-            "implementer",
-            "implementer",
-            project.name,
-            "job",
-            _Tpl(),
-            multi_terminal=True,
-            launched=launch_gate_passed(project),
+        return render_harness_launch_block(
+            resolve_harness_name(_Tpl.cli_tool), model=None, effort=None, launched=launch_gate_passed(project)
         )
 
     before = await _reload_project(db_session, p2, tenant)

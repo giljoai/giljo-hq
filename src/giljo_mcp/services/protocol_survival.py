@@ -18,17 +18,12 @@ SECTION_MAX_LINES = 200
 
 def build_truncation_check(total_chars: int) -> str:
     return (
-        f"This response is ~{total_chars} chars. The full_protocol field ends with the "
-        f"marker line '{PROTOCOL_END_MARKER}'. If you cannot see that marker at the very "
-        "end of full_protocol, your harness truncated this output and you are missing "
-        "instructions. Recovery: call get_job_mission again passing the protocol_etag "
-        "from this response (the unchanged identity+protocol block is then omitted, "
-        "shrinking the response several-fold); if it is still truncated, refetch the "
-        "protocol one section at a time with get_job_mission(job_id, section=<name>) — "
-        "the protocol_toc field in this response lists every section name and size, and "
-        "each section is small enough to survive any known harness limit. Whatever "
-        "arrives, the next_required_actions checklist in this response is authoritative "
-        "for your immediate next steps."
+        f"This response is ~{total_chars} chars; full_protocol ends with the line "
+        f"'{PROTOCOL_END_MARKER}'. If you cannot see it, your harness truncated this output: "
+        "call get_job_mission again with this protocol_etag (the unchanged identity and "
+        "protocol are then omitted), or refetch one section at a time with "
+        "get_job_mission(job_id, section=<name from protocol_toc>), which fits any harness "
+        "limit. next_required_actions is authoritative for your next steps."
     )
 
 
@@ -177,7 +172,7 @@ def _worker() -> list[str]:
     return [
         "1. This response IS your mission. Read the mission and full_protocol fields fully.",
         "2. Publish your full TODO plan: report_progress(job_id, todo_items=[...]).",
-        "3. Do the work; call report_progress after each completed TODO item.",
+        "3. Do the work; call report_progress when TODO items complete (items finished in one stretch go in one call).",
         "4. If blocked or needing a decision: post_to_thread on your coordination thread "
         "(requires_action=true), then set_agent_status(job_id, 'blocked', reason).",
         "5. When ALL TODOs are done: complete_job(job_id, result={summary, artifacts, commits}).",
@@ -213,7 +208,8 @@ def _chain_suborch_staging() -> list[str]:
 def _chain_suborch_implementation() -> list[str]:
     return [
         "1. Launch and drive your spawned agents to completion; monitor with get_workflow_status(project_id).",
-        "2. Verify deliverables (get_agent_result) and finalize_job each accepted agent.",
+        "2. Verify deliverables (get_agent_result only if a worker did not return inline) and "
+        "finalize_job each accepted agent.",
         "3. complete_job(job_id, ...) FIRST — it closes your orchestrator execution so the closeout "
         "readiness gate passes.",
         "4. THEN write_project_closeout(project_id, ...) (commit SHA) — its RETURN stamps the "
@@ -236,9 +232,10 @@ def _solo_orchestrator_implementation() -> list[str]:
     return [
         "1. Read live team state: get_workflow_status(project_id).",
         "2. Drive your agents to completion; answer their coordination-thread posts (get_thread_history).",
-        "3. Verify deliverables (get_agent_result) and finalize_job each accepted agent.",
+        "3. Verify deliverables (get_agent_result only if a worker did not return inline); "
+        "finalize_job only to accept one before you go on working.",
         "4. complete_job(job_id, ...) — your own orchestrator closeout.",
-        "5. write_project_closeout(project_id, ...) (commit SHA + decisions) to finish the project.",
+        "5. write_project_closeout(project_id, ...) (commit SHA + decisions), then update_project(status='completed').",
     ]
 
 

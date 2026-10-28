@@ -45,17 +45,15 @@ def _scanned_files() -> list[Path]:
 
 
 def test_orchestrator_toolsearch_bundle_names_only_live_tools() -> None:
-    from giljo_mcp.branding import MCP_ALIAS
-    from giljo_mcp.prompts._canonical_tool_list import CANONICAL_ORCHESTRATOR_TOOLS
+    from giljo_mcp.prompts._canonical_tool_list import CANONICAL_ORCHESTRATOR_TOOLS, CANONICAL_WORKER_TOOLS
 
     live = _live_tool_names()
-    prefix = f"mcp__{MCP_ALIAS}__"
 
     stale = []
-    for entry in CANONICAL_ORCHESTRATOR_TOOLS:
-        assert entry.startswith(prefix), f"{entry!r} is not a {prefix}* tool reference"
-        name = entry[len(prefix) :]
+    for name in (*CANONICAL_ORCHESTRATOR_TOOLS, *CANONICAL_WORKER_TOOLS):
+        assert not name.startswith("mcp__"), f"{name!r} hardcodes a server prefix"
         if name not in live:
+            entry = name
             stale.append(f"  {entry} -> {RETIRED_TOOL_NAMES.get(name, 'no such tool')}")
 
     assert not stale, (

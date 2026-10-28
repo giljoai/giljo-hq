@@ -58,64 +58,31 @@ _CONDUCTOR_FORBIDDEN_LINES = (
 )
 
 _WAKE_CODEX = """**CONSTELLATION: CODEX CLI**
-Your subagents are Codex spawn_agent() processes you spawn IN-PROCESS — they run and
-return their result to you inline.
-
-**Your OWN workers return INLINE — never sleep-poll them:**
-  `spawn_agent(...)` BLOCKS until the subagent finishes and hands its result straight
-  back to you. The instant it returns:
-  → `get_agent_result(job_id="...")` — read the worker's recorded
-    result and verify its deliverable.
-  There is NO waiting gap to poll across for a spawn_agent() YOU launched — do NOT
-  `sleep` to "wait" for your own worker.
-
-**Cross-terminal peers still reach you by message — drain on every wake:**
-  → `get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true)` — messages from peer
-    agents / other terminals (blockers, hand-offs, the user)
-  → `get_workflow_status(project_id="...")` — live agent statuses
-
-**User-triggered wake:** The user may also tell you to check on things.
-  Regardless of trigger source, always run the full coordination loop."""
+Your subagents are Codex spawn_agent() processes you spawn IN-PROCESS — they run and return their result to you inline.
+**Your OWN workers return INLINE — never sleep-poll them:** `spawn_agent(...)` BLOCKS until the worker
+finishes and its report comes back inline. Verify the work itself; `get_agent_result(job_id="...")` only if that report is missing.
+There is NO waiting gap to poll across for a spawn_agent() YOU launched — do NOT `sleep` to "wait" for it.
+Peers in other terminals, and the user, still reach you by message: when one woke you, run the full
+loop below (RECEIVE, `get_thread_history`, drains it). When your own worker's return woke you, skip
+RECEIVE and ASSESS (`complete_job` refuses on unread action-required posts)."""
 
 _WAKE_CLAUDE = """**CONSTELLATION: CLAUDE CODE CLI**
-Your subagents are Claude Code Task() processes you spawn IN-PROCESS — they run and
-return their result to you inline.
-
-**Your OWN workers return INLINE — never sleep-poll them:**
-  `Task(subagent_type="...")` BLOCKS until the subagent finishes and hands its result
-  straight back to you. The instant it returns:
-  → `get_agent_result(job_id="...")` — read the worker's recorded
-    result and verify its deliverable.
-  There is NO waiting gap to poll across for a Task() YOU launched — do NOT `sleep`
-  to "wait" for your own worker.
-
-**Cross-terminal peers still reach you by message — drain on every wake:**
-  → `get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true)` — messages from peer
-    agents / other terminals (blockers, hand-offs, the user)
-  → `get_workflow_status(project_id="...")` — live agent statuses
-
-**User-triggered wake:** The user may also tell you to check on things.
-  Regardless of trigger source, always run the full coordination loop."""
+Your subagents are Claude Code Task() processes you spawn IN-PROCESS — they run and return their result to you inline.
+**Your OWN workers return INLINE — never sleep-poll them:** `Task(subagent_type="...")` BLOCKS until the worker
+finishes and its report comes back inline. Verify the work itself; `get_agent_result(job_id="...")` only if that report is missing.
+There is NO waiting gap to poll across for a Task() YOU launched — do NOT `sleep` to "wait" for it.
+Peers in other terminals, and the user, still reach you by message: when one woke you, run the full
+loop below (RECEIVE, `get_thread_history`, drains it). When your own worker's return woke you, skip
+RECEIVE and ASSESS (`complete_job` refuses on unread action-required posts)."""
 
 _WAKE_SUBAGENT_GENERIC = """**CONSTELLATION: CLI SUBAGENT**
-Your subagents run IN-PROCESS via your CLI's own subagent syntax — they run and return
-their result to you inline.
-
-**Your OWN workers return INLINE — never sleep-poll them:**
-  Your subagent spawn call BLOCKS until the subagent finishes and hands its result
-  straight back to you. The instant it returns:
-  → `get_agent_result(job_id="...")` — read the worker's recorded
-    result and verify its deliverable.
-  There is NO waiting gap to poll across for a subagent YOU launched — do NOT `sleep`
-  to "wait" for your own worker.
-
-**Cross-terminal peers still reach you by message — drain on every wake:**
-  → `get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true)` — messages from peer
-    agents / other terminals (blockers, hand-offs, the user)
-  → `get_workflow_status(project_id="...")` — live agent statuses
-
-**User-triggered wake:** The user may also tell you to check on things.
-  Regardless of trigger source, always run the full coordination loop."""
+Your subagents run IN-PROCESS via your CLI's own subagent syntax — they run and return their result to you inline.
+**Your OWN workers return INLINE — never sleep-poll them:** your subagent spawn call BLOCKS until the worker
+finishes and its report comes back inline. Verify the work itself; `get_agent_result(job_id="...")` only if that report is missing.
+There is NO waiting gap to poll across for a subagent YOU launched — do NOT `sleep` to "wait" for it.
+Peers in other terminals, and the user, still reach you by message: when one woke you, run the full
+loop below (RECEIVE, `get_thread_history`, drains it). When your own worker's return woke you, skip
+RECEIVE and ASSESS (`complete_job` refuses on unread action-required posts)."""
 
 _WAKE_GENERIC = """**CONSTELLATION: MULTI-TERMINAL**
 Your subagents run in separate sessions. The user mediates between sessions.

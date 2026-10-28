@@ -2,6 +2,27 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.11.0] — 2026-10-27
+
+### Changed
+
+- **Agents use fewer tokens and finish projects faster.** The guides and job briefings your agents read are much shorter: the routing guide is about 60% smaller, a worker's briefing is about half its old size, and orchestrator briefings are about half their old size. A one-worker project now takes about 20 calls instead of 25. Every rule an agent acts on is still there, and your own saved additions still apply.
+- **Agents start with their mission, not a connection check.** The startup steps stored with every agent now begin with fetching the job. Existing agents are updated automatically unless you edited their text by hand. Tool names in the instructions now work whatever you named the server.
+- **Plans can say a step was handed off.** When an agent hands a step to you or to a follow-up task, it marks that step as handed off and names the task, instead of ticking it as done. The job window shows those steps as "Handed off", and the plan count reads like "15 done, 2 handed off".
+
+### Fixed
+
+- **A dropped project no longer blocks its chain.** A project that is parked, cancelled, superseded or deleted after its chain has started now drops out of the chain. The rest of the chain keeps running and can be closed out, and the chain card marks the dropped step.
+- **Agent Details shows the agent's own profile.** The window now shows the template the job was actually started with, not another agent of the same role. When that template is no longer on record, the window says so.
+- **Finished agent results stay readable.** You can still read an agent's result after its job is accepted or the project is closed out.
+- **Launch prompts only say what is true.** A worker agent is no longer told to open a copy of itself in a new terminal, and agents are no longer asked for a health check as a required first step. Orchestrators now hand each worker the exact prompt the server issued.
+- **A job nobody started can no longer be marked done.** The reply tells the agent to dismiss the job, or to have its worker fetch its mission first.
+- **Clearer agent job window.** The first tab is now called "Job" instead of "Mission", so it is not mixed up with the project mission.
+
+### Security
+
+- **Agents connected with an API key now wait for your Implement click, just like OAuth agents.** Unless you turn on "Allow headless CLI self-advance" in Settings, an API-key session cannot start implementation or answer an approval on its own.
+
 ## [2.10.0] — 2026-10-22
 
 ### Added
