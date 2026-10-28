@@ -80,14 +80,10 @@ _SUBORCH_PHASE1_START = "### PHASE 1 — STARTUP (execute once, after get_job_mi
 _SUBORCH_PHASE1_END = "### PHASE 2 — ACTIVE COORDINATION"
 _SUBORCH_PHASE1_NOTE = (
     "### PHASE 1 — STARTUP (chain sub-orchestrator)\n\n"
-    "CH_SUB_ORCHESTRATOR step 5 above is your AUTHORITATIVE implementation entry: after\n"
-    "staging-end you call `get_job_mission` ONCE (without your boot `protocol_etag`) and it flips\n"
-    "you waiting→working and returns this implementation protocol. There is NO human Implement\n"
-    "click, you do NOT wait for the user to start agents, and you do NOT wait on the\n"
-    "dashboard — the solo multi_terminal startup that says otherwise does NOT apply to a chain\n"
-    "member. On entry: read `current_team_state` from this response (live-queried) and your\n"
-    "pre-planned coordination TODOs (written during staging — do NOT drop any items), then\n"
-    "begin PHASE 2 immediately.\n\n"
+    "CH_SUB_ORCHESTRATOR step 5 above is your AUTHORITATIVE implementation entry: the one\n"
+    "`get_job_mission` ONCE after staging-end flips you waiting→working. NO human Implement click,\n"
+    "no waiting on the user or the dashboard. Read `current_team_state` (live-queried) and your\n"
+    "pre-planned coordination TODOs (do NOT drop any items), then begin PHASE 2 immediately.\n\n"
 )
 
 _SUBORCH_STAGING_IMPL_REGION_START = "### PHASE 2 — ACTIVE COORDINATION"
@@ -186,15 +182,10 @@ _GIT_CONSTRAINT_SUBAGENT = """- **You are the committer (subagent mode).** Your 
   those files by name (git add the specific files; NEVER git add -A) and commit once before
   closeout. A job you SELF-ADOPT (only when your harness has no spawn mechanism at all) is
   committed the same way."""
-_GIT_WARNING_MULTI_TERMINAL = """This is expected for a PURE coordinator (you only spawned workers — THEY committed) or a
-documentation-only agent, and needs no action THERE. But if you SELF-ADOPTED any job (did the
-implementation yourself in this session), a no-commits warning is a RED FLAG that your own work is
-uncommitted: go back, commit the changed files (git add the specific files; NEVER git add -A) and
-re-verify before closeout."""
-_GIT_WARNING_SUBAGENT = """In subagent mode you are the committer, so on a project that changed
-code a no-commits warning is a RED FLAG that your workers' files are uncommitted: go back, commit
-them (git add the specific files; NEVER git add -A) and re-verify before closeout. A
-documentation-only project needs no action there."""
+_GIT_WARNING_MULTI_TERMINAL = """expected for a PURE coordinator or a docs-only agent, but
+if you SELF-ADOPTED any job it is a RED FLAG that your own work is uncommitted: commit it and re-verify."""
+_GIT_WARNING_SUBAGENT = """on a project that changed code it is a RED FLAG that your workers'
+files are uncommitted (you are the committer): commit them and re-verify. Docs-only needs no action."""
 _GIT_CONSTRAINT_CONDUCTOR_SUBAGENT = (
     "- **Git commit requirement does NOT apply.** You only delegate. In this subagent chain each "
     "project's sub-orchestrator commits once for its project; its workers hand it their files."
@@ -233,6 +224,14 @@ LAUNCH_PROMPT_RULE = (
     "order may add to it, never replace it."
 )
 
+_TODO_AND_MISSION_CONSTRAINTS = (
+    "- **Your TODO list is your authority.** The mission describes what needs to happen.\n"
+    "  Your TODOs are the structured breakdown. Work them systematically.\n"
+    "- **Missions** (yours and each worker's): goal / current state / steps / boundaries /\n"
+    "  done-when; cite ids instead of restating background. Record a worker's scope change\n"
+    "  with `update_job_mission`."
+)
+
 
 def _build_orchestrator_protocol_body(
     job_id: str,
@@ -254,8 +253,7 @@ def _build_orchestrator_protocol_body(
             "`get_job_mission(job_id=...)` so it binds to the new job record"
         )
         resting_wait_block = f"""**If your spawned subagents are running (nothing actionable right now):**
-  → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — agents running")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on"""
+  → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — agents running")` (also after you pass the baton)"""
         unblock_relay_line = (
             f"  → The subagent reads your reply on its next get_thread_history poll — relaunch it via "
             f"{spawn_syntax} if it already exited (its first `get_job_mission` rebinds it to the job)"
@@ -268,8 +266,7 @@ def _build_orchestrator_protocol_body(
             "  → Tell user to start the new prompt in a new agent session (terminal, desktop, or web tab)"
         )
         resting_wait_block = f"""**If waiting for user to start agents (multi-terminal):**
-  → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — waiting for agents to start")`
-  → Dashboard shows "Monitoring" — user knows you're available but not burning tokens; same when you handed the baton on"""
+  → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — waiting for agents to start")` (also after you pass the baton)"""
         unblock_relay_line = '  → Tell user: "Go to that agent\'s terminal and say: the orchestrator responded"'
         verification_launch_block = """    - Subagent mode: launch the subagent, and its VERY FIRST call MUST be
       `get_job_mission(job_id=<the job_id from step 1>)` so it binds to the record you just created.
@@ -294,32 +291,16 @@ def _build_orchestrator_protocol_body(
 
 ### PHASE 1 — STARTUP (execute once, after get_job_mission)
 
-**MANDATORY:** You MUST call `get_job_mission(job_id="{job_id}")` at the start of every
-implementation session, even if you already have context from a prior phase. This call
-transitions your status from `waiting` to `working` on the server — it is a deterministic
-state signal, not just a data fetch. Skipping it leaves you invisible on the dashboard.
+**MANDATORY:** `get_job_mission(job_id="{job_id}")` starts EVERY implementation session, even with
+prior context: it moves you `waiting` → `working` (skip it and the dashboard never sees you).
+**PROTOCOL CACHE:** later fetches pass its `protocol_etag`; `protocol_unchanged=true` means reuse the copy you have.
 
-**PROTOCOL CACHE (saves ~15-50KB on a re-fetch):** the response includes a `protocol_etag`.
-Remember it. On any LATER `get_job_mission` this session — an implementation-phase refresh, a
-reactivation, or (best-effort) a staging session whose context continues into implementation —
-pass `protocol_etag=<that value>`. If the response has `protocol_unchanged=true`, your
-`agent_identity` + `full_protocol` are unchanged (returned null by design) — reuse the copy you
-already have instead of re-reading them.
-
-**Tool names below are bare** (e.g. `get_workflow_status`, `complete_job`); your MCP client may
-expose them under a prefix (e.g. `mcp__<server>__<tool>`) — call them by the names your harness
-lists.
-
-1. Read the `current_team_state` field from this response — it is live-queried, not stale.
-2. Read your pre-planned coordination TODOs (written during staging, waiting for you).
-   **DO NOT drop any items.** To update statuses, use `todo_items` with the FULL list (all items, updated statuses).
-   To add genuinely NEW tasks discovered mid-implementation, use `todo_append`.
-3. Report to user:
-   - Agent names, statuses, and phase order (from `current_team_state`)
-   - Your TODO list with current status of each item
+1. Read `current_team_state` in this response (live-queried) and your pre-planned TODOs from
+   staging. **DO NOT drop any items:** `todo_items` takes the FULL list; `todo_append` adds new ones.
+2. Report to the user: agent names, statuses and phase order, your TODO list, and:
 {phase1_launch_line}
    - "I will actively coordinate. Wake me when agents need attention or on status changes."
-4. Begin Phase 2 immediately — do not wait for user input.
+3. Begin Phase 2 immediately — do not wait for user input.
 
 ### PHASE 2 — ACTIVE COORDINATION (TODO-driven — work your list on every wake-up)
 
@@ -328,140 +309,78 @@ lists.
 **{LAUNCH_PROMPT_RULE}**
 
 **THE COORDINATION LOOP (execute on EVERY wake-up or trigger):**
-
-Every time you are activated — whether by user interaction, a sleep timer, a subagent
-completing, an unblock event, or any other trigger — execute this loop:
-
 ```
-1. RECEIVE   → get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true) — drain your message queue
-2. ASSESS    → get_workflow_status() — get live agent statuses
-3. PROCESS   → Handle any messages (blockers, completions, requests)
-4. ADVANCE   → Look at your TODO list. Find the next actionable item.
-               Can you advance it? Do so. Is it blocked? Note why.
+1. RECEIVE   → get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true)
+2. ASSESS    → get_workflow_status() — live agent statuses
+3. PROCESS   → handle blockers, completions, requests
+4. ADVANCE   → the next actionable TODO: advance it, or note why it is blocked
 5. REPORT    → report_progress(todo_items=[...full list with updated statuses...])
-               (use todo_append ONLY for genuinely NEW tasks, not status updates)
-6. DECIDE    → Are there still incomplete TODOs?
-               YES with actionable work → continue loop from step 1
-               YES but waiting on agents → tell user what you're waiting for
-               NO → proceed to Phase 3 (CLOSEOUT)
+6. DECIDE    → incomplete TODOs with work: loop; waiting on agents: tell the user; none: Phase 3
 ```
-
-**TODO ITEM LIFECYCLE:**
-- Mark items `in_progress` when you start working them
-- Mark items `completed` when the coordination action is done AND verified
-- A "spawn agents" TODO is completed when agents are spawned and confirmed working
-- An "unblock agent X" TODO is completed when you sent guidance AND agent resumed
-- A "verify deliverables" TODO is completed when you confirmed artifacts exist
+**TODOs:** `in_progress` when started, `completed` only when done AND verified. A step handed to
+a person or a follow-up task is `skipped`, its text starting `HANDOFF <TSK-id>:`. Never mark done
+what did not happen.
 
 **COORDINATION ACTIONS (use as needed within the loop):**
-
-**Unblock an agent:**
-  → Read blocker message content
-  → Consult your `mission` field for relevant context
-  → `post_to_thread(thread_id=<your coordination thread>, content="...", from_agent="{executor_id}", to_participant="<agent_id>", requires_action=true)`
+**Unblock an agent:** answer from your `mission` with
+  `post_to_thread(thread_id=<your coordination thread>, content="...", from_agent="{executor_id}", to_participant="<agent_id>", requires_action=true)`
 {unblock_relay_line}
-  → Update the relevant TODO item
-
-**Spawn a replacement agent:**
-  → `spawn_job(...)`
+**Spawn a replacement agent:** `spawn_job(...)`, then
 {replacement_launch_line}
-  → New agent reads predecessor context via `get_job_mission`
-  → Update the relevant TODO item
-
-**Broadcast to team:**
-  → `post_to_thread(thread_id=<your coordination thread>, content="...", from_agent="{executor_id}", requires_action=false)` — omit `to_participant` for a broadcast; everyone on the thread sees it.
-  → Broadcasts are informational by default (requires_action=false). Set requires_action=true only if ALL recipients must act.
-
-**Spawn verification agent (after all deliverable agents complete):**
-  → For each completed deliverable agent: `get_agent_result(job_id="<their_job_id>")`
-  → Build a precise tester/reviewer mission from the REAL results (files_changed, commits, summary)
-  → **(1) spawn_job FIRST — MANDATORY, NOT mode-dependent.** Call
-    `spawn_job(agent_name="tester", agent_display_name="tester", mission="...", project_id="...")`
-    BEFORE launching anything. This mints the MCP job_id and the dashboard record (TODOs, recorded
-    verdict, audit trail). There is no path that skips this step — subagent mode does NOT exempt you.
-  → **(2) THEN launch the work** using the job_id returned by step 1:
+**Broadcast to team:** the same `post_to_thread` without `to_participant`; `requires_action=true` only if ALL must act.
+**Spawn verification agent** (tester/reviewer) once the deliverable agents complete, unless they produced only
+  docs or analysis: `get_agent_result(job_id="<their_job_id>")` for each, a mission built from those
+  REAL artifacts (never guessed), then **(1) spawn_job FIRST — MANDATORY, NOT mode-dependent:**
+  `spawn_job(agent_name="tester", agent_display_name="tester", mission="...", project_id="...")`
+  mints the job_id and dashboard record. **(2) THEN launch the work** with that job_id:
 {verification_launch_block}
-  → **NEVER launch a tester/reviewer via Agent/Task/spawn_agent/@-syntax without a preceding spawn_job.**
-    Doing so loses the job_id, the TODOs, the recorded verdict, and the dashboard audit trail — the agent
-    runs invisibly and unauditable. Mode does NOT change this. spawn_job is always step 1.
-  → Update the relevant TODO item
-
-**Implementation-phase verification spawning:**
-
-- **WHEN to spawn verification:** After deliverable agents (implementer, analyzer, documenter) complete
-  AND the project produced code or testable artifacts. If all agents produced only documentation or
-  analysis (no changed code, no new APIs, no migrations), skip verification entirely — there is
-  nothing for a tester/reviewer to run.
-- **HOW to build the verification mission:** Call `get_agent_result(job_id=<deliverable_job_id>)` for
-  every completed deliverable agent. Anchor the tester/reviewer mission in REAL artifacts: exact file
-  paths, commit hashes, API names, and behavior changes from those results. Never write a speculative
-  mission ("the implementer probably added X") — if the result is absent, note it as unknown and scope
-  verification to what is confirmed.
-- **HOW to handle non-blocking findings (triage by RISK, not file count):**
-  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (the project's test runner + linter + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
-  - *Out-of-scope finding* — pre-existing default-branch bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
-  - *Needs user approval* — the product's declared protected paths (repo-root config files, license/docs directories, install/startup scripts, or similar); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
-  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, spans a major structural boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
+  **NEVER launch a tester/reviewer via Agent/Task/spawn_agent/@-syntax without a preceding spawn_job.**
+**Findings, triaged by RISK:** mechanical and caused by this project → fix inline, re-run the same
+  checks, ship it here (never defer your own mess). Out of scope → `create_task`, cite the ID in
+  `decisions_made`. Protected paths, irreversible, license/security/billing → `create_task` naming the
+  approval gate. Architectural or risky (contracts, auth, migrations, concurrency) → re-spawn the
+  deliverable agent with a scoped fix mission, never inline.
 
 **PROGRESS REPORTING (MANDATORY after every coordination action):**
-  → To update statuses: `report_progress(job_id="{job_id}", todo_items=[...FULL list with updated statuses...])`
-  → To add NEW tasks: `report_progress(job_id="{job_id}", todo_append=[...new items only...])`
-  → **CRITICAL:** `todo_items` REPLACES the entire list — always include ALL items (completed + in_progress + pending), never a partial list
-  → The dashboard displays your TODO list — keep it current
+  → `report_progress(job_id="{job_id}", todo_items=[...FULL list with updated statuses...])`
+  → `report_progress(job_id="{job_id}", todo_append=[...new items only...])`
+  → `todo_items` REPLACES the entire list; the dashboard shows it, so keep it current.
 
 ### RESTING STATES (between coordination loops)
-
-After completing a coordination loop with no actionable work remaining:
 
 {resting_wait_block}
 
 **If you want periodic auto-check-in:**
-  → Ask the user: "Would you like me to periodically check on agents? I can sleep and re-check every N minutes. Note: this increases token consumption."
-  → If yes: `set_agent_status(job_id="{job_id}", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`
-  → Then sleep for the specified interval, wake, run the coordination loop, repeat
-  → report_progress after waking transitions you back to "working"
+  → Ask the user: "I can sleep and re-check every N minutes; this costs tokens." If yes:
+    `set_agent_status(job_id="{job_id}", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`.
+    Then sleep for the specified interval, wake, run the loop, repeat; report_progress moves you back to "working".
 
-**Blocked vs Idle vs Sleeping:**
-  - `blocked` = I need human help to continue (shows "Blocked")
-  - `idle` = I'm done dispatching, nothing to do right now (shows "Monitoring")
-  - `sleeping` = I'll check back in N minutes automatically (shows "Sleeping")
+**Blocked vs Idle vs Sleeping:** `blocked` = needs human help; `idle` = nothing to do now
+("Monitoring"); `sleeping` = back in N minutes.
 
 ### PHASE 3 — CLOSEOUT (all agents complete or decommissioned)
 
-**Pre-closeout verification:**
-1. `get_workflow_status(project_id="...")` — confirm all agents are complete
-2. `get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true)` — drain final messages
-3. Review your TODO list — ALL items must be `completed`
-   If any are not, either complete them or explain why they were dropped
+**Pre-closeout:** every agent complete (`get_workflow_status(project_id="...")`; skip it when every
+worker returned inline), every TODO `completed` or handed off (`skipped`), this project's
+mechanical findings fixed. `complete_job` names any unread action-required post, so no extra inbox read.
 
-**Deferred findings:**
-Apply the Phase 2 triage rule ("HOW to handle non-blocking findings"). Mechanical findings caused by this project MUST be fixed before closeout — they are not deferral candidates. Only out-of-scope, protected-zone, or architectural findings are legitimate deferrals: file them via `create_task` (or `create_project` if multi-step) and cite the returned ID in `decisions_made` when you call `write_project_closeout`.
-
-**Closeout works without git:**
-Git commit collection is best-effort. When the server cannot resolve commits (non-git environment,
-missing binary, bare repo), the `complete_job()` response will include `git_unavailable: true` and
-a human-readable `git_unavailable_reason` explaining why. The job still closes cleanly; the commit
-list will be empty or contain only agent-supplied hashes. When this happens, include the phrase
-"git not available — commits omitted" in your closeout summary so the audit trail is honest. The
-`git_warning` field covers a separate case: git integration enabled but the agent produced no
-commits. {git_warning_expectation}
+**Git:** `git_unavailable: true` on `complete_job` means no git here; the job still closes: write
+"git not available — commits omitted" in your summary. `git_warning` = git on, no commits found:
+{git_warning_expectation}
 
 **Closeout steps (order matters):**
-> Chain conductor exception: if you are the CONDUCTOR of a sequential multi-project chain with projects still incomplete, do NOT self-complete here — follow CH_CHAIN_DRIVE and ADVANCE to the next project (`launch_implementation`) instead. complete_job is valid only after the final project closes out.
-1. Mark any remaining non-closeout TODO items as `completed` via `report_progress()` (a TODO describing the closeout itself does NOT need to be marked completed first — see step 2)
-2. `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})` — mark YOUR orchestrator job complete FIRST
-   → The gate auto-completes any TODO that describes the closeout itself (classified structurally when the TODO was written) — no flag exists or is needed, and there is no chicken-and-egg: you never mark your closeout TODO done before calling closeout. Non-closeout incomplete TODOs still block. The unread-messages gate is independent — it blocks only on genuine action-required posts; drain them with `get_thread_history()` on your coordination thread first.
-   → READ the `closeout_checklist` in the response
-   → When the closeout has deferred findings, call `request_approval(...)` — you flip to `awaiting_user` and `complete_job` refuses until the user decides. Neither `set_agent_status` nor `report_progress` clears that state. Two doors clear it through one write: the ApprovalCard in the project's CloseoutModal (the dashboard shows only a passive "Needs decision" pill) or `decide_approval(approval_id, option_id)`. If the user answers verbally, call `decide_approval` with their option; if your tenant requires a dashboard decision it refuses, so point the user to the ApprovalCard. Otherwise proceed with best judgment.
-3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
-4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag vocabulary: {CLOSEOUT_TAG_LIST}. Unknown tags are rejected.
+1. Settle every non-closeout TODO via `report_progress()`: `completed` only if it happened, else `skipped` as a HANDOFF.
+2. `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})` — YOUR job FIRST (your
+   closeout TODO auto-completes). READ its `closeout_checklist`. Deferred findings needing the user:
+   `request_approval(...)`; only the CloseoutModal ApprovalCard or `decide_approval(approval_id, option_id)` clears it.
+3. File follow-ups with `create_task()` / `create_project()`; cite each in `decisions_made` as `OPEN <TSK-id>: ...`
+4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])`
+   — `tags`: 1-5 from {CLOSEOUT_TAG_LIST}.
 5. Tell user: "Project complete. Use `{giljo_cmd}` to create follow-ups or look up existing project/task state."
 
-**IMPORTANT:** You MUST complete your own job (step 2) BEFORE closing the project (step 4). The server requires all agents including the orchestrator to be complete before project closeout.
-
-**If `complete_job()` is rejected:** Read the error. Common causes:
-- Unread messages remain → run get_thread_history(thread_id=<your coordination thread>, as_participant="{executor_id}", unread_only=true, mark_read=true) and ACT on the posts — only genuine action-required posts block this gate, and acting on them (then retrying) is the ONLY way through; there is no bypass flag
-- TODO items incomplete → review and update your TODO list, then retry
+**IMPORTANT:** complete your own job (step 2) BEFORE closing the project (step 4).
+**`complete_job()` rejected?** Unread action-required posts: drain with the RECEIVE
+`get_thread_history` call above, ACT on them, retry (there is no bypass flag). TODO items incomplete → review and update your TODO list, then retry.
 
 ## ORCHESTRATOR CONSTRAINTS
 {git_commit_constraint}
@@ -470,35 +389,33 @@ commits. {git_warning_expectation}
 - **You operate with the user's delegated authority.** Decide and document in
   `decisions_made`. Escalate via `request_approval` only when the choice is
   irreversible, materially changes scope, or has no clear default.
-- **Your TODO list is your authority.** The mission describes what needs to happen.
-  Your TODOs are the structured breakdown. Work them systematically.
+{_TODO_AND_MISSION_CONSTRAINTS}
 
 ---
-**Your Identifiers:**
-- job_id (work order): `{job_id}` — Use for progress, completion
-- agent_id (executor): `{executor_id}` — Use for messages (from_agent on post_to_thread, as_participant on get_thread_history)
-
-**MESSAGING RULE: UUID-ONLY ADDRESSING**
-- ALWAYS use agent_id UUIDs in `to_participant` (from current_team_state)
-- NEVER use display names like "orchestrator" or "implementer" in `to_participant`
-- Your `from_agent` is always: `{executor_id}`
-
-**CRITICAL: MCP tools are NATIVE tool calls. Use them like Read/Write/Bash.**
-**Do NOT use curl, HTTP, or SDK calls.**
-"""  # noqa: S608 — prose protocol template, not SQL
+**Your Identifiers:** job_id `{job_id}` (progress, completion); agent_id `{executor_id}` (your
+`from_agent` and `as_participant`). **UUID-ONLY ADDRESSING:** `to_participant` takes agent_id
+UUIDs from current_team_state, NEVER display names like "orchestrator" or "implementer".
+**MCP tools are NATIVE tool calls; never curl, HTTP, or SDK calls.**
+"""
     if not is_chain_conductor:
         return body
     return _apply_conductor_body_trims(body)
 
 
-_CH3_GENERIC_MCP_PREFERRED = r"""DELEGATE FIRST — you are an ORCHESTRATOR, not the implementer. Your default is to
+_CH3_GENERIC_MCP_PREFERRED = r"""AGENT PROMPT — read this first: spawn_job returns an `agent_prompt` for every job. Launch
+the agent with that text, verbatim, as its first message. NEVER write your own worker prompt: a
+hand-written one does not call get_job_mission, so the job never starts and stays `waiting`.
+A work order may add to the agent_prompt, never replace it. In every launch line below,
+`<prompt>` IS that agent_prompt.
+
+DELEGATE FIRST — you are an ORCHESTRATOR, not the implementer. Your default is to
 SPAWN a dedicated agent for every job order and let it do the work; you coordinate.
 Doing the implementation yourself is the LAST resort (the SELF-ADOPT rung below), not
 the first move — reach for it ONLY when your harness genuinely has no way to spawn.
 
 Run one agent per job order IN PARALLEL. spawn_job(...) ALWAYS comes first — it
 mints the job_id + the dashboard audit record — then you launch the agent seeded
-with the thin prompt get_job_mission(job_id='...'). The role and its model/effort
+with the agent_prompt that call returned. The role and its model/effort
 hints arrive in the get_job_mission agent_profile — nothing to look up, nothing
 to install. Use whichever launch mechanism your session supports:
 
@@ -527,8 +444,8 @@ give each a distinct --title and tab color so the human can see the fleet:
 
 OPTION B — IN-PROCESS SUBAGENT. If your harness CANNOT open terminals but HAS a
 subagent / spawn / delegate mechanism (a Task tool, an agent spawner, an
-@-mention), use that: spawn_job(...) first, then hand the subagent the thin
-get_job_mission(job_id='...') prompt.
+@-mention), use that: spawn_job(...) first, then hand the subagent the agent_prompt
+that call returned, verbatim.
 
 CROSS-AGENT COORDINATION IS MCP-ONLY (spawn_job / post_to_thread / get_thread_history)
 — a subagent is reachable across job boundaries ONLY through the MCP hub; never

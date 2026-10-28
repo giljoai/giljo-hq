@@ -106,7 +106,7 @@ class TestProjectBoundOrchestratorIdentity:
 
         expected_tool = _EXECUTION_MODE_TO_TOOL.get("multi_terminal", "multi_terminal")
         composed, _, source_line = identity.rpartition("\n\n")
-        assert composed == compose_orchestrator_identity(PRODUCT_TEXT, tool=expected_tool)
+        assert composed == compose_orchestrator_identity(PRODUCT_TEXT, tool=expected_tool, phase="staging")
         assert source_line.startswith("identity source: product override, saved ")
 
     async def test_seed_used_when_the_product_has_no_override(self, db_manager, db_session, test_tenant_key):
@@ -119,7 +119,7 @@ class TestProjectBoundOrchestratorIdentity:
 
         expected_tool = _EXECUTION_MODE_TO_TOOL.get("multi_terminal", "multi_terminal")
         composed, _, source_line = identity.rpartition("\n\n")
-        assert composed == compose_orchestrator_identity(None, tool=expected_tool)
+        assert composed == compose_orchestrator_identity(None, tool=expected_tool, phase="staging")
         assert source_line == "identity source: built-in default"
 
     async def test_project_without_a_product_gets_the_built_in_prompt(self, db_manager, db_session, test_tenant_key):

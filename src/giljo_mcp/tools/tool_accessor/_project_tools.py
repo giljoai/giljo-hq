@@ -56,13 +56,12 @@ _STAGING_CHAIN_CONTINUE_INSTRUCTION = (
 
 _STAGING_START_PHASES = (
     "Project ready for staging. Follow these phases in order: "
-    "(1) call health_check(); stop and report if it fails. "
-    '(2) call get_staging_instructions(job_id="{job_id}"). '
-    "(3) follow the returned staging protocol to prepare and save the mission, execution "
+    '(1) call get_staging_instructions(job_id="{job_id}"). '
+    "(2) follow the returned staging protocol to prepare and save the mission, execution "
     "plan and worker assignments. Do NOT begin implementation. "
-    '(4) when all staging requirements are satisfied, call complete_job(job_id="{job_id}") '
+    '(3) when all staging requirements are satisfied, call complete_job(job_id="{job_id}") '
     "to mark staging complete. "
-    '(5) when the server confirms phase="staging_end", {phase_five} '
+    '(4) when the server confirms phase="staging_end", {phase_five} '
     "This response starts staging; it does not mean staging is complete."
 )
 
@@ -159,13 +158,16 @@ class ProjectToolsMixin:
             product_id=result.get("product_id"),
         )
 
-        why = _staging_start_instruction(str(result.get("orchestrator_id", "")), is_chain_member=is_chain_member)
+        orchestrator_id = str(result.get("orchestrator_id", ""))
+        why = _staging_start_instruction(orchestrator_id, is_chain_member=is_chain_member)
         return {
             "status": "staged",
             "mode": mode,
             "execution_mode": execution_mode,
             **result,
-            "next_action": build_next_action(tool="health_check", why=why),
+            "next_action": build_next_action(
+                tool="get_staging_instructions", args_hint={"job_id": orchestrator_id}, why=why
+            ),
         }
 
     async def _resolve_stage_mode_default(self, tenant_key: str) -> str:
@@ -259,10 +261,42 @@ class ProjectToolsMixin:
             )
         except ImplementationNotReadyError as e:
             return self._implementation_gate_error(e, project_id)
+        if "next_action" not in result:
+            continue_action = await self._continue_in_session_action(project_id, tenant_key)
+            if continue_action is not None:
+                result["next_action"] = continue_action
         return {
             "status": "launched",
             **result,
         }
+
+    async def _continue_in_session_action(self, project_id: str, tenant_key: str) -> dict[str, Any] | None:
+        from giljo_mcp.platform_registry import is_subagent_render
+        from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
+        from giljo_mcp.repositories.project_repository import ProjectRepository
+        from giljo_mcp.services._session_helpers import optional_tenant_session
+        from giljo_mcp.services.sequence_run_service import active_chain_run
+
+        async with optional_tenant_session(self.db_manager, tenant_key, self._test_session) as db:
+            project = await ProjectRepository().get_by_id(db, tenant_key, project_id)
+            if project is None or not is_subagent_render(project.execution_mode):
+                return None
+            if await active_chain_run(db, project_id, tenant_key) is not None:
+                return None
+            orchestrator = await AgentJobRepository(self.db_manager).find_orchestrator_execution(
+                db, tenant_key, project_id
+            )
+        if orchestrator is None:
+            return None
+        return build_next_action(
+            tool="get_job_mission",
+            args_hint={"job_id": orchestrator.job_id},
+            why=(
+                "Implementation is open. The orchestrator that staged this project in THIS session "
+                f'continues now with get_job_mission(job_id="{orchestrator.job_id}"); it returns the '
+                "implementation protocol. A NEW session starts from get_implementation_prompt instead."
+            ),
+        )
 
     @staticmethod
     def _implementation_gate_error(error: Any, project_id: str) -> dict[str, Any]:

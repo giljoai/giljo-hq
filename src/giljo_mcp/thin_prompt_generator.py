@@ -62,16 +62,13 @@ Tool names below are bare; your MCP client may expose them under a prefix
 
 FIRST ACTIONS (DO NOT RE-STAGE):
 
-1. Verify MCP: health_check()
-   -> Expected: {{"status": "healthy"}}
-
-2. Signal you are alive:
+1. Signal you are alive:
    report_progress(
        job_id="{job_id}",
        todo_items=[{{"content": "Continuation startup", "status": "in_progress"}}]
    )
 
-3. Read 360 Memory for session context:
+2. Read 360 Memory for session context:
    get_context(
        product_id="{product_param}",
        categories=["memory_360"],
@@ -79,7 +76,7 @@ FIRST ACTIONS (DO NOT RE-STAGE):
    )
    -> Background on the product; the session handover itself is a TASK, read next.
 
-3b. Read the handover your predecessor left:
+2b. Read the handover your predecessor left:
    list_tasks(product_id="{product_param}", task_type="HND")
    -> Take the most recent one. It carries previous progress, current status and
       next steps, under three headings: what to verify before trusting it, what it
@@ -89,12 +86,12 @@ FIRST ACTIONS (DO NOT RE-STAGE):
       claim turns out to be false, set that task to Blocked and say which claim.
       Mark it Completed once you have verified it, not once you have read it.
 
-4. Check messages + retrieve execution plan (can run in parallel):
+3. Check messages + retrieve execution plan (can run in parallel):
    get_thread_history(as_participant="{agent_id}", unread_only=true, mark_read=true) on your coordination thread
    get_job_mission(job_id="{job_id}")
    -> Mission contains: team roster with agent_id UUIDs, execution strategy, completion criteria
 
-5. Check workflow status:
+4. Check workflow status:
    get_workflow_status(project_id="{project_id}")
 
 AFTER CONTEXT GATHERING — decide next action based on workflow status:

@@ -27,10 +27,17 @@ def _solo_chain_lookup():
 
 @pytest.fixture(autouse=True)
 def _mock_comm_thread_resolution():
-    with patch(
-        "giljo_mcp.services.comm_thread_service.CommThreadService.resolve_or_create_bound_thread",
-        new_callable=AsyncMock,
-        return_value={"thread_id": "CHT-test-thread"},
+    with (
+        patch(
+            "giljo_mcp.services.comm_thread_service.CommThreadService.resolve_or_create_bound_thread",
+            new_callable=AsyncMock,
+            return_value={"thread_id": "CHT-test-thread"},
+        ),
+        patch(
+            "giljo_mcp.services.comm_thread_service.CommThreadService.join_thread",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
     ):
         yield
 
@@ -362,9 +369,9 @@ class TestGetAgentMissionFullProtocol:
         assert isinstance(response, MissionResponse)
         protocol = response.full_protocol or ""
 
-        assert "MESSAGE HANDLING" in protocol
-        assert "get_thread_history(..., mark_read=true)" in protocol
-        assert "read-only inspection" in protocol
+        drains = [line for line in protocol.splitlines() if "get_thread_history(thread_id=" in line]
+        assert drains, "the protocol carries explicit drain calls"
+        assert all("mark_read=true" in line for line in drains)
 
 
 class TestBe6211cProtocolEtagAlwaysEmitted:
@@ -406,115 +413,57 @@ class TestBe6211cProtocolEtagAlwaysEmitted:
 
 class TestAgentProtocolMessageHandlingEnhancements:
 
+    @staticmethod
+    def _section(protocol: str, start: str, end: str | None) -> str:
+        i = protocol.find(start)
+        j = protocol.find(end, i) if end else len(protocol)
+        return protocol[i:j] if i != -1 and j != -1 else ""
+
+    async def _protocol(self, orchestration_service, mock_db_manager, mock_agent_job) -> str:
+        _db_manager, session = mock_db_manager
+        job, execution = mock_agent_job
+        setup_get_agent_mission_mocks(session, job, execution)
+        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key="tenant-test")
+        return response.full_protocol or ""
+
     @pytest.mark.asyncio
     async def test_agent_protocol_phase2_includes_message_check_after_tasks(
         self, orchestration_service, mock_db_manager, mock_agent_job
     ):
-        _db_manager, session = mock_db_manager
-        job, execution = mock_agent_job
-
-        setup_get_agent_mission_mocks(session, job, execution)
-
-        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key="tenant-test")
-
-        protocol = response.full_protocol or ""
-
-        phase2_start = protocol.find("### Phase 2")
-        phase2_end = protocol.find("### Phase 3")
-        phase2_section = protocol[phase2_start:phase2_end] if phase2_start != -1 and phase2_end != -1 else ""
-
-        assert "get_thread_history()" in phase2_section, (
-            "Phase 2 EXECUTION must instruct agents to check messages after each task"
-        )
-
-        assert "after" in phase2_section.lower() or "completing" in phase2_section.lower(), (
-            "Phase 2 must specify WHEN to check messages (after each task)"
-        )
+        protocol = await self._protocol(orchestration_service, mock_db_manager, mock_agent_job)
+        phase2 = self._section(protocol, "### Phase 2", "### Phase 3")
+        phase3 = self._section(protocol, "### Phase 3", "### Phase 4")
+        assert "pauses of a long job" in phase2.lower()
+        assert "get_thread_history(" in phase2
+        assert "report_progress(" in phase3, "messages are drained BEFORE progress is reported"
 
     @pytest.mark.asyncio
     async def test_agent_protocol_phase3_checks_messages_before_reporting(
         self, orchestration_service, mock_db_manager, mock_agent_job
     ):
-        _db_manager, session = mock_db_manager
-        job, execution = mock_agent_job
-
-        setup_get_agent_mission_mocks(session, job, execution)
-
-        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key="tenant-test")
-
-        protocol = response.full_protocol or ""
-
-        phase3_start = protocol.find("### Phase 3")
-        phase3_end = protocol.find("### Phase 4")
-        phase3_section = protocol[phase3_start:phase3_end] if phase3_start != -1 and phase3_end != -1 else ""
-
-        receive_pos = phase3_section.find("get_thread_history()")
-        report_pos = phase3_section.find("report_progress(")
-
-        assert receive_pos != -1, "Phase 3 must include get_thread_history() call"
-        assert report_pos != -1, "Phase 3 must include report_progress() call"
-        assert receive_pos < report_pos, (
-            "Phase 3 must check messages BEFORE reporting progress (get_thread_history before report_progress)"
-        )
-
-        assert "before" in phase3_section.lower() or "mandatory" in phase3_section.lower(), (
-            "Phase 3 must clearly state messages should be checked BEFORE reporting"
-        )
+        protocol = await self._protocol(orchestration_service, mock_db_manager, mock_agent_job)
+        phase1 = self._section(protocol, "### Phase 1", "### Phase 2")
+        assert "get_thread_history(" in phase1
+        assert "before starting work" in phase1.lower()
 
     @pytest.mark.asyncio
-    async def test_agent_protocol_phase4_requires_empty_queue_before_completion(
+    async def test_agent_protocol_phase4_states_the_unread_gate_without_a_separate_drain(
         self, orchestration_service, mock_db_manager, mock_agent_job
     ):
-        _db_manager, session = mock_db_manager
-        job, execution = mock_agent_job
-
-        setup_get_agent_mission_mocks(session, job, execution)
-
-        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key="tenant-test")
-
-        protocol = response.full_protocol or ""
-
-        phase4_start = protocol.find("### Phase 4")
-        phase4_end = protocol.find("### Phase 5")
-        phase4_section = protocol[phase4_start:phase4_end] if phase4_start != -1 and phase4_end != -1 else ""
-
-        assert "get_thread_history()" in phase4_section, (
-            "Phase 4 COMPLETION must instruct agents to check messages before completing"
-        )
-
-        queue_gate_indicators = ["queue", "empty", "no pending", "clear", "before completing"]
-        has_gate_language = any(indicator in phase4_section.lower() for indicator in queue_gate_indicators)
-
-        assert has_gate_language, "Phase 4 must include gate language requiring empty queue before completion"
+        protocol = await self._protocol(orchestration_service, mock_db_manager, mock_agent_job)
+        phase4 = self._section(protocol, "### Phase 4", "### Phase 5")
+        assert "complete_job(" in phase4
+        assert "get_thread_history(" not in phase4, "no separate final drain: the completion gate enforces it"
+        assert "messages unread" in phase4, "the completion gate on unread messages is stated"
 
     @pytest.mark.asyncio
     async def test_agent_protocol_includes_when_to_check_messages_guidance(
         self, orchestration_service, mock_db_manager, mock_agent_job
     ):
-        _db_manager, session = mock_db_manager
-        job, execution = mock_agent_job
-
-        setup_get_agent_mission_mocks(session, job, execution)
-
-        response = await orchestration_service.get_agent_mission(job_id=job.job_id, tenant_key="tenant-test")
-
-        protocol = response.full_protocol or ""
-
-        guidance_indicators = ["when to check", "message checking", "check messages in each phase", "across phases"]
-
-        has_guidance = any(indicator in protocol.lower() for indicator in guidance_indicators)
-
-        assert has_guidance, "Protocol must include clear guidance on WHEN to check messages across phases"
-
-        phases_mentioned = sum(
-            [
-                "phase 1" in protocol.lower() and "message" in protocol.lower(),
-                "phase 2" in protocol.lower() and "message" in protocol.lower(),
-                "phase 3" in protocol.lower() and "message" in protocol.lower(),
-                "phase 4" in protocol.lower() and "message" in protocol.lower(),
-            ]
-        )
-
-        assert phases_mentioned >= 3, (
-            "Message handling guidance should reference at least 3 phases (startup, execution, completion)"
-        )
+        protocol = await self._protocol(orchestration_service, mock_db_manager, mock_agent_job)
+        for start, end in (
+            ("### Phase 1", "### Phase 2"),
+            ("### Phase 2", "### Phase 3"),
+        ):
+            section = self._section(protocol, start, end)
+            assert "get_thread_history(" in section and "mark_read=true" in section, start

@@ -8,7 +8,7 @@
  * instead of individual template fields. Key changes:
  * - Uses agent_display_name (not agent_type) for orchestrator detection
  * - Fetches template via apiClient.templates.preview(templateId, {}) for rendered output
- * - Falls back to name-matching against active templates if no template_id
+ * - Falls back to an exact name match in the job's own product if no template_id (FE-9818)
  * - No expansion panels, no individual field display (role, cli_tool, model, etc.)
  * - No copy buttons in the simplified view
  * - Orchestrator uses apiClient.system.getOrchestratorPrompt()
@@ -148,9 +148,9 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
 
       await flushPromises()
 
-      // Should attempt name matching via templates.list
-      // If no match found, should show no-template info
-      expect(wrapper.text()).toContain('No template information available')
+      // FE-9818: no bound template and no product to look in -> plainly not found
+      expect(wrapper.text()).toContain('Template not found')
+      expect(mockTemplatePreview).not.toHaveBeenCalled()
     })
 
     it('displays info message when template_id is undefined and no name match', async () => {
@@ -174,8 +174,9 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
 
       await flushPromises()
 
-      // Should show no-template info if no match found
-      expect(wrapper.text()).toContain('No template information available')
+      // FE-9818: no bound template and no product to look in -> plainly not found
+      expect(wrapper.text()).toContain('Template not found')
+      expect(mockTemplatePreview).not.toHaveBeenCalled()
     })
   })
 

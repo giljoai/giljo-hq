@@ -64,6 +64,7 @@ def job_to_response(job: dict) -> JobResponse:
         todo_items=todo_items,
         phase=job.get("phase"),
         result=job.get("result"),
+        template_id=job.get("template_id"),
         accumulated_duration_seconds=job.get("accumulated_duration_seconds", 0.0),
         duration_seconds=job.get("duration_seconds"),
         reactivation_count=job.get("reactivation_count", 0),

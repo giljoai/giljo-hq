@@ -180,4 +180,4 @@ async def test_reset_system_instructions(db_session, template_service, sample_te
 
     assert f"{PRODUCT_NAME} Agent" in sample_template.system_instructions
     assert "get_job_mission" in sample_template.system_instructions
-    assert "health_check" in sample_template.system_instructions
+    assert "health_check" not in sample_template.system_instructions

@@ -180,26 +180,43 @@ async def test_project_orchestrator_finalizes_the_worker(finalize_mcp_client):
 
 
 @pytest.mark.asyncio
-async def test_complete_job_on_a_never_started_worker_job_warns(finalize_mcp_client):
+@pytest.mark.parametrize("status", ["waiting", "staged"])
+async def test_complete_job_on_a_never_started_worker_job_is_refused(finalize_mcp_client, status):
     client, tenant_key, session = finalize_mcp_client
     project = await _seed_project(session, tenant_key)
-    worker = await _seed_job(session, tenant_key, project.id, job_type="implementer", status="waiting")
+    worker = await _seed_job(session, tenant_key, project.id, job_type="implementer", status=status)
     await session.commit()
 
     async with client() as mcp_session:
         result = await mcp_session.call_tool(
-            "complete_job", {"job_id": worker.job_id, "result": {"summary": "verified on its behalf"}}
+            "complete_job", {"job_id": worker.job_id, "result": {"summary": "completed the wrong job_id"}}
         )
 
-    assert not result.is_error, _content_text(result)
+    assert not result.is_error, f"a refusal is a Tier-2 response, not an error: {_content_text(result)!r}"
     payload = _payload(result)
-    assert any("never started" in w for w in payload.get("warnings", [])), payload
+    assert payload["success"] is False, payload
+    assert payload["error"] == "JOB_NEVER_STARTED", payload
+    assert "dismiss_job" in payload["message"], payload
+    assert "get_job_mission" in payload["message"], payload
     await session.refresh(worker)
-    assert worker.status == "complete"
+    assert worker.status == status, f"a refused complete_job must not change the job, got {worker.status!r}"
 
 
 @pytest.mark.asyncio
-async def test_complete_job_on_a_started_worker_job_does_not_warn(finalize_mcp_client):
+async def test_never_started_refusal_does_not_apply_to_an_orchestrator_job(finalize_mcp_client):
+    client, tenant_key, session = finalize_mcp_client
+    project = await _seed_project(session, tenant_key)
+    orch = await _seed_job(session, tenant_key, project.id, job_type="orchestrator", status="waiting")
+    await session.commit()
+
+    async with client() as mcp_session:
+        result = await mcp_session.call_tool("complete_job", {"job_id": orch.job_id, "result": {"summary": "staged"}})
+
+    assert _payload(result).get("error") != "JOB_NEVER_STARTED", _content_text(result)
+
+
+@pytest.mark.asyncio
+async def test_complete_job_on_a_started_worker_job_completes(finalize_mcp_client):
     client, tenant_key, session = finalize_mcp_client
     project = await _seed_project(session, tenant_key)
     worker = await _seed_job(session, tenant_key, project.id, job_type="implementer", status="working")
@@ -209,4 +226,6 @@ async def test_complete_job_on_a_started_worker_job_does_not_warn(finalize_mcp_c
         result = await mcp_session.call_tool("complete_job", {"job_id": worker.job_id, "result": {"summary": "done"}})
 
     assert not result.is_error, _content_text(result)
-    assert not any("never started" in w for w in _payload(result).get("warnings", []))
+    assert _payload(result).get("success") is not False, _content_text(result)
+    await session.refresh(worker)
+    assert worker.status == "complete"

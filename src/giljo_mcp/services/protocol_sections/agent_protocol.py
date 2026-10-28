@@ -44,10 +44,8 @@ def _generate_agent_protocol(
     git_commit_block, giljo_block = _build_conditional_blocks(git_integration_enabled, execution_mode, tool)
 
     phase1_step4 = (
-        "5. **MANDATORY: Plan your TODO items** (BEFORE implementation):\n"
-        "   - Break mission into 3-7 specific, actionable tasks\n"
-        "   - Publish them with `report_progress(todo_items=[...])`: that list is your plan of record\n"
-        "   - NEVER skip this step - planning prevents poor execution"
+        "3. **MANDATORY: Plan your TODO items** (BEFORE implementation). Break mission into 2-7\n"
+        "   tasks. Publish them with `report_progress(todo_items=[...])`: that list is your plan of record."
     )
 
     protocol_framing = "These are your lifecycle operating procedures. Follow them from startup through completion.\n\n"

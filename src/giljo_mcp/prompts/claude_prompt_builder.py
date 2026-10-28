@@ -4,12 +4,8 @@
 # [CE] Community Edition.
 
 
-from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
-
-
-_PREFIX = f"mcp__{MCP_ALIAS}__"
 
 
 class ClaudePromptBuilder(ExecutionPromptBuilderBase):
@@ -24,8 +20,8 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "## STEP 0: TOOLSEARCH BOOTSTRAP (Claude Code only — first action)",
             "",
             "Claude Code defers MCP tool schemas behind `ToolSearch`. You CANNOT call",
-            f"any `{_PREFIX}*` tool until its schema is loaded. Before health_check,",
-            "before anything else, fire this single call:",
+            "any Giljo HQ tool until its schema is loaded. Before anything else,",
+            "fire this single call (bare names match whatever name your MCP server has):",
             "",
             "```",
             render_toolsearch_call_one_line(),
@@ -142,7 +138,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "## When You're Done",
             "",
             "### Verify Sub-Agents Completed",
-            f"1. Check all agents via {_PREFIX}get_workflow_status()",
+            "1. Check all agents via get_workflow_status()",
             "2. Ensure all have status='complete' (no failures or blockers)",
             "3. Review final deliverables",
             "",
@@ -152,12 +148,12 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "you MUST resolve them before closeout. For each non-complete agent:",
             "",
             "1. **Drain their messages:**",
-            f'   `{_PREFIX}get_thread_history(thread_id=<your coordination thread>, as_participant="<their_agent_id>", unread_only=true, mark_read=true)`',
+            '   `get_thread_history(thread_id=<your coordination thread>, as_participant="<their_agent_id>", unread_only=true, mark_read=true)`',
             "   Record any important content for the 360 Memory summary.",
             "",
             "2. **Process incomplete todos** — mark remaining items as completed or skipped:",
             "   ```python",
-            f"   {_PREFIX}report_progress(",
+            "   report_progress(",
             '       job_id="<their_job_id>",',
             "       todo_items=[",
             '           ...keep completed items as "completed",',
@@ -169,7 +165,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "",
             "3. **Force-complete the agent** (ONLY if NOT already 'complete'):",
             "   ```python",
-            f"   {_PREFIX}complete_job(",
+            "   complete_job(",
             '       job_id="<their_job_id>",',
             '       result={"summary": "Force-completed by orchestrator during closeout.", "status": "force_completed"}',
             "   )",
@@ -183,7 +179,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "### Complete Your Orchestrator Job",
             "When all sub-agents are done and project is complete:",
             "```python",
-            f'{_PREFIX}complete_job(job_id="{orchestrator_id}")',
+            f'complete_job(job_id="{orchestrator_id}")',
             "```",
             "",
             "### Handover (if needed)",

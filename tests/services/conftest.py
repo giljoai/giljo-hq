@@ -747,6 +747,7 @@ async def _spawn_and_complete(service, project_id, tenant_key, result_payload, a
         project_id=project_id,
         tenant_key=tenant_key,
     )
+    await service.get_agent_mission(spawn.job_id, tenant_key)
     await service.complete_job(
         job_id=spawn.job_id,
         result=result_payload,

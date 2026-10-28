@@ -1,6 +1,6 @@
 
 const UNSTARTED_MEMBER_STATUSES = new Set(['', 'pending', 'staged'])
-const FINISHED_MEMBER_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled'])
+const FINISHED_MEMBER_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled', 'detached'])
 
 export function buildChainScreenControls(chainCtx, isRunning) {
   if (!chainCtx) {

@@ -21,7 +21,13 @@ from giljo_mcp.exceptions import (
     ValidationError,
 )
 from giljo_mcp.models import AgentExecution, AgentJob
-from giljo_mcp.prompts.spawn_prompt import _MULTI_TERMINAL_PROMPT_POINTER, build_agent_prompt, launch_gate_passed
+from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block
+from giljo_mcp.prompts.spawn_prompt import (
+    _MULTI_TERMINAL_PROMPT_POINTER,
+    AGENT_PROMPT_VERBATIM_NOTE,
+    build_agent_prompt,
+    launch_gate_passed,
+)
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
@@ -33,6 +39,7 @@ from giljo_mcp.services.execution_mode_gate import require_execution_mode
 from giljo_mcp.services.protocol_survival import build_spawn_footer
 from giljo_mcp.services.sequence_chain_context import renders_multi_terminal
 from giljo_mcp.system_roles import ORCHESTRATOR_AGENT_NAME
+from giljo_mcp.template_validation import resolve_harness_name
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.identity import AGENT_DISPLAY_NAME_MAX, validate_agent_display_name
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -169,7 +176,7 @@ class JobLifecycleService:
 
                 await session.commit()
 
-                thin_agent_prompt, agent_prompt_location = await self._resolve_thin_prompt(
+                thin_agent_prompt, agent_prompt_location, launch_notes = await self._resolve_thin_prompt(
                     session,
                     project=project,
                     project_id=project_id,
@@ -207,6 +214,7 @@ class JobLifecycleService:
                     mission_stored=True,
                     thin_client=True,
                     thin_client_note=[
+                        *launch_notes,
                         "Mission stored server-side, keyed by job_id",
                         "Agent calls get_job_mission(job_id) -> returns mission + full_protocol",
                         "Enables: fresh sessions, postponed launches, orchestrator handover",
@@ -256,7 +264,7 @@ class JobLifecycleService:
             return None
 
         project = await AgentJobRepository(None).get_project_by_id(session, tenant_key, project_id)
-        thin_agent_prompt, agent_prompt_location = await self._resolve_thin_prompt(
+        thin_agent_prompt, agent_prompt_location, _ = await self._resolve_thin_prompt(
             session,
             project=project,
             project_id=project_id,
@@ -440,20 +448,26 @@ class JobLifecycleService:
         job_id: str,
         inline_seed: bool,
         template: Any = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, list[str]]:
         mt = await renders_multi_terminal(session, project=project, project_id=project_id, tenant_key=tenant_key)
         if mt and not inline_seed:
-            return _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=agent_display_name), "dashboard"
+            return _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=agent_display_name), "dashboard", []
         prompt = self._build_agent_prompt(
             agent_name=agent_name,
             agent_display_name=agent_display_name,
             project_name=project.name,
             job_id=job_id,
             template=template,
-            multi_terminal=mt,
-            launched=launch_gate_passed(project),
         )
-        return prompt, "inline"
+        if agent_display_name == "orchestrator":
+            return prompt, "inline", []
+        notes = [AGENT_PROMPT_VERBATIM_NOTE]
+        if mt:
+            harness = resolve_harness_name(getattr(template, "cli_tool", None))
+            notes.append(
+                render_harness_launch_block(harness, model=None, effort=None, launched=launch_gate_passed(project))
+            )
+        return prompt, "inline", notes
 
     def _build_agent_prompt(
         self,
@@ -462,19 +476,8 @@ class JobLifecycleService:
         project_name: str,
         job_id: str,
         template: Any = None,
-        *,
-        multi_terminal: bool = False,
-        launched: bool = False,
     ) -> str:
-        return build_agent_prompt(
-            agent_name,
-            agent_display_name,
-            project_name,
-            job_id,
-            template,
-            multi_terminal=multi_terminal,
-            launched=launched,
-        )
+        return build_agent_prompt(agent_name, agent_display_name, project_name, job_id, template)
 
     async def _create_job_and_execution_records(
         self,

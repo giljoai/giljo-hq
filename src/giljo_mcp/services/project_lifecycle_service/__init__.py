@@ -27,6 +27,7 @@ from giljo_mcp.schemas.service_responses import (
     ProjectResumeResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.chain_member_detach import detach_chain_member
 from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
 from giljo_mcp.services.project_helpers import (
     _build_ws_project_data,
@@ -437,7 +438,16 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                         context={"project_id": project_id, "tenant_key": tenant_key},
                     )
 
+                await detach_chain_member(
+                    db_manager=self.db_manager,
+                    tenant_manager=self.tenant_manager,
+                    project_id=project_id,
+                    tenant_key=tenant_key,
+                    test_session=session,
+                    websocket_manager=self._websocket_manager,
+                )
                 await session.commit()
+                await broadcast_deferred_events(session)
 
                 self._logger.info(f"Cancelled project {project_id}")
 

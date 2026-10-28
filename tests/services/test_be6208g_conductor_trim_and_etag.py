@@ -14,8 +14,8 @@ from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orche
 _WORKER_SPAWN_MARKERS = (
     "**COORDINATION ACTIONS (use as needed within the loop):**",
     "**Spawn a replacement agent:**",
-    "**Spawn verification agent (after all deliverable agents complete):**",
-    "**Implementation-phase verification spawning:**",
+    "**Spawn verification agent**",
+    "**Findings, triaged by RISK:**",
 )
 
 

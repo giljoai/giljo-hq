@@ -235,7 +235,6 @@ class TestPropertyCRuntimeInjection:
         identity = response["orchestrator_identity"]
         assert "Custom A prompt" in identity
         assert "MCP Tool Usage" in identity
-        assert "CHECK-IN PROTOCOL" in identity
 
     def test_override_present_for_claude_code_includes_harness_reminder(self):
         service = _make_mission_service()
@@ -247,7 +246,6 @@ class TestPropertyCRuntimeInjection:
 
         identity = response["orchestrator_identity"]
         assert "My Custom Orchestrator" in identity
-        assert "CHECK-IN PROTOCOL" in identity
         assert "HARNESS REMINDER OVERRIDE" in identity
 
     def test_no_override_returns_seed_plus_harness(self):
@@ -256,10 +254,12 @@ class TestPropertyCRuntimeInjection:
 
         response = service._build_orchestrator_response(ctx, job_id="job-B", tenant_key="tk_tenant_B")
 
-        expected = compose_orchestrator_identity(None, tool="multi_terminal") + "\n\nidentity source: built-in default"
+        expected = (
+            compose_orchestrator_identity(None, tool="multi_terminal", phase="staging")
+            + "\n\nidentity source: built-in default"
+        )
         assert response["orchestrator_identity"] == expected
         assert "MCP Tool Usage" in response["orchestrator_identity"]
-        assert "CHECK-IN PROTOCOL" in response["orchestrator_identity"]
 
     def test_tenant_b_does_not_receive_tenant_a_override(self):
         service = _make_mission_service()
@@ -272,10 +272,10 @@ class TestPropertyCRuntimeInjection:
         response_b = service._build_orchestrator_response(ctx_b, job_id="job-B", tenant_key="tk_tenant_B")
 
         assert "SECRET A" in response_a["orchestrator_identity"]
-        assert "CHECK-IN PROTOCOL" in response_a["orchestrator_identity"]
         assert "SECRET A" not in response_b["orchestrator_identity"]
         assert response_b["orchestrator_identity"] == (
-            compose_orchestrator_identity(None, tool="multi_terminal") + "\n\nidentity source: built-in default"
+            compose_orchestrator_identity(None, tool="multi_terminal", phase="staging")
+            + "\n\nidentity source: built-in default"
         )
 
 
@@ -288,7 +288,6 @@ class TestHO1027ThreeLayerIdentity:
         seed = _get_user_facing_orchestrator_seed().strip()
         assert seed in identity
         assert "MCP Tool Usage" in identity
-        assert "CHECK-IN PROTOCOL" in identity
         assert "HARNESS REMINDER OVERRIDE" not in identity
 
     def test_compose_with_string_override_returns_override_plus_harness(self):
@@ -296,7 +295,6 @@ class TestHO1027ThreeLayerIdentity:
         identity = compose_orchestrator_identity(override, tool="multi_terminal")
         assert "My Custom Orchestrator" in identity
         assert "MCP Tool Usage" in identity
-        assert "CHECK-IN PROTOCOL" in identity
         assert "Mission Breakdown" not in identity
 
     def test_compose_tool_gate_claude_code_emits_harness_reminder(self):
@@ -307,7 +305,7 @@ class TestHO1027ThreeLayerIdentity:
     def test_compose_tool_gate_non_claude_code_omits_harness_reminder(self, tool):
         identity = compose_orchestrator_identity(None, tool=tool)
         assert "HARNESS REMINDER OVERRIDE" not in identity
-        assert "CHECK-IN PROTOCOL" in identity
+        assert "MCP Tool Usage" in identity
 
     def test_seed_does_not_contain_harness_mechanics(self):
         seed = _get_user_facing_orchestrator_seed()
@@ -335,5 +333,4 @@ class TestHO1027ThreeLayerIdentity:
         seed = _get_user_facing_orchestrator_seed().strip()
         assert seed in identity
         assert "MCP Tool Usage" in identity
-        assert "CHECK-IN PROTOCOL" in identity
         assert "HARNESS REMINDER OVERRIDE" in identity

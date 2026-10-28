@@ -187,4 +187,4 @@ def test_suborch_render_stays_within_be6214_band() -> None:
     )
     render = "\n\n".join([trim_embedded_protocol_for_chain(solo, "sub_orchestrator"), _suborch()])
     nbytes = len(render.encode("utf-8"))
-    assert 20_000 <= nbytes <= 23_900, f"sub-orch render fell out of the BE-6214 band: {nbytes}"
+    assert 16_500 <= nbytes <= 19_500, f"sub-orch render fell out of the BE-6214 band: {nbytes}"

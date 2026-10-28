@@ -245,11 +245,14 @@ def attach_protocol_and_identity(
         )
         return
 
+    from giljo_mcp.services.orchestrator_product_resolver import identity_phase
     from giljo_mcp.template_seeder import compose_orchestrator_identity
 
     response["orchestrator_protocol"] = _build_orchestrator_protocol(**build_kwargs)
     override_content = ctx.get("orchestrator_prompt_override")
     response["orchestrator_identity"] = append_identity_source(
-        compose_orchestrator_identity(override_content, tool=protocol_tool),
+        compose_orchestrator_identity(
+            override_content, tool=protocol_tool, phase=identity_phase(ctx.get("project"), None)
+        ),
         build_identity_source_line(ctx),
     )

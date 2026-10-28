@@ -29,7 +29,7 @@ from giljo_mcp.services.job_query_service import JobQueryService  # noqa: E402
 
 class TestChainTerminalStatuses:
     def test_wide_set_includes_failed_and_cancelled(self):
-        assert {"completed", "terminated", "cancelled", "failed"} == set(CHAIN_TERMINAL_PROJECT_STATUSES)
+        assert {"completed", "terminated", "cancelled", "failed", "detached"} == set(CHAIN_TERMINAL_PROJECT_STATUSES)
 
     def _make_service(self):
         return JobCompletionService(db_manager=Mock(), tenant_manager=Mock())

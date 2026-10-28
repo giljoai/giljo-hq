@@ -424,6 +424,14 @@ describe('ChainGroup members (FE-9655d)', () => {
     expect(members[2].find('[data-testid="chain-member-status"]').text()).toBe('Starts after step 2 is merged')
   })
 
+  it('BE-9833: a detached member reads "dropped from the chain" and shows no start line', async () => {
+    seed(makeRun({ current_index: 1, project_statuses: { p1: 'completed', p2: 'implementing', p3: 'detached' } }))
+    const w = await mountGroup()
+    const members = w.findAll('[data-testid="chain-group-member"]')
+    expect(members[2].find('[data-testid="chain-member-state"]').text()).toContain('dropped from the chain')
+    expect(members[2].find('[data-testid="chain-member-status"]').exists()).toBe(false)
+  })
+
   it('an unstaged chain offers no fallback prompt yet (members have no orchestrator)', async () => {
     seed(makeRun({ status: 'pending', locked: false, current_index: 0, project_statuses: {} }))
     const w = await mountGroup()

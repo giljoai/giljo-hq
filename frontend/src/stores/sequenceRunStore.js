@@ -8,7 +8,7 @@ import api from '@/services/api'
 import { parseErrorResponse } from '@/utils/errorMessages'
 
 const ACTIVE_RUN_STATUSES = ['pending', 'running', 'stalled']
-const CHAIN_FINISHED_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled'])
+const CHAIN_FINISHED_STATUSES = new Set(['completed', 'failed', 'terminated', 'cancelled', 'detached'])
 const CHAIN_UNSTARTED_MEMBER_STATUSES = new Set(['', 'pending', 'staged'])
 const CHAIN_RUNNING_STATUSES = new Set(['running', 'stalled'])
 

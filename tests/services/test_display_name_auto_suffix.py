@@ -183,6 +183,7 @@ class TestDisplayNameAutoSuffix:
 
         assert r2.agent_display_name == "implementer-2"
 
+        await suffix_service.get_agent_mission(r2.job_id, suffix_tenant_key)
         await suffix_service.complete_job(
             job_id=r2.job_id,
             result={"summary": "Done"},

@@ -358,7 +358,7 @@ async def test_provenance_for_legacy_and_seed_is_unchanged():
 async def test_seed_git_and_test_rules_are_conditional():
     git_body = ORCHESTRATOR_SEED_INSTRUCTIONS.split("## Git: One Committer Per Working Tree\n\n", 1)[1]
     assert git_body.startswith("If the project uses git:")
-    assert "(7) the git instruction, if the project uses git;" in ORCHESTRATOR_SEED_INSTRUCTIONS
+    assert "the git instruction, if the project uses git;" in ORCHESTRATOR_SEED_INSTRUCTIONS
 
     accepting = ORCHESTRATOR_SEED_INSTRUCTIONS.split("## Accepting Deliverables\n\n", 1)[1].split("\n## ", 1)[0]
     assert "Where the project has tests" in accepting

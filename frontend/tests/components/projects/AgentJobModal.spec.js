@@ -1,7 +1,7 @@
 /**
  * AgentJobModal.spec.js - Handover 0423
  *
- * Tests for the AgentJobModal component that displays job mission and plan tabs.
+ * Tests for the AgentJobModal component that displays the job and plan tabs.
  * This modal was created to separate TODO/plan visualization from MessageAuditModal.
  */
 

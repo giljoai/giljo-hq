@@ -17,8 +17,7 @@ class TestMCPCoordinationSectionSlimming:
         section = _get_mcp_coordination_section()
         assert "native" in section.lower()
         assert "mcp" in section.lower()
-        assert "CORRECT" in section or "correct" in section.lower()
-        assert "WRONG" in section or "wrong" in section.lower()
+        assert "never curl, HTTP or SDK calls" in section
 
     def test_mcp_section_contains_get_job_mission_reference(self):
         section = _get_mcp_coordination_section()

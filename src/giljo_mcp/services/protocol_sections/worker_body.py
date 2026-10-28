@@ -10,23 +10,9 @@ from giljo_mcp.platform_registry import Platform, giljo_invocation, is_subagent_
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
-_PHASE1_STEP0_SHELL = r"""0. **ENVIRONMENT DETECTION**:
-   Detect your shell environment before executing tasks:
-   Call: `python -c "import os; print(os.environ.get('SHELL', os.environ.get('COMSPEC', 'unknown')))"`
-   If `python` is not on PATH: fall back to `echo $SHELL` (POSIX) / `echo %COMSPEC%` (Windows).
-   This detects the **actual shell** (bash, zsh, powershell, cmd), not just the OS.
-   Adapt commands to the detected shell:
-   - If shell contains "bash" or "zsh" (includes Git Bash on Windows):
-     Sleep: `sleep N` | Clear: `clear` | Paths: use `/`
-   - If shell contains "powershell" or "pwsh":
-     Sleep: `Start-Sleep -Seconds N` | Clear: `cls` | Paths: use `\` or `/`
-   - If shell contains "cmd":
-     Sleep: `timeout /t N /nobreak >nul` | Clear: `cls` | Paths: use `\`
-   - Default (unknown): use `sleep N` (works in most environments)
-
-   **CONTEXT AWARENESS**: Your mission contains authoritative values including `project_path`.
-   When creating files or referencing directories, use context-provided paths.
-   Do NOT hardcode paths observed in your terminal environment."""
+_PHASE1_STEP0_SHELL = r"""0. **ENVIRONMENT DETECTION**: probe once: `python -c "import os; print(os.environ.get('SHELL', os.environ.get('COMSPEC', 'unknown')))"`
+   (no `python`: `echo $SHELL` / `echo %COMSPEC%`), then use that shell's syntax: `sleep N`,
+   `Start-Sleep -Seconds N` or `timeout /t N /nobreak >nul`. Paths: your mission's `project_path`, not your terminal's."""
 
 
 def _phase1_step0(preset: Platform | None) -> str:
@@ -126,195 +112,61 @@ def _build_worker_protocol_body(
 
     body = rf"""## Agent Lifecycle Protocol (5 Phases)
 
-*Tool names below are bare; your MCP client may expose them under a prefix (e.g.
-`mcp__<server>__get_job_mission`) — call them by the names your harness lists.*
+*Tool names below are bare; your MCP client may expose them under a prefix — call them by
+the names your harness lists.*
 {no_thread_banner}
-### Phase 1: STARTUP (BEFORE ANY WORK)
+### Phase 1: STARTUP
 {phase1_step0}
 
-1. Call `get_job_mission(job_id="{job_id}")` - Get mission (auto-transitions to WORKING)
-   - **PROTOCOL CACHE (saves ~15-50KB on a re-fetch):** the response includes a `protocol_etag`.
-     Remember it. On any LATER `get_job_mission` this session (a reactivation, a context refresh),
-     pass `protocol_etag=<that value>`. If the response comes back with `protocol_unchanged=true`,
-     your `agent_identity` + `full_protocol` are unchanged (returned null by design) — reuse the
-     copy you already have instead of re-reading them.
-2. Call `join_thread(thread_id={thread_ref}, agent_id="{executor_id}")` - Join your project's
-   coordination thread (collision-safe: re-joining an already-joined thread is a no-op)
-3. Call `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)` - Check for instructions
-4. Review any messages and incorporate feedback BEFORE starting work
-
+1. This response is your mission (fetching it moved you to WORKING). **PROTOCOL CACHE:** a LATER
+   `get_job_mission` passes this `protocol_etag`; `protocol_unchanged=true` means reuse the copy you have.
+2. The server has joined you to your coordination thread. Read it and act on any message
+   BEFORE starting work (a read says you are not on it? `join_thread` once, same ids):
+   `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
 {phase1_step4}
 
 ### Phase 2: EXECUTION
-Execute your assigned tasks (your TODO items, published in Phase 1):
-- Maintain focus on mission objectives
-- Update todos as you progress
-- **MESSAGE CHECK**: Call `get_thread_history()` after completing each TODO item
-  - Full call: `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-  - If any messages are returned: Process them BEFORE continuing
-  - If none are returned: Safe to proceed
+At the pauses of a long job (not between a few small items), drain your messages and act on them:
+   `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
 
-### Phase 3: PROGRESS REPORTING (After each milestone)
-1. Call `get_thread_history()` - MANDATORY before reporting
-   - Full call: `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-2. Process ALL pending messages
-3. Call `report_progress()` with your todo_items:
-
-   report_progress(
-       job_id="{job_id}",
-       todo_items=[
-           {{"content": "Task 1 description", "status": "completed"}},
-           {{"content": "Task 2 description", "status": "in_progress"}},
-           {{"content": "Task 3 description", "status": "pending"}}
-       ]
-   )
-
-**Backend automatically calculates percent and step counts from your list.**
-Status values: "pending", "in_progress", "completed"
-
-**WARNING: todo_items is a FULL REPLACEMENT.** Always include ALL prior items with their
-current statuses. Omitting completed items will be REJECTED by the server (regression guard).
-Use todo_append to add genuinely new items discovered mid-work.
-
-### CRITICAL: ONE TODO list, the one you send to report_progress
-
-Every time a TODO item changes status (mark item complete or in_progress),
-IMMEDIATELY call report_progress() with your updated todo_items list.
-
-The todo_items array appears in the Plan/TODOs tab of the dashboard; the server reads
-nothing else. A {todo_phrase} of your own is optional and never replaces it: do not mirror into one.
-
-### BACKEND MONITORING ACTIVE
-The backend monitors report_progress() calls. If todo_items is missing:
-- You will receive a WARNING in the response
-- Warnings are throttled (1 per 5 minutes per job)
-- Dashboard cannot display your progress without todo_items
-
-**MESSAGE HANDLING (CRITICAL):**
-- ALWAYS use `get_thread_history(..., mark_read=true)` to drain your unread posts (it marks
-  the returned posts read and advances your cursor)
-- `get_thread_history(...)` WITHOUT `mark_read` is the read-only inspection — posts stay
-  unread (use for debugging only)
+### Phase 3: PROGRESS REPORTING
+Report the FULL list (your ONE TODO list, the one you send to report_progress):
+   `report_progress(job_id="{job_id}", todo_items=[{{"content": "Task 1 description", "status": "completed"}}, ...])`
+- `todo_items` is a FULL REPLACEMENT: every item, current status, every time (a shorter list is
+  rejected); `todo_append` adds new items.
+- Status values: "pending", "in_progress", "completed"; "skipped" for a step handed to a person or
+  a follow-up task, its text starting "HANDOFF <TSK-id>:". Never mark done what did not happen.
+- The dashboard reads only this list.
+  A {todo_phrase} of your own is optional and never replaces it: do not mirror into one.
 
 ### Phase 4: COMPLETION
-Before calling `complete_job()`, you MUST verify:
-1. All TODO items completed (every item in your last report_progress list)
-2. All messages read (queue empty after `get_thread_history(..., mark_read=true)`)
-
-**Follow-up work:** When you finish work and a follow-up is needed, create a task via `create_task` — or a project via `create_project` if it's multi-step — and cite the returned ID in `decisions_made` when you call `write_project_closeout`.
-
-Final steps:
-1. Call `get_thread_history()` - Final message check
-   - Full call: `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-2. Process any pending messages - ensure queue is empty
-3. Call `complete_job()` - ONLY after TODOs are complete and queue is empty
-   - Full call: `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})`
-   - `complete_job` is your LAST call. Never call `finalize_job`: your orchestrator reviews
-     your result and finalizes it. If it needs rework, it messages you and resumes your job.
-
-If you call `complete_job()` without meeting these requirements:
-- System will REJECT your completion
-- Response will list specific blockers (unread messages, incomplete TODOs)
-
+1. Every TODO item `completed` or handed off (`skipped`).
+2. `complete_job(job_id="{job_id}", result={{"summary": "...", "artifacts": [...]}})`
+   - `complete_job` is your LAST call (refused, naming the blockers, while TODOs are open or
+     action-required messages unread: drain with the Phase 2 call, act, retry). Never call `finalize_job`:
+     your orchestrator reviews your result and finalizes it. If it needs rework, it messages you
+     and resumes your job.
+**Follow-up work:** file it (`create_task`, or `create_project` if multi-step) and give your
+orchestrator the ID; its closeout cites it as `OPEN <TSK-id>: ...`.
 {git_commit_block}{giljo_block}
-### Phase 5: ERROR HANDLING & BLOCKED STATUS
-
-**To mark yourself BLOCKED** (unclear requirements, waiting for clarification):
-1. Call `set_agent_status(job_id="{job_id}", status="blocked", reason="BLOCKED: <reason>")`
-   - Sets status to "blocked" and stores block_reason
-2. Post to your coordination thread addressed to the orchestrator (use its agent_id UUID from YOUR TEAM table):
-   - `post_to_thread(thread_id={thread_ref}, content="BLOCKER: <details>", from_agent="{executor_id}", to_participant="<orchestrator-agent-id-uuid>", requires_action=true)`
-   - ALWAYS use the orchestrator's agent_id UUID, NEVER the display name "orchestrator"
-3. STOP work and poll for response (use longer intervals while blocked — 15-20 seconds between polls, up to 5 attempts):
-   - `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-
-**To resume from BLOCKED**:
-1. After receiving guidance, call `report_progress()` with your updated TODO list:
-   - `report_progress(job_id="{job_id}", todo_items=[...])`
-   - This automatically transitions your status from "blocked" back to "working"
-2. Continue execution with Phase 2
-
-**Use BLOCKED for**: Unclear requirements, missing context, waiting for decisions, unrecoverable errors (all errors use blocked status)
-
-## If You Are Reactivated
-
-If you receive context indicating you are resuming a previously completed job:
-1. Call `get_job_mission(job_id="...")` to load your full prior context
-2. Read any new messages via `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-   — the reactivation reason surfaces on this cursor read
-3. Continue work from your prior state — do not restart from scratch
-4. When done, call `complete_job()` again with updated results
-
-## Handover on Context Exhaustion
-
-If you run out of context before completing, **DO NOT write 360 memory**.
-Memory writes are orchestrator-only — both for normal completion and for handovers.
-Your job is to send the orchestrator everything it needs to decide what happens next.
-
-1. Post a HANDOVER message to the orchestrator (use the orchestrator's agent_id UUID
-   listed in YOUR TEAM table at the top of your mission):
-   - `post_to_thread(thread_id={thread_ref},`
-     `content="HANDOVER: Context exhausted. COMPLETED: <what you finished>.`
-     `IN-PROGRESS: <what was active and the stopping point>. NEXT-STEPS:`
-     `<what a successor needs to do>. BLOCKERS: <any known blockers>.",`
-     `from_agent="{executor_id}", to_participant="<orchestrator-agent-id-uuid>",`
-     `requires_action=true)`
-2. Set yourself BLOCKED so the orchestrator knows you're waiting:
-   - `set_agent_status(job_id="{job_id}", status="blocked",`
-     `reason="BLOCKED: context exhausted, handover sent to orchestrator")`
-3. STOP. Do NOT call `complete_job()` and do NOT call `write_memory_entry()`.
-   The orchestrator will decide whether to spawn a successor (preserving your
-   job_id) or write a handover memory entry itself.
-
-Workers may write `baseline`, `decision`, `architecture`, and `discovery` entries
-when their mission explicitly assigns them. Workers MUST NOT write `project_completion`
-entries — the tool will reject those with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. To record
-that, send a HANDOVER or progress message to your orchestrator with the content.
-
-Concrete examples (one per category):
-- Worker `baseline`: `write_memory_entry(entry_type="baseline", ...)` after seeding
-  the architecture snapshot from a frozen reference doc.
-- Worker `decision`: `write_memory_entry(entry_type="decision", ...)` to record
-  "chose a caching layer over a separate audit table — rationale: latency budget".
-- Worker `architecture`: `write_memory_entry(entry_type="architecture", ...)` to
-  capture a new layered boundary (e.g. a queue introduced between two services).
-- Worker `discovery`: `write_memory_entry(entry_type="discovery", ...)` for a
-  surprising finding (e.g. "a startup-ordering gotcha causes a race during boot").
-- Orchestrator deferred work: create a follow-up task via `create_task` (or a project via `create_project` for multi-step work) and cite the returned ID in `decisions_made` at closeout.
-
-Use `discovery` for one-off findings worth remembering.
+### Phase 5: ERROR HANDLING
+- **Blocked** (unclear scope, a decision, an error):
+  `set_agent_status(job_id="{job_id}", status="blocked", reason="BLOCKED: <reason>")`, then
+  `post_to_thread(thread_id={thread_ref}, content="BLOCKER: <details>", from_agent="{executor_id}", to_participant="<orchestrator-agent-id-uuid>", requires_action=true)`.
+  STOP; poll the `get_thread_history` call above every 15-20 s (up to 5 times); your next
+  `report_progress` resumes you.
+- **Requesting Broader Context:** the same post with `content="REQUEST_CONTEXT: <specific need>"`,
+  then wait for the reply on the thread; never guess at a major ambiguity.
+- **Reactivated:** `get_job_mission` again, drain the thread (the reason is there), continue from
+  your prior state, `complete_job` again.
+- **Out of context:** post `HANDOVER: COMPLETED <...>. IN-PROGRESS <...>. NEXT-STEPS <...>. BLOCKERS <...>`
+  to the orchestrator (requires_action=true), set yourself blocked, and STOP: no `complete_job`,
+  no memory write.
+- **360 memory:** other entry types only when your mission assigns them; `project_completion` is
+  orchestrator-only.
 ---
-**Your Identifiers:**
-- job_id (work order): `{job_id}` - Use for mission, progress, completion
-- agent_id (executor): `{executor_id}` - Use for messages (from_agent and as_participant)
-
-**MESSAGING RULE: UUID-ONLY ADDRESSING**
-- ALWAYS use the agent_id UUID in `to_participant` (from YOUR TEAM table in mission header)
-- NEVER use display names like "orchestrator" or "implementer" in `to_participant`
-- Omit `to_participant` to broadcast to every participant on the thread
-- Your `from_agent` is always your agent_id: `{executor_id}`
-
-**Message Prefixes:**
-- **BLOCKER:** - Urgent, needs immediate help (triggers blocked status)
-- **PROGRESS:** - Milestone update to orchestrator
-- **COMPLETE:** - Work finished notification
-- **READY:** - Available for new work
-- **REQUEST_CONTEXT:** - Need broader project context from orchestrator
-
-**Requesting Broader Context:**
-If your mission references undefined entities, has unclear dependencies, or ambiguous scope:
-1. Post: `post_to_thread(thread_id={thread_ref}, content="REQUEST_CONTEXT: <specific need>", from_agent="{executor_id}", to_participant="<orchestrator-uuid>", requires_action=true)`
-2. Be specific (e.g., "REQUEST_CONTEXT: What database schema is used for user auth?")
-3. Wait for response via `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
-4. Do NOT guess at major ambiguities - ask first
-
-**When to Check Messages:**
-- Phase 1 (STARTUP): Before starting work
-- Phase 2 (EXECUTION): After each TODO item
-- Phase 3 (PROGRESS): Before reporting progress
-- Phase 4 (COMPLETION): Before calling complete_job()
-
-**CRITICAL: MCP tools are NATIVE tool calls. Use them like Read/Write/Bash.**
-**Do NOT use curl, HTTP, or SDK calls.**
-"""  # noqa: S608 — prose protocol template, not SQL
+**Your Identifiers:** job_id `{job_id}`; agent_id `{executor_id}` (your `from_agent` and
+`as_participant`). Message prefixes: BLOCKER:, PROGRESS:, COMPLETE:, READY:, REQUEST_CONTEXT:.
+MCP tools are NATIVE tool calls: never curl, HTTP, or SDK calls.
+"""
     return protocol_framing + body

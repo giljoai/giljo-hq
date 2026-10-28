@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import GateRefusalError, ValidationError
 from giljo_mcp.services.orchestrator_caller_guard import (
     ORCHESTRATOR_ONLY,
+    refuse_if_never_started,
     require_project_orchestrator,
-    warn_if_never_started,
 )
 
 
@@ -66,7 +66,14 @@ async def test_everyone_else_is_refused(caller_job_id, role):
         ("orchestrator", "waiting", False),
     ],
 )
-def test_never_started_warning(job_type, status, warns):
-    warnings: list[str] = []
-    warn_if_never_started(SimpleNamespace(job_type=job_type), SimpleNamespace(status=status), warnings)
-    assert bool(warnings) is warns
+def test_never_started_refusal(job_type, status, warns):
+    job = SimpleNamespace(job_type=job_type, job_id="j1")
+    execution = SimpleNamespace(status=status)
+    if not warns:
+        refuse_if_never_started(job, execution)
+        return
+    with pytest.raises(GateRefusalError) as excinfo:
+        refuse_if_never_started(job, execution)
+    assert excinfo.value.code == "JOB_NEVER_STARTED"
+    assert "dismiss_job" in excinfo.value.message
+    assert "get_job_mission" in excinfo.value.message

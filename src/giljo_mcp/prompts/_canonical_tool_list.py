@@ -6,37 +6,31 @@
 
 from __future__ import annotations
 
-from giljo_mcp.branding import MCP_ALIAS
-
-
-_PREFIX = f"mcp__{MCP_ALIAS}__"
-
 
 CANONICAL_ORCHESTRATOR_TOOLS: tuple[str, ...] = (
-    f"{_PREFIX}health_check",
-    f"{_PREFIX}get_giljo_guide",
-    f"{_PREFIX}get_context",
-    f"{_PREFIX}spawn_job",
-    f"{_PREFIX}get_job_mission",
-    f"{_PREFIX}get_staging_instructions",
-    f"{_PREFIX}post_to_thread",
-    f"{_PREFIX}get_thread_history",
-    f"{_PREFIX}report_progress",
-    f"{_PREFIX}set_agent_status",
-    f"{_PREFIX}get_workflow_status",
-    f"{_PREFIX}update_project_mission",
-    f"{_PREFIX}update_job_mission",
-    f"{_PREFIX}complete_job",
-    f"{_PREFIX}finalize_job",
-    f"{_PREFIX}resume_job",
-    f"{_PREFIX}dismiss_job",
-    f"{_PREFIX}write_memory_entry",
-    f"{_PREFIX}write_project_closeout",
-    f"{_PREFIX}get_agent_result",
-    f"{_PREFIX}create_task",
-    f"{_PREFIX}create_project",
-    f"{_PREFIX}list_projects",
-    f"{_PREFIX}request_approval",
+    "get_giljo_guide",
+    "get_context",
+    "spawn_job",
+    "get_job_mission",
+    "get_staging_instructions",
+    "post_to_thread",
+    "get_thread_history",
+    "report_progress",
+    "set_agent_status",
+    "get_workflow_status",
+    "update_project_mission",
+    "update_job_mission",
+    "complete_job",
+    "finalize_job",
+    "resume_job",
+    "dismiss_job",
+    "write_memory_entry",
+    "write_project_closeout",
+    "get_agent_result",
+    "create_task",
+    "create_project",
+    "list_projects",
+    "request_approval",
 )
 
 
@@ -45,18 +39,17 @@ def render_toolsearch_query() -> str:
 
 
 def render_toolsearch_call_one_line() -> str:
-    return f'ToolSearch(query="{render_toolsearch_query()}", max_results=25)'
+    return f'ToolSearch(query="{render_toolsearch_query()}", max_results={len(CANONICAL_ORCHESTRATOR_TOOLS)})'
 
 
 CANONICAL_WORKER_TOOLS: tuple[str, ...] = (
-    f"{_PREFIX}get_job_mission",
-    f"{_PREFIX}join_thread",
-    f"{_PREFIX}get_thread_history",
-    f"{_PREFIX}post_to_thread",
-    f"{_PREFIX}report_progress",
-    f"{_PREFIX}set_agent_status",
-    f"{_PREFIX}get_context",
-    f"{_PREFIX}complete_job",
+    "get_job_mission",
+    "get_thread_history",
+    "post_to_thread",
+    "report_progress",
+    "set_agent_status",
+    "get_context",
+    "complete_job",
 )
 
 

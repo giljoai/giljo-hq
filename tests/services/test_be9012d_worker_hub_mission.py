@@ -23,7 +23,7 @@ _EXEC = "EXEC-9012D-0001"
 _THREAD = "CHT-thread-uuid"
 
 _BUS_CALLS = ("receive_messages(", "send_message(", "get_messages(")
-_HUB_CALLS = ("get_thread_history(", "post_to_thread(", "join_thread(")
+_HUB_CALLS = ("get_thread_history(", "post_to_thread(")
 
 
 def _render(comm_thread_id: str | None) -> str:
@@ -67,15 +67,12 @@ class TestWorkerBodyRendersHubNotBus:
         assert "mcp__giljo_mcp__" not in protocol
         assert "your MCP client may expose them under a prefix" in protocol
 
-    def test_join_thread_happens_before_first_message_check(self):
+    def test_phase1_reads_the_thread_the_server_already_joined(self):
         protocol = _render(_THREAD)
-        phase1_start = protocol.find("Phase 1: STARTUP")
-        phase1_end = protocol.find("Phase 2: EXECUTION")
-        phase1 = protocol[phase1_start:phase1_end]
-        join_pos = phase1.find("join_thread(")
-        history_pos = phase1.find("get_thread_history(")
-        assert join_pos != -1 and history_pos != -1
-        assert join_pos < history_pos, "join_thread must precede the first get_thread_history drain"
+        phase1 = protocol[protocol.find("Phase 1: STARTUP") : protocol.find("Phase 2: EXECUTION")]
+        assert "The server has joined you to your coordination thread" in phase1
+        assert "get_thread_history(" in phase1
+        assert "`join_thread` once" in phase1, "the not-on-thread fallback is gone"
 
 
 class TestBuildWorkerProtocolBodyDirect:

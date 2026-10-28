@@ -45,12 +45,13 @@ async def resolve_and_enrol(
     job: AgentJob,
     execution: AgentExecution,
     tenant_key: str,
+    detected_harness: str | None = None,
 ) -> dict[str, Any] | None:
     if not job.project_id:
         return None
     comm_thread = await mission_service._resolve_comm_thread(session, job, tenant_key)
-    if comm_thread and job.job_type == "orchestrator":
-        await _join(mission_service, session, comm_thread["thread_id"], execution, tenant_key)
+    if comm_thread:
+        await _join(mission_service, session, comm_thread["thread_id"], execution, tenant_key, detected_harness)
     return comm_thread
 
 
@@ -60,6 +61,7 @@ async def _join(
     thread_id: str,
     execution: AgentExecution,
     tenant_key: str,
+    detected_harness: str | None = None,
 ) -> None:
     try:
         from giljo_mcp.services.comm_thread_service import CommThreadService
@@ -69,10 +71,11 @@ async def _join(
             thread_id=thread_id,
             participant_id=str(execution.agent_id),
             display_name=execution.agent_display_name,
+            detected_harness=detected_harness,
             tenant_key=tenant_key,
         )
     except Exception:  # noqa: BLE001 - best-effort; never break mission delivery
         logger.warning(
-            "[TSK-9459] comm thread join failed (non-fatal); the orchestrator is not enrolled",
+            "[TSK-9459] comm thread join failed (non-fatal); the agent is not enrolled",
             extra={"thread_id": thread_id, "agent_id": str(execution.agent_id)},
         )

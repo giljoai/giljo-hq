@@ -106,8 +106,8 @@ async def test_orchestrator_identity_is_composed_without_a_database_row(
     assert not [row for row in rows if row.role == "orchestrator"]
 
     identity = compose_orchestrator_identity(None, tool="claude-code")
-    assert "## Three-Phase Workflow" in identity
+    assert "## If Requirements Are Unclear" in identity
     assert "### RESPONDING TO CONTEXT REQUESTS" in identity
     assert "## ORCHESTRATOR COORDINATION PRINCIPLES" in identity
     assert "## MCP Tool Usage" in identity
-    assert "## CHECK-IN PROTOCOL" in identity
+    assert "HARNESS REMINDER OVERRIDE" in identity

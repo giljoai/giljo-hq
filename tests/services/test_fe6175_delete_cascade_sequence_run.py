@@ -107,7 +107,7 @@ async def test_delete_member_of_pending_run_dissolves_it(db_session: AsyncSessio
     assert run["id"] not in {r["id"] for r in after}, "deleted member's run must not remain in list_active"
 
 
-async def test_delete_member_of_running_run_cancels_it(db_session: AsyncSession) -> None:
+async def test_delete_member_of_running_run_detaches_it_and_keeps_the_run(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     member_id = str(uuid.uuid4())
     p2 = str(uuid.uuid4())
@@ -119,10 +119,11 @@ async def test_delete_member_of_running_run_cancels_it(db_session: AsyncSession)
 
     await _deletion_svc(db_session, tenant).delete_project(member_id)
 
-    active = await _seq_svc(db_session).list_active(tenant_key=tenant)
-    assert run["id"] not in {r["id"] for r in active}
     row = await _seq_svc(db_session).get(run_id=run["id"], tenant_key=tenant)
-    assert row["status"] == "cancelled"
+    assert row["status"] == "running"
+    assert row["project_statuses"][member_id] == "detached"
+    active = await _seq_svc(db_session).list_active(tenant_key=tenant)
+    assert run["id"] in {r["id"] for r in active}
 
 
 async def test_delete_non_member_leaves_runs_untouched(db_session: AsyncSession) -> None:

@@ -103,6 +103,7 @@ class TestCompleteJobStoresResult:
             "commits": ["abc123"],
         }
 
+        await service.get_agent_mission(spawn.job_id, tenant_key)
         complete_result = await service.complete_job(
             job_id=spawn.job_id,
             result=result_payload,
@@ -150,6 +151,7 @@ class TestCompleteJobAutoMessage:
             "artifacts": ["src/auth.py"],
         }
 
+        await service.get_agent_mission(spec_spawn.job_id, tenant_key)
         await service.complete_job(
             job_id=spec_spawn.job_id,
             result=result_payload,
@@ -198,6 +200,7 @@ class TestOrchestratorCompletionNoMessage:
             "summary": "Project orchestration complete",
         }
 
+        await service.get_agent_mission(orch_spawn.job_id, tenant_key)
         await service.complete_job(
             job_id=orch_spawn.job_id,
             result=result_payload,
@@ -237,6 +240,7 @@ class TestGetAgentResult:
             "test_results": {"passed": 42, "failed": 0},
         }
 
+        await service.get_agent_mission(spawn.job_id, tenant_key)
         await service.complete_job(
             job_id=spawn.job_id,
             result=result_payload,

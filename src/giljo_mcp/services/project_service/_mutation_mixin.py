@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.domain.project_status import (
+    CHAIN_DETACHING_STATUSES,
     IMMUTABLE_PROJECT_STATUSES,
     LIFECYCLE_FINISHED_STATUSES,
     ProjectStatus,
@@ -32,8 +33,9 @@ from giljo_mcp.schemas.service_responses import (
     ProjectLaunchResult,
     ProjectMissionUpdateResult,
 )
+from giljo_mcp.services.chain_member_detach import detach_chain_member
 from giljo_mcp.services.next_action import STAGING_COMPLETE
-from giljo_mcp.services.project_helpers import _build_ws_project_data
+from giljo_mcp.services.project_helpers import _build_ws_project_data, broadcast_deferred_events
 from giljo_mcp.services.project_service._lifecycle_redirects import (
     preflight_supersede_target,
     route_active_inactive_status_transition,
@@ -459,6 +461,16 @@ class MutationMixin:
 
             self._apply_project_updates(project, updates)
 
+            if updates.get("status") in CHAIN_DETACHING_STATUSES:
+                await detach_chain_member(
+                    db_manager=self.db_manager,
+                    tenant_manager=self.tenant_manager,
+                    project_id=project_id,
+                    tenant_key=tenant_key,
+                    test_session=session,
+                    websocket_manager=self._websocket_manager,
+                )
+
             try:
                 await session.commit()
             except IntegrityError as e:
@@ -468,6 +480,7 @@ class MutationMixin:
                         context={"project_id": project_id},
                     ) from e
                 raise
+            await broadcast_deferred_events(session)
             await self._repo.refresh(session, project)
 
             if project.project_type_id:

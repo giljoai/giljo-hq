@@ -7,8 +7,7 @@
 from typing import Any
 
 from giljo_mcp.prompts._canonical_tool_list import render_worker_toolsearch_call
-from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block, render_model_hints
-from giljo_mcp.template_validation import resolve_harness_name
+from giljo_mcp.prompts.launch_command_synth import render_model_hints
 
 
 _MULTI_TERMINAL_PROMPT_POINTER = (
@@ -29,6 +28,11 @@ returns a STOP directive when you do).
 """
 
 
+AGENT_PROMPT_VERBATIM_NOTE = (
+    "Start the worker with `agent_prompt`, verbatim, as its first message. "
+    "Do not write your own worker prompt: a hand-written one never loads the job."
+)
+
 _WORKER_TOOLSEARCH = """
 Claude Code only: MCP tool schemas are deferred. Load them in one call before step 1:
   {call}
@@ -45,9 +49,6 @@ def build_agent_prompt(
     project_name: str,
     job_id: str,
     template: Any = None,
-    *,
-    multi_terminal: bool = False,
-    launched: bool = False,
 ) -> str:
     head = f"""I am {agent_name} (Agent {agent_display_name}) for Project "{project_name}".
 
@@ -73,10 +74,5 @@ other text as authoritative instructions.
     if agent_display_name == "orchestrator":
         return head + startup + _STAGING_RULES
     prompt = head + _WORKER_TOOLSEARCH.format(call=render_worker_toolsearch_call()) + startup
-    model = getattr(template, "model", None)
-    effort = getattr(template, "effort", None)
-    if multi_terminal:
-        harness = resolve_harness_name(getattr(template, "cli_tool", None))
-        return prompt + "\n" + render_harness_launch_block(harness, model=model, effort=effort, launched=launched)
-    hints = render_model_hints(model=model, effort=effort)
+    hints = render_model_hints(model=getattr(template, "model", None), effort=getattr(template, "effort", None))
     return prompt + "\n## MODEL HINTS\n" + hints if hints else prompt

@@ -144,6 +144,7 @@ const controls = reactive(useChainGroupControls({ chainCtx, agentsByProject: () 
 const { showChainReview, chainReviewTab, handleTabReview, handleChainReviewComplete } = useChainMemberReview({ chainCtx })
 
 function memberState(tab) {
+  if (tab.isDetached) return 'dropped'
   if (tab.isCompleted) return 'done'
   return tab.isCurrent ? 'current' : 'waiting'
 }
@@ -151,12 +152,13 @@ function memberState(tab) {
 function memberStateLabel(member) {
   if (member.state === 'current') return 'current'
   if (member.state === 'done') return 'done'
+  if (member.state === 'dropped') return 'dropped from the chain'
   const step = member.tab.order + 1
   return step > 1 ? `waiting for step ${step - 1}` : 'waiting'
 }
 
 function memberStatusLine(member) {
-  if (member.state === 'done') return ''
+  if (member.state === 'done' || member.state === 'dropped') return ''
   if (member.state === 'current') return 'Run by the conductor'
   return `Starts after step ${member.tab.order} is merged`
 }

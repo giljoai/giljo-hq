@@ -51,7 +51,7 @@ def build_conductor_thin_prompt(run_id: str) -> str:
     rid = run_id or "<run_id>"
     return (
         "You are the sub-orchestrator for project <P_i> in chain run "
-        f"{rid}. Verify the MCP connection with health_check, then load your mission by "
+        f"{rid}. Load your mission by "
         "calling get_job_mission with job_id <SUB_ORCH_JOB_ID> and execute it. Coordinate "
         "via get_context chain -> hub_thread_id and get_thread_history, not return values."
     )
@@ -259,13 +259,14 @@ def render_harness_launch_block(
     lines = ["## HARNESS\n"]
     if harness_name is None:
         lines.append(
-            "Harness: default. Open a new terminal running the same harness you are running in,\n"
-            "seeded with this prompt.\n"
+            "Harness: default. Launch this worker in a new terminal running\n"
+            "the same harness you are running in, seeded with its agent_prompt, verbatim.\n"
         )
     else:
         lines.append(
             f"Harness: {harness_name} (the user chose it for this agent). Find it on this machine, work out its launch\n"
-            "syntax (its --help usually says), and open it in a new terminal seeded with this prompt.\n"
+            "syntax (its --help usually says), and open it in a new terminal seeded with the worker's\n"
+            "agent_prompt, verbatim.\n"
             "If you cannot find it or are unsure how to launch it, ask the user.\n"
         )
     lines.append(_autonomy_line(harness_name) if launched else _NO_BYPASS_LINE)

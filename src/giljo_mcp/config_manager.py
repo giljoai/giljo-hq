@@ -396,7 +396,7 @@ class ConfigManager:
         if port := os.getenv("GILJO_MCP_DASHBOARD_PORT"):
             self.server.dashboard_port = int(port)
 
-        if api_key := os.getenv("GILJO_MCP_API_KEY"):
+        if api_key := (None if os.getenv("GILJO_MODE") == "saas" else os.getenv("GILJO_MCP_API_KEY")):
             self.server.api_key = api_key
 
         if host := os.getenv("GILJO_API_HOST"):

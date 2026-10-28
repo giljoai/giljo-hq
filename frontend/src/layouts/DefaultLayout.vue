@@ -49,6 +49,8 @@
     <LicensingDialog />
 
     <component :is="TrialExpiredOverlayComponent" v-if="TrialExpiredOverlayComponent" />
+
+    <component :is="AnnouncementModalComponent" v-if="AnnouncementModalComponent" />
   </v-app>
 </template>
 
@@ -82,6 +84,7 @@ const TrialExpiredOverlayComponent = shallowRef(null)
 const AccountDeletionBannerComponent = shallowRef(null)
 const LapsedStateBannerComponent = shallowRef(null)
 const SetPasswordNudgeBannerComponent = shallowRef(null)
+const AnnouncementModalComponent = shallowRef(null)
 
 const { isSaasMode } = useGiljoMode()
 
@@ -240,6 +243,13 @@ onMounted(async () => {
           if (nudgeBannerLoader) {
             const nudgeBannerMod = await nudgeBannerLoader()
             SetPasswordNudgeBannerComponent.value = nudgeBannerMod.default
+          }
+
+          const announcementLoaders = import.meta.glob('@/saas/components/AnnouncementModal.vue')
+          const [announcementLoader] = Object.values(announcementLoaders)
+          if (announcementLoader) {
+            const announcementMod = await announcementLoader()
+            AnnouncementModalComponent.value = announcementMod.default
           }
         } catch (error) {
           console.warn('[DefaultLayout] SaaS trial UI failed to load:', error)

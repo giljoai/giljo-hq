@@ -35,7 +35,7 @@ class TestSeederProducesSlimBootstrap:
 
         assert f"{PRODUCT_NAME} Agent" in bootstrap or PRODUCT_NAME in bootstrap
         assert "get_job_mission" in bootstrap
-        assert "health_check" in bootstrap
+        assert "health_check" not in bootstrap
         assert "full_protocol" in bootstrap
 
     def test_bootstrap_does_not_contain_protocol(self):

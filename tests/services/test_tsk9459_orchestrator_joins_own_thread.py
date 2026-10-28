@@ -132,8 +132,8 @@ async def _stage_project_with_orchestrator_and_worker(
         await _mission_service(db_session).get_agent_mission(job_id=worker.job_id, tenant_key=tenant_key)
     ).full_protocol or ""
     thread_id = await _bound_thread_id(db_session, tenant_key, project_id)
-    assert f'join_thread(thread_id="{thread_id}"' in worker_protocol, (
-        "precondition: the server writes the worker's join instruction with the real thread id"
+    assert f'get_thread_history(thread_id="{thread_id}"' in worker_protocol, (
+        "precondition: the server writes the worker's thread calls with the real thread id"
     )
     await _comm(db_session).join_thread(
         thread_id=thread_id,

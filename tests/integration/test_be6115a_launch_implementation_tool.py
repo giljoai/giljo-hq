@@ -222,6 +222,45 @@ async def test_launch_implementation_through_transport_stamps_flag(
     assert row.implementation_launched_at is not None, "launch_implementation must stamp implementation_launched_at"
 
 
+async def test_be9822_launch_points_the_staging_session_at_its_own_mission(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(
+        db_session, primary_tenant_key, staging_status="staging_complete", launched=False
+    )
+    team = await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
+
+    async with new_client() as session:
+        result = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
+
+    assert result.is_error is False, _error_text(result)
+    next_action = _payload(result)["next_action"]
+    assert next_action["tool"] == "get_job_mission"
+    assert next_action["args_hint"] == {"job_id": team["orchestrator"].job_id}
+    assert "get_implementation_prompt" in next_action["why"], "the NEW-session door must still be named"
+
+
+async def test_be9822_multi_terminal_launch_carries_no_in_session_pointer(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(
+        db_session,
+        primary_tenant_key,
+        staging_status="staging_complete",
+        launched=False,
+        execution_mode="multi_terminal",
+    )
+    await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
+
+    async with new_client() as session:
+        result = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
+
+    assert result.is_error is False, _error_text(result)
+    assert "next_action" not in _payload(result)
+
+
 async def test_launch_implementation_is_idempotent(lifecycle_mcp_client, db_session, primary_tenant_key):
     new_client, _switch = lifecycle_mcp_client
     seeded = await _seed_product_project(

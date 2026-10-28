@@ -279,15 +279,9 @@ class TestTask6ToolSearchBootstrap:
         identity = compose_orchestrator_identity(None, tool="claude-code")
         assert "TOOLSEARCH BOOTSTRAP" in identity
         assert "ToolSearch(query=" in identity
-        from giljo_mcp.branding import MCP_ALIAS
-
-        for tool_name in (
-            f"mcp__{MCP_ALIAS}__health_check",
-            f"mcp__{MCP_ALIAS}__spawn_job",
-            f"mcp__{MCP_ALIAS}__report_progress",
-            f"mcp__{MCP_ALIAS}__complete_job",
-        ):
+        for tool_name in ("select:get_giljo_guide", "spawn_job", "report_progress", "complete_job"):
             assert tool_name in identity, f"Bootstrap hint missing {tool_name}"
+        assert "mcp__giljo" not in identity.split("ToolSearch(query=")[1].split("\n")[0]
 
     def test_other_tools_omit_bootstrap_hint(self):
         for tool in ("codex", "gemini", "multi_terminal"):

@@ -74,6 +74,7 @@ class JobResponse(BaseModel):
     todo_items: list[TodoItemResponse] = Field(default_factory=list)
     phase: int | None = None
     result: dict | None = None
+    template_id: str | None = None
     accumulated_duration_seconds: float = 0.0
     reactivation_count: int = 0
     duration_seconds: float | None = None

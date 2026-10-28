@@ -320,6 +320,7 @@ class TestUpdateMethodsDualModel:
         agent_id = result.agent_id
         job_id = result.job_id
 
+        await service.get_agent_mission(job_id, test_tenant_key)
         complete_result = await service.complete_job(
             job_id=job_id, result={"output": "Task done"}, tenant_key=test_tenant_key
         )

@@ -481,10 +481,8 @@ class TestDecideApprovalHeadlessOnAllows:
         assert _payload(result)["status"] == "decided"
 
 
-class TestDecideApprovalApiKeyBypassUnaffected:
-    async def test_api_key_sees_and_can_call_decide_approval_even_with_headless_off(
-        self, fenced_gate_client, db_session
-    ):
+class TestDecideApprovalApiKeyFenced:
+    async def test_api_key_headless_off_cannot_see_or_call_decide_approval(self, fenced_gate_client, db_session):
         new_client, holder, service = fenced_gate_client
         seed = await _seed_approval_context(db_session, holder.tenant_key)
         pending = await _create_pending(service, seed, holder.tenant_key)
@@ -495,6 +493,18 @@ class TestDecideApprovalApiKeyBypassUnaffected:
             advertised = {t.name for t in listed.tools}
             call = await session.call_tool("decide_approval", {"approval_id": pending.id, "option_id": "approve"})
 
-        assert "decide_approval" in advertised, "api_key operator must still see decide_approval"
+        assert "decide_approval" not in advertised
+        assert "gated by the human Implement step" in _error_text(call)
+
+    async def test_api_key_headless_on_can_call_decide_approval(self, fenced_gate_client, db_manager, db_session):
+        new_client, holder, service = fenced_gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        seed = await _seed_approval_context(db_session, holder.tenant_key)
+        pending = await _create_pending(service, seed, holder.tenant_key)
+        holder.state = {"auth_method": "api_key", "tenant_key": holder.tenant_key}
+
+        async with new_client() as session:
+            call = await session.call_tool("decide_approval", {"approval_id": pending.id, "option_id": "approve"})
+
         assert call.is_error is False, _error_text(call)
         assert _payload(call)["status"] == "decided"

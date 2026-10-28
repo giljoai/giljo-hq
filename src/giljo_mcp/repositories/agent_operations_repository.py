@@ -18,6 +18,9 @@ from giljo_mcp.repositories._agent_liveness_mixin import AgentLivenessMixin
 from giljo_mcp.repositories._agent_unread_counts_mixin import AgentUnreadCountsMixin
 
 
+RESULT_BEARING_EXECUTION_STATUSES: tuple[str, ...] = ("complete", "closed")
+
+
 class AgentOperationsRepository(AgentHeartbeatSilenceMixin, AgentUnreadCountsMixin, AgentLivenessMixin):
 
 
@@ -135,7 +138,7 @@ class AgentOperationsRepository(AgentHeartbeatSilenceMixin, AgentUnreadCountsMix
             .where(
                 AgentExecution.job_id == job_id,
                 AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status == "complete",
+                AgentExecution.status.in_(RESULT_BEARING_EXECUTION_STATUSES),
             )
             .order_by(AgentExecution.completed_at.desc())
             .limit(1)

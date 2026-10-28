@@ -108,8 +108,15 @@ async def init_core_services(state: APIState) -> None:
         logger.error(f"Failed to initialize auth manager: {e}", exc_info=True)
         raise
 
+    key_variable = "API_KEY" if os.getenv("API_KEY") else "GILJO_MCP_API_KEY"
     api_key = os.getenv("API_KEY") or os.getenv("GILJO_MCP_API_KEY")
-    if api_key:
+    if api_key and os.getenv("GILJO_MODE") == "saas":
+        logger.warning(
+            "%s is set but ignored: the SaaS edition never accepts a static installer API key. "
+            "Remove the variable from this deployment.",
+            key_variable,
+        )
+    elif api_key:
         state.auth.api_keys[api_key] = {
             "name": "Installer Generated",
             "created_at": "2024-01-01T00:00:00Z",

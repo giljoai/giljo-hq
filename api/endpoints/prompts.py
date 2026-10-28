@@ -40,14 +40,14 @@ from giljo_mcp.platform_registry import (
     execution_mode_pattern,
     tool_type_pattern,
 )
-from giljo_mcp.prompts.spawn_prompt import build_agent_prompt, launch_gate_passed
+from giljo_mcp.prompts.spawn_prompt import build_agent_prompt
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.template_repository import TemplateRepository
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_prompt_ws_broadcast import broadcast_orchestrator_prompt_generated
 from giljo_mcp.services.project_service import ProjectService
-from giljo_mcp.services.sequence_chain_context import chain_member_phase, renders_multi_terminal
+from giljo_mcp.services.sequence_chain_context import chain_member_phase
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
@@ -175,7 +175,6 @@ async def generate_agent_prompt(
         )
 
     project_name = "Unknown Project"
-    project = None
     if agent.job and agent.job.project_id:
         project_stmt = select(Project).where(
             Project.id == agent.job.project_id, Project.tenant_key == current_user.tenant_key
@@ -195,21 +194,7 @@ async def generate_agent_prompt(
 
     tid = agent.job.template_id if agent.job else None
     template = await TemplateRepository().get_by_id(db, tid, current_user.tenant_key) if tid else None
-    multi_terminal = await renders_multi_terminal(
-        db,
-        project=project,
-        project_id=(agent.job.project_id if agent.job else ""),
-        tenant_key=current_user.tenant_key,
-    )
-    prompt = build_agent_prompt(
-        agent_name,
-        agent_display_name,
-        project_name,
-        job_id,
-        template,
-        multi_terminal=multi_terminal,
-        launched=launch_gate_passed(project),
-    )
+    prompt = build_agent_prompt(agent_name, agent_display_name, project_name, job_id, template)
 
     instructions = (
         "Paste this prompt into an agent session (terminal, desktop, or web tab) with MCP "

@@ -84,7 +84,7 @@ class HeadlessLaunchResponse(BaseModel):
         description="False (the default) = HITL: a human must press Implement, or answer an approval, "
         "in the dashboard. True = Headless: turning this on says your harness's own permission "
         "prompt for that call IS your approval, and running that harness with a bypass/skip-permissions "
-        "flag removes the ask -- so a trusted CLI/OAuth agent may self-advance the implement gate with "
+        "flag removes the ask -- so a trusted agent (OAuth or API key) may self-advance the implement gate with "
         "nobody having actually been asked."
     )
 
@@ -249,8 +249,8 @@ async def update_headless_launch(
     """Set the account-wide Headless-vs-HITL launch toggle (admin only).
 
     HITL (False) is the platform default: the server does not authorize
-    implementation early for a jwt/OAuth agent session -- the human Implement step
-    is enforced at the MCP launch gate. This endpoint is how a tenant opts IN to
+    implementation early for an agent connected over MCP, whether by OAuth or by
+    API key -- the human Implement step is enforced at the MCP launch gate. This endpoint is how a tenant opts IN to
     Headless (True): a harness's own permission prompt for a gated call then
     counts as the human's approval, so running that harness with a
     bypass/skip-permissions flag removes the ask. This is a server-side

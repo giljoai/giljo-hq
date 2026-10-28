@@ -210,6 +210,11 @@ async def wired_app(db_manager, db_session, tenant_key, monkeypatch):
     monkeypatch.setattr(mcp_sdk_server, "_scopes_from_request", lambda _request: None)
     monkeypatch.setattr(mcp_sdk_server, "_profile_toolset_from_request", lambda _request: None)
 
+    async def _headless_on(_request):
+        return False
+
+    monkeypatch.setattr(mcp_sdk_server, "_launch_gate_blocked", _headless_on)
+
     try:
         yield
     finally:

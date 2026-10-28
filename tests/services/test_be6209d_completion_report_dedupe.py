@@ -141,6 +141,7 @@ class TestCompletionReportDoesNotDuplicateBody:
             "commits": ["abc123"],
         }
 
+        await service.get_agent_mission(spec_spawn.job_id, tenant_key)
         await service.complete_job(
             job_id=spec_spawn.job_id,
             result=result_payload,

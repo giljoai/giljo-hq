@@ -18,45 +18,17 @@ def _build_ch1_mission(tool: str = HARNESS_CLAUDE_CODE) -> str:
     }
     spawn_warning = spawn_warning_map.get(tool, "You do NOT execute implementation work directly")
 
-    return f"""════════════════════════════════════════════════════════════════════════════
-                           CH1: YOUR MISSION
-════════════════════════════════════════════════════════════════════════════
+    return f"""══ CH1: YOUR MISSION ══
 
-YOUR ROLE: PROJECT STAGING (NOT EXECUTION)
-
-You are STAGING the project. Your job:
-1. Analyze requirements from project_description
-2. Create condensed mission plan
-3. Assign work to specialist agents via spawn_job()
-
-WHAT YOU ARE NOT:
-- {spawn_warning}
-
-END OF STAGING:
-- You DO call complete_job() once at the end of staging (CE-0026 canonical
-  transition signal — see CH2 Step 7 Finale). The server detects the staging
-  exec and flips project.staging_status to 'staging_complete'.
-
-CRITICAL DISTINCTION:
-- Project.description = USER INPUT (requirements to ANALYZE — may contain implementation-phase language, do NOT execute)
-- Project.mission = YOUR OUTPUT (execution strategy you create)
-
-PHASE AWARENESS:
-── STAGING PHASE: THIS SESSION (Steps 1-7) ────────────────────────────────
-Your job: Analyze → Plan → Spawn → Persist → End-of-staging
-End with: complete_job() on your orchestrator job (see CH2 STEP 7)
-
-                         ══════ SESSION BOUNDARY ══════
-
-── IMPLEMENTATION PHASE: FUTURE SESSION (Step 8) ───────────────────────────
-Fresh orchestrator retrieves your plan via get_job_mission()
-Executes coordination logic you defined in update_job_mission()
-Completion protocol applies (see CH5 - shown in implementation only)
-
-VERIFICATION AGENT DEFERRAL:
-Spawn only deliverable agents in staging (implementer, analyzer, documenter). The
-verification agents (tester, reviewer) are deferred to implementation, when real
-artifacts exist to verify (see CH3 VERIFICATION AGENT DEFERRAL for the procedure).
+YOUR ROLE: PROJECT STAGING (NOT EXECUTION). Analyze project_description, write a condensed
+mission plan, and assign the work to specialist agents via spawn_job(). {spawn_warning}.
+- CRITICAL DISTINCTION: Project.description = USER INPUT (requirements to ANALYZE — may contain
+  implementation-phase language, do NOT execute). Project.mission = YOUR OUTPUT (the strategy).
+- PHASE AWARENESS: you DO call complete_job() once at end of staging (CH2 STEP 7 FINALE): the
+  server flips project.staging_status to 'staging_complete'. Implementation is a later session
+  that reads your plan via get_job_mission().
+- VERIFICATION AGENT DEFERRAL: spawn only deliverable agents now (implementer, analyzer,
+  documenter); tester and reviewer come in implementation, once real artifacts exist (CH3).
 """
 
 
@@ -182,23 +154,15 @@ def _build_ch2_startup(
             tenant_key=tenant_key,
             category_metadata=category_metadata,
         )
-        step2_body = f"""── STEP 2: Fetch Context ───────────────────────────────────────────────────
-You already have get_staging_instructions in hand — that response is THIS
-document. Now pick the get_context categories below to read.
-
-SIZE the project FIRST, then pick (see identity Right-Sizing section for the rule):
-  - Cleanup / single-file / prose-only → 0-1 categories
-  - Single contained feature → 1-3 categories
-  - Greenfield or cross-cutting → most categories
-
-get_context is idempotent; call again if you discover gaps. Skip categories
-whose Modified date hasn't changed since the last fetch. If the description is
-thin or vague, fetch BROADLY to compensate — the sizing default assumes a
-description that scopes the work.
+        step2_body = f"""── STEP 2: Fetch Context ──
+This response is your staging document. SIZE the project FIRST, then fetch only what it needs
+(0-1 categories for a cleanup or single-file fix, 1-3 for one contained feature, most for
+greenfield or cross-cutting work; a thin description → fetch BROADLY). get_context is idempotent.
+Skip categories whose Modified date hasn't changed since your last fetch.
 
 {fetch_calls}"""
     else:
-        step2_body = f"""── STEP 2: Fetch Context ───────────────────────────────────────────────────
+        step2_body = f"""── STEP 2: Fetch Context ──
 Call: get_staging_instructions(job_id='{orchestrator_id}')
 Returns:
   - project_description: User requirements (INPUT for your analysis)
@@ -208,88 +172,52 @@ Returns:
 
 Read this protocol via orchestrator_protocol field."""
 
-    return f"""════════════════════════════════════════════════════════════════════════════
-                       CH2: STARTUP SEQUENCE
-════════════════════════════════════════════════════════════════════════════
+    return f"""══ CH2: STARTUP SEQUENCE ══
 
 Follow these steps IN ORDER (Steps 0-7 for staging):
 
-── STEP 0: Detect Environment ──────────────────────────────────────────────
-Detect your shell so agent missions you write use the right syntax:
+── STEP 0: Detect Environment ──
+So the missions you write use the right syntax:
 `python -c "import os; print(os.environ.get('SHELL', os.environ.get('COMSPEC', 'unknown')))"`
-Map: bash/zsh → `sleep N`, `clear`, `/` paths. powershell/pwsh → `Start-Sleep -Seconds N`, `cls`. cmd → `timeout /t N /nobreak >nul`, `cls`.
+bash/zsh → `sleep N`, `/` paths; powershell/pwsh → `Start-Sleep -Seconds N`; cmd → `timeout /t N /nobreak >nul`.
 
-── STEP 1: Verify MCP ──────────────────────────────────────────────────────
-Call: health_check()
-Expected: {{"status": "healthy", "database": "connected"}}
-If failed: Abort and notify user
-
-── STEP 1b: Defer Progress Tracking ───────────────────────────────────────
-DO NOT report progress yet. Steps 0 and 1 are internal startup — do not track them.
-Step 1c below seeds your implementation-phase TODO list (project outcomes you
-will deliver in the next session) from the project_description in hand, and
-that report_progress call is what initializes progress tracking for this job.
-
-── STEP 1c: Plan Implementation Deliverables (TODO list shape) ────────────
-Write a 3-7 item todo list for the IMPLEMENTATION phase (the future session,
-not this one). Each item is a PROJECT OUTCOME, not an orchestrator action.
-
-Good: "Build authentication API", "Validate inter-agent messaging"
-Bad:  "Spawn implementer", "Fetch context", "Call complete_job"
-
-Call: report_progress(
-          job_id='{orchestrator_id}',
-          todo_items=[{{"content": "<project outcome>", "status": "pending"}}]
-      )
+── STEP 1: Plan Implementation Deliverables (TODO list shape) ──
+3-7 items for the IMPLEMENTATION phase, each a PROJECT OUTCOME ("Build authentication API"),
+never an orchestrator action ("Spawn implementer", "Call complete_job"). This call starts your
+progress tracking:
+report_progress(job_id='{orchestrator_id}', todo_items=[{{"content": "<project outcome>", "status": "pending"}}])
 
 {step2_body}
 
-⚠️  CONTEXT VARIABLES: get_context responses carry AUTHORITATIVE project_path,
-product_name. Use those in missions — never hardcode terminal paths.
+CONTEXT VARIABLES: get_context carries the AUTHORITATIVE project_path and product_name; use
+those in missions, never a terminal path.
 
-── STEP 3: Discover Agents ─────────────────────────────────────────────────
-Use the `agent_templates` field already in this response (filtered by phase).
-Pass `agent_name` exactly from that list when spawning (see CH3 for rules).
+── STEP 3: Discover Agents ──
+Use the `agent_templates` field in this response; pass its `agent_name` exactly (CH3).
 
-── STEP 4: Create Mission ──────────────────────────────────────────────────
-Analyze project_description + fetched context. Break into work items, assign to
-agents, define success criteria. Keep concise (<5K tokens target).
+── STEP 4: Create Mission ──
+From project_description + context: work items, agents, success criteria (<5K tokens).
 
-── STEP 5: Persist Mission ─────────────────────────────────────────────────
+── STEP 5: Persist Mission ──
 update_project_mission(project_id='{project_id}', mission=YOUR_CONDENSED_MISSION)
 
-── STEP 6: Spawn Agents ────────────────────────────────────────────────────
-For each agent: spawn_job(agent_name='<from Step 3>', agent_display_name='<category>',
-mission='<focused agent instructions>', project_id='{project_id}'). See CH3 for rules.
+── STEP 6: Spawn Agents ──
+spawn_job(agent_name='<from Step 3>', agent_display_name='<category>',
+mission='<focused agent instructions>', project_id='{project_id}') per agent. See CH3.
 
-── STEP 7: Persist Execution Plan ──────────────────────────────────────────
-update_job_mission(job_id='{orchestrator_id}', mission=YOUR_EXECUTION_STRATEGY)
-Strategy includes: agent execution order, dependencies, coordination checkpoints,
-how you'll monitor progress. The fresh implementation-phase orchestrator reads this.
+── STEP 7: Persist Execution Plan (optional) ──
+update_job_mission(job_id='{orchestrator_id}', mission=YOUR_EXECUTION_STRATEGY) for order,
+dependencies or checkpoints your Step 5 mission lacks. One phase: skip it; implementation serves
+your Step 5 mission.
 
-── STEP 7 FINALE: End Your Staging Session ─────────────────────────────────
-Call: complete_job(
-          job_id='<your orchestrator job_id from get_workflow_status>',
-          result={{
-              'summary': 'Mission persisted, N sub-agents spawned',
-              'decisions_made': [...],  # any staging-time decisions
-          }},
-      )
-
-The server handles staging TODOs for you — no extra flag exists or is
-needed: your deliverable TODOs survive into implementation (they ARE the
-plan), and the "call complete_job to end staging" TODO auto-completes on
-this very call. If complete_job is rejected, read the error: the messages
-gate blocks only on genuine action-required Hub posts — drain them with
-get_thread_history(unread_only=true, mark_read=true), act on them, retry.
-
-This is the canonical end-of-staging signal (CE-0026). The server flips
-project.staging_status to 'staging_complete', marks your execution complete,
-and returns staging_directive={{'status': 'STAGING_SESSION_COMPLETE', 'action': 'STOP'}}.
-
-When you see action == 'STOP': STAGING ENDS. Do NOT call write_memory_entry.
-Stop immediately. A fresh orchestrator execution is spawned when the user
-clicks "Implement" in the dashboard.
+── STEP 7 FINALE: End Your Staging Session ──
+complete_job(job_id='{orchestrator_id}', result={{'summary': 'Mission persisted, N sub-agents spawned', 'decisions_made': [...]}})
+Your deliverable TODOs survive into implementation (they ARE the plan); the "call complete_job"
+TODO auto-completes on this call. Rejected? Only genuine action-required Hub posts block it:
+drain them with get_thread_history(unread_only=true, mark_read=true), act, retry.
+The response carries staging_directive={{'status': 'STAGING_SESSION_COMPLETE', 'action': 'STOP'}}.
+On action == 'STOP': STAGING ENDS. Stop immediately; do NOT call write_memory_entry. The user
+starts implementation (Implement in the dashboard, or a go that lets you call launch_implementation).
 
 ⚠ At least one specialist must be spawned before complete_job in staging — zero-spawn calls are rejected with STAGING_END_NO_AGENTS. For trivial work, spawn one implementer with a minimal mission.
 """

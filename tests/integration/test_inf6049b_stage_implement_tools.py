@@ -860,14 +860,16 @@ async def test_be9622_stage_project_start_is_phased_not_a_stop(lifecycle_mcp_cli
 
     assert result.is_error is False, _error_text(result)
     next_action = _payload(result)["next_action"]
-    assert next_action["tool"] == "health_check", (
+    assert next_action["tool"] == "get_staging_instructions", (
         f"the START response must point at the first phase, not nowhere: {next_action!r}"
     )
+    assert next_action["args_hint"] == {"job_id": _payload(result)["orchestrator_id"]}
+    assert "health_check" not in next_action["why"]
     why = next_action["why"]
     assert not why.startswith("STAGING COMPLETE"), (
         f"the response that STARTS staging must not announce staging is complete: {why!r}"
     )
-    for phase_marker in ("(1)", "(2)", "(3)", "(4)", "(5)"):
+    for phase_marker in ("(1)", "(2)", "(3)", "(4)"):
         assert phase_marker in why, f"phase {phase_marker} missing from the staging phases: {why!r}"
     assert "get_staging_instructions" in why
     assert "complete_job" in why
@@ -886,11 +888,11 @@ async def test_be9622_chain_start_defers_get_job_mission_to_the_end(
 
     assert result.is_error is False, _error_text(result)
     next_action = _payload(result)["next_action"]
-    assert next_action["tool"] == "health_check"
+    assert next_action["tool"] == "get_staging_instructions"
     why = next_action["why"]
     assert not why.startswith("STAGING COMPLETE"), why
     assert "get_job_mission" in why, "the chain continue instruction must survive, at the END"
-    assert why.index("get_job_mission") > why.index("(5)"), (
+    assert why.index("get_job_mission") > why.index("(4)"), (
         "get_job_mission must be reached only in the final phase, not before staging starts"
     )
     assert "MANUALLY press Implement" not in why

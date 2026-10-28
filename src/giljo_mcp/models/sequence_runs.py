@@ -29,10 +29,13 @@ VALID_PROJECT_STATUSES: frozenset[str] = frozenset(
         "failed",
         "stalled",
         "terminated",
+        "detached",
     }
 )
 
-CHAIN_TERMINAL_PROJECT_STATUSES: frozenset[str] = frozenset({"completed", "terminated", "cancelled", "failed"})
+CHAIN_TERMINAL_PROJECT_STATUSES: frozenset[str] = frozenset(
+    {"completed", "terminated", "cancelled", "failed", "detached"}
+)
 
 CHAIN_UNSTARTED_PROJECT_STATUSES: frozenset[str] = frozenset({"", "pending", "staged"})
 

@@ -7,7 +7,6 @@
 import logging
 from typing import Any
 
-from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.config_manager import get_config
 from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.http.url_resolver import get_public_url
@@ -15,7 +14,6 @@ from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
 
-_PREFIX = f"mcp__{MCP_ALIAS}__"
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +49,9 @@ class StagingPromptBuilder:
         if tool == HARNESS_CLAUDE_CODE:
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
-                "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-                f"{_PREFIX}* tool (including health_check) until its schema\n"
-                "is loaded. Fire this single call before the WORKFLOW below:\n"
+                "Claude Code defers MCP tool schemas. You CANNOT call any Giljo HQ tool\n"
+                "(including get_staging_instructions) until its schema is loaded. Fire this\n"
+                "single call before the WORKFLOW below (bare names match your MCP server's name):\n"
                 f"  {render_toolsearch_call_one_line()}\n"
                 "After that, every tool in the canonical orchestrator set is callable.\n"
                 "\n"
@@ -87,19 +85,17 @@ PROJECT CONTEXT (Inline - ~200 tokens):
 - Mission: {project.mission or "(Mission will be created by you)"}
 
 {toolsearch_bootstrap}WORKFLOW:
-1. Verify MCP connection: health_check()
-   → Expected: {{"status": "healthy", "database": "connected"}}
-   → If failed: STOP and report error - do NOT proceed
-2. Fetch complete context: get_staging_instructions('{orchestrator_id}')
+1. Fetch complete context: get_staging_instructions('{orchestrator_id}')
+   → If it fails: STOP and report the error (MCP connection) - do NOT proceed
    → Returns configured context (vision, tech stack, architecture, memory, git history, templates)
    → User toggle/depth configuration automatically applied server-side
    → Depth configuration (chunking, commit count, etc.) pre-configured
-3. Create condensed mission plan from fetched context
-4. Persist mission: update_project_mission('{project_id}', mission)
-5. Spawn specialist agents: spawn_job(agent_display_name, agent_name, mission, '{project_id}')
+2. Create condensed mission plan from fetched context
+3. Persist mission: update_project_mission('{project_id}', mission)
+4. Spawn specialist agents: spawn_job(agent_display_name, agent_name, mission, '{project_id}')
    → SAVE each response's agent_id UUID - needed for UUID-based messaging
-6. Monitor: get_workflow_status('{project_id}')
-7. End your staging session: complete_job(job_id='{orchestrator_id}', result={{'summary': 'Mission created, N agents spawned: [list names]'}})
+5. Monitor: get_workflow_status('{project_id}')
+6. End your staging session: complete_job(job_id='{orchestrator_id}', result={{'summary': 'Mission created, N agents spawned: [list names]'}})
    → Server flips project.staging_status to 'staging_complete' (enables the Implement button in UI)
    → Response includes staging_directive.action='STOP' — your session ends NOW
 
@@ -114,7 +110,6 @@ CRITICAL DISTINCTIONS:
 - Agent jobs = Specialist agents who will DO THE ACTUAL WORK (you coordinate them)
 
 MCP CORE TOOLS (Always Available):
-✓ health_check() - Verify MCP connection
 ✓ get_staging_instructions('{orchestrator_id}') - Fetch complete prioritized context
 ✓ update_project_mission('{project_id}', mission) - Save mission plan
 ✓ spawn_job(agent_display_name, agent_name, mission, '{project_id}') - Create agents (returns agent_id UUID)
@@ -125,7 +120,7 @@ CONNECTION TROUBLESHOOTING:
 If MCP fails: Check server running at {mcp_url}/health
 Logs: ~/.giljo_mcp/logs/mcp_adapter.log
 
-Begin by verifying MCP connection, then fetch complete context, and CREATE the mission plan.
+Begin by fetching complete context (get_staging_instructions), then CREATE the mission plan.
 """
 
     def build_staging_prompt(
@@ -142,9 +137,9 @@ Begin by verifying MCP connection, then fetch complete context, and CREATE the m
         if tool == HARNESS_CLAUDE_CODE:
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
-                "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-                f"{_PREFIX}* tool (including health_check) until its schema\n"
-                "is loaded. Fire this single call before the START NOW workflow below:\n"
+                "Claude Code defers MCP tool schemas. You CANNOT call any Giljo HQ tool\n"
+                "(including get_staging_instructions) until its schema is loaded. Fire this\n"
+                "single call before the START NOW workflow below (bare names match your MCP server's name):\n"
                 f"  {render_toolsearch_call_one_line()}\n"
                 "After that, every tool in the canonical orchestrator set is callable.\n"
                 "\n"
@@ -163,10 +158,9 @@ MCP Server: {mcp_url}
 (e.g. `mcp__<server>__<tool>`) — call them by the names your harness lists.
 
 START NOW:
-1. Verify MCP: health_check()
-   → Expected: {{"status": "healthy"}} - If failed, STOP and report error
-2. Fetch instructions: get_staging_instructions(job_id='{orchestrator_id}')
+1. Fetch instructions: get_staging_instructions(job_id='{orchestrator_id}')
    → Response includes orchestrator_protocol (5-chapter workflow) AND orchestrator_identity (behavioral guidance)
+   → If the call fails, STOP and report the error: the MCP connection is down
 """
 
     def regenerate_mission(

@@ -50,10 +50,12 @@ def _mission_service(thread_id: str | None = _THREAD) -> MagicMock:
     return service
 
 
-async def _run(job: AgentJob, thread_id: str | None = _THREAD):
+async def _run(job: AgentJob, thread_id: str | None = _THREAD, detected_harness: str | None = None):
     with patch("giljo_mcp.services.comm_thread_service.CommThreadService") as cls:
         cls.return_value.join_thread = AsyncMock(return_value={})
-        result = await resolve_and_enrol(_mission_service(thread_id), MagicMock(), job, _execution(), _TENANT)
+        result = await resolve_and_enrol(
+            _mission_service(thread_id), MagicMock(), job, _execution(), _TENANT, detected_harness
+        )
         return result, cls.return_value.join_thread
 
 
@@ -64,10 +66,16 @@ class TestWhoGetsEnrolled:
         join.assert_awaited_once()
         assert join.await_args.kwargs["thread_id"] == _THREAD
 
-    async def test_a_worker_is_not_enrolled_here(self):
+    async def test_a_worker_is_enrolled_too(self):
         result, join = await _run(_job("implementer"))
         assert result["thread_id"] == _THREAD, "the worker still gets its thread id for the render"
-        join.assert_not_awaited()
+        join.assert_awaited_once()
+        assert join.await_args.kwargs["thread_id"] == _THREAD
+
+    async def test_the_session_harness_rides_along_on_the_join(self):
+        for job_type in ("implementer", "orchestrator"):
+            _result, join = await _run(_job(job_type), detected_harness="claude-code")
+            assert join.await_args.kwargs["detected_harness"] == "claude-code", job_type
 
     async def test_an_unresolvable_thread_enrols_nobody(self):
         result, join = await _run(_job("orchestrator"), thread_id=None)
