@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -24,6 +23,7 @@ from giljo_mcp.services.project_helpers import broadcast_deferred_events, mark_s
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -198,7 +198,7 @@ async def test_approval_read_carries_product_id(db_session, db_manager, tenant_k
         description="seed",
         mission="seed",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(proj)
     await db_session.flush()
@@ -265,7 +265,7 @@ async def test_deactivate_never_run_orchestrator_agent_removed_carries_product_i
         description="seed",
         mission="",
         status="inactive",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(proj)
     await db_session.commit()

@@ -4,13 +4,13 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 
 import pytest
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import AgentExecution, AgentJob, AgentTemplate, Product, Project
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -39,7 +39,7 @@ class TestCLIModeRules:
                 mission="Test mission for CLI mode validation",
                 status="active",
                 execution_mode="claude_code_cli",
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
             session.add(project)
             await session.flush()
@@ -113,7 +113,7 @@ class TestCLIModeRules:
                 description="Project for testing multi-terminal mode",
                 mission="Test mission for multi-terminal mode",
                 status="active",
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
             session.add(project)
             await session.flush()

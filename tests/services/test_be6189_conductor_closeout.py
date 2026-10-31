@@ -122,6 +122,7 @@ async def test_sub_orch_closeout_marks_member_completed(db_session: AsyncSession
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_c1_guard_passes_when_all_terminal(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_run_with_conductor(db_session, tenant)
@@ -146,6 +147,7 @@ async def test_c1_guard_passes_when_all_terminal(db_session: AsyncSession) -> No
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_complete_chain_run_if_finished_purges_run(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_run_with_conductor(db_session, tenant)

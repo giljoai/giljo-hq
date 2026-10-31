@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter
 
-from . import api_keys, registration, session, setup
+from . import api_keys, connected_apps, registration, session, setup
 from .api_keys import (
     create_api_key,
     get_active_api_keys,
@@ -49,6 +49,7 @@ router = APIRouter()
 router.include_router(session.router)
 router.include_router(setup.router)
 router.include_router(api_keys.router)
+router.include_router(connected_apps.router)
 router.include_router(registration.router)
 
 

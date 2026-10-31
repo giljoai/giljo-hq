@@ -32,6 +32,12 @@ export const createApiKeysApi = (apiClient) => ({
   delete: (keyId) => apiClient.delete(`/api/auth/api-keys/${keyId}`),
 })
 
+export const createConnectedAppsApi = (apiClient) => ({
+  list: () => apiClient.get('/api/auth/connected-apps'),
+  logOut: (loginId) => apiClient.delete(`/api/auth/connected-apps/${loginId}`),
+  logOutAll: () => apiClient.delete('/api/auth/connected-apps'),
+})
+
 export const createConnectApi = (apiClient) => ({
   credentialStatus: () => apiClient.get('/api/connect/credential-status'),
   removeConnection: (harness) => apiClient.delete(`/api/connect/connections/${harness}`),

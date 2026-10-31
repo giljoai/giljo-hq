@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -25,6 +24,7 @@ from giljo_mcp.prompts.launch_command_synth import render_harness_launch_block
 from giljo_mcp.template_validation import resolve_harness_name
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def _seed_launched_multiterminal_project(db_session, tenant_key: str):
         execution_mode="multi_terminal",
         staging_status="staging_complete",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 999_999_999),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

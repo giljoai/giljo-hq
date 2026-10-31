@@ -154,6 +154,7 @@ async def test_member_closeout_advances_run_and_opens_next_gate(db_session: Asyn
     assert [d["project_id"] for d in launched] == [p2], f"the dashboard must hear member 2 open, got {ws.events}"
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_last_member_closeout_keeps_index_in_range(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run_id, (p1, p2) = await _seed_running_chain(db_session, tenant, size=2)

@@ -5,6 +5,7 @@
 
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +17,21 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.models import Task
 from giljo_mcp.schemas.service_responses import ConversionResult
+from giljo_mcp.services.bulk_close import (
+    REASON_NOT_AUTHORIZED,
+    REASON_NOT_FOUND,
+    REASON_PENDING_HANDOVER,
+    BulkCloseOutcome,
+    bulk_event_data,
+    unique_ids,
+)
+from giljo_mcp.services.handover_validation import HANDOVER_TYPE_ABBR
 from giljo_mcp.utils.log_sanitizer import sanitize
+
+
+def _is_pending_handover(task: Task) -> bool:
+    task_type = getattr(task, "task_type", None)
+    return getattr(task_type, "abbreviation", None) == HANDOVER_TYPE_ABBR and task.status == "pending"
 
 
 class _TaskLifecycleMixin:
@@ -49,6 +64,37 @@ class _TaskLifecycleMixin:
             )
 
         return task
+
+    async def bulk_close_tasks(self, action: str, task_ids: list[str], user_id: str) -> dict[str, Any]:
+        tenant_key = self.tenant_manager.get_current_tenant()
+        if not tenant_key:
+            raise ValidationError(message="No tenant context available", context={"operation": "bulk_close_tasks"})
+        outcome = BulkCloseOutcome()
+        async with self._get_session() as session:
+            user = await self._repo.get_user_by_id(session, tenant_key, user_id)
+            if not user:
+                raise ResourceNotFoundError(message="User not found", context={"user_id": user_id})
+            for task_id in unique_ids(task_ids):
+                task = await self._repo.get_task_by_id(session, task_id, tenant_key)
+                if task is None:
+                    outcome.skip(task_id, REASON_NOT_FOUND)
+                elif not self._conversion.can_delete_task(task, user):
+                    outcome.skip(task_id, REASON_NOT_AUTHORIZED)
+                elif action == "archive" and _is_pending_handover(task):
+                    outcome.skip(task_id, REASON_PENDING_HANDOVER)
+                else:
+                    if action == "delete":
+                        await self._delete_task_impl(session, task_id, user_id)
+                    else:
+                        await self._update_task_impl(session, task_id, broadcast=False, hidden=action == "archive")
+                    outcome.done.append(task_id)
+        if outcome.done and self._websocket_manager:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="tasks:bulk_updated",
+                data=bulk_event_data(action, outcome.done),
+            )
+        return outcome.as_dict()
 
     async def _change_status_impl(self, session: AsyncSession, task_id: str, new_status: str) -> Task:
         tenant_key = self.tenant_manager.get_current_tenant()

@@ -123,6 +123,7 @@ async def _corrupt_copy(session: AsyncSession, run: dict, tenant_key: str, statu
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_guard_heals_stale_copy_and_allows_completion(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)
@@ -142,6 +143,7 @@ async def test_guard_heals_stale_copy_and_allows_completion(db_session: AsyncSes
     assert refetched["project_statuses"][p2] == "completed", "the guard must repair the stale copy, not just bypass it"
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_guard_heals_missing_copy_entry(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)
@@ -158,6 +160,7 @@ async def test_guard_heals_missing_copy_entry(db_session: AsyncSession) -> None:
     )
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_guard_proceeds_when_persisting_healed_copy_fails(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -182,6 +185,7 @@ async def test_guard_proceeds_when_persisting_healed_copy_fails(
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_purge_heals_stale_copy_and_completes_run(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)

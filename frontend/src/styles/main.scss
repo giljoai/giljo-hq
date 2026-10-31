@@ -11,10 +11,10 @@
   --color-bg-elevated: #1e3147;
   --color-border: #315074;
   --color-text-primary: #e1e1e1;
-  --color-text-secondary: #a3aac4;
+  --color-text-secondary: #{$color-text-secondary};
   --text-primary: var(--color-text-primary);
-  --text-muted: #8895a8;
-  --text-secondary: #a3aac4;
+  --text-muted: #{$text-muted};
+  --text-secondary: #{$color-text-secondary};
   --font-mono: #{$typography-font-mono};
   --border-subtle: rgba(255, 255, 255, 0.10);
   --badge-text: #0e1c2d;
@@ -44,6 +44,7 @@
   // source of color truth for compile-time consumers.
   --color-status-complete: #67bd6d;       // matches $color-status-complete
   --color-status-blocked: #f44336;        // matches $color-status-blocked
+  --color-status-warning: #ff9800;        // matches $color-status-warning
   --color-text-muted: #9e9e9e;            // matches $color-text-muted
   --color-agent-implementer: #6db3e4;     // matches $color-agent-implementor
   --color-agent-analyzer: #e07872;        // matches $color-agent-analyzer

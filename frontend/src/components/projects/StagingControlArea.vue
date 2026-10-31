@@ -83,6 +83,7 @@
         class="sca-link"
         :disabled="secondaryBusy"
         :aria-busy="secondaryBusy ? 'true' : undefined"
+        :title="secondaryTitle || undefined"
         :data-testid="ids.secondary"
         @click="emit('secondary')"
       >
@@ -118,6 +119,7 @@ const props = defineProps({
   copying: { type: Boolean, default: false },
   secondaryLabel: { type: String, default: '' },
   secondaryBusy: { type: Boolean, default: false },
+  secondaryTitle: { type: String, default: '' },
 })
 
 const emit = defineEmits(['pick-mode', 'stage', 'implement', 'copy-prompt', 'secondary'])

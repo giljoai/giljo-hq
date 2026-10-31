@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -18,6 +17,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.schemas.user_approval import VALID_APPROVAL_BANNER_STATES
 from giljo_mcp.services.user_approval_service import UserApprovalService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture
@@ -41,7 +41,7 @@ async def banner_seed(db_session, test_tenant_key):
             description="Project for FE-9511 banner-state tests",
             mission="Test mission",
             status="active",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
             staging_status=staging_status,
             implementation_launched_at=implementation_launched_at,
         )

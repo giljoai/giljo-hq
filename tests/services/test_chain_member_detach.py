@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -24,6 +23,7 @@ from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager, current_tenant
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def chain(db_manager, db_session: AsyncSession):
             status=status,
             tenant_key=tenant,
             product_id=product.id,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
             execution_mode="claude_code_cli",
             created_at=datetime.now(UTC),
         )
@@ -124,6 +124,7 @@ async def _finish(ctx: dict, project_id: str) -> None:
     await ctx["run_svc"].update(run_id=run["id"], tenant_key=ctx["tenant"], project_statuses=statuses)
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_parked_tail_member_no_longer_blocks_the_conductor(chain) -> None:
     _p1, p2, p3 = chain["ids"]
     await _finish(chain, p2)
@@ -162,6 +163,7 @@ async def test_parking_a_member_not_yet_reached_keeps_the_in_flight_index(chain)
         await _conductor_guard(chain)
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_cancelled_and_superseded_doors_detach(chain) -> None:
     p1, p2, p3 = chain["ids"]
     await chain["svc"].lifecycle.cancel_project(p2, tenant_key=chain["tenant"], reason="no longer needed")
@@ -182,14 +184,117 @@ async def test_delete_door_detaches_instead_of_cancelling_the_run(chain) -> None
     assert run["project_statuses"][p3] == "detached"
 
 
-async def test_detached_project_keeps_its_own_row(chain) -> None:
+async def _stage_and_launch(ctx: dict, project_id: str) -> None:
+    session = ctx["session"]
+    row = (await session.execute(select(Project).where(Project.id == project_id))).scalar_one()
+    row.staging_status = "staging_complete"
+    row.implementation_launched_at = datetime.now(UTC)
+    row.ever_launched_at = datetime.now(UTC)
+    job = AgentJob(
+        job_id=str(uuid.uuid4()),
+        job_type="orchestrator",
+        tenant_key=ctx["tenant"],
+        project_id=project_id,
+        mission="orchestrator mission",
+        status="active",
+    )
+    session.add(job)
+    await session.flush()
+    session.add(
+        AgentExecution(
+            agent_id=str(uuid.uuid4()),
+            job_id=job.job_id,
+            tenant_key=ctx["tenant"],
+            agent_display_name="orchestrator",
+            agent_name="orchestrator",
+            status="working",
+        )
+    )
+    await session.flush()
+
+
+async def _agent_row_count(ctx: dict, project_id: str) -> int:
+    rows = (
+        await ctx["session"].execute(
+            select(AgentJob).where(AgentJob.tenant_key == ctx["tenant"], AgentJob.project_id == project_id)
+        )
+    ).all()
+    return len(rows)
+
+
+@pytest.mark.parametrize("door_status", ["parked", "superseded"])
+async def test_detached_project_goes_back_to_prestage_keeping_the_door_status(chain, door_status) -> None:
+    p1, p2, _p3 = chain["ids"]
+    await _stage_and_launch(chain, p2)
+    updates = {"status": door_status}
+    if door_status == "superseded":
+        updates["successor_project_id"] = p1
+    await chain["svc"].update_project(project_id=p2, updates=updates)
+
+    row = (await chain["session"].execute(select(Project).where(Project.id == p2))).scalar_one()
+    await chain["session"].refresh(row)
+    assert row.status == door_status
+    assert row.mission == ""
+    assert row.staging_status is None
+    assert row.implementation_launched_at is None
+    assert row.ever_launched_at is None
+    assert row.description == "member"
+    assert await _agent_row_count(chain, p2) == 0
+    assert (await _run(chain))["project_statuses"][p2] == "detached"
+
+
+async def test_cancel_door_resets_the_dropped_member_and_keeps_cancelled(chain) -> None:
+    _p1, p2, _p3 = chain["ids"]
+    await _stage_and_launch(chain, p2)
+    await chain["svc"].lifecycle.cancel_project(p2, tenant_key=chain["tenant"], reason="no longer needed")
+
+    row = (await chain["session"].execute(select(Project).where(Project.id == p2))).scalar_one()
+    await chain["session"].refresh(row)
+    assert row.status == "cancelled"
+    assert row.mission == ""
+    assert row.staging_status is None
+    assert row.implementation_launched_at is None
+    assert await _agent_row_count(chain, p2) == 0
+
+
+async def test_delete_door_resets_the_dropped_member_and_keeps_deleted(chain) -> None:
     _p1, _p2, p3 = chain["ids"]
+    await _stage_and_launch(chain, p3)
+    await chain["svc"].deletion.delete_project(p3)
+
+    row = (await chain["session"].execute(select(Project).where(Project.id == p3))).scalar_one()
+    await chain["session"].refresh(row)
+    assert row.status == "deleted"
+    assert row.mission == ""
+    assert row.staging_status is None
+    assert await _agent_row_count(chain, p3) == 0
+
+
+async def test_parking_a_member_of_a_pending_run_leaves_it_staged(chain) -> None:
+    p1, p2, p3 = chain["ids"]
+    await _stage_and_launch(chain, p3)
+    await chain["run_svc"].update(
+        run_id=chain["run"]["id"],
+        tenant_key=chain["tenant"],
+        status="pending",
+        project_statuses={p1: "pending", p2: "pending", p3: "pending"},
+    )
     await chain["svc"].update_project(project_id=p3, updates={"status": "parked"})
 
     row = (await chain["session"].execute(select(Project).where(Project.id == p3))).scalar_one()
-    assert row.status == "parked"
     assert row.mission == "member mission"
-    assert row.description == "member"
+    assert row.staging_status == "staging_complete"
+    assert await _agent_row_count(chain, p3) == 1
+
+
+async def test_a_completed_member_is_not_reset_when_superseded(chain) -> None:
+    p1, p2, _p3 = chain["ids"]
+    await _stage_and_launch(chain, p1)
+    await chain["svc"].update_project(project_id=p1, updates={"status": "superseded", "successor_project_id": p2})
+
+    row = (await chain["session"].execute(select(Project).where(Project.id == p1))).scalar_one()
+    assert row.mission == "member mission"
+    assert await _agent_row_count(chain, p1) == 1
 
 
 async def test_detach_is_idempotent_and_never_overwrites_a_completed_member(chain) -> None:

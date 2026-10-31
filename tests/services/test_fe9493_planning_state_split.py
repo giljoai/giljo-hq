@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import Mock
@@ -23,6 +22,7 @@ from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.project_helpers import advance_chain_member_to_implementing, mark_chain_member_status
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -50,7 +50,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, implementatio
         status="active",
         tenant_key=tenant_key,
         product_id=product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC) if implementation_launched else None,
         created_at=datetime.now(UTC),

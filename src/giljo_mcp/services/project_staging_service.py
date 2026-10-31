@@ -157,26 +157,15 @@ class ProjectStagingService:
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
 
         async with self._get_session(effective_tenant_key) as session:
-            project = await self._project_repo.get_by_id(session, effective_tenant_key, project_id)
-            if not project:
+            deleted = await self._lifecycle_repo.reset_project_to_prestage(session, effective_tenant_key, project_id)
+            if deleted is None:
                 raise ResourceNotFoundError(message="Project not found", context={"project_id": project_id})
-
-            project.staging_status = None
-            project.mission = ""
-            project.implementation_launched_at = None
-            project.ever_launched_at = None
-            project.status = ProjectStatus.INACTIVE
-            project.updated_at = datetime.now(UTC)
-
-            deleted = await self._lifecycle_repo.delete_all_agent_state_for_project(
-                session, effective_tenant_key, project_id
-            )
             await session.commit()
 
             self._logger.info("[RESET] Project %s reset to pre-stage; deleted %s", project_id, deleted)
             return {
                 "message": "Project reset to original state",
-                "project_id": project.id,
+                "project_id": project_id,
                 "deleted": deleted,
             }
 

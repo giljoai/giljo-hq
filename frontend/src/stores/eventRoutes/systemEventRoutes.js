@@ -140,6 +140,12 @@ export const SYSTEM_EVENT_ROUTES = {
     },
   },
 
+  'tasks:bulk_updated': {
+    handler: async (payload) => {
+      useTaskStore().handleBulkUpdated(payload)
+    },
+  },
+
   'template:updated': {
     handler: async (payload) => {
       dispatchWindowEvent('template:updated', payload)

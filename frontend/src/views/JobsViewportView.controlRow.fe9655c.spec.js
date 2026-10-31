@@ -80,7 +80,8 @@ async function mountBoard() {
 const stageBtn = (w) => w.find('[data-testid="jbf-stage"]')
 const footerState = (w) => w.find('[data-testid="jb-footer"]').attributes('data-footer-state')
 
-beforeEach(() => {
+beforeEach(async () => {
+  await router.replace({ path: '/', query: {} })
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -16,6 +15,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def _seed_staging_complete_project(db_session, tenant_key: str) -> str:
         execution_mode="claude_code_cli",
         staging_status="staging_complete",
         implementation_launched_at=None,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

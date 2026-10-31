@@ -24,6 +24,7 @@ from api.endpoints import (
     git,
     notifications,
     oauth,
+    oauth_client_info,
     oauth_deny,
     oauth_register,
     oauth_revoke,
@@ -87,6 +88,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(connect.router, prefix="/api/connect", tags=["connect"])
     app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
     app.include_router(oauth_deny.router, prefix="/api/oauth", tags=["oauth"])
+    app.include_router(oauth_client_info.router, prefix="/api/oauth", tags=["oauth"])
     app.include_router(oauth_revoke.router, prefix="/api/oauth", tags=["oauth"])
     if _app_module.GILJO_MODE in ("", "ce"):
         app.include_router(oauth_register.router, prefix="/api/oauth", tags=["oauth"])

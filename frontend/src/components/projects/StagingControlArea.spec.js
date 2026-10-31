@@ -149,4 +149,9 @@ describe('StagingControlArea: hard disables', () => {
     const style = source.slice(source.indexOf('<style'))
     expect(style).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
+
+  it('FE-9834b: the secondary link carries the tooltip it is given', () => {
+    const w = mountArea({ secondaryTitle: 'Tip text' })
+    expect(w.find('.sca-link').attributes('title')).toBe('Tip text')
+  })
 })

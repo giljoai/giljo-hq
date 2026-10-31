@@ -229,7 +229,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 if locked is False and ultralocked:
                     raise ValidationError(
                         message=(
-                            "Cannot unstage: the run is staging-complete or running. Use Terminate or Release instead."
+                            "Cannot unstage: the run is staging-complete or running. Use Stop chain or Deactivate chain instead."
                         ),
                         context={"field": "locked", "run_id": run_id, "status": run.status},
                     )
@@ -349,6 +349,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
         *,
         run_id: str,
         tenant_key: str | None = None,
+        keep_conductor_jobs: bool = False,
     ) -> dict[str, Any]:
         try:
             effective_tenant_key = tenant_key or (
@@ -365,7 +366,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                         AgentJob.job_metadata["run_id"].astext == run_id,
                     )
                 )
-                conductor_job_ids = [row[0] for row in job_id_rows.all()]
+                conductor_job_ids = [] if keep_conductor_jobs else [row[0] for row in job_id_rows.all()]
 
                 if conductor_job_ids:
                     await session.execute(
@@ -456,7 +457,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                     raise ValidationError(
                         message=(
                             "Cannot edit membership: the run is staging-complete or running. "
-                            "Use Terminate or Release instead."
+                            "Use Stop chain or Deactivate chain instead."
                         ),
                         context={"field": "project_id", "run_id": run_id, "status": run.status},
                     )
@@ -569,6 +570,16 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 serialized = _serialize(run)
 
             await self._broadcast_after_commit(run_id, effective_tenant_key)
+            if via == "ui":
+                from giljo_mcp.services.chain_member_detach import finish_chain_after_review
+
+                await finish_chain_after_review(
+                    run=serialized,
+                    db_manager=self.db_manager,
+                    tenant_manager=self.tenant_manager,
+                    test_session=self._session,
+                    websocket_manager=self._websocket_manager,
+                )
             self._logger.info(
                 "Marked project %s reviewed (via=%s) in sequence_run %s (tenant=%s, reviewed=%d)",
                 sanitize(project_id),

@@ -4,6 +4,7 @@ import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { useChainLifecycle } from '@/composables/useChainLifecycle'
 import { useChainImplementation } from '@/composables/useChainImplementation'
 import { useClipboard } from '@/composables/useClipboard'
+import { useChainManageProjects } from '@/composables/useChainManageProjects'
 import { useToast } from '@/composables/useToast'
 import { useSettingsStore } from '@/stores/settings'
 import { buildChainScreenControls } from '@/components/projects/chainScreenVisibility.js'
@@ -194,7 +195,13 @@ export function useChainGroupControls({ chainCtx, agentsByProject = () => ({}) }
     }
   }
 
+  const manage = useChainManageProjects({
+    chainCtx,
+    started: () => chainScreenControls.value.showStopChain,
+  })
+
   return {
+    ...manage,
     chainScreenControls,
     chainStaging,
     launching,

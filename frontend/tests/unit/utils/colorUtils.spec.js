@@ -22,17 +22,17 @@ describe('colorUtils', () => {
     it('returns style object for known agent', () => {
       const style = getAgentBadgeStyle('orchestrator')
       expect(style.backgroundColor).toContain('rgba(212, 176, 138, 0.15)')
-      expect(style.color).toBe('#D4B08A')
+      expect(style.color).toBe('#dfc4a7')
     })
 
     it('returns style for synonym agent name', () => {
       const style = getAgentBadgeStyle('implementor')
-      expect(style.color).toBe('#6DB3E4')
+      expect(style.color).toBe('#a0ceed')
     })
 
     it('falls back to orchestrator for unknown agent', () => {
       const style = getAgentBadgeStyle('unknown-agent')
-      expect(style.color).toBe('#D4B08A')
+      expect(style.color).toBe('#dfc4a7')
     })
 
     it('handles null/undefined gracefully', () => {

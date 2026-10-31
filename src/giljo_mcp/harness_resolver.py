@@ -86,9 +86,10 @@ def harness_from_oauth_client_id(client_id: str | None) -> str | None:
 
 def harness_for_connection(client_info: dict | None, oauth_client_id: str | None) -> str:
     info = client_info or {}
-    return harness_from_oauth_client_id(oauth_client_id) or harness_from_client_info(
-        info.get("name"), info.get("version")
-    )
+    from_cimd = harness_from_oauth_client_id(oauth_client_id)
+    if from_cimd and from_cimd != GENERIC_HARNESS:
+        return from_cimd
+    return harness_from_client_info(info.get("name"), info.get("version"))
 
 
 def harness_from_client_info(name: str | None, version: str | None = None) -> str:
@@ -123,3 +124,23 @@ def _detected_harness_from_session(session: object | None) -> str | None:
             if isinstance(value, str) and value:
                 return value
     return None
+
+
+HUB_SURFACE_CLAUDE = "claude"
+HUB_SURFACE_CHATGPT = "chatgpt"
+HUB_SURFACE_HERMES = "hermes"
+_HUB_SURFACE_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("Anthropic/", HUB_SURFACE_CLAUDE),
+    ("openai-mcp", HUB_SURFACE_CHATGPT),
+    ("hermes-agent", HUB_SURFACE_HERMES),
+)
+
+
+def hub_participant_harness(detected: str | None, client_name: str | None) -> str:
+    if detected and detected != GENERIC_HARNESS:
+        return detected
+    name = (client_name or "").strip()
+    for prefix, surface in _HUB_SURFACE_PREFIXES:
+        if name.startswith(prefix):
+            return surface
+    return GENERIC_HARNESS

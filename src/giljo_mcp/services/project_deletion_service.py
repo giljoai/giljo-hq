@@ -55,7 +55,7 @@ class ProjectDeletionService:
             self.db_manager, tenant_key or self.tenant_manager.get_current_tenant(), self._test_session
         )
 
-    async def delete_project(self, project_id: str) -> SoftDeleteResult:
+    async def delete_project(self, project_id: str, *, broadcast: bool = True) -> SoftDeleteResult:
         tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(message="No tenant context available", context={"project_id": project_id})
@@ -92,7 +92,7 @@ class ProjectDeletionService:
                 f"Decommissioned {decommissioned_jobs_count} agent jobs."
             )
 
-            if self._websocket_manager:
+            if self._websocket_manager and broadcast:
                 await self._websocket_manager.broadcast_project_update(
                     project_id=project_id,
                     update_type="status_changed",

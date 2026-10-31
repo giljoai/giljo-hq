@@ -267,3 +267,36 @@ class TestFrontendDependencyInstallScope:
         source = (Path(__file__).parent.parent.parent / "startup.py").read_text(encoding="utf-8")
         assert 'subprocess.run([npm_cmd, "ci", "--omit=dev"]' in source
         assert 'subprocess.run([npm_executable, "ci"]' in source
+
+
+class TestFrontendDepsNeedInstall:
+
+    @staticmethod
+    def _tree(tmp_path, installed):
+        (tmp_path / "package.json").write_text('{"devDependencies": {"vitest": "1", "eslint": "1"}}')
+        (tmp_path / "package-lock.json").write_text("{}")
+        node_modules = tmp_path / "node_modules"
+        node_modules.mkdir()
+        for name in installed:
+            (node_modules / name).mkdir()
+            (node_modules / name / "package.json").write_text("{}")
+        (node_modules / ".package-lock.json").write_text("{}")
+        return tmp_path
+
+    def test_dev_start_after_production_install_reinstalls(self, tmp_path):
+        from startup_support.frontend_deps import frontend_deps_need_install
+
+        frontend = self._tree(tmp_path, installed=["vue"])
+        assert frontend_deps_need_install(frontend, include_dev=True) is True
+        assert frontend_deps_need_install(frontend, include_dev=False) is False
+
+    def test_full_install_satisfies_dev_start(self, tmp_path):
+        from startup_support.frontend_deps import frontend_deps_need_install
+
+        frontend = self._tree(tmp_path, installed=["vue", "vitest", "eslint"])
+        assert frontend_deps_need_install(frontend, include_dev=True) is False
+
+    def test_missing_marker_needs_install(self, tmp_path):
+        from startup_support.frontend_deps import frontend_deps_need_install
+
+        assert frontend_deps_need_install(tmp_path, include_dev=False) is True

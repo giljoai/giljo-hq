@@ -14,6 +14,7 @@ from sqlalchemy import select
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.integration.test_be6081_mcp_boundary_contract import (
     _enable_git_integration,
     _parse_content_dict,
@@ -72,7 +73,7 @@ async def _seed_uuid_project(session, tenant_key: str):
         mission="Boundary test",
         status="active",
         staging_status="staging_complete",
-        series_number=project.series_number + 1,
+        series_number=next_series_number(),
     )
     session.add(uuid_project)
     await session.flush()

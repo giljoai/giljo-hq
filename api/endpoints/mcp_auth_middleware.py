@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.endpoints.auth.session import _resolve_client_ip
+from api.endpoints.mcp_connected_apps import record_connected_app_use
 from api.endpoints.mcp_tools import logger
 from api.endpoints.mcp_transport import (
     _DISCOVER_METHOD,
@@ -26,6 +27,7 @@ from api.endpoints.mcp_transport import (
     _peek_jsonrpc_client_info,
     _peek_jsonrpc_method,
     _peek_jsonrpc_protocol_version,
+    _peek_tool_target,
     _read_full_body,
     _replay_receive,
     _send_method_not_allowed,
@@ -136,6 +138,28 @@ class MCPAuthMiddleware:
             scope["state"]["scopes"] = token_scopes
         scope["state"]["must_change_password"] = must_change_password
 
+    @staticmethod
+    async def _refuse_unauthenticated(
+        scope: Scope, receive: Receive, send: Send, request: StarletteRequest, api_key_value: str | None
+    ) -> None:
+        if api_key_value:
+            from api.middleware.auth_rate_limiter import enforce_api_key_auth_failure
+
+            try:
+                await enforce_api_key_auth_failure(request)
+            except HTTPException as rl_exc:
+                if rl_exc.status_code == 429:
+                    retry_after = (rl_exc.headers or {}).get("Retry-After", "60")
+                    await _send_raw_status(
+                        send,
+                        status=429,
+                        headers=[(b"retry-after", str(retry_after).encode("ascii"))],
+                    )
+                    return
+                raise
+        resp = _unauthenticated_response(scope, "Invalid credentials")
+        await resp(scope, receive, send)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -176,7 +200,11 @@ class MCPAuthMiddleware:
                     auth_method = "jwt"
                     must_change_password = principal.user.must_change_password
                     scope.setdefault("state", {})["oauth_client_id"] = principal.oauth_client_id
+                    scope["state"]["oauth_family_id"] = principal.oauth_family_id
                     token_scopes = principal.scopes if principal.scopes is not None else ["mcp:read", "mcp:write"]
+                except (TimeoutError, PoolTimeoutError):
+                    await server_busy_response(request)(scope, receive, send)
+                    return
                 except PrincipalValidationError as exc:
                     if exc.reason in JWT_FALLBACK_REASONS:
                         api_key_value = bearer_token
@@ -236,6 +264,9 @@ class MCPAuthMiddleware:
                                 await session_mgr.log_ip(api_key_id, client_ip)
                             except (OSError, ValueError, KeyError):
                                 logger.debug("IP logging failed (non-blocking)")
+            except (TimeoutError, PoolTimeoutError):
+                await server_busy_response(request)(scope, receive, send)
+                return
             except SQLAlchemyError:
                 logger.exception("API key authentication: database unavailable")
                 resp = JSONResponse({"error": "Authentication service unavailable"}, status_code=503)
@@ -243,23 +274,7 @@ class MCPAuthMiddleware:
                 return
 
         if not tenant_key:
-            if api_key_value:
-                from api.middleware.auth_rate_limiter import enforce_api_key_auth_failure
-
-                try:
-                    await enforce_api_key_auth_failure(request)
-                except HTTPException as rl_exc:
-                    if rl_exc.status_code == 429:
-                        retry_after = (rl_exc.headers or {}).get("Retry-After", "60")
-                        await _send_raw_status(
-                            send,
-                            status=429,
-                            headers=[(b"retry-after", str(retry_after).encode("ascii"))],
-                        )
-                        return
-                    raise
-            resp = _unauthenticated_response(scope, "Invalid credentials")
-            await resp(scope, receive, send)
+            await self._refuse_unauthenticated(scope, receive, send, request, api_key_value)
             return
 
         self._stamp_auth_state(scope, tenant_key, user_id, auth_method, token_scopes, must_change_password)
@@ -301,6 +316,7 @@ class MCPAuthMiddleware:
             return
 
         _announce_agent_access(scope, request, tenant_key, user_id, api_key_id)
+        await record_connected_app_use(scope, request, tenant_key)
 
         _stamp_url_profile(scope)
 
@@ -333,6 +349,8 @@ class MCPAuthMiddleware:
             return None
         receive = _replay_receive(buffered_body, original_receive)
         method = _peek_jsonrpc_method(buffered_body)
+        if method == "tools/call":
+            scope.setdefault("state", {})["mcp_tool_target"] = _peek_tool_target(buffered_body)
         is_initialize = method == _INITIALIZE_METHOD
         client_info = _peek_jsonrpc_client_info(buffered_body) if announces_client(method) else None
         if is_initialize:

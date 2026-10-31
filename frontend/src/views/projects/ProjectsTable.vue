@@ -509,7 +509,7 @@ function getStatusActions(item) {
 /* FE-6165f / FE-6170: "In chain" badge (now in Status column). Tinted badge —
    FE-6171b (item C): uses the same design token as the inactive StatusBadge
    so "In chain" replaces (not appends to) the inactive badge visually.
-   --text-muted (#8895a8) is the canonical inactive badge color. */
+   --text-muted (#96a2b3) is the canonical inactive badge color. */
 .in-chain-pill {
   display: inline-flex;
   align-items: center;
@@ -520,8 +520,8 @@ function getStatusActions(item) {
   white-space: nowrap;
   line-height: 1.4;
   /* Mirrors StatusBadge inactive: rgba(--text-muted, 0.15) bg + full-brightness text */
-  background-color: rgba(136, 149, 168, 0.15);
-  color: var(--text-muted, #8895a8);
+  background-color: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-muted, #96a2b3);
 }
 
 /* Play-circle activate button */

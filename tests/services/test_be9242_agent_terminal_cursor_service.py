@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +19,7 @@ from giljo_mcp.services.orchestration_agent_state_service import (
     OrchestrationAgentStateService,
 )
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         tenant_key=tenant_key,
         product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     session.add(proj)

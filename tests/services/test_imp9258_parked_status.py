@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 
 import pytest
@@ -18,6 +17,7 @@ from giljo_mcp.domain.project_status import (
     ProjectStatus,
 )
 from giljo_mcp.exceptions import ProjectStateError
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def parked_setup(db_manager, db_session):
         description="d",
         mission="m",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

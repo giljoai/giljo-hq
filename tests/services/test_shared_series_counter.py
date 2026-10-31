@@ -227,6 +227,7 @@ class TestGlobalSerialCounter:
     @pytest.mark.asyncio
     async def test_project_cap_rejected_above_9999(
         self,
+        monkeypatch,
         project_service: ProjectService,
         db_session,
         test_tenant_key: str,
@@ -245,9 +246,11 @@ class TestGlobalSerialCounter:
             tenant_key=test_tenant_key,
             project_type_id=be_taxonomy.id,
         )
+        from giljo_mcp.repositories import project_repository
+
+        monkeypatch.setattr(project_repository, "MAX_SERIES_NUMBER", 1)
         seed_row = (await db_session.execute(select(Project).where(Project.id == seed.id))).scalar_one()
-        seed_row.series_number = 9999
-        await db_session.commit()
+        assert seed_row.series_number == 1
 
         with pytest.raises(ValidationError, match="exhausted"):
             await project_service.create_project(
@@ -262,6 +265,7 @@ class TestGlobalSerialCounter:
     @pytest.mark.asyncio
     async def test_task_cap_rejected_above_9999(
         self,
+        monkeypatch,
         task_service: TaskService,
         project_service: ProjectService,
         db_session,
@@ -281,9 +285,11 @@ class TestGlobalSerialCounter:
             tenant_key=test_tenant_key,
             project_type_id=be_taxonomy.id,
         )
+        from giljo_mcp.repositories import project_repository
+
+        monkeypatch.setattr(project_repository, "MAX_SERIES_NUMBER", 1)
         seed_row = (await db_session.execute(select(Project).where(Project.id == seed.id))).scalar_one()
-        seed_row.series_number = 9999
-        await db_session.commit()
+        assert seed_row.series_number == 1
 
         with pytest.raises(ValidationError, match="exhausted"):
             await task_service.create_task_for_mcp(
@@ -293,7 +299,7 @@ class TestGlobalSerialCounter:
             )
 
     @pytest.mark.asyncio
-    async def test_soft_delete_frees_and_restore_reallocates_fresh(
+    async def test_trash_keeps_the_number_and_restore_reallocates_fresh(
         self,
         project_service: ProjectService,
         db_session,
@@ -325,11 +331,130 @@ class TestGlobalSerialCounter:
             tenant_key=test_tenant_key,
             project_type_id=be_taxonomy.id,
         )
-        assert second.series_number == 1
+        assert second.series_number == 2
 
         await project_service.deletion.restore_project(first.id, tenant_key=test_tenant_key)
         restored = (await db_session.execute(select(Project).where(Project.id == first.id))).scalar_one()
 
         assert restored.deleted_at is None
-        assert restored.series_number == 2
+        assert restored.series_number == 3
         assert restored.series_number != second.series_number
+
+
+class TestLowestFreeSerial:
+
+    @staticmethod
+    async def _set_serial(db_session, project_id: str, serial: int) -> None:
+        from sqlalchemy import select
+
+        from giljo_mcp.models.projects import Project
+
+        row = (await db_session.execute(select(Project).where(Project.id == project_id))).scalar_one()
+        row.series_number = serial
+        await db_session.commit()
+
+    @pytest.mark.asyncio
+    async def test_a_used_9999_no_longer_blocks_new_tasks(
+        self,
+        task_service: TaskService,
+        project_service: ProjectService,
+        db_session,
+        test_tenant_key: str,
+        active_product: Product,
+        be_taxonomy: TaxonomyType,
+    ):
+        from sqlalchemy import select
+
+        from giljo_mcp.models import Task
+
+        low = await project_service.create_project(
+            name="Low",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        top = await project_service.create_project(
+            name="Top",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        await self._set_serial(db_session, top.id, 9999)
+        assert low.series_number == 1
+
+        task_result = await task_service.create_task_for_mcp(title="T", description="t", tenant_key=test_tenant_key)
+        task = (await db_session.execute(select(Task).where(Task.id == task_result["task_id"]))).scalar_one()
+        assert task.series_number == 2
+
+        nxt = await project_service.create_project(
+            name="Next",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        assert nxt.series_number == 3
+
+    @pytest.mark.asyncio
+    async def test_a_trashed_items_number_stays_taken(
+        self,
+        project_service: ProjectService,
+        db_session,
+        test_tenant_key: str,
+        active_product: Product,
+        be_taxonomy: TaxonomyType,
+    ):
+        first = await project_service.create_project(
+            name="First",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        await project_service.deletion.delete_project(first.id)
+        second = await project_service.create_project(
+            name="Second",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        assert first.series_number == 1
+        assert second.series_number == 2
+
+    @pytest.mark.asyncio
+    async def test_the_ui_preview_shows_the_same_lowest_free_number(
+        self,
+        project_service: ProjectService,
+        db_session,
+        test_tenant_key: str,
+        active_product: Product,
+        be_taxonomy: TaxonomyType,
+    ):
+        from giljo_mcp.repositories.project_repository import ProjectRepository
+        from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
+
+        top = await project_service.create_project(
+            name="Top",
+            mission="m",
+            description="d",
+            product_id=active_product.id,
+            tenant_key=test_tenant_key,
+            project_type_id=be_taxonomy.id,
+        )
+        await self._set_serial(db_session, top.id, 9999)
+
+        preview = await TaxonomyRepository().get_next_series_number(
+            db_session, test_tenant_key, be_taxonomy.id, active_product.id
+        )
+        allocated = await ProjectRepository().get_next_series_number_shared(
+            db_session, test_tenant_key, active_product.id
+        )
+        assert preview == allocated == 1

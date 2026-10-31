@@ -2108,3 +2108,29 @@ class TestTokenEndpointRefreshGrant:
             dict(via_token.headers),
             dict(via_refresh.headers),
         )
+
+
+class TestOAuthClientNameEndpoint:
+
+    @pytest.mark.asyncio
+    async def test_builtin_client_returns_registered_name(self, api_client, auth_headers):
+        response = await api_client.get(
+            "/api/oauth/authorize/client", headers=auth_headers, params={"client_id": BUILTIN_CLIENT_ID}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["client_id"] == BUILTIN_CLIENT_ID
+        assert "(built-in)" in body["client_name"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_client_is_404_without_echo(self, api_client, auth_headers):
+        response = await api_client.get(
+            "/api/oauth/authorize/client", headers=auth_headers, params={"client_id": "no-such-client-zz"}
+        )
+        assert response.status_code == 404
+        assert "no-such-client-zz" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_requires_auth(self, api_client):
+        response = await api_client.get("/api/oauth/authorize/client", params={"client_id": BUILTIN_CLIENT_ID})
+        assert response.status_code in (401, 403)

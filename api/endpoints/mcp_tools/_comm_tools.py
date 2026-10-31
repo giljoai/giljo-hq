@@ -19,11 +19,11 @@ from api.endpoints.mcp_tools._base import (
     MCP_NAME_MAX,
     MCP_SHORT_TEXT_MAX,
     _call_tool,
-    _detected_harness,
     mcp,
     validation_rejection,
 )
 from api.endpoints.mcp_tools._comm_broadcast_helpers import broadcast_thread_metadata_update
+from api.endpoints.mcp_tools._harness import _hub_harness
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.models.comm import VALID_SELF_REPORTED_STATUSES, VALID_THREAD_STATUSES
 from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS
@@ -188,7 +188,7 @@ async def join_thread(
     kwargs: dict[str, Any] = {
         "thread_id": thread_id,
         "agent_id": agent_id,
-        "detected_harness": _detected_harness(ctx),
+        "detected_harness": _hub_harness(ctx),
     }
     if display_name:
         kwargs["display_name"] = display_name
@@ -296,7 +296,7 @@ async def post_to_thread(
         "requires_action": requires_action,
         "loop_directive": loop_directive,
         "user_id": _base._resolve_user_id(ctx),
-        "detected_harness": _detected_harness(ctx),
+        "detected_harness": _hub_harness(ctx),
     }
     if from_agent:
         kwargs["from_agent"] = from_agent

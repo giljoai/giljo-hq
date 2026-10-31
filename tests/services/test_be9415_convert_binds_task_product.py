@@ -147,8 +147,9 @@ class TestConversionBindsToTheTasksProduct:
         owner = await _product(db_session, test_tenant_key, is_active=False)
         active = await _product(db_session, test_tenant_key, is_active=True)
 
-        await _task_on(db_session, test_tenant_key, owner, user, series_number=5)
-        await _task_on(db_session, test_tenant_key, active, user, series_number=50)
+        await _task_on(db_session, test_tenant_key, owner, user, series_number=1)
+        await _task_on(db_session, test_tenant_key, active, user, series_number=1)
+        await _task_on(db_session, test_tenant_key, active, user, series_number=2)
 
         task = await _task_on(db_session, test_tenant_key, owner, user, series_number=None)
 
@@ -162,9 +163,9 @@ class TestConversionBindsToTheTasksProduct:
 
         project = await _get_project(db_session, result.project_id)
         assert project.product_id == owner.id
-        assert project.series_number == 6, (
-            "the serial must come from the task's product bucket (max 5 -> 6); "
-            "51 means it was drawn from the active product's counter"
+        assert project.series_number == 2, (
+            "the serial must come from the task's product bucket (holds 1 -> 2); "
+            "3 means it was drawn from the active product's counter"
         )
 
     @pytest.mark.asyncio

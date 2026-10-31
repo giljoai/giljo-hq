@@ -216,7 +216,7 @@
 <script setup>
 import { useFormatDate } from '@/composables/useFormatDate'
 import { getAgentColor } from '@/config/agentColors'
-import { TEXT_MUTED } from '@/config/colorTokens'
+import { COLOR_DECISION } from '@/config/colorTokens'
 import { STATUS_COLORS } from '@/utils/statusConfig'
 import { taxonomyBadgeStyle, resolveTaxonomyColor, isHandoverRow } from '@/utils/taxonomyBadge'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
@@ -282,8 +282,8 @@ function getStatusColor(status) {
     in_progress: getAgentColor('implementer').hex,
     on_hold: getAgentColor('reviewer').hex,
     completed: getAgentColor('documenter').hex,
-    blocked: getAgentColor('analyzer').hex,
-    cancelled: TEXT_MUTED,
+    blocked: COLOR_DECISION,
+    cancelled: STATUS_COLORS.BLOCKED,
   }
   return colors[status] || STATUS_COLORS.PENDING
 }

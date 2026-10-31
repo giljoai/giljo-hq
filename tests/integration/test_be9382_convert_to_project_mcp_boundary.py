@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from uuid import uuid4
 
 import pytest
@@ -22,6 +21,7 @@ from giljo_mcp.models.roadmaps import Roadmap, RoadmapItem
 from giljo_mcp.models.tasks import Task
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -102,7 +102,7 @@ async def _seed_promotable_task(db_session, tenant_key: str) -> _Seeded:
         description="Bigger than a task once we looked at it.",
         status="pending",
         priority="high",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(task)
     await db_session.flush()

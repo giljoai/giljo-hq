@@ -194,7 +194,7 @@ describe('AgentJobModal', () => {
 
     it('should return default badge style for null agent name', () => {
       const style = wrapper.vm.getAgentBadgeStyle(null)
-      expect(style.color).toBe('#D4B08A')
+      expect(style.color).toBe('#dfc4a7')
     })
 
     // FE-9490: AgentJobModal's own initials splitter (map(word => word[0]) over

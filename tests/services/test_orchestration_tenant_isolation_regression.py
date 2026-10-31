@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -16,6 +15,7 @@ from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -51,7 +51,7 @@ async def two_tenant_orchestration(db_session, db_manager):
         status="active",
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     project_b = Project(
         id=str(uuid.uuid4()),
@@ -63,7 +63,7 @@ async def two_tenant_orchestration(db_session, db_manager):
         status="active",
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_a)
     db_session.add(project_b)

@@ -54,6 +54,8 @@ from .notifications import (
 
 from .oauth import (
     OAuthAuthorizationCode,
+    OAuthLogin,
+    OAuthLoginIp,
     OAuthRefreshToken,
 )
 
@@ -167,6 +169,8 @@ __all__ = [
     "MessageRecipient",
     "Notification",
     "OAuthAuthorizationCode",
+    "OAuthLogin",
+    "OAuthLoginIp",
     "OAuthRefreshToken",
     "OrgMembership",
     "Organization",

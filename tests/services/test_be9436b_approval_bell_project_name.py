@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -24,6 +23,7 @@ from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.notification_service import NotificationService
 from giljo_mcp.services.settings_service import SettingsService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -59,7 +59,7 @@ async def _seed_closeout_orchestrator(db_session, tenant_key: str, project_name:
         status="active",
         staging_status="staging_complete",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

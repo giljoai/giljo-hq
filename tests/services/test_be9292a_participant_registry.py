@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -24,6 +23,7 @@ from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_workflow_status_unread_count_and_drain_ability_agree(db_manager, 
         tenant_key=tenant,
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     db_session.add(project)

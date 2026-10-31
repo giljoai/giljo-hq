@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from api.middleware.trusted_proxy_headers import TrustedProxyHeadersMiddleware
+
 
 class McpDispatcher:
 
     def __init__(self, fastapi_app: ASGIApp, mcp_app: ASGIApp) -> None:
         self.fastapi_app = fastapi_app
         self.mcp_app = mcp_app
+        self._edge = TrustedProxyHeadersMiddleware(self._route)
 
     def __getattr__(self, name: str):
         fastapi_app = self.__dict__.get("fastapi_app")
@@ -26,6 +29,9 @@ class McpDispatcher:
         return path == "/mcp" or path.startswith("/mcp/")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._edge(scope, receive, send)
+
+    async def _route(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and self._is_mcp_path(scope["path"]) and scope.get("method") != "OPTIONS":
             await self.mcp_app(scope, receive, send)
             return

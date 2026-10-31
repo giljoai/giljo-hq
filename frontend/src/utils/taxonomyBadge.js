@@ -1,3 +1,4 @@
+import { BADGE_SURFACE, compositeOver, ensureContrast } from './colorUtils'
 import {
   DEFAULT_PROJECT_TYPE_COLOR,
   HND_TYPE_COLOR,
@@ -8,9 +9,10 @@ import {
 
 export function taxonomyBadgeStyle(color) {
   const resolved = color || DEFAULT_PROJECT_TYPE_COLOR
+  const tint = compositeOver(resolved, BADGE_SURFACE, 0.15)
   return {
     backgroundColor: `${resolved}26`,
-    color: resolved,
+    color: ensureContrast(resolved, tint, 4.5),
   }
 }
 

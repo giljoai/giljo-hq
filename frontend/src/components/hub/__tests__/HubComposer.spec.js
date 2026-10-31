@@ -208,7 +208,7 @@ describe('HubComposer', () => {
       expect(agentRow.querySelector('.agent-badge-sq').textContent).toBe('LA')
       expect(agentRow.querySelector('img.hub-composer__mascot')).toBeNull()
       expect(agentRow.querySelector('.hub-composer__option-name').textContent).toBe('LANE_A')
-      expect(agentRow.querySelector('.hub-composer__option-sub').textContent).toBe('direct · claude-code')
+      expect(agentRow.querySelector('.hub-composer__option-sub').textContent).toBe('direct · Claude Code')
     } finally {
       wrapper.unmount()
       restore()
@@ -242,7 +242,7 @@ describe('HubComposer', () => {
     const wrapper = mountComposer(pinia)
 
     expect(wrapper.vm.optionSubLabel({ participant_id: EVERYONE })).toBe('broadcast · 2 registered')
-    expect(wrapper.vm.optionSubLabel({ participant_id: 'a', harness: 'claude-code' })).toBe('direct · claude-code')
+    expect(wrapper.vm.optionSubLabel({ participant_id: 'a', harness: 'claude-code' })).toBe('direct · Claude Code')
     expect(wrapper.vm.optionSubLabel({ participant_id: 'b', harness: 'generic' })).toBe('direct · Generic Harness')
   })
 

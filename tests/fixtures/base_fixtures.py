@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import Product, Project
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import (
     PostgreSQLTestHelper,
     TransactionalTestContext,
@@ -98,7 +99,6 @@ class TestData:
 
     @staticmethod
     def generate_project_data(tenant_key: str) -> dict[str, Any]:
-        import random
 
         return {
             "id": str(uuid.uuid4()),
@@ -108,7 +108,7 @@ class TestData:
             "status": "active",
             "tenant_key": tenant_key,
             "metadata": {"test": True},
-            "series_number": random.randint(1, 9000),
+            "series_number": next_series_number(),
         }
 
     @staticmethod

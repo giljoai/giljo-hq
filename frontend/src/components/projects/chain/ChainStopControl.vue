@@ -5,6 +5,7 @@
       class="csc-btn"
       :disabled="stopping"
       :aria-busy="stopping ? 'true' : undefined"
+      :title="STOP_CHAIN_TOOLTIP"
       data-testid="stop-chain-btn"
       @click="emit('open')"
     >
@@ -35,6 +36,7 @@
 <script setup>
 import { computed } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { STOP_CHAIN_TOOLTIP } from './chainControlTooltips.js'
 import { buildStopChainEffects } from '@/components/projects/chainScreenVisibility.js'
 
 const props = defineProps({

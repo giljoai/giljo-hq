@@ -28,7 +28,7 @@ from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRe
 from giljo_mcp.schemas.jsonb_validators import validate_agent_execution_result
 from giljo_mcp.schemas.responses.orchestration import SOLO_STAGING_END_NEXT_ACTION_WHY
 from giljo_mcp.schemas.service_responses import CompleteJobResult, StagingDirective, build_next_action
-from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
+from giljo_mcp.services.chain_conductor_retire import complete_job_without_active_execution
 from giljo_mcp.services.job_completion_closeout_gate import (
     build_closeout_checklist,
     build_completion_blocked_error,
@@ -225,7 +225,9 @@ class JobCompletionService:
                         else None
                     )
                 else:
-                    await self._raise_for_missing_execution(session, job_id, tenant_key)
+                    return await complete_job_without_active_execution(
+                        session, tenant_key, job_id, db_manager=self.db_manager
+                    )
 
             await broadcast_deferred_events(session)
             if execution:
@@ -465,29 +467,6 @@ class JobCompletionService:
             db_manager=self.db_manager,
             tenant_manager=self.tenant_manager,
             websocket_manager=self._websocket_manager,
-        )
-
-    async def _raise_for_missing_execution(self, session: AsyncSession, job_id: str, tenant_key: str) -> None:
-        repo = AgentCompletionRepository()
-        decommissioned_exec = await repo.find_decommissioned_execution(session, tenant_key, job_id)
-
-        if decommissioned_exec:
-            raise ResourceNotFoundError(
-                message=(
-                    f"Job {job_id} was decommissioned and cannot transition to 'completed'. "
-                    f"This typically happens when write_project_closeout(force=true) "
-                    f"was called before complete_job()."
-                ),
-                context={
-                    "job_id": job_id,
-                    "method": "complete_job",
-                    "execution_status": "decommissioned",
-                    "cause": "Project was force-closed before this job called complete_job()",
-                },
-            )
-
-        raise await not_found_or_wrong_state_error(
-            session, tenant_key, job_id, expected_status="active", method="complete_job", db_manager=self.db_manager
         )
 
     async def _broadcast_completion(

@@ -116,10 +116,11 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useHubMessageOrder } from '@/components/hub/useHubMessageOrder'
 import { useSanitizeMarkdown } from '@/composables/useSanitizeMarkdown'
-import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
+import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { formatHubDateTime } from '@/components/hub/hubDateTime'
 import { BATON_FOCUS, MENTION_FOCUS, APPROVAL_FOCUS } from '@/components/hub/hubThreadRoute'
+import { harnessLabel as rosterHarnessLabel } from '@/components/hub/rosterState'
 
 const FOCUS_COPY = {
   [BATON_FOCUS]: 'Waiting on you',
@@ -193,8 +194,7 @@ function authorFor(message) {
 }
 
 function harnessLabel(harness) {
-  if (!harness) return ''
-  return harness === 'generic' ? 'Generic Harness' : harness
+  return harness ? rosterHarnessLabel(harness) : ''
 }
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000
@@ -260,26 +260,14 @@ const decoratedMessages = computed(() =>
   }),
 )
 
-const FALLBACK_HEX = getAgentColor('orchestrator')?.hex
-
 function avatarStyle({ role, name } = {}) {
-  const colorObj = getAgentColor(getAgentColorKey({ role, display_name: name }))
-  const hex = colorObj?.hex || FALLBACK_HEX
   return {
-    backgroundColor: hexToRgba(hex, 0.2),
-    color: hex,
+    ...getAgentBadgeStyle(getAgentColorKey({ role, display_name: name }), 0.2),
     borderRadius: '8px',
   }
 }
 
-const directChipStyle = computed(() => {
-  const hex = getAgentColor('reviewer')?.hex
-  return {
-    backgroundColor: hexToRgba(hex, 0.15),
-    color: hex,
-    borderRadius: '8px',
-  }
-})
+const directChipStyle = computed(() => ({ ...getAgentBadgeStyle('reviewer'), borderRadius: '8px' }))
 </script>
 
 <style scoped lang="scss">

@@ -569,7 +569,7 @@ onMounted(async () => {
   unsubRoadmap = wsStore.on('roadmap:updated', onRoadmapUpdated)
   unsubAgentActive = wsStore.on('roadmap:agent_active', onAgentActive)
   unsubProjectUpdate = wsStore.on('project_update', onProjectUpdated)
-  unsubHeadlessLifecycle = ['project:staging_complete', 'project:implementation_launched'].map((t) => wsStore.on(t, onRoadmapUpdated))
+  unsubHeadlessLifecycle = ['project:staging_complete', 'project:implementation_launched', 'projects:bulk_updated'].map((t) => wsStore.on(t, onRoadmapUpdated))
   unsubResync = registerReconnectResync(async () => {
     await Promise.allSettled([sequenceRunStore.hydrate(), fetchRoadmap()])
     if (waitIsSuperseded(roadmap.value, items.value, agentActiveStorageKey())) dismissWaiting()

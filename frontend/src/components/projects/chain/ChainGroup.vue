@@ -17,7 +17,7 @@
         v-for="member in members"
         :key="member.tab.projectId"
         class="cg-member"
-        :class="member.state === 'current' ? 'cg-member--current' : 'cg-member--quiet'"
+        :class="memberClass(member)"
         :data-project-id="member.tab.projectId"
         :data-member-state="member.state"
         data-testid="chain-group-member"
@@ -33,10 +33,22 @@
           </span>
           <span v-if="!member.tab.needsReview && member.tab.isCompleted" class="cg-reviewed">Reviewed</span>
           <span class="cg-spacer" />
+          <button
+            v-if="canDrop(member)"
+            type="button"
+            class="cg-drop"
+            :title="dropTooltip"
+            :aria-label="`Drop ${member.label} from the chain`"
+            :disabled="Boolean(controls.manageDroppingId)"
+            :data-testid="`chain-member-drop-${member.tab.projectId}`"
+            @click="controls.requestDrop(member.tab.projectId)"
+          >
+            <v-icon size="16" aria-hidden="true">mdi-close</v-icon>
+          </button>
           <span v-if="memberStatusLine(member)" class="cg-member-status" data-testid="chain-member-status">
             {{ memberStatusLine(member) }}
           </span>
-          <v-menu v-if="chainCtx.locked" location="bottom end">
+          <v-menu v-if="chainCtx.locked && member.state !== 'dropped'" location="bottom end">
             <template #activator="{ props: menuProps }">
               <v-btn
                 v-bind="menuProps"
@@ -61,8 +73,15 @@
             </v-list>
           </v-menu>
         </div>
+        <div v-if="member.state === 'dropped'" class="cg-dropped smooth-border" data-testid="chain-member-dropped">
+          <span v-if="member.tab.taxonomyAlias" class="cg-dropped-alias">{{ member.tab.taxonomyAlias }}</span>
+          <span class="cg-dropped-title" :title="member.tab.name" data-testid="chain-member-dropped-title">
+            {{ member.tab.name }}
+          </span>
+          <span class="cg-dropped-label">Dropped from chain</span>
+        </div>
         <JobsBoardCard
-          v-if="member.project"
+          v-else-if="member.project"
           :project="member.project"
           :agents="agentsByProject[member.tab.projectId] || []"
           :now="now"
@@ -92,6 +111,37 @@
       </div>
     </div>
 
+    <v-alert
+      v-if="controls.manageError"
+      type="error"
+      variant="tonal"
+      density="compact"
+      class="mt-3"
+      data-testid="chain-drop-error"
+    >
+      {{ controls.manageError }}
+    </v-alert>
+
+    <BaseDialog
+      :model-value="Boolean(controls.managePendingId)"
+      type="danger"
+      :title="controls.managePendingCancelsChain ? 'Cancel this chain?' : 'Drop the current project?'"
+      :confirm-label="controls.managePendingCancelsChain ? 'Drop and cancel chain' : 'Drop from chain'"
+      size="sm"
+      :loading="Boolean(controls.manageDroppingId)"
+      @confirm="controls.confirmDrop"
+      @cancel="controls.cancelDrop"
+      @update:model-value="(open) => !open && controls.cancelDrop()"
+    >
+      <p v-if="controls.managePendingCancelsChain">
+        Dropping this project leaves one project, and one project is not a chain. The chain will be cancelled.
+      </p>
+      <p v-else>
+        This project is running now. Dropping it parks the project and clears its plan and agents.
+        The rest of the chain keeps running.
+      </p>
+    </BaseDialog>
+
     <CloseoutModal
       v-if="chainReviewTab"
       :show="showChainReview"
@@ -113,6 +163,7 @@ import { useChainContext } from '@/composables/useChainContext'
 import { useChainGroupControls } from '@/composables/useChainGroupControls'
 import { withChainReview } from '@/utils/jobsSectionLabel'
 import { useChainMemberReview } from '@/composables/useChainMemberReview'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import CloseoutModal from '@/components/orchestration/CloseoutModal.vue'
 import JobsBoardCard from '@/components/projects/JobsBoardCard.vue'
 import ChainGroupHeader from './ChainGroupHeader.vue'
@@ -152,10 +203,24 @@ function memberState(tab) {
 function memberStateLabel(member) {
   if (member.state === 'current') return 'current'
   if (member.state === 'done') return 'done'
-  if (member.state === 'dropped') return 'dropped from the chain'
+  if (member.state === 'dropped') return 'dropped'
   const step = member.tab.order + 1
   return step > 1 ? `waiting for step ${step - 1}` : 'waiting'
 }
+
+function memberClass(member) {
+  if (member.state === 'dropped') return ['cg-member--quiet', 'cg-member--dropped']
+  return member.state === 'current' ? 'cg-member--current' : 'cg-member--quiet'
+}
+
+function canDrop(member) {
+  return controls.manageRows?.some((r) => r.projectId === member.tab.projectId && r.kind === 'droppable') || false
+}
+const dropTooltip = computed(() =>
+  controls.managePhase === 'started'
+    ? 'Drop this project from the chain. It is parked, not deleted.'
+    : 'Drop this project from the chain.',
+)
 
 function memberStatusLine(member) {
   if (member.state === 'done' || member.state === 'dropped') return ''
@@ -172,7 +237,7 @@ const members = computed(() =>
   (chainCtx.value?.tabs || []).map((tab) => ({
     tab,
     state: memberState(tab),
-    label: tab.taxonomyAlias || tab.name || `step ${tab.order + 1}`,
+    label: tab.name || tab.taxonomyAlias || `step ${tab.order + 1}`,
     project: memberProject(tab),
   })),
 )
@@ -269,6 +334,67 @@ const agentCount = computed(() =>
 .cg-member-status {
   font-size: 0.72rem;
   color: $color-text-secondary;
+}
+
+.cg-drop {
+  background: none;
+  border: 0;
+  padding: 2px;
+  line-height: 1;
+  border-radius: 6px;
+  color: $color-status-error;
+  cursor: pointer;
+
+  &:hover:not(:disabled),
+  &:focus-visible {
+    background: rgba($color-status-error, 0.15);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $color-status-error;
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.cg-member--dropped {
+  box-shadow: inset 0 0 0 2px rgba($color-text-hover, 0.25);
+}
+
+.cg-dropped {
+  --smooth-border-color: var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: $border-radius-rounded;
+}
+
+.cg-dropped-alias {
+  font-family: $typography-font-mono;
+  font-size: 0.7rem;
+  color: $color-text-secondary;
+  opacity: 0.7;
+}
+
+.cg-dropped-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: $color-text-secondary;
+  opacity: 0.7;
+}
+
+.cg-dropped-label {
+  font-size: 0.75rem;
+  color: $color-brand-yellow;
 }
 
 .cg-more {

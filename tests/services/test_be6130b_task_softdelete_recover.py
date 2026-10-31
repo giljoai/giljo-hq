@@ -81,7 +81,7 @@ async def test_delete_then_recover_round_trips(task_service, db_session, test_te
     assert task_id not in {t.id for t in trashed}
 
 
-async def test_trashed_task_frees_serial_and_restore_remints(
+async def test_trashed_task_keeps_serial_and_restore_remints(
     task_service, db_session, test_tenant_key, active_product, admin_user
 ):
     a = await _create_task(task_service, test_tenant_key)
@@ -92,10 +92,10 @@ async def test_trashed_task_frees_serial_and_restore_remints(
 
     b = await _create_task(task_service, test_tenant_key)
     task_b = (await db_session.execute(select(Task).where(Task.id == b["task_id"]))).scalar_one()
-    assert task_b.series_number == 1
+    assert task_b.series_number == 2
 
     restored = await task_service.restore_task(a["task_id"])
-    assert restored.series_number == 2
+    assert restored.series_number == 3
     assert restored.series_number != task_b.series_number
 
 

@@ -2,12 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, computed, nextTick } from 'vue'
 import { useTaskBulkActions, PENDING_HANDOVER_REASON } from './useTaskBulkActions'
 
-const mockUpdateTask = vi.fn()
-const mockDeleteTask = vi.fn()
+const mockBulkClose = vi.fn()
 const mockShowToast = vi.fn()
 
 vi.mock('@/stores/tasks', () => ({
-  useTaskStore: () => ({ updateTask: mockUpdateTask, deleteTask: mockDeleteTask }),
+  useTaskStore: () => ({ bulkClose: mockBulkClose }),
 }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
@@ -25,28 +24,38 @@ function setup(tasks) {
 
 describe('useTaskBulkActions', () => {
   beforeEach(() => {
-    mockUpdateTask.mockReset().mockResolvedValue({})
-    mockDeleteTask.mockReset().mockResolvedValue(undefined)
+    mockBulkClose.mockReset().mockImplementation(async (_action, ids) => ({ done: ids, skipped: [], failed: [] }))
     mockShowToast.mockReset()
   })
 
-  it('archives ticked rows one by one, skips a pending handover and names it', async () => {
+  it('archives the ticked rows in one request, skips a pending handover and names it', async () => {
     const tasks = [plain('t1'), plain('t2'), pendingHandover]
     const { api } = setup(tasks)
     api.onSelectedIds(['t1', 't2', 'h1'])
 
     const result = await api.archiveSelected()
 
-    expect(mockUpdateTask.mock.calls).toEqual([
-      ['t1', { hidden: true }],
-      ['t2', { hidden: true }],
-    ])
+    expect(mockBulkClose.mock.calls).toEqual([['archive', ['t1', 't2']]])
     expect(result.skipped).toEqual([{ row: pendingHandover, reason: PENDING_HANDOVER_REASON }])
     expect(mockShowToast).toHaveBeenCalledWith({
       message: `2 archived, 1 skipped: ${PENDING_HANDOVER_REASON}`,
       type: 'warning',
     })
     expect(api.bulk.selectedIds.value).toEqual(['h1'])
+  })
+
+  it('deleting 20 selected tasks is ONE request and ONE toast', async () => {
+    const tasks = Array.from({ length: 20 }, (_, i) => plain(`t${i}`))
+    const { api } = setup(tasks)
+    api.onSelectedIds(tasks.map((t) => t.id))
+
+    await api.deleteSelected()
+
+    expect(mockBulkClose).toHaveBeenCalledTimes(1)
+    expect(mockBulkClose.mock.calls[0][0]).toBe('delete')
+    expect(mockBulkClose.mock.calls[0][1]).toHaveLength(20)
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith({ message: '20 deleted', type: 'success' })
   })
 
   it('an archived handover (not pending) is archivable like any task', async () => {
@@ -58,15 +67,17 @@ describe('useTaskBulkActions', () => {
   })
 
   it('reports a server refusal with its reason instead of failing the batch', async () => {
-    mockDeleteTask.mockRejectedValueOnce({
-      response: { data: { error_code: 'VALIDATIONERROR', message: 'Task is locked' } },
+    mockBulkClose.mockResolvedValueOnce({
+      done: ['t2'],
+      skipped: [],
+      failed: [{ id: 't1', reason: 'Task is locked' }],
     })
     const { api } = setup([plain('t1'), plain('t2')])
     api.onSelectedIds(['t1', 't2'])
 
     const result = await api.deleteSelected()
 
-    expect(mockDeleteTask).toHaveBeenCalledTimes(2)
+    expect(mockBulkClose).toHaveBeenCalledTimes(1)
     expect(result.done.map((t) => t.id)).toEqual(['t2'])
     expect(mockShowToast).toHaveBeenCalledWith({ message: '1 deleted, 1 failed: Task is locked', type: 'warning' })
     expect(api.bulk.selectedIds.value).toEqual(['t1'])
@@ -79,7 +90,7 @@ describe('useTaskBulkActions', () => {
     expect(api.canUnarchive.value).toBe(true)
 
     await api.unarchiveSelected()
-    expect(mockUpdateTask.mock.calls).toEqual([['t2', { hidden: false }]])
+    expect(mockBulkClose.mock.calls).toEqual([['unarchive', ['t2']]])
   })
 
   it('select all matching takes every row in the filtered view', () => {

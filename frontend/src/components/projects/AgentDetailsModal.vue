@@ -10,10 +10,7 @@
       <div
         v-if="!isOrchestrator"
         class="agent-badge-sq"
-        :style="{
-          background: hexToRgba(getAgentDisplayNameColor(agent), 0.15),
-          color: getAgentDisplayNameColor(agent),
-        }"
+        :style="getAgentBadgeStyle(getAgentColorKey(agent))"
       >{{ getAgentInitials(agent?.agent_display_name) }}</div>
       <v-icon v-else class="dlg-icon">mdi-information-outline</v-icon>
     </template>
@@ -23,7 +20,7 @@
         <div class="d-flex align-center gap-2 mb-2">
           <span
             class="agent-tinted-badge"
-            :style="tintedStyle(getAgentDisplayNameColor(agent))"
+            :style="getAgentBadgeStyle(getAgentColorKey(agent))"
           >
             {{ agent.agent_display_name }}
           </span>
@@ -82,8 +79,8 @@
 import { ref, computed, watch, getCurrentInstance } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import api from '@/services/api'
-import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { hexToRgba, tintedStyle } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
+import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { parseErrorResponse } from '@/utils/errorMessages'
 
 const props = defineProps({
@@ -125,10 +122,6 @@ const dialogTitle = computed(() => {
 
 const handleClose = () => {
   emit('update:modelValue', false)
-}
-
-const getAgentDisplayNameColor = (agentEntity) => {
-  return getAgentColorConfig(getAgentColorKey(agentEntity)).hex
 }
 
 const findTemplateInJobProduct = async () => {

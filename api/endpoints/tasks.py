@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.endpoints._boundary_types import ID_MAX, IdPath, IdQuery
+from api.endpoints._bulk_close_models import BulkCloseRequest, BulkCloseResponse
 from api.endpoints.dependencies import get_task_service
 from api.endpoints.mcp_tools._base import CONSTRAINT_INVALID_CHOICE, validation_rejection
 from api.schemas.task import (
@@ -212,6 +213,28 @@ async def create_task(
 
     logger.info("Created task %s by user %s", task.id, sanitize(current_user.username))
     return task_to_response(task)
+
+
+@router.post("/bulk", response_model=BulkCloseResponse)
+async def bulk_close_tasks(
+    body: BulkCloseRequest,
+    current_user: User = Depends(get_current_active_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> BulkCloseResponse:
+    """
+    Archive, unarchive or delete many tasks in one step.
+
+    Send `action` (`archive`, `unarchive` or `delete`) and up to 500 task ids.
+    Every task is handled exactly as the single call would, and every connected
+    browser is told once about the whole batch instead of once per task. Only a
+    task's creator or an admin can change it, and a handover nobody has read yet
+    cannot be archived; those and unknown ids are skipped and listed with the
+    reason. The reply lists the ids that changed and the ones skipped or failed.
+    """
+    result = await task_service.bulk_close_tasks(
+        action=body.action, task_ids=[str(tid) for tid in body.ids], user_id=str(current_user.id)
+    )
+    return BulkCloseResponse(**result)
 
 
 @router.get("/summary")

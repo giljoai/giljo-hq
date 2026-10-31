@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -20,6 +19,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -122,7 +122,7 @@ async def _seed_generic_mcp_orchestrator(db_session, tenant_key: str, product_id
         mission="build it",
         status="active",
         staging_status="staging",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode="generic_mcp",
         created_at=now,
     )
@@ -267,7 +267,7 @@ async def test_generic_mcp_two_job_self_adopt_sequence_closes_out(mcp_client):
         description="generic_mcp self-adopt sequence",
         mission="ship two",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode="generic_mcp",
         staging_status="staging_complete",
         implementation_launched_at=now,

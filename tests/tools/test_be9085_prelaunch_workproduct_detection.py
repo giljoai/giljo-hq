@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -19,6 +18,7 @@ from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentJob
 from giljo_mcp.models.notifications import Notification
 from giljo_mcp.tools.write_memory_entry import write_360_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ async def _make_project(
         status="active",
         tenant_key=test_tenant_key,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         implementation_launched_at=datetime.now(UTC) if implementation_launched else None,
         ever_launched_at=datetime.now(UTC) if ever_launched else None,
     )

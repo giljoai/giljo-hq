@@ -50,6 +50,7 @@ from tests.fixtures.base_fixtures import (  # noqa: E402
     restored_global_wake_relay,
     test_project,
 )
+from tests.helpers.taxonomy_seeds import next_series_number  # noqa: E402
 
 
 pytest_plugins = ["tests.pytest_postgresql_plugin"]
@@ -262,7 +263,6 @@ async def test_tenant_key():
 
 @pytest_asyncio.fixture(scope="function")
 async def test_project_id(db_session, test_tenant_key):
-    import random
     import uuid
 
     from giljo_mcp.models import Product, Project
@@ -286,7 +286,7 @@ async def test_project_id(db_session, test_tenant_key):
         mission="Test mission for integration testing",
         status="active",
         tenant_key=test_tenant_key,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
 
     db_session.add(project)

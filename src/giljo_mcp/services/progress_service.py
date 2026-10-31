@@ -28,6 +28,7 @@ from giljo_mcp.repositories.progress_repository import ProgressRepository
 from giljo_mcp.schemas.service_responses import ProgressResult
 from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.chain_conductor_retire import is_chain_conductor_job
 from giljo_mcp.tenant import TenantManager
 
 
@@ -301,6 +302,8 @@ class ProgressService:
             decommissioned_exec = await self._repo.get_decommissioned_execution(session, tenant_key, job_id)
 
             if decommissioned_exec:
+                if await is_chain_conductor_job(session, tenant_key, job_id):
+                    return None
                 raise ResourceNotFoundError(
                     message=(
                         f"Job {job_id} was decommissioned and cannot report progress. "

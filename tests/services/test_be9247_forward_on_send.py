@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -21,6 +20,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message, MessageAcknowledgment, MessageRecipient
 from giljo_mcp.services.message_routing_service import MessageRoutingService
+from tests.helpers.taxonomy_seeds import next_series_number, next_thread_serial
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ async def _seed_project(db_session: AsyncSession, tenant_key: str, *, status: st
         mission="test",
         status=status,
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -114,7 +114,7 @@ async def _seed_thread_post(
     thread = CommThread(
         id=str(uuid4()),
         tenant_key=tenant_key,
-        serial=random.randint(1, 90000),
+        serial=next_thread_serial(),
         subject="BE-9247 thread",
         status="open",
         project_id=project_id,

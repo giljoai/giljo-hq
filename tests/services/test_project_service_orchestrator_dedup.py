@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -19,6 +18,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.schemas.service_responses import ProjectLaunchResult
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture
@@ -87,7 +87,7 @@ class TestOrchestratorDeduplication:
             product_id=product.id,
             tenant_key=test_user.tenant_key,
             status="inactive",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.flush()
@@ -160,7 +160,7 @@ class TestOrchestratorDeduplication:
             product_id=product.id,
             tenant_key=test_user.tenant_key,
             status="inactive",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.flush()
@@ -232,7 +232,7 @@ class TestOrchestratorDeduplication:
             product_id=product.id,
             tenant_key=test_user.tenant_key,
             status="inactive",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.flush()
@@ -312,7 +312,7 @@ class TestOrchestratorDeduplication:
             product_id=product.id,
             tenant_key=test_user.tenant_key,
             status="active",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.flush()

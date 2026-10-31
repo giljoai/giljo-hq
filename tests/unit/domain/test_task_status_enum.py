@@ -117,3 +117,24 @@ def test_is_lifecycle_finished_property() -> None:
     assert TaskStatus.PENDING.is_lifecycle_finished is False
     assert TaskStatus.IN_PROGRESS.is_lifecycle_finished is False
     assert TaskStatus.BLOCKED.is_lifecycle_finished is False
+
+
+
+
+def test_blocked_is_decision_orange_and_cancelled_is_project_cancelled_red() -> None:
+    from giljo_mcp.domain.project_status import PROJECT_STATUS_META, ProjectStatus
+
+    assert TASK_STATUS_META[TaskStatus.BLOCKED].color_token == "color-status-warning"
+    assert (
+        TASK_STATUS_META[TaskStatus.CANCELLED].color_token == PROJECT_STATUS_META[ProjectStatus.CANCELLED].color_token
+    )
+
+
+def test_every_task_status_token_is_a_css_custom_property() -> None:
+    from pathlib import Path
+
+    scss = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "styles" / "main.scss").read_text()
+    for member, meta in TASK_STATUS_META.items():
+        assert f"--{meta.color_token}:" in scss, (
+            f"{member} uses {meta.color_token!r}, which main.scss does not define, so the badge falls back to grey."
+        )

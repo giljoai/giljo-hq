@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -17,6 +16,7 @@ from giljo_mcp.schemas.service_responses import MissionResponse
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.services.protocol_builder import _generate_agent_protocol
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +165,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
             staging_status="staging_complete",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         job_result = MagicMock()
@@ -234,7 +234,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
             staging_status="staging_complete",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         job_result = MagicMock()
@@ -304,7 +304,7 @@ class TestOrchestratorIdentityPopulated:
             auto_checkin_interval=10,
             implementation_launched_at=datetime.now(UTC),
             staging_status="staging_complete",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         job_result = MagicMock()
@@ -484,7 +484,7 @@ class TestOrchestratorPhaseGate:
             status="active",
             execution_mode="multi_terminal",
             implementation_launched_at=None,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         job_result = MagicMock()
@@ -539,7 +539,7 @@ class TestOrchestratorPhaseGate:
             status="active",
             execution_mode="multi_terminal",
             implementation_launched_at=None,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         job_result = MagicMock()
@@ -594,7 +594,7 @@ class TestGetOrchestratorInstructionsRedirectBranches:
             execution_mode="multi_terminal",
             staging_status="staging_complete",
             implementation_launched_at=implementation_launched_at,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
         return job_id, job, execution, project
