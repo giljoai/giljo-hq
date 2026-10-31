@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -19,6 +18,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -53,7 +53,7 @@ async def shrink_project(
         mission="Guard report_progress against silent todo wipe",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

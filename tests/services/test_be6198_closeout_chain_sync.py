@@ -183,6 +183,7 @@ async def test_all_chain_members_end_completed(db_session: AsyncSession) -> None
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_final_closeout_lets_conductor_complete(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)

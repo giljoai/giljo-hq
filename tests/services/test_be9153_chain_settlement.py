@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -22,6 +21,7 @@ from giljo_mcp.services.project_helpers import complete_chain_run_if_finished
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.services.user_approval_service import UserApprovalService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def _seed_member(db_session, tenant_key: str) -> dict:
         mission="x",
         status="active",
         execution_mode="claude_code_cli",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     db_session.info["tenant_key"] = tenant_key

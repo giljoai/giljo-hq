@@ -59,7 +59,7 @@ from .models import (
     UserFieldPriority,
     VisionDocument,
 )
-from .models.oauth import OAuthAuthorizationCode, OAuthRefreshToken, OAuthRevokedToken
+from .models.oauth import OAuthAuthorizationCode, OAuthLogin, OAuthLoginIp, OAuthRefreshToken, OAuthRevokedToken
 from .signals import SIGNAL_UNSCOPED_WRITE, publish_signal
 from .tenant import TenantManager
 
@@ -88,6 +88,8 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         MessageRecipient,
         Notification,
         OAuthAuthorizationCode,
+        OAuthLogin,
+        OAuthLoginIp,
         OAuthRevokedToken,
         OAuthRefreshToken,
         OrgMembership,

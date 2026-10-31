@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 
 import pytest
@@ -25,6 +24,7 @@ from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.context_tools.fetch_context import fetch_context
 from giljo_mcp.tools.context_tools.get_chain_context import get_chain_context
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def _create_project(db_manager, tenant_key: str, product_id: str) -> str:
                 status="completed",
                 tenant_key=tenant_key,
                 execution_mode=_MODE,
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
         )
         await session.commit()

@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -13,6 +12,7 @@ from sqlalchemy import select
 
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.models.projects import Project
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ async def project_linked_to_product(db_session, test_product, test_tenant_key) -
         status="active",
         tenant_key=test_tenant_key,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

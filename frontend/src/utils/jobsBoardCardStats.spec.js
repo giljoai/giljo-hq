@@ -54,14 +54,26 @@ describe('projectDurationSeconds', () => {
 })
 
 describe('jobsBoardMetaLine', () => {
-  it('Staged: "staged HH:MM · awaiting your go"', () => {
+  it('Staged: "created HH:MM · awaiting your go"', () => {
     const line = jobsBoardMetaLine(
       { created_at: '2026-08-30T23:20:00Z' },
       JOBS_SECTION_LABELS.STAGED,
       Date.now(),
     )
     expect(line).toContain('awaiting your go')
-    expect(line.startsWith('staged ')).toBe(true)
+    expect(line.startsWith('created ')).toBe(true)
+    expect(line).not.toContain('staged ')
+  })
+
+  it('Staged chain member: created time only, no gate prose', () => {
+    const line = jobsBoardMetaLine(
+      { created_at: '2026-08-30T23:20:00Z' },
+      JOBS_SECTION_LABELS.STAGED,
+      Date.now(),
+      { chainMember: true },
+    )
+    expect(line.startsWith('created ')).toBe(true)
+    expect(line).not.toContain('awaiting your go')
   })
 
   it('Implementing: "launched HH:MM · Nm elapsed" (mock BE-6174: 41m)', () => {

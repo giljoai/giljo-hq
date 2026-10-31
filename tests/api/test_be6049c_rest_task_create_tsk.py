@@ -106,23 +106,27 @@ async def test_rest_create_task_refuses_an_inbound_project_type(api_client: Asyn
 
 
 @pytest.mark.asyncio
-async def test_rest_create_task_gated_at_serial_cap(api_client: AsyncClient, seeded_product: dict, db_manager) -> None:
+async def test_rest_create_task_gated_at_serial_cap(
+    api_client: AsyncClient, seeded_product: dict, db_manager, monkeypatch
+) -> None:
     import uuid as _uuid
 
     from giljo_mcp.models import Project
-    from giljo_mcp.repositories.project_repository import MAX_SERIES_NUMBER
+    from giljo_mcp.repositories import project_repository
+
+    monkeypatch.setattr(project_repository, "MAX_SERIES_NUMBER", 1)
 
     async with db_manager.get_session_async() as session:
         session.add(
             Project(
                 id=str(_uuid.uuid4()),
-                name="Watermark-9999",
+                name="Holds-the-only-number",
                 description="watermark seed",
                 mission="",
                 tenant_key=seeded_product["tenant_key"],
                 product_id=seeded_product["product_id"],
                 status="inactive",
-                series_number=MAX_SERIES_NUMBER,
+                series_number=1,
             )
         )
         await session.commit()

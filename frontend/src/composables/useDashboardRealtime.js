@@ -2,7 +2,7 @@ import { onMounted, onUnmounted } from 'vue'
 import debounce from 'lodash-es/debounce'
 import { useWebSocketStore } from '@/stores/websocket'
 
-const DASHBOARD_REFRESH_EVENTS = ['project_update', 'agent:created', 'task:updated']
+const DASHBOARD_REFRESH_EVENTS = ['project_update', 'agent:created', 'task:updated', 'projects:bulk_updated', 'tasks:bulk_updated']
 
 export function useDashboardRealtime(refetch, { debounceMs = 600 } = {}) {
   const wsStore = useWebSocketStore()

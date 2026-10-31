@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_deletion_service import ProjectDeletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, status: str =
         description="seeded",
         mission="seeded",
         status=status,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.commit()

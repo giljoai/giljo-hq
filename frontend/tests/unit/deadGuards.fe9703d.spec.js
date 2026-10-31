@@ -17,7 +17,7 @@ describe('guards around calls that cannot fail are gone', () => {
   it('getAgentColor answers for any name, so the badge helpers read .hex directly', () => {
     expect(getAgentColor('no-such-agent')).toHaveProperty('hex')
     expect(getAgentColor(undefined)).toHaveProperty('hex')
-    expect(getAgentBadgeStyle('no-such-agent').color).toBe(getAgentColor('no-such-agent').hex)
+    expect(getAgentBadgeStyle('no-such-agent').color).toBe(getAgentBadgeStyle('orchestrator').color)
     expect(src('utils/colorUtils.js')).not.toMatch(/colorObj\?\.hex/)
     expect(src('components/hub/AgentPill.vue')).not.toMatch(/\)\?\.hex/)
   })

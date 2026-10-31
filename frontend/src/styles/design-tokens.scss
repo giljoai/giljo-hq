@@ -35,7 +35,7 @@ $color-border-tertiary: rgba(255, 255, 255, 0.05); // Row separators (5% opacity
 // =========================================================================
 
 $color-text-primary: #e1e1e1; // Main text
-$color-text-secondary: #999; // Labels, headers
+$color-text-secondary: #a3aac4; // Labels, headers (design-system-sample-v2: --text-secondary; the ONE source for the CSS variables in main.scss)
 $color-text-tertiary: #ccc; // Subdued text
 $color-text-highlight: #ffd700; // Yellow - status, waiting
 
@@ -75,7 +75,8 @@ $color-status-unread: #2196f3; // Blue - unread messages waiting for an agent
 $color-status-handed-over: #9e9e9e; // Grey for handed-over status
 $color-status-idle: #7a9bb5; // Muted blue-grey for idle/monitoring
 $color-status-sleeping: #9b89b3; // Soft indigo for sleeping
-$color-status-decommissioned: #757575; // Dark grey for decommissioned
+$text-muted: #96a2b3; // --text-muted: 4.5:1+ on raised, elevated and hovered-elevated surfaces (single source, FE-9847)
+$color-status-decommissioned: #8a8a8a; // Grey for decommissioned
 $color-status-closed: #4a9c5f; // Darker green - closed, signals finality (matches statusConfig.js)
 $color-status-pending: #9e9e9e; // Grey - not started yet (matches statusConfig.js)
 $color-status-staged: #ffc107; // Amber for staged project status

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -27,6 +26,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -141,7 +141,7 @@ async def _seed_project(
         staging_status=staging_status,
         execution_mode=execution_mode,
         implementation_launched_at=implementation_launched_at,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

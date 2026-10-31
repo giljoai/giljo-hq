@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.user_approval_repository import UserApprovalRepository
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture
@@ -40,7 +40,7 @@ async def _seed(db_session, tenant_key):
         description="x",
         mission="x",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

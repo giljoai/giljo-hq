@@ -147,4 +147,11 @@ describe('ChainStopControl — the confirm modal', () => {
     expect(w.emitted('cancel')).toBeTruthy()
     expect(w.emitted('confirm')).toBeFalsy()
   })
+
+  it('FE-9834b: the Stop chain button carries its tooltip', () => {
+    const w = mountControl()
+    expect(w.find('[data-testid="stop-chain-btn"]').attributes('title')).toBe(
+      'End the chain and keep its work. Finished projects stay finished. Projects not started go back to inactive.',
+    )
+  })
 })

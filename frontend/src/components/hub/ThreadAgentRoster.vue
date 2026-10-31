@@ -58,8 +58,8 @@
 import { ref, computed } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
-import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
+import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { agentStatusDot, agentPillTitle } from '@/composables/useAgentStatusDot'
 import { harnessLabel, rosterAgents, stateWords, isActive, needYouIds } from '@/components/hub/rosterState'
 
@@ -110,8 +110,7 @@ const nameOf = (a) => a.display_name || a.participant_id || 'Unnamed agent'
 const initials = (a) => getAgentInitials(nameOf(a))
 
 function avatarStyle(a) {
-  const { hex } = getAgentColor(getAgentColorKey(a))
-  return { backgroundColor: hexToRgba(hex, 0.2), color: hex }
+  return getAgentBadgeStyle(getAgentColorKey(a), 0.2)
 }
 
 function dotStyle(a) {

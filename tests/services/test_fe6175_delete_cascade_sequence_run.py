@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from unittest.mock import Mock
 
@@ -22,6 +21,7 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.project_deletion_service import ProjectDeletionService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def _create_project(session: AsyncSession, tenant_key: str, project_id: st
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.commit()

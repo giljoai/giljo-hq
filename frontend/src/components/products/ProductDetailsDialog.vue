@@ -339,7 +339,7 @@ const CONSOLIDATED_TIER_COLORS = {
   full: getAgentColor('implementer').hex,
 }
 
-const FALLBACK_MUTED = '#8895a8'
+const FALLBACK_MUTED = '#96a2b3'
 
 const ANALYSIS_PILL_ANALYZED_HEX = getStatusColor('complete')
 const ANALYSIS_PILL_PENDING_HEX = getAgentColor('tester').hex

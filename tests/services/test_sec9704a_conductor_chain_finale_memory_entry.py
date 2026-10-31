@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +20,7 @@ from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.services.conductor_job_minter import mint_conductor_job
 from giljo_mcp.services.protocol_sections import chapters_chain
 from giljo_mcp.tools.write_memory_entry import write_360_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 DRIVE_TODOS = ("Poll P1 for closeout", "Advance to P2", "Poll P2 for closeout", "Write the series summary")
@@ -89,7 +89,7 @@ async def _closed_chain(db_session, tenant_key, product, *, head_worker_status="
             status="active",
             tenant_key=tenant_key,
             product_id=product.id,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.commit()

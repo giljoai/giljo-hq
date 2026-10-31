@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -19,6 +18,7 @@ from giljo_mcp.models.projects import ProjectStatus
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def _seed_project_with_one_closed_agent(session: AsyncSession, tenant_key:
         tenant_key=tenant_key,
         product_id=owning_product.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     session.add(project)

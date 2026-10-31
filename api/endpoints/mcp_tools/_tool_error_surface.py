@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -18,6 +19,12 @@ from giljo_mcp.exceptions import BaseGiljoError
 
 
 _WRAPPED_MARKER = "__giljo_tool_error_surface__"
+
+_PYDANTIC_INPUT_ECHO = re.compile(r",\s*input_value=.*?(?=,\s*input_type=)", re.DOTALL)
+
+
+def redact_input_echo(message: str) -> str:
+    return _PYDANTIC_INPUT_ECHO.sub("", message)
 
 
 def is_anticipated_rejection(exc: BaseException) -> bool:
@@ -39,7 +46,7 @@ def _surface_rejections(fn: Callable[..., Any]) -> Callable[..., Any]:
             return await fn(*args, **kwargs)
         except Exception as exc:
             if is_anticipated_rejection(exc):
-                raise ToolError(str(exc)) from exc
+                raise ToolError(redact_input_echo(str(exc))) from exc
             raise
 
     setattr(wrapper, _WRAPPED_MARKER, True)

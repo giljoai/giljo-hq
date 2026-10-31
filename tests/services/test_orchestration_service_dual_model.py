@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC
 
@@ -14,6 +13,7 @@ from sqlalchemy import select
 
 from giljo_mcp.models import AgentExecution, AgentJob, AgentTemplate, Product, Project
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -61,7 +61,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

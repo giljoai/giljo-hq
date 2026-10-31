@@ -9,7 +9,7 @@ export const STATUS_COLORS = {
   SLEEPING: '#9b89b3',
   HANDED_OVER: '#9e9e9e',
   CLOSED: '#4a9c5f',
-  DECOMMISSIONED: '#757575',
+  DECOMMISSIONED: '#8a8a8a',
   CLOSEOUT: '#ffc107',
   PENDING: '#9e9e9e',
   FALLBACK: '#666666',

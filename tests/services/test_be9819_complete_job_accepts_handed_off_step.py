@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -20,6 +19,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoI
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.job_completion_service import JobCompletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_worker_with_plan(session: AsyncSession, tenant_key: str, statuses: list[str]) -> str:
@@ -36,7 +36,7 @@ async def _seed_worker_with_plan(session: AsyncSession, tenant_key: str, statuse
         staging_status="staging_complete",
         implementation_launched_at=datetime.now(UTC) - timedelta(minutes=10),
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     job_id = str(uuid4())

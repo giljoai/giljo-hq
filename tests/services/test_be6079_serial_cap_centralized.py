@@ -49,6 +49,19 @@ async def _seed_project_at(db_session, tenant_key: str, product_id: str, series_
     return proj
 
 
+@pytest.fixture
+def small_cap(monkeypatch) -> int:
+    from giljo_mcp.repositories import project_repository
+
+    monkeypatch.setattr(project_repository, "MAX_SERIES_NUMBER", 3)
+    return 3
+
+
+async def _fill_to(db_session, tenant_key: str, product_id: str, cap: int) -> None:
+    for serial in range(1, cap + 1):
+        await _seed_project_at(db_session, tenant_key, product_id, serial)
+
+
 class TestAllocatorCap:
     @pytest.mark.asyncio
     async def test_allocator_raises_at_cap(
@@ -56,8 +69,9 @@ class TestAllocatorCap:
         db_session,
         test_tenant_key: str,
         active_product: Product,
+        small_cap: int,
     ):
-        await _seed_project_at(db_session, test_tenant_key, active_product.id, MAX_SERIES_NUMBER)
+        await _fill_to(db_session, test_tenant_key, active_product.id, small_cap)
 
         repo = ProjectRepository()
         with pytest.raises(ValidationError, match="exhausted"):
@@ -70,11 +84,11 @@ class TestAllocatorCap:
         test_tenant_key: str,
         active_product: Product,
     ):
-        await _seed_project_at(db_session, test_tenant_key, active_product.id, MAX_SERIES_NUMBER - 1)
+        await _seed_project_at(db_session, test_tenant_key, active_product.id, MAX_SERIES_NUMBER)
 
         repo = ProjectRepository()
         nxt = await repo.get_next_series_number_shared(db_session, test_tenant_key, active_product.id)
-        assert nxt == MAX_SERIES_NUMBER
+        assert nxt == 1
 
 
 class TestConversionFallbackCap:
@@ -85,6 +99,7 @@ class TestConversionFallbackCap:
         db_session,
         test_tenant_key: str,
         active_product: Product,
+        small_cap: int,
     ):
         from giljo_mcp.tenant import TenantManager
 
@@ -100,7 +115,7 @@ class TestConversionFallbackCap:
             role="admin",
         )
         db_session.add(user)
-        await _seed_project_at(db_session, test_tenant_key, active_product.id, MAX_SERIES_NUMBER)
+        await _fill_to(db_session, test_tenant_key, active_product.id, small_cap)
 
         task = Task(
             id=str(uuid4()),

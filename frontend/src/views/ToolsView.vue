@@ -122,6 +122,7 @@
         </div>
 
         <div class="credentials-section">
+          <ConnectedAppsManager class="mb-5" />
           <ApiKeyManager />
         </div>
       </v-window-item>
@@ -138,6 +139,7 @@ import { useRouter } from 'vue-router'
 import { useWebSocketStore } from '@/stores/websocket'
 import TemplateManager from '@/components/TemplateManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
+import ConnectedAppsManager from '@/components/ConnectedAppsManager.vue'
 import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME

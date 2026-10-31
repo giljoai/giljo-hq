@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -15,6 +14,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.project_service import ProjectService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -52,7 +52,7 @@ async def completed_project(db_session, test_tenant_key):
         status="completed",
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -78,7 +78,7 @@ async def cancelled_project(db_session, test_tenant_key):
         status="cancelled",
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -104,7 +104,7 @@ async def active_project(db_session, test_tenant_key):
         status="active",
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -130,7 +130,7 @@ async def inactive_project(db_session, test_tenant_key):
         status="inactive",
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

@@ -1,7 +1,14 @@
 <template>
-  <div class="product-tab-strip" role="tablist" aria-label="Open products" data-testid="product-tab-strip">
+  <div
+    ref="stripEl"
+    class="product-tab-strip"
+    role="tablist"
+    aria-label="Open products"
+    data-testid="product-tab-strip"
+  >
     <div
       v-if="showAll"
+      ref="allEl"
       class="product-tab product-tab--all smooth-border"
       :class="{ 'product-tab--active': allSelected }"
     >
@@ -18,16 +25,16 @@
       </button>
     </div>
     <div
-      v-for="tab in tabs"
+      v-for="tab in visibleTabs"
       :key="tab.id"
       class="product-tab smooth-border"
-      :class="{ 'product-tab--active': !allSelected && tab.id === viewedId }"
+      :class="{ 'product-tab--active': isViewed(tab) }"
     >
       <button
         type="button"
         role="tab"
         class="product-tab__select"
-        :aria-selected="!allSelected && tab.id === viewedId"
+        :aria-selected="isViewed(tab)"
         :data-testid="`product-tab-${tab.id}`"
         :title="tab.name"
         @click="emit('select', tab.id)"
@@ -46,9 +53,45 @@
       </button>
     </div>
 
+    <v-menu v-if="overflowTabs.length">
+      <template #activator="{ props: menuProps }">
+        <button
+          type="button"
+          class="product-tab__more smooth-border"
+          :aria-label="`${overflowTabs.length} more open products`"
+          data-testid="product-tab-more"
+          v-bind="menuProps"
+        >
+          +{{ overflowTabs.length }} more
+          <v-icon size="14">mdi-chevron-down</v-icon>
+        </button>
+      </template>
+      <v-list density="compact" data-testid="product-tab-more-menu">
+        <v-list-item
+          v-for="tab in overflowTabs"
+          :key="tab.id"
+          :title="tab.name"
+          :data-testid="`product-tab-more-${tab.id}`"
+          @click="emit('select', tab.id)"
+        >
+          <template #append>
+            <v-btn
+              icon="mdi-close"
+              size="x-small"
+              variant="text"
+              :aria-label="`Close ${tab.name} tab`"
+              data-testid="product-tab-more-close"
+              @click.stop="emit('close', tab.id)"
+            />
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-menu>
+
     <v-menu v-if="addableProducts.length">
       <template #activator="{ props: menuProps }">
         <button
+          ref="addEl"
           type="button"
           class="product-tab__add smooth-border"
           aria-label="Open another product in a new tab"
@@ -68,11 +111,23 @@
         />
       </v-list>
     </v-menu>
+
+    <div ref="measureEl" class="product-tab-strip__measure" aria-hidden="true" inert>
+      <div v-for="tab in tabs" :key="tab.id" class="product-tab smooth-border" data-measure-tab>
+        <span class="product-tab__select">{{ tab.name }}</span>
+        <span v-if="tabs.length > 1" class="product-tab__close"><v-icon size="14">mdi-close</v-icon></span>
+      </div>
+      <span class="product-tab__more smooth-border" data-measure-more>
+        +{{ tabs.length }} more <v-icon size="14">mdi-chevron-down</v-icon>
+      </span>
+    </div>
   </div>
 </template>
 
 <script setup>
-defineProps({
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { planTabFit } from './productTabFit'
+const props = defineProps({
   tabs: {
     type: Array,
     required: true,
@@ -96,17 +151,79 @@ defineProps({
 })
 
 const emit = defineEmits(['select', 'close', 'add', 'select-all'])
+
+const GAP = 6
+const stripEl = ref(null)
+const measureEl = ref(null)
+const allEl = ref(null)
+const addEl = ref(null)
+const shownIndexes = ref(null)
+
+function isViewed(tab) {
+  return !props.allSelected && tab.id === props.viewedId
+}
+
+const visibleTabs = computed(() =>
+  shownIndexes.value ? shownIndexes.value.map((i) => props.tabs[i]).filter(Boolean) : props.tabs,
+)
+const overflowTabs = computed(() => {
+  const shown = new Set(visibleTabs.value.map((t) => t.id))
+  return props.tabs.filter((t) => !shown.has(t.id))
+})
+
+function measure() {
+  const strip = stripEl.value
+  const box = measureEl.value
+  if (!strip || !box) return
+  const widths = [...box.querySelectorAll('[data-measure-tab]')].map((el) => el.offsetWidth)
+  const more = box.querySelector('[data-measure-more]')
+  const fixedWidth =
+    (allEl.value ? allEl.value.offsetWidth + GAP : 0) + (addEl.value ? addEl.value.offsetWidth + GAP : 0)
+  shownIndexes.value = planTabFit({
+    available: strip.clientWidth,
+    widths,
+    gap: GAP,
+    fixedWidth,
+    moreWidth: more ? more.offsetWidth : 0,
+    viewedIndex: props.tabs.findIndex((t) => t.id === props.viewedId),
+  })
+}
+
+let observer = null
+onMounted(() => {
+  measure()
+  observer = new ResizeObserver(() => measure())
+  if (stripEl.value) observer.observe(stripEl.value)
+})
+onBeforeUnmount(() => observer?.disconnect())
+watch(
+  () => [props.tabs.map((t) => t.name).join('\n'), props.viewedId, props.showAll, props.addableProducts.length],
+  () => nextTick(measure),
+)
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/design-tokens' as *;
 
 .product-tab-strip {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.product-tab-strip__measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 6px;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .product-tab--all {
@@ -119,6 +236,7 @@ const emit = defineEmits(['select', 'close', 'add', 'select-all'])
 
 .product-tab {
   display: flex;
+  flex-shrink: 0;
   align-items: stretch;
   border-radius: $border-radius-pill;
   overflow: hidden;
@@ -142,15 +260,16 @@ const emit = defineEmits(['select', 'close', 'add', 'select-all'])
 .product-tab__select {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: 30px;
+  padding: 0 12px;
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.78rem;
+  font: inherit;
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
-  max-width: 220px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -160,8 +279,9 @@ const emit = defineEmits(['select', 'close', 'add', 'select-all'])
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  min-height: 44px;
+  min-width: 24px;
+  min-height: 30px;
+  padding-right: 4px;
   border: none;
   background: transparent;
   color: inherit;
@@ -173,12 +293,36 @@ const emit = defineEmits(['select', 'close', 'add', 'select-all'])
   }
 }
 
+.product-tab__more {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 0 10px 0 12px;
+  border-radius: $border-radius-pill;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  --smooth-border-color: rgba(var(--v-theme-on-surface), 0.15);
+
+  &:hover {
+    --smooth-border-color: rgba(var(--v-theme-on-surface), 0.25);
+  }
+}
+
 .product-tab__add {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 30px;
+  min-height: 30px;
   border-radius: $border-radius-pill;
   border: none;
   background: transparent;

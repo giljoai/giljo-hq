@@ -535,10 +535,11 @@ const { BANNER_ROW_PX, renderedRowCount, pendingReserveRows } = useBannerSpaceRe
   }
 }
 
-// FE-9377: reserved space while row eligibility resolves — same tint as the
-// rows that will fill it, inert to the pointer.
+// FE-9377: reserved space while row eligibility resolves, inert to the pointer.
+// Transparent: when a remembered banner does not come back, an empty tinted
+// strip read as a broken bar for the seconds before it collapses.
 .system-banner-skeleton {
-  background: var(--banner-bg);
+  background: transparent;
   pointer-events: none;
 }
 

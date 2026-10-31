@@ -112,7 +112,6 @@ describe('ChainGroupHeader running state (FE-9793)', () => {
 
   it.each(['ready', 'staged', 'pickup'])('%s: the header stays information only', (phase) => {
     const w = mountHeader(controlsFor({ chainPhase: phase }))
-    expect(byId(w, 'chain-header-actions').exists()).toBe(false)
     expect(byId(w, 'stop-chain-btn').exists()).toBe(false)
     expect(byId(w, 'chain-group-deactivate').exists()).toBe(false)
     expect(byId(w, 'chain-mission-tag').exists()).toBe(true)
@@ -121,14 +120,14 @@ describe('ChainGroupHeader running state (FE-9793)', () => {
   it('follows the phase live: the row appears when the chain starts running and leaves when it stops', async () => {
     const controls = controlsFor({ chainPhase: 'pickup' })
     const w = mountHeader(controls)
-    expect(byId(w, 'chain-header-actions').exists()).toBe(false)
+    expect(byId(w, 'stop-chain-btn').exists()).toBe(false)
     controls.chainPhase = 'running'
     await w.vm.$nextTick()
     expect(byId(w, 'chain-header-actions').exists()).toBe(true)
     expect(byId(w, 'stop-chain-btn').text()).toContain('Stop chain')
     controls.chainPhase = 'staged'
     await w.vm.$nextTick()
-    expect(byId(w, 'chain-header-actions').exists()).toBe(false)
+    expect(byId(w, 'stop-chain-btn').exists()).toBe(false)
     expect(byId(w, 'chain-mission-tag').exists()).toBe(true)
   })
 
@@ -167,5 +166,15 @@ describe('ChainGroupHeader controls slot (operator ruling 2026-10-19)', () => {
       (el) => el.getAttribute('data-testid') || 'goal',
     )
     expect(order).toEqual(['chain-group-name', 'slot-controls', 'goal'])
+  })
+
+  it('FE-9834b: Stop chain and Deactivate chain on the running row carry their tooltips', () => {
+    const w = mountHeader(controlsFor({ chainPhase: 'running' }))
+    expect(byId(w, 'stop-chain-btn').attributes('title')).toBe(
+      'End the chain and keep its work. Finished projects stay finished. Projects not started go back to inactive.',
+    )
+    expect(byId(w, 'chain-group-deactivate').attributes('title')).toBe(
+      'Undo the chain. Projects go back to how they were before it. Its agents and jobs are deleted and its missions are cleared. This cannot be undone.',
+    )
   })
 })

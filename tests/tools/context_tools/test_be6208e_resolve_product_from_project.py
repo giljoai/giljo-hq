@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
@@ -20,6 +19,7 @@ from giljo_mcp.tools.context_tools.fetch_context import (
     _resolve_product_id_from_project,
     fetch_context,
 )
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 class _SessionYieldingDBManager:
@@ -62,7 +62,7 @@ async def _make_project(db_session, tenant_key: str, product_id: str) -> Project
         status="active",
         tenant_key=tenant_key,
         product_id=product_id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

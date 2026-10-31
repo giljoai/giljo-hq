@@ -77,7 +77,13 @@
               v-on="cardListeners"
             />
           </div>
-          <JobsBoardDoneGroup v-if="group.unreviewed.length" :count="group.unreviewed.length">
+          <JobsBoardDoneGroup
+            v-if="group.unreviewed.length"
+            :count="group.unreviewed.length"
+            :project-ids="group.unreviewed.map((p) => p.id)"
+            :product-name="group.name"
+            @changed="fetchBoard"
+          >
             <div class="jb-grid">
               <JobsBoardCard
                 v-for="project in group.unreviewed"
@@ -119,7 +125,13 @@
             v-on="cardListeners"
           />
         </div>
-        <JobsBoardDoneGroup v-if="sideUnreviewed.length" :count="sideUnreviewed.length">
+        <JobsBoardDoneGroup
+          v-if="sideUnreviewed.length"
+          :count="sideUnreviewed.length"
+          :project-ids="sideUnreviewed.map((p) => p.id)"
+          :product-name="productName"
+          @changed="fetchBoard"
+        >
           <div class="jb-grid">
             <JobsBoardCard
               v-for="project in sideUnreviewed"
@@ -277,6 +289,16 @@ const {
 } = useJobActions(findAgent)
 
 const router = useRouter()
+if (route.query.scope === 'product') jobsScope.selectProduct()
+else if (route.query.scope === 'all') jobsScope.selectAll()
+function writeScopeQuery() {
+  const { scope: current, ...rest } = route.query
+  const wanted = allProducts.value ? undefined : 'product'
+  if (current === wanted) return
+  router.replace({ query: wanted ? { ...rest, scope: wanted } : rest })
+}
+writeScopeQuery()
+watch(allProducts, writeScopeQuery)
 const { showToast } = useToast()
 const notificationStore = useNotificationStore()
 const board = useBoardCloseout({ agentsFor: (id) => agentsByProject.value[id] || [], refresh: () => fetchBoard() })

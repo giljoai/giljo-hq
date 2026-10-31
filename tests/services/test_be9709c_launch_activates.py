@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -21,6 +20,7 @@ from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def _project(
         status=status,
         staging_status=staging_status,
         implementation_launched_at=datetime.now(UTC) if launched else None,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     db_session.add(project)

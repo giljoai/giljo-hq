@@ -51,6 +51,7 @@ class JWTManager:
         revocation_epoch: int = 0,
         terms_version: str | None = None,
         client_id: str | None = None,
+        family_id: str | None = None,
     ) -> str:
         secret_key = cls._get_secret_key()
 
@@ -74,6 +75,8 @@ class JWTManager:
             payload["tos"] = terms_version
         if client_id is not None:
             payload["cid"] = client_id
+        if family_id is not None:
+            payload["fid"] = family_id
         return jwt.encode(payload, secret_key, algorithm=cls.ALGORITHM)
 
     @classmethod

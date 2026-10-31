@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -24,6 +23,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message, MessageAcknowledgment, MessageRecipient
 from giljo_mcp.services.message_routing_service import MessageRoutingService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number, next_thread_serial
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -62,7 +62,7 @@ async def _seed(db_manager: DatabaseManager, tenant_key: str) -> tuple[str, str,
             mission="test",
             status="active",
             created_at=datetime.now(UTC),
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         session.add(project)
         await session.flush()
@@ -116,7 +116,7 @@ async def _seed(db_manager: DatabaseManager, tenant_key: str) -> tuple[str, str,
         thread = CommThread(
             id=str(uuid.uuid4()),
             tenant_key=tenant_key,
-            serial=random.randint(1, 90000),
+            serial=next_thread_serial(),
             subject="BE-9273 forward-on-send DB failure thread",
             status="open",
             project_id=project.id,

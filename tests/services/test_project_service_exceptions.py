@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -24,6 +23,7 @@ from giljo_mcp.schemas.service_responses import (
     SoftDeleteResult,
 )
 from giljo_mcp.services.project_service import ProjectService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 class TestProjectServiceExceptions:
@@ -169,7 +169,7 @@ class TestProjectServiceTypedReturns:
             tenant_key=test_tenant_key,
             status="inactive",
             staging_status="staging",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.commit()
@@ -212,7 +212,7 @@ class TestProjectServiceTypedReturns:
             tenant_key=test_tenant_key,
             product_id=_owning_product_project.id,
             status="completed",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project)
         await db_session.commit()
@@ -257,7 +257,7 @@ async def active_project(db_session, test_tenant_key):
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -285,7 +285,7 @@ async def inactive_project(db_session, test_tenant_key):
         tenant_key=test_tenant_key,
         product_id=_owning_product_project.id,
         status="inactive",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -314,7 +314,7 @@ async def staged_project(db_session, test_tenant_key):
         product_id=_owning_product_project.id,
         status="inactive",
         staging_status="staged",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

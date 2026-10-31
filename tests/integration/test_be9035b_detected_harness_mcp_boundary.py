@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -21,6 +20,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -111,7 +111,7 @@ async def _seed_orchestrator(db_session, tenant_key: str, product_id: str, execu
         mission="build it",
         status="active",
         staging_status="staging",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode=execution_mode,
         created_at=now,
     )

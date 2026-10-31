@@ -478,6 +478,16 @@ install_prerequisites() {
     esac
 }
 
+install_node_binary_linux() {
+    # Direct binary from nodejs.org CDN: fast, no package repo setup needed
+    print_step "Installing Node.js 22..."
+    local node_ver="v${MIN_NODE_VERSION}"
+    local node_arch="x64"
+    [[ "$(uname -m)" == "aarch64" ]] && node_arch="arm64"
+    curl -fsSL "https://nodejs.org/dist/${node_ver}/node-${node_ver}-linux-${node_arch}.tar.xz" | sudo tar -xJ -C /usr/local --strip-components=1
+    print_ok "Node.js installed"
+}
+
 install_prereqs_linux() {
     local items=("$@")
 
@@ -520,13 +530,7 @@ install_prereqs_linux() {
                         print_ok "Python installed"
                         ;;
                     node)
-                        print_step "Installing Node.js 22..."
-                        # Direct binary from nodejs.org CDN — fast, no repo setup needed
-                        local node_ver="v${MIN_NODE_VERSION}"
-                        local node_arch="x64"
-                        [[ "$(uname -m)" == "aarch64" ]] && node_arch="arm64"
-                        curl -fsSL "https://nodejs.org/dist/${node_ver}/node-${node_ver}-linux-${node_arch}.tar.xz" | sudo tar -xJ -C /usr/local --strip-components=1
-                        print_ok "Node.js installed"
+                        install_node_binary_linux
                         ;;
                     git)
                         print_step "Installing Git..."
@@ -563,10 +567,7 @@ install_prereqs_linux() {
                         print_ok "Python installed"
                         ;;
                     node)
-                        print_step "Installing Node.js 22..."
-                        curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - </dev/null
-                        sudo "$PKG_MANAGER" install -y nodejs </dev/null
-                        print_ok "Node.js installed"
+                        install_node_binary_linux
                         ;;
                     git)
                         print_step "Installing Git..."

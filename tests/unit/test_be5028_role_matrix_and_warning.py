@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from typing import ClassVar
@@ -24,6 +23,7 @@ from giljo_mcp.tools.write_memory_entry import (
     WORKER_ALLOWED_ENTRY_TYPES,
     write_360_memory,
 )
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -38,7 +38,7 @@ async def linked_project(db_session, test_tenant_key, test_product):
         status="active",
         tenant_key=test_tenant_key,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -367,7 +367,7 @@ async def test_cross_tenant_orchestrator_cannot_authorize_write_in_another_tenan
         status="active",
         tenant_key=tenant_a,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_a)
     await db_session.commit()
@@ -394,7 +394,7 @@ async def test_cross_tenant_orchestrator_cannot_authorize_write_in_another_tenan
         status="active",
         tenant_key=tenant_b,
         product_id=product_b.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_b)
     await db_session.commit()

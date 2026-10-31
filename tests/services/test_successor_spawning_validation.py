@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC
 
@@ -12,6 +11,7 @@ import pytest
 
 from giljo_mcp.models import Product, Project
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -57,7 +57,7 @@ class TestPredecessorValidation:
             tenant_key=tenant_key,
             product_id=_owning_product_proj2.id,
             execution_mode="multi_terminal",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
             implementation_launched_at=datetime.now(UTC),
         )
         db_session.add(proj2)

@@ -11,26 +11,27 @@ import { TSK_TYPE_COLOR, HND_TYPE_COLOR } from '@/utils/constants'
 
 describe('taxonomyBadgeStyle', () => {
   it('returns a 15% tint background and full-brightness foreground for a given hex', () => {
-    const style = taxonomyBadgeStyle('#6DB3E4')
+    const style = taxonomyBadgeStyle('#A0D0F0')
     expect(style).toEqual({
-      backgroundColor: '#6DB3E426',
-      color: '#6DB3E4',
+      backgroundColor: '#A0D0F026',
+      color: '#A0D0F0',
     })
   })
 
   it('falls back to DEFAULT_PROJECT_TYPE_COLOR when color is empty/null/undefined', () => {
     const fallbackBg = `${DEFAULT_PROJECT_TYPE_COLOR}26`
+    const fallbackColor = taxonomyBadgeStyle(DEFAULT_PROJECT_TYPE_COLOR).color
     expect(taxonomyBadgeStyle(null)).toEqual({
       backgroundColor: fallbackBg,
-      color: DEFAULT_PROJECT_TYPE_COLOR,
+      color: fallbackColor,
     })
     expect(taxonomyBadgeStyle(undefined)).toEqual({
       backgroundColor: fallbackBg,
-      color: DEFAULT_PROJECT_TYPE_COLOR,
+      color: fallbackColor,
     })
     expect(taxonomyBadgeStyle('')).toEqual({
       backgroundColor: fallbackBg,
-      color: DEFAULT_PROJECT_TYPE_COLOR,
+      color: fallbackColor,
     })
   })
 })

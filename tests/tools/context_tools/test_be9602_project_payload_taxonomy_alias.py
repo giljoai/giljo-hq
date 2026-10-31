@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from contextlib import asynccontextmanager
 
@@ -16,6 +15,7 @@ from giljo_mcp.models import Project
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.tools.context_tools.fetch_context import fetch_context
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -59,7 +59,7 @@ async def test_project_payload_carries_taxonomy_alias_alongside_project_alias(db
         product_id=product.id,
         project_type_id=ptype.id,
         status="inactive",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

@@ -13,9 +13,10 @@ from api.app_state import APIState
 
 
 @pytest.mark.asyncio
-async def test_init_database_sets_db_manager_on_state():
+async def test_init_database_sets_db_manager_on_state(monkeypatch):
     from api.startup.database import init_database
 
+    monkeypatch.setenv("GILJO_MODE", "")
     state = APIState()
 
     with (

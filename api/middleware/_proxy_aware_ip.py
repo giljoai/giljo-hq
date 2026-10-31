@@ -39,18 +39,24 @@ class _RequestLike(Protocol):
     def headers(self) -> _HeadersLike: ...
 
 
-def parse_trusted_proxies(raw: str | None) -> list[_TrustedNetwork]:
-    if not raw:
-        return []
+def split_trusted_proxies(raw: str | None) -> tuple[list[_TrustedNetwork], list[str]]:
     networks: list[_TrustedNetwork] = []
-    for entry in raw.split(","):
+    malformed: list[str] = []
+    for entry in (raw or "").split(","):
         candidate = entry.strip()
         if not candidate:
             continue
         try:
             networks.append(ipaddress.ip_network(candidate, strict=False))
         except ValueError:
-            logger.warning("Ignoring malformed %s entry: %r", TRUSTED_PROXIES_ENV, candidate)
+            malformed.append(candidate)
+    return networks, malformed
+
+
+def parse_trusted_proxies(raw: str | None) -> list[_TrustedNetwork]:
+    networks, malformed = split_trusted_proxies(raw)
+    if malformed:
+        logger.warning("Ignoring %d malformed GILJO_TRUSTED_PROXIES entries", len(malformed))
     return networks
 
 

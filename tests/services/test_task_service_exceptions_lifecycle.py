@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -23,6 +22,7 @@ from giljo_mcp.models.auth import User
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Task
 from giljo_mcp.services.task_service import TaskService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -38,7 +38,7 @@ async def test_project(db_session, test_tenant_key, test_product):
         tenant_key=test_tenant_key,
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -187,7 +187,7 @@ async def test_convert_to_project_raises_validation_error_already_converted(
         tenant_key=test_tenant_key,
         status="inactive",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(converted_project)
     await db_session.flush()

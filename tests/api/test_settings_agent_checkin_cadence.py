@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import bcrypt
 import pytest
+import pytest_asyncio
 from sqlalchemy import delete, select
 
 from giljo_mcp.auth.jwt_manager import JWTManager
@@ -23,6 +24,20 @@ from giljo_mcp.tenant import TenantManager
 ENDPOINT = "/api/v1/settings/system/agent-checkin-cadence"
 CADENCE_KEY = "agent_checkin_cadence_minutes"
 CSRF_TOKEN = "test-agent-checkin-cadence-csrf"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _restore_deployment_cadence(db_manager):
+    async with db_manager.get_session_async() as session:
+        prior = await session.scalar(select(SystemSetting.value).where(SystemSetting.key == CADENCE_KEY))
+    try:
+        yield
+    finally:
+        async with db_manager.get_session_async() as session:
+            await session.execute(delete(SystemSetting).where(SystemSetting.key == CADENCE_KEY))
+            if prior is not None:
+                session.add(SystemSetting(key=CADENCE_KEY, value=prior))
+            await session.commit()
 
 
 async def _cleanup_tenant_override(db_manager, tenant_key: str) -> None:

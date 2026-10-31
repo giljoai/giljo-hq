@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -26,6 +25,7 @@ from giljo_mcp.models.tasks import Message
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -118,7 +118,7 @@ async def _seed_product_and_projects(session, tenant_key: str, *, projects: int 
             description="tool split boundary test",
             mission="m",
             status="inactive",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         for n in range(projects)
     ]

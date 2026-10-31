@@ -20,6 +20,11 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import RoadmapCard from '@/components/RoadmapCard.vue'
+import { taxonomyBadgeStyle } from '@/utils/taxonomyBadge'
+import { DEFAULT_PROJECT_TYPE_COLOR } from '@/utils/constants'
+
+// jsdom renders hex as rgb(); the chip text is the lifted (AA) colour from the helper.
+const hexToRgbString = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
 
 // ── WCAG luminance helpers (per StatusBadge.spec convention) ──────────────────
 function hexToRgb(hex) {
@@ -244,13 +249,13 @@ describe('RoadmapCard.vue — content', () => {
     const w = mountCard({ ...PROJECT_ITEM, taxonomy_color: '#6DB3E4' })
     const style = w.find('.rm-alias').attributes('style')
     expect(style).toContain('rgba(109, 179, 228, 0.15)') // 15% tinted background
-    expect(style).toContain('rgb(109, 179, 228)') // full-color text
+    expect(style).toContain(hexToRgbString(taxonomyBadgeStyle('#6DB3E4').color)) // AA-lifted text
   })
 
   it('falls back to the default type color when taxonomy_color is absent', () => {
     const w = mountCard({ ...PROJECT_ITEM, taxonomy_color: null })
     const style = w.find('.rm-alias').attributes('style')
-    expect(style).toContain('rgb(96, 125, 139)') // DEFAULT_PROJECT_TYPE_COLOR #607D8B
+    expect(style).toContain(hexToRgbString(taxonomyBadgeStyle(DEFAULT_PROJECT_TYPE_COLOR).color)) // AA-lifted default
   })
 
   it('renders the display rank (1-based position, not raw priority)', () => {

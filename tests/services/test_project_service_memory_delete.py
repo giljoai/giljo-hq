@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -13,6 +12,7 @@ import pytest
 from giljo_mcp.models import Project
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.schemas.service_responses import NuclearDeleteResult
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ async def test_nuclear_delete_marks_memory_entries_in_table(
         status="active",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
 
@@ -92,7 +92,7 @@ async def test_nuclear_delete_with_no_memory_entries(
         status="active",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -118,7 +118,7 @@ async def test_nuclear_delete_tenant_isolation(db_session, test_tenant_key, test
         status="active",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project1)
 

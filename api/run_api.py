@@ -363,6 +363,7 @@ def main():
             reload=args.reload,
             workers=args.workers if not args.reload else 1,
             log_level=args.log_level,
+            proxy_headers=False,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down server...")

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { useBulkSelection, runBulk, describeBulkResult, bulkResultType } from './useBulkSelection'
+import { useBulkSelection, runBulkBatch, describeBulkResult, bulkResultType } from './useBulkSelection'
 
 const rows = [
   { id: 'a', title: 'A' },
@@ -38,31 +38,46 @@ describe('useBulkSelection', () => {
   })
 })
 
-describe('runBulk', () => {
-  it('runs each row one at a time and reports done, skipped and failed separately', async () => {
-    const calls = []
-    const action = vi.fn(async (row) => {
-      calls.push(row.id)
-      if (row.id === 'c') {
-        const error = new Error('409')
-        error.response = { data: { error_code: 'VALIDATIONERROR', message: 'Project is active' } }
-        throw error
-      }
-    })
-    const result = await runBulk(rows, action, { skipReason: (r) => (r.id === 'b' ? 'pending handover' : null) })
+describe('runBulkBatch', () => {
+  it('sends every non-skipped row in ONE request and maps the per-id result back to rows', async () => {
+    const send = vi.fn(async () => ({
+      done: ['a'],
+      skipped: [{ id: 'c', reason: 'not found' }],
+      failed: [],
+    }))
+    const result = await runBulkBatch(rows, send, { skipReason: (r) => (r.id === 'b' ? 'pending handover' : null) })
 
-    expect(calls).toEqual(['a', 'c'])
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledWith(['a', 'c'])
     expect(result.done).toEqual([rows[0]])
-    expect(result.skipped).toEqual([{ row: rows[1], reason: 'pending handover' }])
-    expect(result.failed).toEqual([{ row: rows[2], reason: 'Project is active' }])
+    expect(result.skipped).toEqual([
+      { row: rows[1], reason: 'pending handover' },
+      { row: rows[2], reason: 'not found' },
+    ])
+    expect(result.failed).toEqual([])
   })
 
-  it('does not stop at the first failure', async () => {
-    const action = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined)
-    const result = await runBulk(rows, action)
-    expect(action).toHaveBeenCalledTimes(3)
-    expect(result.done).toHaveLength(2)
-    expect(result.failed[0].reason).toBe('boom')
+  it('a rejected request fails every row it carried, with the server reason', async () => {
+    const error = new Error('409')
+    error.response = { data: { error_code: 'VALIDATIONERROR', message: 'Nope' } }
+    const result = await runBulkBatch(rows, vi.fn().mockRejectedValue(error))
+    expect(result.done).toEqual([])
+    expect(result.failed.map((f) => f.reason)).toEqual(['Nope', 'Nope', 'Nope'])
+  })
+
+  it('sends nothing when every row is skipped up front', async () => {
+    const send = vi.fn()
+    const result = await runBulkBatch(rows, send, { skipReason: () => 'no' })
+    expect(send).not.toHaveBeenCalled()
+    expect(result.skipped).toHaveLength(3)
+  })
+
+  it('splits past the 500-id cap into more than one request', async () => {
+    const many = Array.from({ length: 501 }, (_, i) => ({ id: `r${i}` }))
+    const send = vi.fn(async (ids) => ({ done: ids, skipped: [], failed: [] }))
+    const result = await runBulkBatch(many, send)
+    expect(send.mock.calls.map(([ids]) => ids.length)).toEqual([500, 1])
+    expect(result.done).toHaveLength(501)
   })
 })
 

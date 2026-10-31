@@ -26,10 +26,11 @@ export function projectDurationSeconds(project, nowMs) {
   return elapsedSecondsSince(project.implementation_launched_at, endMs)
 }
 
-export function jobsBoardMetaLine(project, sectionLabel, nowMs) {
+export function jobsBoardMetaLine(project, sectionLabel, nowMs, { chainMember = false } = {}) {
   if (sectionLabel === JOBS_SECTION_LABELS.STAGED) {
-    const staged = formatTimeOfDay(project?.created_at)
-    return staged ? `staged ${staged} · awaiting your go` : 'awaiting your go'
+    const created = formatTimeOfDay(project?.created_at)
+    if (chainMember) return created ? `created ${created}` : ''
+    return created ? `created ${created} · awaiting your go` : 'awaiting your go'
   }
   if (sectionLabel === JOBS_SECTION_LABELS.PLANNING) {
     return 'staging in progress'

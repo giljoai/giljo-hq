@@ -37,6 +37,9 @@ EXPECTED_AUTH_ROUTE_SIGNATURES = frozenset(
         ("/api-keys", frozenset({"GET"})),
         ("/api-keys", frozenset({"POST"})),
         ("/api-keys/{key_id}", frozenset({"DELETE"})),
+        ("/connected-apps", frozenset({"GET"})),
+        ("/connected-apps", frozenset({"DELETE"})),
+        ("/connected-apps/{login_id}", frozenset({"DELETE"})),
         ("/register", frozenset({"POST"})),
         ("/create-first-admin", frozenset({"POST"})),
     }

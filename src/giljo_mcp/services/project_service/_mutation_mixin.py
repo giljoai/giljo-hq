@@ -407,6 +407,8 @@ class MutationMixin:
         project_id: str,
         updates: dict[str, Any],
         websocket_manager: Any | None = None,
+        *,
+        broadcast: bool = True,
     ) -> ProjectData:
         tenant_key = self.tenant_manager.get_current_tenant()
 
@@ -491,7 +493,7 @@ class MutationMixin:
             self._logger.info(f"Updated project {sanitize(project_id)}")
 
             ws = self._websocket_manager
-            if ws:
+            if ws and broadcast:
                 try:
                     await ws.broadcast_project_update(
                         project_id=project.id,

@@ -206,6 +206,31 @@ describe('jobsSectionLabelFor on a finished project (TSK-9690)', () => {
 
   it('Complete is green like a complete agent; Stopped is quiet grey', () => {
     expect(jobsBoardLifecycleColor('Complete').toLowerCase()).toBe('#67bd6d')
-    expect(jobsBoardLifecycleColor('Stopped').toLowerCase()).toBe('#999')
+    expect(jobsBoardLifecycleColor('Stopped').toLowerCase()).toBe('#a3aac4')
+  })
+})
+
+describe('jobsSectionLabelFor on a parked project (FE-9835)', () => {
+  const stoodDown = [
+    { agent_name: 'orchestrator', agent_display_name: 'orchestrator', status: 'decommissioned' },
+    { agent_display_name: 'implementer', status: 'decommissioned' },
+  ]
+  const launched = { staging_status: 'staging_complete', implementation_launched_at: '2026-09-26T13:00:00Z' }
+
+  it('a parked project whose agents were all stood down is never Review', () => {
+    expect(jobsSectionLabelFor({ ...launched, status: 'parked' }, stoodDown)).not.toBe('Review')
+    expect(jobsSectionLabelFor({ ...launched, status: 'parked' }, stoodDown)).toBe('Stopped')
+  })
+
+  it('isReadyForReview refuses a parked project', () => {
+    expect(isReadyForReview({ ...launched, status: 'parked' }, stoodDown)).toBe(false)
+  })
+})
+
+describe('jobsSectionLabelFor on a project the server marks "staged" (FE-9843)', () => {
+  it('reads Staged, not Activated', () => {
+    expect(jobsSectionLabelFor({ staging_status: 'staged', implementation_launched_at: null }, [])).toBe(
+      JOBS_SECTION_LABELS.STAGED,
+    )
   })
 })

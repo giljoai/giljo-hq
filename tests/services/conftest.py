@@ -4,12 +4,12 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import bcrypt
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from giljo_mcp.models.tasks import Task
 from giljo_mcp.services.task_service import TaskService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_owning_product(session, tenant_key, label):
@@ -207,7 +208,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -228,7 +229,7 @@ async def test_project_multi_terminal(db_session, test_tenant_key, test_agent_te
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -249,7 +250,7 @@ async def test_project_cli_mode(db_session, test_tenant_key, test_agent_template
         product_id=_owning_product_project.id,
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -322,7 +323,7 @@ async def two_tenant_products(db_session, db_manager):
         tenant_key=tenant_a,
         product_id=product_a.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     project_b = Project(
         id=str(uuid4()),
@@ -332,7 +333,7 @@ async def two_tenant_products(db_session, db_manager):
         tenant_key=tenant_b,
         product_id=product_b.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add_all([project_a, project_b])
     await db_session.commit()
@@ -548,7 +549,7 @@ async def two_tenant_service_setup(db_session, db_manager):
         tenant_key=tenant_a,
         product_id=product_a.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_a)
 
@@ -560,7 +561,7 @@ async def two_tenant_service_setup(db_session, db_manager):
         tenant_key=tenant_b,
         product_id=product_b.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_b)
 
@@ -698,7 +699,7 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
         product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(proj)
     await db_session.commit()
@@ -719,7 +720,7 @@ async def other_project(db_session, other_tenant_key, other_tenant_templates) ->
         product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(proj)
     await db_session.commit()
@@ -830,3 +831,13 @@ async def auth_user_with_password(db_session, auth_test_org):
     await db_session.commit()
     await db_session.refresh(user)
     return user, password
+
+
+@pytest.fixture
+def chain_does_not_self_finish(monkeypatch):
+    from giljo_mcp.services import project_helpers
+
+    async def _hold(**_kwargs):
+        return False
+
+    monkeypatch.setattr(project_helpers, "complete_chain_run_if_finished", _hold)

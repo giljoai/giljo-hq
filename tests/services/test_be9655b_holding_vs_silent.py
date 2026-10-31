@@ -22,6 +22,7 @@ from giljo_mcp.services.job_query_service import JobQueryService
 from giljo_mcp.services.silence_detector import SilenceDetector
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.tenant_guard import tenant_session_context
 
 
 def _ago(minutes: float) -> datetime:
@@ -120,8 +121,12 @@ def _detector() -> SilenceDetector:
     return SilenceDetector(db_manager=Mock(spec=DatabaseManager), ws_manager=ws)
 
 
-async def _status_of(session: AsyncSession, job_id: str) -> str:
-    return (await session.execute(select(AgentExecution.status).where(AgentExecution.job_id == job_id))).scalar_one()
+async def _status_of(session: AsyncSession, job_id: str, tenant_key: str) -> str:
+    with tenant_session_context(session, tenant_key):
+        stmt = select(AgentExecution.status).where(
+            AgentExecution.tenant_key == tenant_key, AgentExecution.job_id == job_id
+        )
+        return (await session.execute(stmt)).scalar_one()
 
 
 def _svc(session: AsyncSession) -> WorkflowStatusService:
@@ -130,6 +135,16 @@ def _svc(session: AsyncSession) -> WorkflowStatusService:
 
 @pytest.mark.asyncio
 async def test_detector_leaves_a_holding_job_working(db_session: AsyncSession) -> None:
+    other_tenant = TenantManager.generate_tenant_key()
+    other_pid = await _seed_project(db_session, other_tenant)
+    other_job_id, _ = await _seed_agent(
+        db_session,
+        other_tenant,
+        other_pid,
+        status="working",
+        last_progress_minutes_ago=30,
+        todo_statuses=["completed", "in_progress"],
+    )
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(db_session, tenant)
     job_id, _ = await _seed_agent(
@@ -144,7 +159,8 @@ async def test_detector_leaves_a_holding_job_working(db_session: AsyncSession) -
 
     await _detector()._detect_silent_agents(db_session, threshold_minutes=10)
 
-    assert await _status_of(db_session, job_id) == "working"
+    assert await _status_of(db_session, job_id, tenant) == "working"
+    assert await _status_of(db_session, other_job_id, other_tenant) == "silent"
 
 
 @pytest.mark.asyncio
@@ -162,7 +178,7 @@ async def test_detector_still_silences_a_real_stall_at_eleven_minutes(db_session
 
     await _detector()._detect_silent_agents(db_session, threshold_minutes=10)
 
-    assert await _status_of(db_session, job_id) == "silent"
+    assert await _status_of(db_session, job_id, tenant) == "silent"
 
 
 @pytest.mark.asyncio
