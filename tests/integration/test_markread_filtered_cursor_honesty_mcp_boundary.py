@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -24,6 +23,7 @@ from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -90,7 +90,7 @@ async def markread_mcp_client(db_manager, db_session, monkeypatch):
         mission="prove the wire response reports only what changed",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

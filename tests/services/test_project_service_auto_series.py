@@ -121,7 +121,7 @@ class TestAutoAssignSeriesNumber:
         assert p2.series_number == 2
 
     @pytest.mark.asyncio
-    async def test_auto_series_excludes_soft_deleted(
+    async def test_auto_series_skips_a_trashed_projects_number(
         self, project_service: ProjectService, test_tenant_key: str, db_session, test_product
     ):
         from datetime import datetime
@@ -146,7 +146,7 @@ class TestAutoAssignSeriesNumber:
             tenant_key=test_tenant_key,
             product_id=test_product.id,
         )
-        assert project.series_number == 1
+        assert project.series_number == 2
 
     @pytest.mark.asyncio
     async def test_different_tenants_independent_series(

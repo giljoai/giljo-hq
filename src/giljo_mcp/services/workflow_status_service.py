@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.domain.job_activity import HOLDING, SILENT, WORKING, activity_word
 from giljo_mcp.domain.project_status import CHAIN_DETACHING_STATUSES
 from giljo_mcp.exceptions import DatabaseError, ResourceNotFoundError
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
@@ -23,6 +22,7 @@ from giljo_mcp.schemas.service_responses import (
     build_next_action,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.agent_status_tally import tally_agent_statuses
 from giljo_mcp.services.next_action import project_next_action_for
 from giljo_mcp.services.not_picked_up import NOT_PICKED_UP_WHY, not_picked_up_job_ids
 from giljo_mcp.services.project_helpers import compute_completion_percent
@@ -92,16 +92,17 @@ class WorkflowStatusService:
 
                 job_type_map = {ex.job_id: ex.job_type or "" for ex in executions}
                 todo_map = await ops_repo.get_todo_counts_by_job(session, tenant_key, [ex.job_id for ex in executions])
-                words = {ex.job_id: activity_word(ex.status, todo_map.get(ex.job_id)) for ex in executions}
-                active_count = sum(1 for word in words.values() if word == WORKING)
-                holding_count = sum(1 for word in words.values() if word == HOLDING)
-                completed_count = sum(1 for ex in executions if ex.status == "complete")
-                closed_count = sum(1 for ex in executions if ex.status == "closed")
-                pending_count = sum(1 for ex in executions if ex.status == "waiting")
-                blocked_count = sum(1 for ex in executions if ex.status == "blocked")
-                silent_count = sum(1 for word in words.values() if word == SILENT)
-                decommissioned_count = sum(1 for ex in executions if ex.status == "decommissioned")
-                total_count = len(executions)
+                tally = tally_agent_statuses(executions, todo_map)
+                words = tally.words
+                active_count = tally.active
+                holding_count = tally.holding
+                completed_count = tally.completed
+                closed_count = tally.closed
+                pending_count = tally.pending
+                blocked_count = tally.blocked
+                silent_count = tally.silent
+                decommissioned_count = tally.decommissioned
+                total_count = tally.total
 
                 done_count = completed_count + closed_count
                 actionable_count = total_count - decommissioned_count

@@ -19,6 +19,7 @@ import {
   createAccountApi,
   createAuthApi,
   createApiKeysApi,
+  createConnectedAppsApi,
   createConnectApi,
   createOrganizationsApi,
 } from './api/accounts.js'
@@ -289,6 +290,7 @@ export const api = {
 
   auth: createAuthApi(apiClient),
   apiKeys: createApiKeysApi(apiClient),
+  connectedApps: createConnectedAppsApi(apiClient),
   connect: createConnectApi(apiClient),
   git: createGitApi(apiClient),
   agentJobs: createAgentJobsApi(apiClient),

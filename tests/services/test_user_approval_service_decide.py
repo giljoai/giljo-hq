@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -22,6 +21,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.services.user_approval_service import UserApprovalService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture
@@ -43,7 +43,7 @@ async def approval_seed(db_session, test_tenant_key):
         description="x",
         mission="x",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

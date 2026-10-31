@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -22,6 +21,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message, MessageAcknowledgment, MessageRecipient
 from giljo_mcp.services.job_completion_service import JobCompletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -56,7 +56,7 @@ async def active_project(
         mission="Test message acknowledgement",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -370,7 +370,7 @@ async def test_retired_flag_leaves_messages_untouched_across_tenants(
         mission="cross-tenant",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(other_project)
     await db_session.flush()

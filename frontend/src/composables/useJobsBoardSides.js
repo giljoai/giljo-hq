@@ -73,8 +73,10 @@ export function useJobsBoardSides({
   }))
 
   const side = ref('implementation')
+  const SIDES = ['staging', 'implementation']
   function selectSide(value) {
     side.value = value
+    if (landed && route.query.side !== value) router.replace({ query: { ...route.query, side: value } })
   }
 
   const sideProjects = computed(() => projects.value.filter((project) => sideOf(project) === side.value))
@@ -144,7 +146,8 @@ export function useJobsBoardSides({
   let landed = false
   function land() {
     landed = true
-    side.value = sideCounts.value.staging > 0 ? 'staging' : 'implementation'
+    const stored = SIDES.includes(route.query.side) ? route.query.side : null
+    side.value = stored || (sideCounts.value.staging > 0 ? 'staging' : 'implementation')
     revealHighlightedRun()
     consumeArrival()
   }

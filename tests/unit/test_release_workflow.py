@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -117,11 +120,12 @@ class TestReleaseWorkflowStructure:
         assert "checksum" in files_config or "CHECKSUM" in files_config, "Release must include checksum asset"
         assert "manifest" in files_config or "MANIFEST" in files_config, "Release must include manifest asset"
 
-    def test_gh_release_generates_notes(self):
+    def test_gh_release_body_is_the_changelog_section(self):
         steps = self.workflow["jobs"]["release"]["steps"]
         release_step = next(s for s in steps if "softprops/action-gh-release" in s.get("uses", ""))
         with_config = release_step.get("with", {})
-        assert with_config.get("generate_release_notes") is True
+        assert "steps.notes.outputs.NOTES_PATH" in str(with_config.get("body_path", ""))
+        assert with_config.get("generate_release_notes") is False
 
     def test_prerelease_detection(self):
         steps = self.workflow["jobs"]["release"]["steps"]
@@ -137,6 +141,72 @@ class TestReleaseWorkflowStructure:
         assert "PRERELEASE" in prerelease_value or "prerelease" in prerelease_value.lower(), (
             "Release step must wire prerelease flag from version step"
         )
+
+
+def _notes_step_script() -> str:
+    workflow = yaml.safe_load(RELEASE_YML.read_text())
+    steps = workflow["jobs"]["release"]["steps"]
+    return next(s for s in steps if s.get("id") == "notes")["run"]
+
+
+SAMPLE_CHANGELOG = """# Changelog
+
+## [2.11.0] — 2026-10-27
+
+### Fixed
+
+- **Chains keep going.** A dropped project leaves the chain.
+
+## [2.10.0] — 2026-10-20
+
+### Added
+
+- **Older entry.** Must not appear.
+"""
+
+
+@pytest.mark.skipif(shutil.which("bash") is None or shutil.which("awk") is None, reason="needs bash and awk")
+class TestReleaseNotesExtraction:
+
+    def _run(self, tmp_path, version, changelog=SAMPLE_CHANGELOG):
+        (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+        out = tmp_path / "gh_output"
+        out.write_text("")
+        env = {
+            "PATH": os.environ["PATH"],
+            "VERSION": version,
+            "TAG": f"v{version}",
+            "REPO": "giljoai/giljo-hq",
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(out),
+        }
+        result = subprocess.run(
+            ["bash", "-e", "-c", _notes_step_script()],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result, out.read_text()
+
+    def test_extracts_only_this_versions_section(self, tmp_path):
+        result, output = self._run(tmp_path, "2.11.0")
+        assert result.returncode == 0, result.stderr
+        notes = Path(output.split("NOTES_PATH=", 1)[1].strip()).read_text(encoding="utf-8")
+        assert "**Chains keep going.**" in notes
+        assert "### Fixed" in notes
+        assert "Older entry" not in notes
+        assert "## [2.11.0]" not in notes
+        assert "https://github.com/giljoai/giljo-hq/blob/v2.11.0/CHANGELOG.md" in notes
+
+    def test_missing_section_fails_the_release(self, tmp_path):
+        result, _ = self._run(tmp_path, "9.9.9")
+        assert result.returncode != 0
+
+    def test_empty_section_fails_the_release(self, tmp_path):
+        result, _ = self._run(tmp_path, "3.0.0", "# Changelog\n\n## [3.0.0] — x\n\n## [2.0.0]\n\n- old\n")
+        assert result.returncode != 0
 
 
 @pytest.mark.skipif(

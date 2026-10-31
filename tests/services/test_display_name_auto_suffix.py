@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC
 
@@ -16,6 +15,7 @@ from giljo_mcp.models import AgentExecution, AgentJob, AgentTemplate, Product, P
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -62,7 +62,7 @@ async def suffix_project(db_session, suffix_tenant_key, suffix_templates) -> Pro
         product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

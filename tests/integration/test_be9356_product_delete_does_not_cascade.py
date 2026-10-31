@@ -4,13 +4,13 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
 
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.product_service import ProductService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _product_with_one_project(db_manager, tenant_key: str) -> str:
@@ -28,7 +28,7 @@ async def _product_with_one_project(db_manager, tenant_key: str) -> str:
                 status="inactive",
                 product_id=product_id,
                 tenant_key=tenant_key,
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
         )
         await session.commit()

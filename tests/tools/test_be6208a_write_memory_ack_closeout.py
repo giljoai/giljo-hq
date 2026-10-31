@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -18,6 +17,7 @@ from sqlalchemy import select
 from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoItem
 from giljo_mcp.tools.write_memory_entry import write_360_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +43,7 @@ async def linked_project(db_session, test_tenant_key, test_product):
         status="active",
         tenant_key=test_tenant_key,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

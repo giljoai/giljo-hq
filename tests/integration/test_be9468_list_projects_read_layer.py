@@ -35,6 +35,9 @@ def _wire_bytes(obj) -> int:
 def _tokens(obj) -> int:
     import tiktoken
 
+    from giljo_mcp.context_management.tiktoken_bundle import use_bundled_tiktoken_cache
+
+    use_bundled_tiktoken_cache()
     return len(tiktoken.get_encoding("o200k_base").encode(to_json(obj, fallback=str).decode()))
 
 

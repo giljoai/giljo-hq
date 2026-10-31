@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -21,6 +20,7 @@ from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.services.task_service import TaskService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -53,7 +53,7 @@ async def two_tenants_full_surface(db_session, db_manager):
         tenant_key=tenant_a,
         product_id=product_a.id,
         status="active",
-        series_number=random.randint(1, 900_000),
+        series_number=next_series_number(),
     )
     project_b = Project(
         id=str(uuid.uuid4()),
@@ -63,7 +63,7 @@ async def two_tenants_full_surface(db_session, db_manager):
         tenant_key=tenant_b,
         product_id=product_b.id,
         status="active",
-        series_number=random.randint(1, 900_000),
+        series_number=next_series_number(),
     )
     db_session.add_all([project_a, project_b])
     await db_session.commit()

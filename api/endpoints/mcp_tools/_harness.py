@@ -13,7 +13,7 @@ from starlette.requests import Request as StarletteRequest
 if TYPE_CHECKING:
     from mcp.types import ClientCapabilities
 
-from giljo_mcp.harness_resolver import preset_from_client_info
+from giljo_mcp.harness_resolver import hub_participant_harness, preset_from_client_info
 from giljo_mcp.platform_registry import GENERIC_HARNESS, harness_from_client_info, select_effective_preset
 
 
@@ -35,6 +35,14 @@ def _detected_harness(ctx: Context) -> str:
     if live != GENERIC_HARNESS:
         return live
     return _persisted_harness(ctx) or GENERIC_HARNESS
+
+
+def _hub_harness(ctx: Context) -> str:
+    try:
+        name = ctx.request_context.request.scope.get("state", {}).get("mcp_client_name")
+    except Exception:  # noqa: BLE001 - a display hint, never raise into the tool
+        name = None
+    return hub_participant_harness(_detected_harness(ctx), name if isinstance(name, str) else None)
 
 
 def _persisted_preset(ctx: Context) -> str | None:

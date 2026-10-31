@@ -337,7 +337,7 @@ const edgeColor = computed(() =>
 )
 const lifecyclePillColor = computed(() => (needsInput.value ? TEXT_SECONDARY : edgeColor.value))
 const showGateNote = computed(
-  () => sectionLabel.value === JOBS_SECTION_LABELS.STAGED && props.headlessAllowed === false,
+  () => !props.chainCtx && sectionLabel.value === JOBS_SECTION_LABELS.STAGED && props.headlessAllowed === false,
 )
 const sortedAgents = computed(() => orderAgentsForDisplay(props.agents))
 const taxonomyStyle = computed(() =>
@@ -390,7 +390,7 @@ const emptyRun = computed(() => isEmptyAgentRun(props.project, props.agents))
 const steps = computed(() => aggregateSteps(props.agents))
 const waiting = computed(() => aggregateWaiting(props.agents))
 const durationLabel = computed(() => formatDurationSeconds(projectDurationSeconds(props.project, props.now)))
-const metaLine = computed(() => jobsBoardMetaLine(props.project, sectionLabel.value, props.now))
+const metaLine = computed(() => jobsBoardMetaLine(props.project, sectionLabel.value, props.now, { chainMember: !!props.chainCtx }))
 
 const projectStateStore = useProjectStateStore()
 const sequenceRunStore = useSequenceRunStore()

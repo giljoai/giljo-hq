@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.schemas.service_responses import MissionUpdateResult
 from giljo_mcp.services.orchestration_service import OrchestrationService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -179,7 +179,7 @@ class TestGetOrchestratorInstructions:
             mission="Test mission for tenant A",
             tenant_key=tenant_a,
             product_id=product_a.id,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project_a)
         await db_session.commit()
@@ -303,7 +303,7 @@ class TestUpdateAgentMission:
             mission="Test mission for tenant A",
             tenant_key=tenant_a,
             product_id=product_a.id,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         db_session.add(project_a)
         await db_session.commit()

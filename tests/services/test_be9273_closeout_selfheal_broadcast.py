@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -20,6 +19,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -93,7 +93,7 @@ async def test_rest_selfheal_complete_project_broadcasts_status_changed_post_com
                 description="REST self-heal closeout WS broadcast regression.",
                 mission="Prove the REST complete_project self-heal path broadcasts too.",
                 status="active",
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
             session.add(project)
             await session.flush()
@@ -157,7 +157,7 @@ async def test_rest_selfheal_complete_project_no_agents_emits_nothing(db_manager
                 description="No active agents to decommission.",
                 mission="Prove the no-op case stays silent.",
                 status="active",
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
             session.add(project)
             await session.flush()

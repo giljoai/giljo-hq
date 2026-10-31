@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -19,6 +18,7 @@ from giljo_mcp.models.tasks import MessageRecipient
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.services.job_query_service import JobQueryService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def _seed_project_with_two_agents(
         tenant_key=tenant_key,
         product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     session.add(proj)
@@ -224,7 +224,7 @@ async def _seed_project_with_shared_agent(
         tenant_key=tenant_key,
         product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     session.add(proj)

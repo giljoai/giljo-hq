@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from uuid import uuid4
 
 import pytest
@@ -21,6 +20,7 @@ from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orche
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 def _payload(call_tool_result) -> dict:
@@ -73,7 +73,7 @@ async def _seed_project(db_session, tenant_key: str, *, execution_mode: str) -> 
         status="active",
         staging_status="staging",
         execution_mode=execution_mode,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

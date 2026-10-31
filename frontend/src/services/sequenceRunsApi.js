@@ -10,4 +10,6 @@ export const sequenceRunsApi = {
   stop: (runId) => apiClient.post(`/api/v1/sequence-runs/${runId}/stop`),
   markReviewed: (runId, projectId) =>
     apiClient.post(`/api/v1/sequence-runs/${runId}/members/${projectId}/review`),
+  removeMember: (runId, projectId) =>
+    apiClient.delete(`/api/v1/sequence-runs/${runId}/members/${projectId}`),
 }

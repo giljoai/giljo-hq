@@ -13,8 +13,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.projects import Project, TaxonomyType
-from giljo_mcp.models.tasks import Task
 from giljo_mcp.repositories._project_enrichment_reads_mixin import project_not_trashed
+from giljo_mcp.repositories._series_allocation import lowest_free_series_number
 
 
 logger = logging.getLogger(__name__)
@@ -131,20 +131,7 @@ class TaxonomyRepository:
             {"key": bucket_key},
         )
 
-        project_query = select(func.coalesce(func.max(Project.series_number), 0)).where(
-            Project.tenant_key == tenant_key,
-            Project.product_id == product_id,
-            project_not_trashed(),
-        )
-        task_query = select(func.coalesce(func.max(Task.series_number), 0)).where(
-            Task.tenant_key == tenant_key,
-            Task.product_id == product_id,
-            Task.deleted_at.is_(None),
-        )
-
-        project_max = (await session.execute(project_query)).scalar_one()
-        task_max = (await session.execute(task_query)).scalar_one()
-        return max(project_max, task_max) + 1
+        return await lowest_free_series_number(session, tenant_key, product_id)
 
     async def get_used_series_numbers(
         self,

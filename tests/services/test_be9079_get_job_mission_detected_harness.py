@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -19,6 +18,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.mission_assembly import assemble_mission_context, compute_protocol_etag
 from giljo_mcp.services.mission_service import MissionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +68,7 @@ def _make_orchestrator_fixtures() -> tuple[AgentJob, AgentExecution, Project]:
         auto_checkin_enabled=True,
         auto_checkin_interval=10,
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     return job, execution, project
 

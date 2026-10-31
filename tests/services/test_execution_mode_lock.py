@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -15,6 +14,7 @@ from giljo_mcp.exceptions import ProjectStateError
 from giljo_mcp.models import Product, Project
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_update_execution_mode_allowed_before_staging(
         product_id=_owning_product_project.id,
         status="inactive",
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -78,7 +78,7 @@ async def test_update_execution_mode_allowed_when_staged_but_not_launched(
         execution_mode="multi_terminal",
         staging_status="staging_complete",
         implementation_launched_at=None,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -114,7 +114,7 @@ async def test_update_execution_mode_blocked_after_implementation_launched(
         status="active",
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -154,7 +154,7 @@ async def test_update_other_fields_still_allowed_after_launch(
         status="active",
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()
@@ -196,7 +196,7 @@ async def test_set_first_mode_allowed_when_unselected_despite_mission(
         product_id=_owning_product_project.id,
         status="inactive",
         execution_mode=None,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

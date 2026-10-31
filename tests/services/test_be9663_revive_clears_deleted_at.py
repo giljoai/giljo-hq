@@ -139,14 +139,14 @@ class TestReviveClearsDeletedAt:
         await project_service.deletion.delete_project(project_id=trashed.id)
 
         reused_by = await project_service.create_project(
-            name="Reused the freed serial",
+            name="Created while the other sat in the trash",
             mission="m",
             description="d",
             product_id=active_product.id,
             tenant_key=test_tenant_key,
             project_type_id=be_taxonomy.id,
         )
-        assert reused_by.series_number == original_serial
+        assert reused_by.series_number != original_serial
 
         revived = await project_service.update_project(project_id=trashed.id, updates={"status": "inactive"})
 

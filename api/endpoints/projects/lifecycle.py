@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.endpoints._boundary_types import IdPath, IdQuery
+from api.endpoints._bulk_close_models import BulkCloseRequest, BulkCloseResponse
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import ProjectStateError, ResourceNotFoundError
 from giljo_mcp.models import User
@@ -19,6 +20,8 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .dependencies import get_project_service
 from .models import (
+    ProjectBulkReviewedRequest,
+    ProjectBulkReviewedResponse,
     ProjectDeleteResponse,
     ProjectPurgeResponse,
     ProjectResponse,
@@ -462,6 +465,48 @@ async def mark_project_reviewed(
     """
     reviewed_at = await project_service.mark_project_reviewed(project_id=project_id, tenant_key=current_user.tenant_key)
     return ProjectReviewedResponse(id=project_id, reviewed_at=reviewed_at)
+
+
+@router.post("/reviewed/bulk", response_model=ProjectBulkReviewedResponse)
+async def mark_projects_reviewed_bulk(
+    body: ProjectBulkReviewedRequest,
+    current_user: User = Depends(get_current_active_user),
+    project_service: ProjectService = Depends(get_project_service),
+) -> ProjectBulkReviewedResponse:
+    """
+    Record that you reviewed many finished projects at once.
+
+    The Jobs board's "Mark all reviewed" link calls this with the projects in the
+    "Done, not reviewed" section (at most 500). Each is reviewed exactly as the
+    single call does. Projects that are unknown, not finished, or part of a chain
+    are skipped and listed with the reason; nothing is deleted.
+    """
+    result = await project_service.mark_projects_reviewed(
+        project_ids=[str(pid) for pid in body.project_ids], tenant_key=current_user.tenant_key
+    )
+    return ProjectBulkReviewedResponse(**result)
+
+
+@router.post("/bulk", response_model=BulkCloseResponse)
+async def bulk_close_projects(
+    body: BulkCloseRequest,
+    current_user: User = Depends(get_current_active_user),
+    project_service: ProjectService = Depends(get_project_service),
+) -> BulkCloseResponse:
+    """
+    Archive, unarchive or delete many projects in one step.
+
+    Send `action` (`archive`, `unarchive` or `delete`) and up to 500 project ids.
+    Every project is handled exactly as the single call would, and every connected
+    browser is told once about the whole batch instead of once per project.
+    Projects in an active chain are skipped by archive and delete (use Deactivate
+    Chain first), and unknown ids are skipped as not found. The reply lists the ids
+    that changed, the ones skipped or failed, and the reason for each.
+    """
+    result = await project_service.bulk_close_projects(
+        action=body.action, project_ids=[str(pid) for pid in body.ids], tenant_key=current_user.tenant_key
+    )
+    return BulkCloseResponse(**result)
 
 
 @router.delete("/{project_id}", response_model=ProjectDeleteResponse)

@@ -46,7 +46,8 @@ function envelope(jobs) {
   return { data: { jobs, total: jobs.length, limit: 50, offset: 0 } }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await router.replace({ path: '/', query: {} })
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()

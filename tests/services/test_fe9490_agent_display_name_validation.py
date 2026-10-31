@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -20,6 +19,7 @@ from giljo_mcp.services.agent_job_manager import AgentJobManager
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.utils.identity import validate_agent_display_name
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -85,7 +85,7 @@ async def fe9490_project(db_session, test_tenant_key) -> Project:
         tenant_key=test_tenant_key,
         product_id=owning_product.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     db_session.add(project)

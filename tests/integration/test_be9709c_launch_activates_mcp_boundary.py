@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from uuid import uuid4
 
 import pytest
@@ -18,6 +17,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project, ProjectStatus
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -80,7 +80,7 @@ async def _seed_staged_inactive_project(db_session, tenant_key: str) -> str:
         status=ProjectStatus.INACTIVE,
         execution_mode="claude_code_cli",
         staging_status="staging_complete",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

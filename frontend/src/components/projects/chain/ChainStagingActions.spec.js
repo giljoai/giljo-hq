@@ -114,4 +114,18 @@ describe('ChainStagingActions (FE-9749)', () => {
     expect(dialog.text()).toContain('3 linked projects')
     expect(dialog.text()).toContain('2 agents')
   })
+
+  it('FE-9834b: pre-run Deactivate chain and pickup Stop chain carry their tooltips', () => {
+    const ready = mountActions(controlsFor())
+    expect(byId(ready, 'chain-group-deactivate').attributes('title')).toBe(
+      'Undo the chain. Projects go back to how they were before it. Its agents and jobs are deleted and its missions are cleared. This cannot be undone.',
+    )
+    const pickup = mountActions(controlsFor({ chainPhase: 'pickup' }), true)
+    expect(byId(pickup, 'stop-chain-btn').attributes('title')).toBe(
+      'End the chain and keep its work. Finished projects stay finished. Projects not started go back to inactive.',
+    )
+    expect(byId(pickup, 'chain-group-deactivate').attributes('title')).toBe(
+      'Undo the chain. Projects go back to how they were before it. Its agents and jobs are deleted and its missions are cleared. This cannot be undone.',
+    )
+  })
 })

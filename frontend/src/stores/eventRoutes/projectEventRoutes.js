@@ -54,6 +54,12 @@ export const PROJECT_EVENT_ROUTES = {
     },
   },
 
+  'projects:bulk_updated': {
+    handler: async (payload) => {
+      useProjectStore().handleBulkUpdated(payload)
+    },
+  },
+
   'project:created': {
     handler: async () => {
       const projectStore = useProjectStore()

@@ -434,7 +434,11 @@ async def test_apikey_mint_rejects_bearer(api_client, db_manager, monkeypatch):
     resp = await api_client.post(
         "/api/auth/api-keys",
         json={"name": "minted-by-bearer", "permissions": ["*"]},
-        headers={"Authorization": f"Bearer {token}"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Cookie": f"csrf_token={_CSRF}",
+            "X-CSRF-Token": _CSRF,
+        },
     )
 
     assert resp.status_code == 403, resp.text

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +20,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -111,7 +111,7 @@ async def _seed_project_with_completed_agent(
                 status=status,
                 staging_status="staging_complete",
                 early_termination=early_termination,
-                series_number=random.randint(1, 9999),
+                series_number=next_series_number(),
             )
         )
         session.add(

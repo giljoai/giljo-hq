@@ -63,9 +63,10 @@
         v-if="!rail"
         :to="{ name: 'Products' }"
         class="nav-product-subtitle"
-        :class="{ 'nav-product-subtitle--inactive': !productsStore.currentProduct }"
+        :class="{ 'nav-product-subtitle--inactive': !productsStore.currentProduct && !showsAllProducts }"
+        data-testid="nav-product-subtitle"
       >
-        {{ productsStore.currentProduct ? productsStore.currentProduct.name : 'No product open' }}
+        {{ productSubtitle }}
       </router-link>
     </div>
 
@@ -198,6 +199,7 @@ import { useUserStore } from '@/stores/user'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
+import { useJobsScopeStore } from '@/stores/jobsScope'
 import { useToast } from '@/composables/useToast'
 import { useNavDrawerAccount } from '@/composables/useNavDrawerAccount'
 import { useNavConnectionStatus } from '@/composables/useNavConnectionStatus'
@@ -387,6 +389,12 @@ const handleLogout = async () => {
 const jobsIcon = computed(() => resolveJobsNavIcon(route.path, route?.query))
 
 const hasProduct = computed(() => !!productsStore.currentProduct)
+const jobsScope = useJobsScopeStore()
+const showsAllProducts = computed(() => route.name === 'JobsViewport' && jobsScope.allProducts)
+const productSubtitle = computed(() => {
+  if (showsAllProducts.value) return 'All products'
+  return productsStore.currentProduct ? productsStore.currentProduct.name : 'No product open'
+})
 const hasProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 
 const navigationItems = computed(() => {

@@ -274,6 +274,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     await hydrate()
   }
 
+  async function removeMember(runId, projectId) {
+    await api.sequenceRuns.removeMember(runId, projectId)
+    await hydrate()
+  }
+
   function $reset() {
     runsById.value = new Map()
     reviewedProjects.value = new Map()
@@ -313,6 +318,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     isProjectRunLocked,
     isProjectStartable,
     isRunning,
+    removeMember,
     isReviewed,
     reviewPendingRun,
     hydrate,

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from collections.abc import AsyncIterator
 
@@ -22,6 +21,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def seeded_run(db_manager) -> AsyncIterator[dict[str, str]]:
                 mission="member",
                 status="completed",
                 tenant_key=tenant_key,
-                series_number=random.randint(1, 9000),
+                series_number=next_series_number(),
             )
         )
         await session.flush()

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -24,6 +23,7 @@ from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.job_completion_service import JobCompletionService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def _seed_project_and_orchestrator(
         mission="verify the completion gate clears on the real drain",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

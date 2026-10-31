@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -23,6 +22,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -97,7 +97,7 @@ async def _seed_project_with_working_agent(db_manager, tenant_key: str) -> tuple
                 mission="Prove archive refuses without a closeout entry.",
                 status="active",
                 staging_status="staging_complete",
-                series_number=random.randint(1, 9999),
+                series_number=next_series_number(),
             )
         )
         session.add(

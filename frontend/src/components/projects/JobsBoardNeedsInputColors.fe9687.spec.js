@@ -12,7 +12,7 @@ const ORANGE = '#ff9800'
 const BLUE = '#2196f3'
 const MAGENTA = '#e060b0'
 const RED = '#f44336'
-const GREY = '#999'
+const GREY = '#a3aac4'
 
 const vuetify = createVuetify()
 const router = createRouter({

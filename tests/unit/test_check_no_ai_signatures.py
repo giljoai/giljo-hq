@@ -136,3 +136,14 @@ def test_bare_model_word_not_flagged():
     mod = _load_module()
     assert mod.find_signature("Refactor opus module and tidy haiku formatting") is None
     assert mod.find_signature("Generated with airflow scheduler config") is None
+
+
+def test_gitea_renovate_squash_trailer_is_allowed():
+    mod = _load_module()
+    coauth = "Co-authored" + "-by: "
+    renovate = coauth + "Renovate bot <" + "renovate" + "@" + "giljo.local>"
+    body = "deps: bump\n\n**Edition Scope:** Both\n\n" + renovate + "\n"
+    assert mod.find_signature(body) is None
+    assert mod.find_signature("subj\n\n" + coauth + "Renovate bot <x@y.invalid>") is not None
+    assert mod.find_signature("subj\n\n" + coauth + "Release Bot <bot@example.invalid>") is not None
+    assert mod.find_signature(body + coauth + "Copilot <x@y.invalid>\n") is not None

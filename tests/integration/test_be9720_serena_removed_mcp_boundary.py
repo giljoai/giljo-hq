@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -25,6 +24,7 @@ from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.services.settings_service import SettingsService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 SERENA_TOOL_NAMES = (
@@ -84,7 +84,7 @@ async def _seed_project(db_session, tenant_key: str, *, launched: bool) -> str:
         mission="build it",
         status="active",
         staging_status="staging_complete" if launched else "staging",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode="multi_terminal",
         implementation_launched_at=now if launched else None,
         created_at=now,

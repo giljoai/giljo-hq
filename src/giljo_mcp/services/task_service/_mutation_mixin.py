@@ -312,7 +312,9 @@ class _TaskMutationMixin:
             self._logger.exception("Failed to update task")
             raise BaseGiljoError(message=str(e), context={"operation": "update_task", "task_id": task_id}) from e
 
-    async def _update_task_impl(self, session: AsyncSession, task_id: str, **kwargs) -> TaskUpdateResult:
+    async def _update_task_impl(
+        self, session: AsyncSession, task_id: str, *, broadcast: bool = True, **kwargs
+    ) -> TaskUpdateResult:
         tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(
@@ -382,7 +384,7 @@ class _TaskMutationMixin:
         self._logger.info(f"Updated task {sanitize(task_id)}: {sanitize(updated_fields)}")
 
         ws = self._websocket_manager
-        if ws and updated_fields:
+        if ws and updated_fields and broadcast:
             await ws.broadcast_to_tenant(
                 tenant_key=tenant_key,
                 event_type="task:updated",

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from typing import Any
 from unittest.mock import create_autospec
 from uuid import uuid4
@@ -26,6 +25,7 @@ from giljo_mcp.models.settings import Settings
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -148,7 +148,7 @@ async def _seed_product_and_project(db_session, tenant_key: str):
         mission="Contract test",
         status="active",
         staging_status="staging_complete",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()
@@ -240,7 +240,7 @@ async def _seed_org_product_project(session, tenant_key: str, label: str):
         mission="Boundary test",
         status="active",
         staging_status="staging_complete",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()

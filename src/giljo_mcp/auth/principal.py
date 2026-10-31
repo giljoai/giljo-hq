@@ -18,6 +18,7 @@ from giljo_mcp.api_key_utils import get_key_prefix, verify_api_key_cached
 from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models import APIKey, User
+from giljo_mcp.services.oauth_login_service import family_is_live
 from giljo_mcp.services.oauth_revocation_service import is_access_token_jti_revoked
 
 
@@ -65,6 +66,7 @@ class Principal:
     jti: str | None = None
     terms_version: str | None = None
     oauth_client_id: str | None = None
+    oauth_family_id: str | None = None
 
 
 async def _resolve_api_key(db: AsyncSession, api_key: str) -> tuple[APIKey, User] | None:
@@ -137,6 +139,10 @@ async def _validate_jwt(
     if jti and await is_access_token_jti_revoked(db, tenant_key=tenant_key, jti=jti):
         raise PrincipalValidationError(AuthErrorReason.REVOKED, "Token revoked")
 
+    family_id = payload.get("fid") if isinstance(payload.get("fid"), str) else None
+    if family_id and not await family_is_live(db, tenant_key=tenant_key, family_id=family_id):
+        raise PrincipalValidationError(AuthErrorReason.REVOKED, "Token revoked (app logged out)")
+
     user = await _reuse_prefetched_user(db, prefetched_user, user_id=user_id, tenant_key=tenant_key)
     if user is None:
         user = (
@@ -173,6 +179,7 @@ async def _validate_jwt(
         jti=jti,
         terms_version=payload["tos"] if isinstance(payload.get("tos"), str) else None,
         oauth_client_id=payload["cid"] if isinstance(payload.get("cid"), str) else None,
+        oauth_family_id=family_id,
     )
 
 

@@ -107,3 +107,23 @@ describe('products store — deleting the resolved default re-reads it (FE-9529)
     expect(store.activeProduct).toMatchObject({ id: 'prod-a' })
   })
 })
+
+describe('products store — default write leaves the viewed tab alone (FE-9847)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('keeps currentProduct on the viewed tab after setDefaultProduct names another product', async () => {
+    const store = useProductStore()
+    store.$patch({ products: [PRODUCT_A, PRODUCT_B], currentProductId: 'prod-a', currentProduct: PRODUCT_A })
+    mockSetDefault.mockResolvedValue({ data: { ...PRODUCT_B, is_default: true } })
+    mockGetDefault.mockResolvedValue({ data: { has_active_product: true, product: { ...PRODUCT_B, is_default: true } } })
+
+    await store.setDefaultProduct('prod-b')
+
+    expect(store.currentProductId).toBe('prod-a')
+    expect(store.currentProduct.name).toBe('Alpha')
+    expect(store.activeProduct.id).toBe('prod-b')
+  })
+})

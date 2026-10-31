@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -20,6 +19,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoI
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.job_completion_service import JobCompletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ async def active_project(
         mission="Test self-referential closeout TODO wording",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

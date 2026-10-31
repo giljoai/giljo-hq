@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 
 import pytest
@@ -18,6 +17,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def _seed(session, tenant_key: str):
         mission="m",
         status="active",
         staging_status="staging_complete",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()

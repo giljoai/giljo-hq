@@ -16,6 +16,7 @@
       :implement-busy="controls.launching"
       :copying="controls.copyingChainPrompt"
       secondary-label="Deactivate chain"
+      :secondary-title="DEACTIVATE_CHAIN_TOOLTIP"
       :secondary-busy="controls.deactivating"
       @pick-mode="controls.patchRunMode"
       @stage="controls.handleChainStage"
@@ -63,6 +64,7 @@
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import StagingControlArea from '@/components/projects/StagingControlArea.vue'
 import ChainStopControl from './ChainStopControl.vue'
+import { DEACTIVATE_CHAIN_TOOLTIP } from './chainControlTooltips.js'
 
 defineProps({
   chainCtx: { type: Object, required: true },

@@ -128,7 +128,7 @@
                   <v-icon size="24" color="white">mdi-application</v-icon>
                 </v-avatar>
                 <div>
-                  <p class="text-body-large font-weight-medium">{{ clientDisplayName }}</p>
+                  <p class="text-body-large font-weight-medium" data-testid="consent-client-name">{{ clientDisplayName }}</p>
                   <p class="text-body-small text-muted-a11y">wants to access your account</p>
                 </div>
               </div>
@@ -205,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, shallowRef, computed, onMounted } from 'vue'
+import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppAlert from '@/components/ui/AppAlert.vue'
@@ -259,13 +259,40 @@ const missingParams = computed(() => {
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 const currentUser = computed(() => userStore.currentUser)
 
+const registeredName = ref('')
+const CLIENT_NAME_MAX = 80
+const BUILTIN_CLIENT_ID = 'giljo-mcp-default'
+
+function capName(name) {
+  const text = String(name).trim()
+  return text.length > CLIENT_NAME_MAX ? `${text.slice(0, CLIENT_NAME_MAX - 1)}\u2026` : text
+}
+
+async function loadRegisteredName() {
+  const clientId = oauthParams.value.client_id
+  registeredName.value = ''
+  if (!clientId || clientId === BUILTIN_CLIENT_ID) return
+  try {
+    const response = await apiClient.get('/api/oauth/authorize/client', { params: { client_id: clientId } })
+    const name = response.data?.client_name
+    if (typeof name === 'string' && name.trim()) registeredName.value = capName(name)
+  } catch {
+    // Unknown or unreachable: the page falls back to the client id.
+  }
+}
+
+watch(
+  () => [isAuthenticated.value, oauthParams.value.client_id],
+  ([authed]) => {
+    if (authed) loadRegisteredName()
+  },
+  { immediate: true },
+)
+
 const clientDisplayName = computed(() => {
   const clientId = oauthParams.value.client_id
-  const knownClients = {
-    'giljo-mcp-default': `${PRODUCT_NAME} Client`,
-    'claude-desktop': 'Claude Desktop',
-  }
-  return knownClients[clientId] || clientId
+  if (clientId === BUILTIN_CLIENT_ID) return `${PRODUCT_NAME} Client`
+  return registeredName.value || capName(clientId)
 })
 
 const seamClient = computed(() => ({

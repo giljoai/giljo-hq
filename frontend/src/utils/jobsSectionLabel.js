@@ -14,12 +14,12 @@ export const JOBS_SECTION_LABELS = Object.freeze({
   STOPPED: 'Stopped',
 })
 
-const STOPPED_PROJECT_STATUSES = new Set(['cancelled', 'terminated'])
+const STOPPED_PROJECT_STATUSES = new Set(['cancelled', 'terminated', 'parked'])
 
 const TERMINAL_AGENT_STATUSES = new Set(['complete', 'completed', 'decommissioned', 'closed'])
 
 export function isReadyForReview(project, agents = []) {
-  if (['completed', 'terminated', 'cancelled'].includes(project?.status)) return false
+  if (['completed', 'terminated', 'cancelled', 'parked'].includes(project?.status)) return false
   if (project?.staging_status === 'staging_complete' && !project?.implementation_launched_at) return false
   if (!agents.length) return false
   const allTerminal = agents.every((a) => TERMINAL_AGENT_STATUSES.has(a?.status))
@@ -43,7 +43,7 @@ export function jobsSectionLabelFor(project, agents = []) {
   if (project?.implementation_launched_at) {
     return JOBS_SECTION_LABELS.IMPLEMENTING
   }
-  if (project?.staging_status === 'staging_complete') {
+  if (project?.staging_status === 'staging_complete' || project?.staging_status === 'staged') {
     return JOBS_SECTION_LABELS.STAGED
   }
   if (project?.staging_status === 'staging') {

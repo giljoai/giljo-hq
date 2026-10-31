@@ -35,7 +35,7 @@ describe('ThreadCard', () => {
     })
     const pill = w.find('[data-testid="thread-card-pill"]')
     expect(pill.exists()).toBe(true)
-    expect(pill.text()).toContain('claude-code')
+    expect(pill.text()).toContain('Claude Code')
     expect(pill.text()).not.toContain('Alpha')
     expect(pill.attributes('title')).toContain('Alpha')
     expect(pill.text()).not.toContain('laptop-a')

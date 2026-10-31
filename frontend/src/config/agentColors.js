@@ -83,7 +83,7 @@ const AGENT_SYNONYMS = {
   'orchestrator-coordinator': 'orchestrator',
 }
 
-export function getAgentColor(displayName) {
+function lookupRole(displayName) {
   const normalizedType = (displayName?.toLowerCase() || '').trim().replace(/[_\s]+/g, '-')
   const canonical = AGENT_SYNONYMS[normalizedType] || normalizedType
   if (AGENT_COLORS[canonical]) return AGENT_COLORS[canonical]
@@ -92,13 +92,18 @@ export function getAgentColor(displayName) {
     const resolved = AGENT_SYNONYMS[seg] || seg
     if (AGENT_COLORS[resolved]) return AGENT_COLORS[resolved]
   }
-  return AGENT_COLORS.orchestrator
+  return null
+}
+
+export function getAgentColor(displayName) {
+  return lookupRole(displayName) || AGENT_COLORS.orchestrator
 }
 
 export function getAgentColorKey(entity) {
   if (!entity) return ''
   if (typeof entity === 'string') return entity
-  return entity.role || entity.agent_name || entity.display_name || entity.agent_display_name || ''
+  const candidates = [entity.role, entity.agent_name, entity.display_name, entity.agent_display_name].filter(Boolean)
+  return candidates.find((c) => lookupRole(c)) || candidates[0] || ''
 }
 
 export function getAgentInitials(name) {

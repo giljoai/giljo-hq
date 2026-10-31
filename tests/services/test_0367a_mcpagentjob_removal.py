@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 
 import pytest
@@ -13,6 +12,7 @@ import pytest_asyncio
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -40,7 +40,7 @@ async def test_project_0367a(db_session, test_tenant_0367a) -> Project:
         status="active",
         tenant_key=test_tenant_0367a,
         product_id=_owning_product_project.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

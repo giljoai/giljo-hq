@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import debounce from 'lodash-es/debounce'
 import api from '@/services/api'
 import { TASK_STATUS } from '@/utils/constants'
 import { useProductStore } from './products'
@@ -112,6 +113,31 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
+  async function bulkClose(action, ids) {
+    const response = await api.tasks.bulk(action, ids)
+    applyBulk(action, response.data.done)
+    return response.data
+  }
+
+  function applyBulk(action, ids) {
+    const changed = new Set(ids)
+    if (action === 'delete') {
+      tasks.value = tasks.value.filter((t) => !changed.has(t.id))
+      return
+    }
+    const hidden = action === 'archive'
+    tasks.value = tasks.value.map((t) => (changed.has(t.id) ? { ...t, hidden } : t))
+  }
+
+  const debouncedRefreshList = debounce(() => {
+    refreshList()
+  }, 400)
+
+  function handleBulkUpdated(data) {
+    applyBulk(data?.action, data?.ids || [])
+    debouncedRefreshList()
+  }
+
   async function changeTaskStatus(id, status) {
     try {
       const response = await api.tasks.changeStatus(id, status)
@@ -210,6 +236,9 @@ export const useTaskStore = defineStore('tasks', () => {
     createTask,
     updateTask,
     deleteTask,
+    bulkClose,
+    handleBulkUpdated,
+    debouncedRefreshList,
     changeTaskStatus,
     handleRealtimeUpdate,
   }

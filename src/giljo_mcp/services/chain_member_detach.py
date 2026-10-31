@@ -11,7 +11,7 @@ from typing import Any
 
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
-from giljo_mcp.services.project_helpers import mark_chain_member_status
+from giljo_mcp.services.project_helpers import complete_chain_run_if_finished, mark_chain_member_status
 
 
 async def detach_chain_member(
@@ -49,7 +49,30 @@ async def detach_chain_member(
     async with (
         nullcontext(test_session)
         if test_session is not None
-        else db_manager.get_session_async(tenant_key=tenant_key) as stand_down_session
+        else db_manager.get_session_async(tenant_key=tenant_key) as reset_session
     ):
-        await ProjectLifecycleRepository().stand_down_project_agents(stand_down_session, tenant_key, project_id)
+        await ProjectLifecycleRepository().reset_project_to_prestage(
+            reset_session, tenant_key, project_id, keep_status=True
+        )
     return True
+
+
+async def finish_chain_after_review(
+    *,
+    run: dict[str, Any],
+    db_manager: Any,
+    tenant_manager: Any,
+    test_session: Any | None = None,
+    websocket_manager: Any | None = None,
+) -> bool:
+    if run.get("review_policy") != "per_card" or not run.get("conductor_agent_id"):
+        return False
+    return await complete_chain_run_if_finished(
+        db_manager=db_manager,
+        tenant_manager=tenant_manager,
+        conductor_agent_id=run["conductor_agent_id"],
+        tenant_key=run["tenant_key"],
+        test_session=test_session,
+        websocket_manager=websocket_manager,
+        member_path=True,
+    )

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -17,6 +16,7 @@ from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.services.job_query_service import JobQueryService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str, agents: tuple[st
         tenant_key=tenant_key,
         product_id=product.id,
         execution_mode="multi_terminal",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     session.add(project)

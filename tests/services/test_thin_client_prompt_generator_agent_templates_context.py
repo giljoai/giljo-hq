@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import AgentTemplate, Product, Project, User
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.services.conftest import create_test_org
 
 
@@ -44,7 +44,7 @@ async def test_thin_prompt_token_estimation(db_session: AsyncSession):
         tenant_key=tenant_key,
         description="Token test description",
         mission="Token test mission",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
 
@@ -109,7 +109,7 @@ async def test_thin_prompt_includes_project_context(db_session: AsyncSession):
         tenant_key=tenant_a_key,
         description="Tenant A description",
         mission="Tenant A mission",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_a)
 
@@ -194,7 +194,7 @@ async def test_thin_prompt_works_without_field_toggles(db_session: AsyncSession)
         tenant_key=tenant_key,
         description="Default priority test description",
         mission="Default priority test mission",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
 
@@ -267,7 +267,7 @@ async def test_project_description_not_notes_in_context_string(db_session: Async
         tenant_key=tenant_key,
         description=project_description,
         mission="Test mission for notes bug",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

@@ -177,7 +177,7 @@ describe('ThreadTimeline agent badge consistency (FE-9490)', () => {
     const avatar = row.find('.timeline-msg__avatar')
     const reviewerHex = getAgentColor('reviewer').hex
     const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(reviewerHex.slice(i, i + 2), 16))
-    expect(avatar.attributes('style') || '').toContain(`color: rgb(${r}, ${g}, ${b})`)
+    expect(avatar.attributes('style') || '').toContain(`background-color: rgba(${r}, ${g}, ${b}, 0.2)`)
   })
 })
 
@@ -306,7 +306,7 @@ describe('ThreadTimeline reading surface (FE-9289c)', () => {
     ])
     const wrapper = mountTimeline(pinia)
     const row = wrapper.get('[data-testid="timeline-message-h1"]')
-    expect(row.get('[data-testid="message-harness"]').text()).toBe('claude-code')
+    expect(row.get('[data-testid="message-harness"]').text()).toBe('Claude Code')
     expect(row.text()).not.toContain('laptop-a')
   })
 

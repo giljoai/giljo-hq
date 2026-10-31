@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -14,6 +13,7 @@ import pytest
 from giljo_mcp.models import Product, Project
 from giljo_mcp.services.product_service import ProductService
 from tests.fixtures.base_fixtures import TestData
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,7 @@ async def test_activate_product_does_not_deactivate_projects_in_other_products(d
         status="active",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_x)
     await db_session.commit()
@@ -100,7 +100,7 @@ async def test_activate_product_emits_no_bulk_deactivation_event(db_session, db_
         status="active",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_1)
     await db_session.commit()
@@ -158,7 +158,7 @@ async def test_product_switch_multi_tenant_isolation(db_session, db_manager):
         mission="Test",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_x_tenant_a)
 
@@ -193,7 +193,7 @@ async def test_product_switch_multi_tenant_isolation(db_session, db_manager):
         mission="Test",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project_y_tenant_b)
     await db_session.commit()

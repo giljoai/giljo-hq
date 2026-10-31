@@ -292,7 +292,7 @@ class OAuthService:
         if auth_code.client_id != client_id:
             raise ValueError(f"client_id mismatch: expected '{auth_code.client_id}', got '{client_id}'")
 
-        await self._verify_client_authentication(
+        resolved_client = await self._verify_client_authentication(
             client_id=client_id,
             tenant_key=tenant_key_hint or auth_code.tenant_key,
             client_secret=client_secret,
@@ -338,6 +338,7 @@ class OAuthService:
             auth_code=auth_code,
             token_audience=bound_resource if bound_resource is not None else audience,
             idem_signature=idem_signature,
+            client_name=resolved_client.client_name,
         )
 
     async def _consume_code_and_issue_pair(
@@ -348,6 +349,7 @@ class OAuthService:
         auth_code: OAuthAuthorizationCode,
         token_audience: str | None,
         idem_signature: str,
+        client_name: str,
     ) -> dict:
         from giljo_mcp.services import oauth_refresh_service as _refresh
 
@@ -375,6 +377,7 @@ class OAuthService:
             if user is None:
                 raise ValueError("User associated with authorization code not found")
 
+            family_id = _refresh.new_family_id()
             access_token = JWTManager.create_access_token(
                 user_id=UUID(user.id),
                 username=user.username,
@@ -384,6 +387,7 @@ class OAuthService:
                 scope=auth_code.scope,
                 revocation_epoch=user.token_revocation_epoch or 0,
                 client_id=client_id if is_cimd_client_id(client_id) else None,
+                family_id=family_id,
             )
 
             logger.info(
@@ -400,7 +404,7 @@ class OAuthService:
 
             refresh_token = await _refresh.issue_refresh_token(
                 self._db,
-                family_id=_refresh.new_family_id(),
+                family_id=family_id,
                 client_id=client_id,
                 tenant_key=user.tenant_key,
                 user_id=user.id,
@@ -408,6 +412,7 @@ class OAuthService:
                 aud=token_audience or "",
                 lifetime_seconds=REFRESH_TOKEN_LIFETIME_SECONDS,
                 origin_code_hash=_refresh.hash_authorization_code(code),
+                client_name=client_name,
             )
             response["refresh_token"] = refresh_token
             response["refresh_expires_in"] = REFRESH_TOKEN_LIFETIME_SECONDS

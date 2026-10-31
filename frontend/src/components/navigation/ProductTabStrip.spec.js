@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import ProductTabStrip from './ProductTabStrip.vue'
 
 const TAB_A = { id: 'prod-a', name: 'Product A' }
@@ -117,5 +118,71 @@ describe('ProductTabStrip — the All tab (FE-9680)', () => {
     const tabs = wrapper.findAll('[role="tab"]')
     expect(tabs[0].attributes('aria-selected')).toBe('false')
     expect(tabs[2].attributes('aria-selected')).toBe('true')
+  })
+})
+
+describe('ProductTabStrip: one row with a +N more menu', () => {
+  const TABS = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id: `prod-${id}`, name: `Product ${id}` }))
+  const menuStubs = {
+    'v-menu': menuStub,
+    'v-list-item': { template: '<div class="v-list-item" v-bind="$attrs"><slot /><slot name="append" /></div>' },
+  }
+
+  const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
+  const client = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')
+  afterEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', offset)
+    Object.defineProperty(Element.prototype, 'clientWidth', client)
+  })
+
+  function mountNarrow(viewedId, stripWidth) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get() {
+        if (this.hasAttribute('data-measure-tab')) return 120
+        if (this.hasAttribute('data-measure-more')) return 80
+        return 0
+      },
+    })
+    Object.defineProperty(Element.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return this.getAttribute('data-testid') === 'product-tab-strip' ? stripWidth : 0
+      },
+    })
+    return mount(ProductTabStrip, { props: { tabs: TABS, viewedId }, global: { stubs: menuStubs } })
+  }
+
+  it('shows the tabs that fit and puts the rest behind +N more', async () => {
+    const wrapper = mountNarrow('prod-a', 480)
+    await nextTick()
+    const shown = wrapper.findAll('[role="tab"]').map((t) => t.attributes('data-testid'))
+    expect(shown).toEqual(['product-tab-prod-a', 'product-tab-prod-b', 'product-tab-prod-c'])
+    expect(wrapper.get('[data-testid="product-tab-more"]').text()).toContain('+2 more')
+    expect(wrapper.find('[data-testid="product-tab-more-prod-d"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="product-tab-more-prod-e"]').exists()).toBe(true)
+  })
+
+  it('keeps the viewed tab on the row even when it is last', async () => {
+    const wrapper = mountNarrow('prod-e', 480)
+    await nextTick()
+    const shown = wrapper.findAll('[role="tab"]').map((t) => t.attributes('data-testid'))
+    expect(shown).toContain('product-tab-prod-e')
+    expect(shown).toHaveLength(3)
+  })
+
+  it('picking or closing a tab from the menu emits for that tab', async () => {
+    const wrapper = mountNarrow('prod-a', 480)
+    await nextTick()
+    await wrapper.get('[data-testid="product-tab-more-prod-d"]').trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['prod-d']])
+    await wrapper.findAll('[data-testid="product-tab-more-close"]')[0].trigger('click')
+    expect(wrapper.emitted('close')).toEqual([['prod-d']])
+  })
+
+  it('shows no +N more control when every tab fits', () => {
+    const wrapper = mountNarrow('prod-a', 2000)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
+    expect(wrapper.find('[data-testid="product-tab-more"]').exists()).toBe(false)
   })
 })

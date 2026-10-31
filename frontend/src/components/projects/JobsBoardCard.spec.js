@@ -269,14 +269,14 @@ describe('JobsBoardCard fixes (FE-9678)', () => {
   it('colours the taxonomy pill from the project type, the same helper the Projects list uses', () => {
     const wrapper = mountCard({ project: secProject, agents: implementingAgents })
     const pill = wrapper.find('[data-testid="jb-tax-pill"]')
-    expect(pill.element.style.color).toBe('rgb(224, 82, 82)')
+    expect(pill.element.style.color).toBe('rgb(233, 134, 134)')
     expect(pill.element.style.backgroundColor).toMatch(/rgba\(224, 82, 82, 0\.1[45]/)
   })
 
   it('falls back to the default type colour when the row carries no type', () => {
     const wrapper = mountCard({ project: { ...secProject, project_type: null }, agents: implementingAgents })
     const pill = wrapper.find('[data-testid="jb-tax-pill"]')
-    expect(pill.element.style.color).toBe('rgb(96, 125, 139)')
+    expect(pill.element.style.color).toBe('rgb(152, 171, 180)')
   })
 
   it('renders the orchestrator row first whatever order the store handed the agents', () => {

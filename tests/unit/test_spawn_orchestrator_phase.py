@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -20,6 +19,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -53,7 +53,7 @@ async def _seed_active_project(
         mission="CE-0026 test mission",
         status="active",
         staging_status=staging_status,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         created_at=datetime.now(UTC),
     )
     db_session.add(project)

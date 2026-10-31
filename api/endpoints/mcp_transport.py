@@ -286,6 +286,23 @@ def _stamp_client_name(scope: Scope, client_info: Any) -> None:
     name = client_info.get("name") if isinstance(client_info, dict) else None
     if isinstance(name, str) and name:
         scope.setdefault("state", {})["mcp_client_name"] = name
+        version = client_info.get("version")
+        if isinstance(version, str) and version:
+            scope["state"]["mcp_client_version"] = version
+
+
+def _peek_tool_target(body: bytes) -> dict[str, str]:
+    try:
+        arguments = json.loads(body).get("params", {}).get("arguments", {})
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return {}
+    if not isinstance(arguments, dict):
+        return {}
+    return {
+        key: arguments[key]
+        for key in ("product_id", "project_id")
+        if isinstance(arguments.get(key), str) and 0 < len(arguments[key]) <= 36
+    }
 
 
 def _stamp_resolved_preset(scope: Scope, session_row: Any) -> None:

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -25,6 +24,7 @@ from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.template_validation import resolve_harness_name
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -58,7 +58,7 @@ async def _seed_project(
         status="active",
         tenant_key=tenant_key,
         product_id=product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode=execution_mode,
         staging_status=staging_status,
         implementation_launched_at=None,

@@ -6,6 +6,7 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -203,6 +204,29 @@ class ProjectReviewedResponse(BaseModel):
 
     id: str
     reviewed_at: datetime
+
+
+BULK_REVIEW_MAX = 500
+
+
+class ProjectBulkReviewedRequest(BaseModel):
+    """The finished projects to mark reviewed in one step (at most 500)."""
+
+    project_ids: list[UUID] = Field(..., min_length=1, max_length=BULK_REVIEW_MAX)
+
+
+class ProjectBulkReviewSkip(BaseModel):
+    """A project the bulk review left alone, and why."""
+
+    id: str
+    reason: str
+
+
+class ProjectBulkReviewedResponse(BaseModel):
+    """How many projects were marked reviewed and which were skipped."""
+
+    marked: int
+    skipped: list[ProjectBulkReviewSkip]
 
 
 class ProjectDeleteResponse(BaseModel):

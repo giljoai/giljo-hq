@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -18,6 +17,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.sequence_run_live_filter import filter_runs_by_product, filter_runs_with_live_members
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def _project(session: AsyncSession, tenant: str, pid: str, *, status: str,
             status=status,
             tenant_key=tenant,
             execution_mode="multi_terminal",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
             deleted_at=deleted_at,
         )
     )
@@ -112,7 +112,7 @@ async def test_filter_runs_by_product_keeps_a_stale_deleted_at_member(db_session
             status="active",
             tenant_key=tenant,
             execution_mode="multi_terminal",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
             deleted_at=datetime.now(UTC),
         )
     )

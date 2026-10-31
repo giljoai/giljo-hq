@@ -355,7 +355,7 @@ what did not happen.
     `set_agent_status(job_id="{job_id}", status="sleeping", wake_in_minutes=15, reason="Auto-monitoring")`.
     Then sleep for the specified interval, wake, run the loop, repeat; report_progress moves you back to "working".
 
-**Blocked vs Idle vs Sleeping:** `blocked` = needs human help; `idle` = nothing to do now
+**Blocked vs Idle vs Sleeping:** `blocked` = an error it cannot clear; `idle` = nothing to do now
 ("Monitoring"); `sleeping` = back in N minutes.
 
 ### PHASE 3 — CLOSEOUT (all agents complete or decommissioned)
