@@ -44,6 +44,6 @@ describe('tinted badges', () => {
       props: { modelValue: true, agent: { id: 'j1', agent_id: 'j1', agent_display_name: 'implementer', agent_name: 'impl' } },
       global: { stubs: { 'v-dialog': { template: '<div><slot /></div>', props: ['modelValue'] } } },
     })
-    expect(tint(w.find('.agent-tinted-badge'))).toEqual({ rgb: '212, 176, 138', rest: '' })
+    expect(w.find('.agent-tinted-badge').attributes('style')).toMatch(/^background-color: rgba\(109, 179, 228, 0\.15\); color: rgb\(160, 206, 237\);$/)
   })
 })

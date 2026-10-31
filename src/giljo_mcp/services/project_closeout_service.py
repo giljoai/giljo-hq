@@ -16,6 +16,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import BaseGiljoError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
+from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import (
@@ -25,6 +26,7 @@ from giljo_mcp.schemas.service_responses import (
     ProjectCloseOutResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.agent_status_tally import tally_agent_statuses
 from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
 from giljo_mcp.services.closeout_ws_broadcast import (
     broadcast_agent_status_events,
@@ -444,6 +446,10 @@ class ProjectCloseoutService:
 
             report = await self.evaluate_closeout_readiness(session, project_id, tenant_key)
             counts = report.status_counts
+            ops_repo = AgentOperationsRepository()
+            executions = await ops_repo.get_workflow_executions(session, tenant_key, project_id)
+            todo_map = await ops_repo.get_todo_counts_by_job(session, tenant_key, [ex.job_id for ex in executions])
+            tally = tally_agent_statuses(executions, todo_map)
 
             status = str(getattr(project, "status", "") or "")
             execution_mode = getattr(project, "execution_mode", None)
@@ -489,11 +495,12 @@ class ProjectCloseoutService:
                 "implementation_launched_at": launched_at.isoformat() if launched_at else None,
                 "completed_at": completed_at.isoformat() if completed_at else None,
                 "agent_status_counts": {
-                    "total": counts["total"],
-                    "complete": counts["completed"],
-                    "blocked": counts["blocked"],
-                    "silent": counts.get("silent", 0),
-                    "active": counts["active"],
+                    "total": tally.total,
+                    "complete": tally.completed,
+                    "blocked": tally.blocked,
+                    "silent": tally.silent,
+                    "active": tally.active,
+                    "holding": tally.holding,
                 },
                 "readiness": {
                     "can_close": all_finished,

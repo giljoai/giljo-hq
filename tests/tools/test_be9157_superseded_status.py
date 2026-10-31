@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
@@ -19,6 +18,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.tools._memory_helpers import refuse_if_superseded
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 _PRODUCT_SERVICE_PATH = "giljo_mcp.services.product_service.ProductService"
@@ -192,7 +192,7 @@ async def superseding_setup(db_manager, db_session):
             description="d",
             mission="m",
             status="inactive",
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
 
     victim = _proj(f"be9157-victim-{suffix}", "Victim")
@@ -318,7 +318,7 @@ async def superseded_tool_client(db_manager, db_session, monkeypatch):
         description="BE-9157",
         mission="superseded",
         status="superseded",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

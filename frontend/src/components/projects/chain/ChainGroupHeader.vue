@@ -11,9 +11,10 @@
     <slot name="controls" />
 
     <ChainMissionWindow :mission="chainCtx.chainMission" class="cgh-goal">
-      <template v-if="running" #actions>
+      <template v-if="controls" #actions>
         <div class="cgh-actions" data-testid="chain-header-actions">
           <ChainStopControl
+            v-if="running"
             :run="chainCtx.run"
             :model-value="controls.showChainStopConfirm"
             :stopping="controls.chainStopping"
@@ -22,10 +23,12 @@
             @cancel="controls.cancelChainStop"
           />
           <button
+            v-if="running"
             type="button"
             class="cgh-link"
             :disabled="controls.deactivating"
             :aria-busy="controls.deactivating ? 'true' : undefined"
+            :title="DEACTIVATE_CHAIN_TOOLTIP"
             data-testid="chain-group-deactivate"
             @click="controls.openDeactivateConfirm"
           >
@@ -41,6 +44,7 @@
 import { computed } from 'vue'
 import ChainMissionWindow from './ChainMissionWindow.vue'
 import ChainStopControl from './ChainStopControl.vue'
+import { DEACTIVATE_CHAIN_TOOLTIP } from './chainControlTooltips.js'
 
 const props = defineProps({
   chainCtx: { type: Object, required: true },

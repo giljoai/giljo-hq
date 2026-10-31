@@ -290,9 +290,13 @@ async function handleLogin() {
           router.push('/org-setup')
           return
         }
-      } catch {
-        // Silently continue to dashboard if org-setup check fails
-        // (endpoint may not exist, network issue, etc.)
+      } catch (orgErr) {
+        const orgStatusCode = orgErr?.response?.status
+        if (orgStatusCode === 429 || orgStatusCode === 503) {
+          error.value =
+            "We couldn't check your account setup just now. Please wait a moment and sign in again."
+          return
+        }
       }
     }
 

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -21,6 +20,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def _seed(db_manager, tenant_key: str, *, status: str = "inactive", **proj
                 description="BE-9744a split-undo boundary test project",
                 mission=project_kwargs.pop("mission", "a staging mission"),
                 status=status,
-                series_number=random.randint(1, 9999),
+                series_number=next_series_number(),
                 **project_kwargs,
             )
         )

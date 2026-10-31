@@ -39,7 +39,7 @@ class _RequestLike(Protocol):
     def headers(self) -> _HeadersLike: ...
 
 
-def parse_trusted_proxies(raw: str | None) -> list[_TrustedNetwork]:
+def parse_trusted_proxies(raw: str | None, env_name: str = TRUSTED_PROXIES_ENV) -> list[_TrustedNetwork]:
     if not raw:
         return []
     networks: list[_TrustedNetwork] = []
@@ -50,7 +50,7 @@ def parse_trusted_proxies(raw: str | None) -> list[_TrustedNetwork]:
         try:
             networks.append(ipaddress.ip_network(candidate, strict=False))
         except ValueError:
-            logger.warning("Ignoring malformed %s entry: %r", TRUSTED_PROXIES_ENV, candidate)
+            logger.warning("Ignoring malformed %s entry: %r", env_name, candidate)
     return networks
 
 

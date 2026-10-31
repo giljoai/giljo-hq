@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -22,6 +21,7 @@ from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.write_memory_entry import write_360_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def _seed_team(
         mission="verify the project_completion gate reads the drain's store",
         status="active",
         created_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

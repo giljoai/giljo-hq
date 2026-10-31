@@ -57,21 +57,29 @@ export function useBulkSelection() {
   }
 }
 
-export async function runBulk(rows, action, { skipReason } = {}) {
+export const BULK_REQUEST_MAX = 500
+
+export async function runBulkBatch(rows, send, { skipReason } = {}) {
   const done = []
   const skipped = []
   const failed = []
+  const toSend = []
   for (const row of rows || []) {
     const reason = skipReason ? skipReason(row) : null
-    if (reason) {
-      skipped.push({ row, reason })
-      continue
-    }
+    if (reason) skipped.push({ row, reason })
+    else toSend.push(row)
+  }
+  const byId = new Map(toSend.map((row) => [row.id, row]))
+  for (let start = 0; start < toSend.length; start += BULK_REQUEST_MAX) {
+    const chunk = toSend.slice(start, start + BULK_REQUEST_MAX)
     try {
-      await action(row)
-      done.push(row)
+      const result = await send(chunk.map((row) => row.id))
+      for (const id of result.done || []) done.push(byId.get(id))
+      for (const { id, reason } of result.skipped || []) skipped.push({ row: byId.get(id), reason })
+      for (const { id, reason } of result.failed || []) failed.push({ row: byId.get(id), reason })
     } catch (error) {
-      failed.push({ row, reason: parseErrorResponse(error).message })
+      const reason = parseErrorResponse(error).message
+      for (const row of chunk) failed.push({ row, reason })
     }
   }
   return { done, skipped, failed }

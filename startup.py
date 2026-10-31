@@ -89,6 +89,7 @@ from startup_support.console import (
     print_success,
     print_warning,
 )
+from startup_support.frontend_deps import frontend_deps_need_install
 from startup_support.migration_stamp import (  # noqa: F401 -- re-exported seam
     _check_and_stamp_migration_version,
     _get_database_url,
@@ -367,12 +368,7 @@ def start_frontend_server(verbose: bool = False) -> subprocess.Popen | None:
             print_warning("npm not found in PATH - skipping frontend server")
             return None
 
-        node_modules_marker = frontend_dir / "node_modules" / ".package-lock.json"
-        package_lock = frontend_dir / "package-lock.json"
-        needs_install = not node_modules_marker.exists() or (
-            package_lock.exists() and package_lock.stat().st_mtime > node_modules_marker.stat().st_mtime
-        )
-        if needs_install:
+        if frontend_deps_need_install(frontend_dir, include_dev=True):
             print_info("Installing frontend dependencies (npm ci)...")
             subprocess.run([npm_executable, "ci"], cwd=str(frontend_dir), check=True)
 
@@ -709,12 +705,7 @@ def run_startup(
                 return 1
         else:
             print_info("Rebuilding frontend...")
-            node_modules_marker = frontend_dir / "node_modules" / ".package-lock.json"
-            package_lock = frontend_dir / "package-lock.json"
-            needs_install = not node_modules_marker.exists() or (
-                package_lock.exists() and package_lock.stat().st_mtime > node_modules_marker.stat().st_mtime
-            )
-            if needs_install:
+            if frontend_deps_need_install(frontend_dir, include_dev=False):
                 print_info("Installing frontend dependencies (npm ci --omit=dev)...")
                 ci_result = subprocess.run([npm_cmd, "ci", "--omit=dev"], cwd=str(frontend_dir), check=False)
                 if ci_result.returncode != 0:

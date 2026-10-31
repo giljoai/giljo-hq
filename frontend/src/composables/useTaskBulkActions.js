@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useToast } from '@/composables/useToast'
-import { useBulkSelection, runBulk, describeBulkResult, bulkResultType } from '@/composables/useBulkSelection'
+import { useBulkSelection, runBulkBatch, describeBulkResult, bulkResultType } from '@/composables/useBulkSelection'
 import { isHandoverRow } from '@/utils/taxonomyBadge'
 
 export const PENDING_HANDOVER_REASON = 'pending handover (nobody has read it yet)'
@@ -29,7 +29,7 @@ export function useTaskBulkActions({ visibleTasks, filterKeys }) {
   async function run(verb, rows, action, opts) {
     busy.value = true
     try {
-      const result = await runBulk(rows, action, opts)
+      const result = await runBulkBatch(rows, (ids) => taskStore.bulkClose(action, ids), opts)
       const leftover = new Set([...result.skipped, ...result.failed].map(({ row }) => row.id))
       const remaining = bulk.selectedItems.value.filter((t) => leftover.has(t.id) || !rows.includes(t))
       bulk.setSelectedIds(
@@ -45,18 +45,18 @@ export function useTaskBulkActions({ visibleTasks, filterKeys }) {
 
   function archiveSelected() {
     const rows = bulk.selectedItems.value.filter((t) => !t.hidden)
-    return run('archived', rows, (t) => taskStore.updateTask(t.id, { hidden: true }), {
+    return run('archived', rows, 'archive', {
       skipReason: (t) => (isHandoverRow(t) && t.status === 'pending' ? PENDING_HANDOVER_REASON : null),
     })
   }
 
   function unarchiveSelected() {
     const rows = bulk.selectedItems.value.filter((t) => t.hidden)
-    return run('unarchived', rows, (t) => taskStore.updateTask(t.id, { hidden: false }))
+    return run('unarchived', rows, 'unarchive')
   }
 
   function deleteSelected() {
-    return run('deleted', bulk.selectedItems.value.slice(), (t) => taskStore.deleteTask(t.id))
+    return run('deleted', bulk.selectedItems.value.slice(), 'delete')
   }
 
   return {

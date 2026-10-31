@@ -336,8 +336,12 @@ async function handleSubmit() {
           router.push('/org-setup')
           return
         }
-      } catch {
-        // Silently continue to dashboard if org-setup check fails
+      } catch (orgErr) {
+        const orgStatusCode = orgErr?.response?.status
+        if (orgStatusCode === 429 || orgStatusCode === 503) {
+          router.push('/login')
+          return
+        }
       }
     }
 

@@ -2,16 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { computed } from 'vue'
 import { useProjectBulkActions, IN_CHAIN_REASON } from './useProjectBulkActions'
 
-const mockUpdateProject = vi.fn()
-const mockDeleteProject = vi.fn()
+const mockBulkClose = vi.fn()
+const mockCancelRefresh = vi.fn()
 const mockFetchHidden = vi.fn()
 const mockFetchAllMatching = vi.fn()
 const mockShowToast = vi.fn()
 
 vi.mock('@/stores/projects', () => ({
   useProjectStore: () => ({
-    updateProject: mockUpdateProject,
-    deleteProject: mockDeleteProject,
+    bulkClose: mockBulkClose,
+    debouncedRefreshList: { cancel: mockCancelRefresh },
     fetchHiddenProjects: mockFetchHidden,
     fetchAllMatchingProjects: mockFetchAllMatching,
   }),
@@ -36,9 +36,8 @@ function setup({ inChain = [] } = {}) {
 
 describe('useProjectBulkActions', () => {
   beforeEach(() => {
-    for (const m of [mockUpdateProject, mockDeleteProject, mockFetchHidden, mockFetchAllMatching, mockShowToast]) m.mockReset()
-    mockUpdateProject.mockResolvedValue({})
-    mockDeleteProject.mockResolvedValue(undefined)
+    for (const m of [mockBulkClose, mockCancelRefresh, mockFetchHidden, mockFetchAllMatching, mockShowToast]) m.mockReset()
+    mockBulkClose.mockImplementation(async (_action, ids) => ({ done: ids, skipped: [], failed: [] }))
   })
 
   it('archive skips a project in an active chain and names why, then reloads the list', async () => {
@@ -48,11 +47,39 @@ describe('useProjectBulkActions', () => {
 
     const result = await api.archiveSelected()
 
-    expect(mockUpdateProject.mock.calls).toEqual([['p1', { hidden: true }]])
+    expect(mockBulkClose.mock.calls).toEqual([['archive', ['p1']]])
     expect(result.skipped).toEqual([{ row: rows[1], reason: IN_CHAIN_REASON }])
     expect(mockShowToast).toHaveBeenCalledWith({ message: `1 archived, 1 skipped: ${IN_CHAIN_REASON}`, type: 'warning' })
     expect(reloadProjects).toHaveBeenCalled()
     expect(mockFetchHidden).toHaveBeenCalled()
+  })
+
+  it('archiving 20 selected projects is ONE request, ONE toast and ONE reload', async () => {
+    const rows = Array.from({ length: 20 }, (_, i) => inactive(`p${i}`))
+    const { api, reloadProjects } = setup()
+    api.onSelectedIds(rows.map((r) => r.id), rows)
+
+    await api.archiveSelected()
+
+    expect(mockBulkClose).toHaveBeenCalledTimes(1)
+    expect(mockBulkClose.mock.calls[0][1]).toHaveLength(20)
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith({ message: '20 archived', type: 'success' })
+    expect(reloadProjects).toHaveBeenCalledTimes(1)
+    expect(mockFetchHidden).toHaveBeenCalledTimes(1)
+    expect(mockCancelRefresh).toHaveBeenCalled()
+  })
+
+  it('shows what the server skipped, grouped, in the same single toast', async () => {
+    mockBulkClose.mockResolvedValue({ done: ['p1'], skipped: [{ id: 'p2', reason: 'not found' }], failed: [] })
+    const rows = [inactive('p1', { hidden: true }), inactive('p2', { hidden: true })]
+    const { api } = setup()
+    api.onSelectedIds(['p1', 'p2'], rows)
+
+    await api.unarchiveSelected()
+
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith({ message: '1 unarchived, 1 skipped: not found', type: 'warning' })
   })
 
   it('delete also leaves chain members alone', async () => {
@@ -60,7 +87,7 @@ describe('useProjectBulkActions', () => {
     const { api } = setup({ inChain: ['p1'] })
     api.onSelectedIds(['p1', 'p2'], rows)
     await api.deleteSelected()
-    expect(mockDeleteProject.mock.calls).toEqual([['p2']])
+    expect(mockBulkClose.mock.calls).toEqual([['delete', ['p2']]])
   })
 
   it('Chain opens the confirm step with only the eligible rows, and creates nothing itself', () => {
@@ -76,7 +103,7 @@ describe('useProjectBulkActions', () => {
     expect(api.showChainDialog.value).toBe(true)
     expect(api.chainRows.value.map((p) => p.id)).toEqual(['p1', 'p2'])
     expect(api.bulk.count.value).toBe(4)
-    expect(mockUpdateProject).not.toHaveBeenCalled()
+    expect(mockBulkClose).not.toHaveBeenCalled()
 
     api.onChainStarted()
     expect(api.bulk.count.value).toBe(0)

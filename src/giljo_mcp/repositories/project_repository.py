@@ -28,6 +28,7 @@ from giljo_mcp.repositories._project_keyset import (
     keyset_axis_for_sort_key,
     project_keyset_after,
 )
+from giljo_mcp.repositories._series_allocation import lowest_free_series_number
 
 
 logger = logging.getLogger(__name__)
@@ -84,20 +85,7 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         tenant_key: str,
         product_id: str | None,
     ) -> int:
-        project_max_q = select(func.coalesce(func.max(Project.series_number), 0)).where(
-            Project.tenant_key == tenant_key,
-            Project.product_id == product_id,
-            project_not_trashed(),
-        )
-        task_max_q = select(func.coalesce(func.max(Task.series_number), 0)).where(
-            Task.tenant_key == tenant_key,
-            Task.product_id == product_id,
-            Task.deleted_at.is_(None),
-        )
-
-        project_max = (await session.execute(project_max_q)).scalar_one()
-        task_max = (await session.execute(task_max_q)).scalar_one()
-        next_series_number = max(project_max, task_max) + 1
+        next_series_number = await lowest_free_series_number(session, tenant_key, product_id)
         if next_series_number > MAX_SERIES_NUMBER:
             raise ValidationError(
                 message=f"Serial space exhausted: this product has used all serials "

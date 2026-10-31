@@ -81,9 +81,9 @@ class ContextToolsMixin:
             "is_active": product.is_active,
             "created_at": product.created_at.isoformat() if product.created_at else None,
             "next_step": (
-                "Product created (inactive). Populate its card via update_product_context; "
-                "write a vision document via create_vision_document. The user activates it "
-                "from the dashboard review screen."
+                f"Product created and {'shown in the product tabs' if product.is_active else 'hidden from the product tabs'}. "
+                "Populate its card via update_product_context; "
+                "write a vision document via create_vision_document."
             ),
         }
 

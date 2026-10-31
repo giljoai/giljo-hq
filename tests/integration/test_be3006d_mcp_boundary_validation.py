@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import create_autospec
@@ -33,6 +32,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 _LEAK_MARKERS = ("[SQL:", "[parameters:", "Traceback", "INSERT INTO", "psycopg", "secret-bind-value")
@@ -343,7 +343,7 @@ async def _seed_impl_orchestrator(db_session, tenant_key: str) -> AgentJob:
         mission="x",
         status="active",
         staging_status="staging_complete",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

@@ -284,6 +284,24 @@ export const useProjectStore = defineStore('projects', () => {
     })
   }
 
+  async function bulkClose(action, ids) {
+    const response = await api.projects.bulk(action, ids)
+    const result = response.data
+    if (action !== 'unarchive') removeProjectsLocally(result.done)
+    if (action === 'delete') await fetchDeletedProjects()
+    return result
+  }
+
+  function removeProjectsLocally(ids) {
+    const gone = new Set(ids)
+    projects.value = projects.value.filter((p) => !gone.has(p.id))
+  }
+
+  function handleBulkUpdated(data) {
+    if (data?.action !== 'unarchive') removeProjectsLocally(data?.ids || [])
+    debouncedRefreshList()
+  }
+
   async function activateProject(id) {
     loading.value = true
     error.value = null
@@ -430,6 +448,11 @@ export const useProjectStore = defineStore('projects', () => {
     }
   }
 
+  async function markProjectsReviewed(ids) {
+    const response = await api.projects.markReviewedBulk(ids)
+    return { marked: response.data.marked, skipped: response.data.skipped || [] }
+  }
+
   return {
     projects,
     deletedProjects,
@@ -443,6 +466,7 @@ export const useProjectStore = defineStore('projects', () => {
     activeProjects,
     projectById,
 
+    markProjectsReviewed,
     fetchProjects,
     refreshList,
     debouncedRefreshList,
@@ -454,6 +478,8 @@ export const useProjectStore = defineStore('projects', () => {
     createProject,
     updateProject,
     deleteProject,
+    bulkClose,
+    handleBulkUpdated,
     fetchAllMatchingProjects,
     activateProject,
     deactivateProject,

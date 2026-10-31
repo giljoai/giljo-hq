@@ -9,6 +9,7 @@ from typing import Any
 
 import tiktoken
 
+from giljo_mcp.context_management.tiktoken_bundle import use_bundled_tiktoken_cache
 from giljo_mcp.exceptions import ContextError
 from giljo_mcp.tools.chunking import VISION_DELIVERY_BUDGET, EnhancedChunker
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -22,6 +23,7 @@ class VisionDocumentChunker:
     def __init__(self, target_chunk_size: int = VISION_DELIVERY_BUDGET):
         self.target_chunk_size = target_chunk_size
 
+        use_bundled_tiktoken_cache()
         try:
             self.encoding = tiktoken.get_encoding("cl100k_base")
         except (ValueError, KeyError, ImportError):

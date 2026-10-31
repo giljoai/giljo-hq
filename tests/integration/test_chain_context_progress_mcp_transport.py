@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import uuid
 
 import pytest
@@ -22,6 +21,7 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def _seed_two_linked_projects(db_manager, tenant_key: str) -> tuple[str, s
                     status="completed",
                     tenant_key=tenant_key,
                     execution_mode=_MODE,
-                    series_number=random.randint(1, 9000),
+                    series_number=next_series_number(),
                 )
             )
         await session.commit()

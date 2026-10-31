@@ -184,6 +184,7 @@ import { BOUND_THREAD_MARKER_SUBJECT } from '@/composables/useProjectBoundThread
 import AgentPill from '@/components/hub/AgentPill.vue'
 import ThreadDates from '@/components/hub/ThreadDates.vue'
 import { threadResolveControl } from '@/components/hub/useThreadResolve'
+import { harnessLabel } from '@/components/hub/rosterState'
 
 const props = defineProps({
   thread: { type: Object, required: true },
@@ -233,10 +234,6 @@ const overflowTitle = computed(() =>
     .join('\n'),
 )
 
-function harnessLabel(harness) {
-  if (!harness || harness === 'generic') return 'Generic Harness'
-  return String(harness).split(' · ')[0]
-}
 
 const excerpt = computed(() => {
   const raw = props.thread.last_message?.excerpt || ''

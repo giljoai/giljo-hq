@@ -70,9 +70,20 @@ describe('useDashboardRealtime — FE-9501c (D7)', () => {
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
+  it('a bulk archive / delete event refreshes the dashboard like any project change', () => {
+    const refetch = vi.fn()
+    mountHost(refetch)
+
+    fire('projects:bulk_updated')
+    fire('tasks:bulk_updated')
+    vi.advanceTimersByTime(20)
+
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
   it('unsubscribes every handler on unmount', () => {
     const wrapper = mountHost(vi.fn())
     wrapper.unmount()
-    expect(unsub).toHaveBeenCalledTimes(3)
+    expect(unsub).toHaveBeenCalledTimes(5)
   })
 })

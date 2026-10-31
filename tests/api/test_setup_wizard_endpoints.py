@@ -150,6 +150,7 @@ async def test_patch_setup_state_invalid_step_rejected(api_client, auth_headers)
 async def test_patch_setup_state_unauthenticated(api_client):
     response = await api_client.patch(
         "/api/auth/me/setup-state",
+        headers={"Cookie": "csrf_token=t", "X-CSRF-Token": "t"},
         json={"setup_step_completed": 1},
     )
     assert response.status_code == 401, f"Expected 401, got {response.status_code}: {response.text}"

@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from datetime import UTC
 
@@ -20,6 +19,7 @@ from giljo_mcp.schemas.service_responses import (
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -63,7 +63,7 @@ async def test_project(db_manager: DatabaseManager, test_product: dict):
             status="active",
             execution_mode="multi_terminal",
             implementation_launched_at=datetime.now(UTC),
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         session.add(project)
         await session.commit()
@@ -87,7 +87,7 @@ async def test_project_not_launched(db_manager: DatabaseManager, test_product: d
             status="active",
             execution_mode="multi_terminal",
             implementation_launched_at=None,
-            series_number=random.randint(1, 9000),
+            series_number=next_series_number(),
         )
         session.add(project)
         await session.commit()

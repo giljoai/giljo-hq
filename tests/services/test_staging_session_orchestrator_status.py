@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -22,6 +21,8 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.services.silence_detector import SilenceDetector
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.tenant_guard import tenant_session_context
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -43,7 +44,7 @@ async def _seed(db_session, tenant_key: str) -> tuple[str, str]:
         status="active",
         staging_status="staging",
         execution_mode="subagent",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()
@@ -94,9 +95,10 @@ async def _seed(db_session, tenant_key: str) -> tuple[str, str]:
 
 async def _execution(db_session, tenant_key: str, job_id: str) -> AgentExecution:
     db_session.expire_all()
-    return await db_session.scalar(
-        select(AgentExecution).where(AgentExecution.tenant_key == tenant_key, AgentExecution.job_id == job_id)
-    )
+    with tenant_session_context(db_session, tenant_key):
+        return await db_session.scalar(
+            select(AgentExecution).where(AgentExecution.tenant_key == tenant_key, AgentExecution.job_id == job_id)
+        )
 
 
 def _service(db_manager, db_session) -> OrchestrationService:
@@ -158,8 +160,15 @@ async def test_staging_end_parks_at_waiting_and_implementation_starts_it_again(d
 
 async def test_orchestrator_at_the_gate_is_never_flagged_silent(db_manager, db_session):
     tenant_key = TenantManager.generate_tenant_key()
-    _project_id, orch_job_id = await _seed(db_session, tenant_key)
+    other_tenant = TenantManager.generate_tenant_key()
+    _other_project_id, other_job_id = await _seed(db_session, other_tenant)
     service = _service(db_manager, db_session)
+    await service._mission.get_staging_instructions(other_job_id, other_tenant)
+    other = await _execution(db_session, other_tenant, other_job_id)
+    other.last_progress_at = datetime.now(UTC) - timedelta(hours=3)
+    await db_session.commit()
+
+    _project_id, orch_job_id = await _seed(db_session, tenant_key)
     await service._mission.get_staging_instructions(orch_job_id, tenant_key)
     await service.complete_job(orch_job_id, {"summary": "staged"}, tenant_key=tenant_key)
 
@@ -170,6 +179,7 @@ async def test_orchestrator_at_the_gate_is_never_flagged_silent(db_manager, db_s
     await _detector()._detect_silent_agents(db_session, threshold_minutes=10)
 
     assert (await _execution(db_session, tenant_key, orch_job_id)).status == "waiting"
+    assert (await _execution(db_session, other_tenant, other_job_id)).status == "silent"
 
 
 async def test_a_quiet_planning_orchestrator_is_flagged_silent(db_manager, db_session):

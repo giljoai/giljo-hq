@@ -25,6 +25,8 @@ EXPORT_EXCLUDE: frozenset[str] = frozenset(
         "password_reset_tokens",
         "api_keys",
         "oauth_clients",
+        "oauth_login_ips",
+        "oauth_logins",
         "oauth_refresh_tokens",
         "oauth_revoked_tokens",
         "org_api_keys",

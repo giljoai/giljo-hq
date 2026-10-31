@@ -44,7 +44,7 @@ describe('ThreadTimeline compact rows (FE-9742)', () => {
     const row = mountTl().get('[data-testid="timeline-message-m1"]')
     const header = row.get('.timeline-msg__header')
     expect(header.find('.timeline-msg__sender').text()).toBe('implementer')
-    expect(header.find('[data-testid="message-harness"]').text()).toBe('claude-code')
+    expect(header.find('[data-testid="message-harness"]').text()).toBe('Claude Code')
     expect(header.find('[data-testid="message-time"]').exists()).toBe(true)
     const html = row.html()
     expect(html.indexOf('timeline-msg__header')).toBeLessThan(html.indexOf('timeline-msg__content'))

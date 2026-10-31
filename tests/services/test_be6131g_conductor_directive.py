@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -25,7 +24,7 @@ from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
-from tests.helpers.taxonomy_seeds import next_series_number
+from tests.helpers.taxonomy_seeds import next_series_number, next_thread_serial
 
 
 pytestmark = pytest.mark.asyncio
@@ -107,7 +106,7 @@ async def _post_directive(
     thread = CommThread(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
-        serial=random.randint(1, 90000),
+        serial=next_thread_serial(),
         subject="chain directive test thread",
         status="open",
         project_id=project_id,

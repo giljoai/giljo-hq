@@ -27,6 +27,7 @@ from giljo_mcp.models.oauth import OAuthRefreshToken
 from giljo_mcp.services._idem_crypto import decrypt_payload, encrypt_payload
 from giljo_mcp.services.cache_backends import OAUTH_REFRESH_BACKEND_NAME, get_cache_backend
 from giljo_mcp.services.oauth_cimd import is_cimd_client_id
+from giljo_mcp.services.oauth_login_service import ensure_login
 
 
 if TYPE_CHECKING:
@@ -145,6 +146,7 @@ async def issue_refresh_token(
     aud: str,
     lifetime_seconds: int,
     origin_code_hash: str | None = None,
+    client_name: str | None = None,
 ) -> str:
     raw_token = secrets.token_urlsafe(64)
     token_hash = hash_refresh_token(raw_token)
@@ -164,6 +166,15 @@ async def issue_refresh_token(
     )
     session.add(row)
     await session.flush()
+    if client_name is not None:
+        await ensure_login(
+            session,
+            family_id=family_id,
+            tenant_key=tenant_key,
+            user_id=user_id,
+            client_id=client_id,
+            client_name=client_name,
+        )
     return raw_token
 
 
@@ -387,7 +398,6 @@ async def _refresh_grant_after_lookup(
 
     row.revoked = True
     await db.flush()
-
     new_access = JWTManager.create_access_token(
         user_id=UUID(user.id),
         username=user.username,
@@ -397,6 +407,7 @@ async def _refresh_grant_after_lookup(
         scope=row.scope,
         revocation_epoch=user.token_revocation_epoch or 0,
         client_id=row.client_id if is_cimd_client_id(row.client_id) else None,
+        family_id=str(row.family_id),
     )
     new_refresh = await issue_refresh_token(
         db,
@@ -407,6 +418,7 @@ async def _refresh_grant_after_lookup(
         scope=row.scope,
         aud=row.aud,
         lifetime_seconds=refresh_token_lifetime_seconds,
+        client_name=resolved.client_name,
     )
 
     logger.info(

@@ -79,7 +79,8 @@ def _xdist_active(config) -> bool:
 
 def _shared_base_verdict(resolved_db: str, xdist: bool) -> tuple[str, str] | None:
     base = re.sub(r"_gw\d+$", "", resolved_db)
-    if base != TEST_DB_NAME or not xdist:
+    sibling = re.fullmatch(rf"{TEST_DB_NAME}(\d+)", base)
+    if not xdist or (base != TEST_DB_NAME and not sibling):
         return None
 
     try:
@@ -88,6 +89,19 @@ def _shared_base_verdict(resolved_db: str, xdist: bool) -> tuple[str, str] | Non
         dir_slot = clone_dir_slot()
     except ImportError:
         dir_slot = ""
+
+    if sibling:
+        if not dir_slot or sibling.group(1) == dir_slot:
+            return None
+        intended = f"{TEST_DB_NAME}{dir_slot}"
+        return (
+            "FAIL",
+            f"This clone is CI{dir_slot}, so its test-DB base is '{intended}' — but this run resolved to "
+            f"'{base}', which belongs to lane CI{sibling.group(1)}. Under xdist that lane's workers use the "
+            f"same '{base}_gwN' databases. Fix: export "
+            f"DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/{intended}, or run this repo's local "
+            f"suite wrapper. To proceed anyway: {SHARED_BASE_OVERRIDE_ENV_VAR}=1.",
+        )
 
     if not dir_slot:
         return (

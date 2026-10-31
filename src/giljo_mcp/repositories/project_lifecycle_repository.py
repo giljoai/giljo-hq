@@ -266,6 +266,28 @@ class ProjectLifecycleRepository:
         )
         return {"jobs": len(job_ids), "executions": len(exec_ids), "approvals": appr.rowcount or 0}
 
+    async def reset_project_to_prestage(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+        *,
+        keep_status: bool = False,
+    ) -> dict[str, int] | None:
+        project = (
+            await session.execute(select(Project).where(Project.id == project_id, Project.tenant_key == tenant_key))
+        ).scalar_one_or_none()
+        if project is None:
+            return None
+        project.staging_status = None
+        project.mission = ""
+        project.implementation_launched_at = None
+        project.ever_launched_at = None
+        if not keep_status:
+            project.status = ProjectStatus.INACTIVE
+        project.updated_at = datetime.now(UTC)
+        return await self.delete_all_agent_state_for_project(session, tenant_key, project_id)
+
 
     async def flush(self, session: AsyncSession) -> None:
         await session.flush()

@@ -99,7 +99,7 @@ async def test_headless_completion_writes_review_before_purge(db_session: AsyncS
     captured: dict = {}
     original_purge = SequenceRunService.purge_run
 
-    async def _capturing_purge(self, *, run_id, tenant_key=None):
+    async def _capturing_purge(self, *, run_id, tenant_key=None, keep_conductor_jobs=False):
         current = await self.get(run_id=run_id, tenant_key=tenant_key)
         captured["reviewed_project_ids"] = current["reviewed_project_ids"]
         captured["reviewed_via"] = current["reviewed_via"]
@@ -143,7 +143,7 @@ async def test_existing_ui_review_is_not_overwritten_by_harness_pass(db_session:
     captured: dict = {}
     original_purge = SequenceRunService.purge_run
 
-    async def _capturing_purge(self, *, run_id, tenant_key=None):
+    async def _capturing_purge(self, *, run_id, tenant_key=None, keep_conductor_jobs=False):
         current = await self.get(run_id=run_id, tenant_key=tenant_key)
         captured["reviewed_via"] = current["reviewed_via"]
         return await original_purge(self, run_id=run_id, tenant_key=tenant_key)
@@ -165,6 +165,7 @@ async def test_existing_ui_review_is_not_overwritten_by_harness_pass(db_session:
 
 
 
+@pytest.mark.usefixtures("chain_does_not_self_finish")
 async def test_auto_close_run_gets_no_auto_review_write(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_run_with_conductor(db_session, tenant, review_policy="auto_close")

@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import { useToast } from '@/composables/useToast'
-import { useBulkSelection, runBulk, describeBulkResult, bulkResultType } from '@/composables/useBulkSelection'
+import { useBulkSelection, runBulkBatch, describeBulkResult, bulkResultType } from '@/composables/useBulkSelection'
 import { MAX_SEQUENCE_PROJECTS } from '@/utils/sequenceOrder'
 
 const MIN_CHAIN_PROJECTS = 2
@@ -70,7 +70,7 @@ export function useProjectBulkActions({ inChainIds, buildServerParams, reloadPro
   async function run(verb, rows, action, opts) {
     busy.value = true
     try {
-      const result = await runBulk(rows, action, opts)
+      const result = await runBulkBatch(rows, (ids) => projectStore.bulkClose(action, ids), opts)
       const leftover = new Set([...result.skipped, ...result.failed].map(({ row }) => row.id))
       const remaining = bulk.selectedItems.value.filter((p) => leftover.has(p.id) || !rows.includes(p))
       bulk.setSelectedIds(
@@ -79,6 +79,7 @@ export function useProjectBulkActions({ inChainIds, buildServerParams, reloadPro
       )
       showToast({ message: describeBulkResult(verb, result), type: bulkResultType(result) })
       await Promise.all([reloadProjects(), projectStore.fetchHiddenProjects()])
+      projectStore.debouncedRefreshList?.cancel?.()
       return result
     } finally {
       busy.value = false
@@ -87,18 +88,16 @@ export function useProjectBulkActions({ inChainIds, buildServerParams, reloadPro
 
   function archiveSelected() {
     const rows = bulk.selectedItems.value.filter((p) => !p.hidden)
-    return run('archived', rows, (p) => projectStore.updateProject(p.id, { hidden: true }), { skipReason: inChainSkip })
+    return run('archived', rows, 'archive', { skipReason: inChainSkip })
   }
 
   function unarchiveSelected() {
     const rows = bulk.selectedItems.value.filter((p) => p.hidden)
-    return run('unarchived', rows, (p) => projectStore.updateProject(p.id, { hidden: false }))
+    return run('unarchived', rows, 'unarchive')
   }
 
   function deleteSelected() {
-    return run('deleted', bulk.selectedItems.value.slice(), (p) => projectStore.deleteProject(p.id), {
-      skipReason: inChainSkip,
-    })
+    return run('deleted', bulk.selectedItems.value.slice(), 'delete', { skipReason: inChainSkip })
   }
 
   function chainSelected() {

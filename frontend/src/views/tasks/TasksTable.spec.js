@@ -20,6 +20,7 @@ vi.mock('@/config/agentColors', () => ({
 }))
 vi.mock('@/config/colorTokens', () => ({
   TEXT_MUTED: '#8895a8',
+  COLOR_DECISION: '#ff9800',
 }))
 
 import TasksTable from './TasksTable.vue'
@@ -155,6 +156,32 @@ describe('TasksTable', () => {
     expect(onHold.text()).toBe('mdi-pause-circle-outline')
     const inProgress = wrapper.find('.status-option[data-value="in_progress"] .v-icon')
     expect(inProgress.text()).toBe('mdi-progress-clock')
+  })
+
+  it('colours the Blocked option the decision orange and Cancelled the project-cancelled red', () => {
+    const optionStubs = {
+      ...stubs,
+      'v-select': {
+        template:
+          '<div class="v-select"><template v-for="opt in items" :key="opt.value"><div class="status-option" :data-value="opt.value"><slot name="item" v-bind="{ props: {}, item: opt, internalItem: { value: opt.value } }" /></div></template></div>',
+        props: ['modelValue', 'items'],
+      },
+      'v-icon': { template: '<i class="v-icon" :data-color="color"><slot /></i>', props: ['color', 'size'] },
+    }
+    const wrapper = mount(TasksTable, {
+      props: {
+        tasks: sampleTasks,
+        loading: false,
+        statusSelectOptions: [
+          { title: 'Blocked', value: 'blocked' },
+          { title: 'Cancelled', value: 'cancelled' },
+        ],
+        priorityOptions: ['low', 'medium', 'high', 'critical'],
+      },
+      global: { stubs: optionStubs },
+    })
+    expect(wrapper.find('.status-option[data-value="blocked"] .v-icon').attributes('data-color')).toBe('#ff9800')
+    expect(wrapper.find('.status-option[data-value="cancelled"] .v-icon').attributes('data-color')).toBe('#f44336')
   })
 
   it('does NOT render the Archived badge for a visible task', () => {

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -19,6 +18,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def _seed_chain_member(session: AsyncSession, tenant_key: str) -> tuple[Pr
         description="seeded",
         mission="seeded",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()

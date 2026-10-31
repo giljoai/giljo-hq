@@ -67,12 +67,12 @@ TASK_STATUS_META: dict[TaskStatus, TaskStatusMeta] = {
     ),
     TaskStatus.BLOCKED: TaskStatusMeta(
         label="Blocked",
-        color_token="color-agent-analyzer",
+        color_token="color-status-warning",
         is_lifecycle_finished=False,
     ),
     TaskStatus.CANCELLED: TaskStatusMeta(
         label="Cancelled",
-        color_token="color-text-muted",
+        color_token="color-status-blocked",
         is_lifecycle_finished=True,
     ),
 }

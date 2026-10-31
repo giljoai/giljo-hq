@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 
 import pytest
@@ -16,6 +15,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.schemas.service_responses import CloseoutData
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_get_closeout_data_all_agents_complete(
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()
@@ -100,7 +100,7 @@ async def test_get_closeout_data_with_blocked_agents(
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()
@@ -193,7 +193,7 @@ async def test_get_closeout_data_with_git_integration(
         tenant_key=tenant_key,
         product_id=product.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()
@@ -252,7 +252,7 @@ async def test_get_closeout_data_tenant_isolation(db_manager, db_session: AsyncS
         tenant_key=tenant_one,
         product_id=_owning_product_project.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

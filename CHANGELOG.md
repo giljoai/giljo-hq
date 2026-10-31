@@ -2,6 +2,44 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.12.0] — 2026-10-30
+
+### Added
+
+- **Mark all reviewed on the Jobs board.** The "Done, not reviewed" section has a "Mark all reviewed" link, so you can clear a long list of finished projects in one step. Nothing is deleted.
+- **Connected apps in your account.** See every app signed in to your account: its name, when it connected, when it was last used and where it last connected from. Log out one app or all of them, and a logged-out app is refused on its very next request. Giljo HQ keeps the last 10 addresses per app for 90 days, only you can see them, and they are removed with your account.
+
+### Changed
+
+- **Drop a project from a chain.** Each step on a chain card has a red X. Before the chain starts the project is removed; while it runs the project is parked, not deleted, and the rest of the chain keeps going. Dropping the running project asks first. A dropped project goes back to its pre-stage state and keeps the status you gave it.
+- **Clearer chain controls.** Stop chain and Deactivate chain explain what they do: Stop keeps the finished work, Deactivate undoes the chain and deletes its agents, jobs and missions.
+- **Bulk archive, unarchive and delete run as one step,** with one confirmation and no list flicker. Anything skipped is still listed with its reason.
+- **The Hub names your tools properly:** Claude, ChatGPT, Claude Code, Codex, OpenCode, Gemini CLI, Antigravity and the Hermes support agent, instead of "Generic Harness".
+- **Task status colours match projects:** Blocked is orange, Cancelled is red, in the list and in the status menu.
+
+### Fixed
+
+- A chain now finishes on its own when its last project is completed or dropped.
+- Chain cards show the right state: a waiting project shows as staged, a staged card shows when it was created, and removing a project that would leave a one-project chain asks first.
+- Agents that sign in from Claude Code are recognised as Claude Code again.
+- The app consent screen shows the app's name instead of its technical ID.
+- Connecting an app with an unknown client name gets a normal "invalid client" answer instead of a server error.
+- When the database is slow during an agent sign-in, the server says "busy, try again" instead of an internal error.
+- Server replies to agents are more accurate, and validation errors no longer echo back what you typed.
+- New projects and tasks get the lowest free number, so a product that used a high number such as 9999 keeps working.
+- Vision document upload works with no internet access.
+- The Linux installer now installs Node.js on Fedora, RHEL and other dnf or yum systems, and developer mode after a normal install adds the missing test tools.
+- A new account is no longer sent past organization setup when that check is briefly rate-limited, and the password field is no longer cleared.
+- The Jobs board keeps your product and tab when you reload or share the link.
+- Product tabs stay on one row, with a "+N more" menu for the rest.
+- Small labels and agent role badges are easier to read, and Hub role badges show their own colours.
+- A banner that does not come back no longer leaves a blank purple bar.
+
+### Security
+
+- **Forwarded client addresses are trusted only from proxies you list** in GILJO_TRUSTED_PROXIES. If nginx or Caddy runs on the same machine as Giljo HQ, add 127.0.0.1 to GILJO_TRUSTED_PROXIES so visitor addresses stay correct.
+- **Account changes need the CSRF token** like every other dashboard change: logging an app out, creating or deleting an API key, and the setup and first-login steps.
+
 ## [2.11.0] — 2026-10-27
 
 ### Changed

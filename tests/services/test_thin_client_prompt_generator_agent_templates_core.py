@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models import AgentTemplate, Product, Project, User
 from giljo_mcp.models.auth import UserFieldPriority
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
+from tests.helpers.taxonomy_seeds import next_series_number
 from tests.services.conftest import create_test_org
 
 
@@ -55,7 +55,7 @@ async def test_thin_prompt_contains_core_structure(db_session: AsyncSession):
         tenant_key=tenant_key,
         description="Test project description",
         mission="Test project mission",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
 
@@ -158,7 +158,7 @@ async def test_thin_prompt_is_concise(db_session: AsyncSession):
         tenant_key=tenant_key,
         description="Priority test description",
         mission="Priority test mission",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
 

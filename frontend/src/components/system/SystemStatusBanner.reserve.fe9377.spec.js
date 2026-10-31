@@ -236,3 +236,12 @@ describe('SystemStatusBanner first-frame space reservation (FE-9377)', () => {
     expect(storedReserve().u).toBe('u1')
   })
 })
+
+describe('reserved-space placeholder has no tint', () => {
+  it('stays transparent so a banner that does not come back never shows as a blank coloured bar', async () => {
+    const { default: source } = await import('./SystemStatusBanner.vue?raw')
+    const rule = source.match(/\.system-banner-skeleton\s*\{([^}]*)\}/)
+    expect(rule).not.toBeNull()
+    expect(rule[1]).toMatch(/background:\s*transparent;/)
+  })
+})

@@ -11,7 +11,7 @@
 <script setup>
 import { computed, toRef } from 'vue'
 
-import { hexToRgba } from '@/utils/colorUtils'
+import { accessibleTintedStyle } from '@/utils/colorUtils'
 import { useProjectStatusesStore } from '@/stores/projectStatusesStore'
 import { useStatusBadgeMeta } from '@/composables/useStatusBadgeMeta'
 
@@ -30,8 +30,7 @@ const { meta, statusLabel, colorHex } = useStatusBadgeMeta(
 )
 
 const badgeStyle = computed(() => ({
-  background: hexToRgba(colorHex.value, 0.15),
-  color: colorHex.value,
+  ...accessibleTintedStyle(colorHex.value),
   borderRadius: '8px',
 }))
 

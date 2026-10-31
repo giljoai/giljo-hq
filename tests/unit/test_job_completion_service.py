@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 import uuid
 from unittest.mock import MagicMock
 
@@ -14,6 +13,7 @@ from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.services.job_completion_service import JobCompletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ async def _seed_staging_project(session, tenant_key):
         mission="seeded mission",
         status="active",
         staging_status="staging",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()

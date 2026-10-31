@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 from datetime import UTC, datetime
 
@@ -31,6 +30,7 @@ from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_chain_
 from giljo_mcp.services.sequence_run_service import SequenceRunService, active_chain_run
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.product_crew_helper import adopt_all_templates
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -55,7 +55,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, launched: boo
         status="active",
         tenant_key=tenant_key,
         product_id=product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC) if launched else None,
         created_at=datetime.now(UTC),

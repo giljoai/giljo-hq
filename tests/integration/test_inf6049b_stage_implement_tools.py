@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 import re
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -32,6 +31,7 @@ from giljo_mcp.tools.tool_accessor._project_tools import (
     _STAGING_STOP_INSTRUCTION,
 )
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -93,7 +93,7 @@ async def _seed_product_project(
         execution_mode=execution_mode,
         staging_status=staging_status,
         implementation_launched_at=datetime.now(UTC) if launched else None,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     with tenant_session_context(db_session, tenant_key):

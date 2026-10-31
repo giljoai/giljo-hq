@@ -19,6 +19,7 @@ from giljo_mcp.services.memory_entry_write_validator import (
 )
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 def _error_text(result) -> str:
@@ -191,7 +192,6 @@ async def db_backed_client(db_manager, db_session, monkeypatch):
 
 
 async def _seed_working_job(db_session, tenant_key: str):
-    import random
     from datetime import UTC, datetime
 
     from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -218,7 +218,7 @@ async def _seed_working_job(db_session, tenant_key: str):
         description="BE-8003b",
         mission="x",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.flush()

@@ -149,7 +149,7 @@ describe('ThreadAgentRoster (FE-9742)', () => {
     const tile = mountRoster(pinia).get('[data-testid="thread-roster-tile"]')
     expect(tile.get('[data-testid="thread-roster-avatar"]').text()).toBe('IW')
     expect(tile.get('[data-testid="thread-roster-name"]').text()).toBe('implementer-working')
-    expect(tile.get('[data-testid="thread-roster-sub"]').text()).toBe('claude-code · working')
+    expect(tile.get('[data-testid="thread-roster-sub"]').text()).toBe('Claude Code · working')
   })
 
   it('3: states read holds baton, blocked, working, unknown; a generic harness is labelled', () => {
@@ -166,8 +166,8 @@ describe('ThreadAgentRoster (FE-9742)', () => {
       .findAll('[data-testid="thread-roster-sub"]')
       .map((s) => s.text())
     expect(subs).toEqual([
-      'claude-code · holds baton',
-      'claude-code · blocked',
+      'Claude Code · holds baton',
+      'Claude Code · blocked',
       'Generic Harness · working',
       'Generic Harness · unknown',
     ])

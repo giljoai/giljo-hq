@@ -12,6 +12,7 @@ from sqlalchemy import select
 from giljo_mcp.models.agent_identity import AgentTodoItem
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
+from giljo_mcp.services.orchestrator_caller_guard import NEVER_STARTED_STATUSES
 
 
 @dataclass
@@ -92,7 +93,10 @@ def shape_agent_blocker(finding: AgentReadinessFinding) -> dict[str, Any]:
             f"report_progress(job_id='{finding.job_id}', todo_items=[...]) "
             f"marking as completed/skipped"
         )
-    steps.append(f"Force-complete via complete_job(job_id='{finding.job_id}')")
+    if finding.status in NEVER_STARTED_STATUSES:
+        steps.append(f"Retire the never-started job via dismiss_job(job_id='{finding.job_id}') if it is not needed")
+    else:
+        steps.append(f"Force-complete via complete_job(job_id='{finding.job_id}')")
     return {
         "agent_id": finding.agent_id,
         "agent_name": finding.agent_name,

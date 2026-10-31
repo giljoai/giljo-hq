@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from uuid import uuid4
 
 import pytest
@@ -14,6 +13,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest_asyncio.fixture
@@ -46,7 +46,7 @@ async def one_active_one_inactive(db_session, test_tenant_key):
         status=ProjectStatus.ACTIVE,
         tenant_key=test_tenant_key,
         product_id=product.id,
-        series_number=random.randint(1, 4000),
+        series_number=next_series_number(),
     )
     project_b = Project(
         id=str(uuid4()),
@@ -56,7 +56,7 @@ async def one_active_one_inactive(db_session, test_tenant_key):
         status=ProjectStatus.INACTIVE,
         tenant_key=test_tenant_key,
         product_id=product.id,
-        series_number=random.randint(4001, 9000),
+        series_number=next_series_number(),
     )
     db_session.add_all([project_a, project_b])
     await db_session.commit()

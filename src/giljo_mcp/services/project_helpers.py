@@ -11,6 +11,7 @@ from typing import Any
 
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
+from giljo_mcp.services.chain_conductor_retire import retire_chain_conductor
 from giljo_mcp.services.next_action import STAGING_COMPLETE
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -274,6 +275,15 @@ async def mark_chain_member_status(
             test_session=test_session,
             websocket_manager=websocket_manager,
         )
+        await complete_chain_run_if_finished(
+            db_manager=db_manager,
+            tenant_manager=tenant_manager,
+            conductor_agent_id=conductor_agent_id,
+            tenant_key=tenant_key,
+            test_session=test_session,
+            websocket_manager=websocket_manager,
+            member_path=True,
+        )
     return True
 
 
@@ -426,6 +436,7 @@ async def complete_chain_run_if_finished(
     tenant_key: str,
     test_session: Any | None = None,
     websocket_manager: Any | None = None,
+    member_path: bool = False,
 ) -> bool:
     from giljo_mcp.services.sequence_run_service import SequenceRunService
 
@@ -476,13 +487,21 @@ async def complete_chain_run_if_finished(
 
         if run.get("review_policy") == "per_card":
             reviewed = set(run.get("reviewed_project_ids") or [])
-            for pid in resolved_order:
-                if pid not in reviewed:
+            unreviewed = [pid for pid in resolved_order if pid not in reviewed]
+            if member_path:
+                if any(statuses.get(pid) != "detached" for pid in unreviewed):
+                    return False
+            else:
+                for pid in unreviewed:
                     run = await svc.mark_member_reviewed(
                         run_id=run["id"], project_id=pid, tenant_key=tenant_key, via="harness"
                     )
 
-        await svc.purge_run(run_id=run["id"], tenant_key=tenant_key)
+        if member_path:
+            await retire_chain_conductor(
+                db_manager, tenant_manager, conductor_agent_id, tenant_key, test_session, websocket_manager
+            )
+        await svc.purge_run(run_id=run["id"], tenant_key=tenant_key, keep_conductor_jobs=member_path)
         logger.info(
             "[CHAIN_RUN_COMPLETE] run=%s purged on completion (conductor=%s, tenant=%s)",
             run["id"],

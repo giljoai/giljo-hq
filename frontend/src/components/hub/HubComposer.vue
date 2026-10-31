@@ -133,12 +133,13 @@
 import { ref, computed, watch } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useToast } from '@/composables/useToast'
-import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
+import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import { agentStatusDot } from '@/composables/useAgentStatusDot'
 import MarkHandledToggle from '@/components/hub/MarkHandledToggle.vue'
 import { useMarkHandled } from '@/components/hub/useMarkHandled'
+import { harnessLabel } from '@/components/hub/rosterState'
 
 const commHub = useCommHubStore()
 const { showToast } = useToast()
@@ -146,20 +147,11 @@ const { showToast } = useToast()
 const { isYourTurn, clearing, markHandled } = useMarkHandled()
 
 function yourTurnBadgeStyle() {
-  const hex = getAgentColor('orchestrator')?.hex
-  return {
-    backgroundColor: hexToRgba(hex, 0.18),
-    color: hex,
-    borderRadius: '8px',
-  }
+  return { ...getAgentBadgeStyle('orchestrator', 0.18), borderRadius: '8px' }
 }
 
 function agentBadgeStyle(participant) {
-  const hex = getAgentColor(getAgentColorKey(participant))?.hex
-  return {
-    backgroundColor: hexToRgba(hex, 0.2),
-    color: hex,
-  }
+  return getAgentBadgeStyle(getAgentColorKey(participant), 0.2)
 }
 
 function agentAbbr(name) {
@@ -177,11 +169,6 @@ function optionSubLabel(item) {
     return `broadcast · ${n} registered`
   }
   return `direct · ${harnessLabel(item.harness)}`
-}
-
-function harnessLabel(harness) {
-  if (!harness || harness === 'generic') return 'Generic Harness'
-  return String(harness).split(' · ')[0]
 }
 
 const content = ref('')

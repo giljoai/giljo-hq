@@ -34,7 +34,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 259
+EXPECTED_ROUTE_COUNT = 266
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -59,6 +59,9 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/auth/api-keys/active", frozenset({"GET"})),
         ("/api/auth/api-keys/{key_id}", frozenset({"DELETE"})),
         ("/api/auth/check-first-login", frozenset({"POST"})),
+        ("/api/auth/connected-apps", frozenset({"DELETE"})),
+        ("/api/auth/connected-apps", frozenset({"GET"})),
+        ("/api/auth/connected-apps/{login_id}", frozenset({"DELETE"})),
         ("/api/auth/complete-first-login", frozenset({"POST"})),
         ("/api/auth/create-first-admin", frozenset({"POST"})),
         ("/api/auth/login", frozenset({"POST"})),
@@ -88,6 +91,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/notifications/{notification_id}/read", frozenset({"PATCH"})),
         ("/api/oauth/.well-known/oauth-authorization-server", frozenset({"GET"})),
         ("/api/oauth/authorize", frozenset({"POST"})),
+        ("/api/oauth/authorize/client", frozenset({"GET"})),
         ("/api/oauth/authorize/deny", frozenset({"POST"})),
         ("/api/oauth/refresh", frozenset({"POST"})),
         ("/api/oauth/register", frozenset({"POST"})),
@@ -164,6 +168,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/projects/{project_id}/restage", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/restore", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/review", frozenset({"GET"})),
+        ("/api/v1/projects/reviewed/bulk", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/reviewed", frozenset({"POST"})),
         ("/api/v1/projects/{project_id}/summary", frozenset({"GET"})),
         ("/api/v1/projects/{project_id}/unstage", frozenset({"POST"})),
@@ -210,6 +215,8 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/tasks/", frozenset({"POST"})),
         ("/api/v1/tasks/deleted", frozenset({"GET"})),
         ("/api/v1/tasks/deleted/", frozenset({"GET"})),
+        ("/api/v1/projects/bulk", frozenset({"POST"})),
+        ("/api/v1/tasks/bulk", frozenset({"POST"})),
         ("/api/v1/tasks/summary", frozenset({"GET"})),
         ("/api/v1/tasks/summary/", frozenset({"GET"})),
         ("/api/v1/tasks/{task_id}", frozenset({"DELETE"})),

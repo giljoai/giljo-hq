@@ -4,13 +4,26 @@
 # [CE] Community Edition.
 
 
+import os
 import secrets
 from unittest.mock import MagicMock
 
 import bcrypt
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport
 from httpx import AsyncClient as HTTPXAsyncClient
+
+
+@pytest.fixture(autouse=True)
+def _tests_api_is_the_ce_suite():
+    if os.environ.get("GILJO_MODE", "").strip().lower() == "saas":
+        pytest.exit(
+            "tests/api is the CE endpoint suite: ci.yml runs it with GILJO_MODE unset, and this "
+            "run has GILJO_MODE=saas. Unset GILJO_MODE for tests/api. SaaS endpoint coverage "
+            "lives in tests/saas, which ci.yml runs with GILJO_MODE=saas.",
+            returncode=4,
+        )
 
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)

@@ -3,8 +3,20 @@ import { getStatusLabel } from '@/utils/statusConfig'
 const TERMINAL_THREAD = new Set(['resolved', 'closed'])
 const ACTIVE_STATUSES = new Set(['working', 'blocked', 'waiting', 'awaiting_user'])
 
+const HARNESS_NAMES = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  gemini: 'Gemini CLI',
+  antigravity: 'Antigravity',
+  claude: 'Claude',
+  chatgpt: 'ChatGPT',
+  hermes: 'Hermes',
+}
+
 export function harnessLabel(harness) {
   if (!harness || harness === 'generic') return 'Generic Harness'
+  if (HARNESS_NAMES[harness]) return HARNESS_NAMES[harness]
   return String(harness).split(' · ')[0]
 }
 

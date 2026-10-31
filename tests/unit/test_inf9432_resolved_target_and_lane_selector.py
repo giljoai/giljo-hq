@@ -90,6 +90,9 @@ def test_the_resolved_name_is_not_re_derived_from_database_url_here(monkeypatch)
         pytest.param("giljo_mcp_test", False, None, id="serial-run-is-risky-not-corrupting"),
         pytest.param("giljo_mcp_test2", True, None, id="correctly-pinned-clone"),
         pytest.param("giljo_mcp_test2_gw0", True, None, id="correctly-pinned-clone-worker"),
+        pytest.param("giljo_mcp_test5", True, "FAIL", id="SIBLING-lane-base-under-xdist"),
+        pytest.param("giljo_mcp_test5_gw1", True, "FAIL", id="sibling-lane-worker"),
+        pytest.param("giljo_mcp_test5", False, None, id="sibling-base-serial-is-risky-not-corrupting"),
         pytest.param("giljo_test", True, None, id="CI-BASE-CANNOT-TRIP-IT"),
         pytest.param("giljo_test_gw0", True, None, id="CI-worker-cannot-trip-it"),
     ],
@@ -107,6 +110,21 @@ def test_an_unnumbered_tree_is_warned_and_not_refused(monkeypatch):
     level, message = _shared_base_verdict(TEST_DB_NAME, True)
     assert level == "WARN"
     assert "not a numbered clone" in message
+
+
+def test_a_sibling_lanes_base_is_refused_and_named(monkeypatch):
+    monkeypatch.setattr("tests.helpers.test_db_helper.clone_dir_slot", lambda: "4")
+
+    level, message = _shared_base_verdict("giljo_mcp_test2_gw0", True)
+    assert level == "FAIL"
+    assert "giljo_mcp_test4" in message
+    assert "lane CI2" in message
+
+
+def test_an_unnumbered_tree_on_a_numbered_base_is_left_alone(monkeypatch):
+    monkeypatch.setattr("tests.helpers.test_db_helper.clone_dir_slot", lambda: "")
+
+    assert _shared_base_verdict("giljo_mcp_test2", True) is None
 
 
 def test_the_refusal_message_names_the_base_the_clone_should_have_used(monkeypatch):
@@ -176,7 +194,7 @@ def test_the_banner_box_stays_aligned_for_a_long_database_name():
 
 
 
-def test_the_two_lane_derivations_agree_when_the_tree_is_pinned_correctly():
+def test_the_two_lane_derivations_agree_when_the_tree_is_pinned_correctly(monkeypatch):
     dir_slot = clone_dir_slot()
     if not dir_slot:
         skip_reason = (
@@ -186,6 +204,7 @@ def test_the_two_lane_derivations_agree_when_the_tree_is_pinned_correctly():
             "refusal truth-table cases in this file"
         )
         pytest.skip(reason=skip_reason)
+    _as_lane(monkeypatch, f"{TEST_DB_NAME}{dir_slot}", worker="gw3")
     assert clone_slot() == dir_slot, (
         f"this tree's directory says lane {dir_slot!r} but its pinned test-DB base says "
         f"{clone_slot()!r}. Pin the base from the directory (this repo's local suite "

@@ -13,6 +13,7 @@ import pytest_asyncio
 
 from giljo_mcp.models import AgentExecution, AgentJob
 from giljo_mcp.services.job_completion_service import JobCompletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture
@@ -140,7 +141,6 @@ def test_orchestrator_protocol_references_closeout_checklist():
 
 @pytest_asyncio.fixture
 async def linked_project(db_session, test_tenant_key, test_product):
-    import random
 
     from giljo_mcp.models import Project
 
@@ -152,7 +152,7 @@ async def linked_project(db_session, test_tenant_key, test_product):
         status="active",
         tenant_key=test_tenant_key,
         product_id=test_product.id,
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     db_session.add(project)
     await db_session.commit()

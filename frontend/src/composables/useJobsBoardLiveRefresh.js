@@ -23,6 +23,7 @@ export const BOARD_REFRESH_EVENTS = Object.freeze([
   'project:memory_updated',
   'project_update',
   'projects:bulk:deactivated',
+  'projects:bulk_updated',
   'sequence:updated',
 ])
 

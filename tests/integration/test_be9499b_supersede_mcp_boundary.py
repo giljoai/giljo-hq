@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import random
 from uuid import uuid4
 
 import pytest
@@ -19,6 +18,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -74,7 +74,7 @@ def _project(project_id: str, tenant_key: str, product_id: str, *, name: str, st
         description="BE-9499b supersede boundary test",
         mission="test mission",
         status=status,
-        series_number=random.randint(1, 9999),
+        series_number=next_series_number(),
     )
 
 

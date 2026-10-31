@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -15,6 +14,7 @@ from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, ProductMemoryEntry, Project
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.services.project_query_service import ProjectQueryService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ async def _seed_project(session, tenant_key, status="active", product=None, **ex
         description="seeded",
         mission="seeded mission",
         status=status,
-        series_number=extra.pop("series_number", random.randint(1, 9000)),
+        series_number=extra.pop("series_number", next_series_number()),
         **extra,
     )
     session.add(project)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giljo-mcp"
-version = "2.11.0"
+version = "2.12.0"
 description = "Giljo HQ Coding Orchestrator - Multi-agent orchestration system"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,14 +36,15 @@ dependencies = [
     # (route-introspection tests flatten _IncludedRouter via tests/helpers/route_surface). starlette 1.3.1
     # clears 4 CVEs (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two in lockstep.
     # 2026-09-24: pair bumped to fastapi 0.141.1 / starlette 1.7.0 (see requirements.txt).
-    "fastapi==0.143.0",
-    "starlette==1.8.0",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
+    # 2026-10-28: pair bumped to fastapi 0.161.1 / starlette 1.9.0 (see requirements.txt).
+    "fastapi==0.161.1",
+    "starlette==1.9.0",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
     "uvicorn[standard]>=0.54.0",
     "pydantic>=2.14.1",
 
     # Database (PostgreSQL Only - Required)
-    "sqlalchemy>=2.1.0,<2.2",  # >=2.1: postgresql.distinct_on; engines pin psycopg2/asyncpg explicitly
-    "alembic>=1.20.0",
+    "sqlalchemy>=2.1.6,<2.2",  # >=2.1: postgresql.distinct_on; engines pin psycopg2/asyncpg explicitly
+    "alembic>=1.20.1",
     "psycopg2-binary>=2.9.13",
     "asyncpg>=0.32.0",
     "greenlet>=3.5.6",  # Required by SQLAlchemy async on macOS arm64 (transitive dep not auto-installed)
@@ -81,10 +82,10 @@ dependencies = [
 
     # SaaS Dependencies (only used when GILJO_MODE=saas or demo).
     # CE installer paths never touch these; SaaS-gated by GILJO_MODE.
-    "resend>=2.49.1",  # Transactional email via Resend API
+    "resend>=2.50.0",  # Transactional email via Resend API
     "aiosmtplib>=5.1.3",  # Async SMTP client for SmtpProvider (Mailpit/local capture)
     "jinja2>=3.1.6",  # Templating for Ops Panel HTML views (ops_panel/main.py)
-    "sentry-sdk[fastapi]>=2.72.0",  # Backend error tracking for SaaS/Demo (INF-5063)
+    "sentry-sdk[fastapi]>=2.73.0",  # Backend error tracking for SaaS/Demo (INF-5063)
 
     # SaaS Edition: per-tenant rate limiting backed by Redis.
     # CE installer paths never touch Redis; guarded by GILJO_MODE=saas in both
@@ -94,11 +95,11 @@ dependencies = [
     # SaaS Edition: durable per-tenant backup object storage (S3-compatible
     # Railway bucket). Imported LAZILY inside saas/backup/backends.py so CE
     # self-hosters without boto3 never fail importing the module (INF-6139).
-    "boto3>=1.43.113",
+    "boto3>=1.43.118",
 
     # SaaS Edition: OAuth 2.0/OIDC client for social-login provider adapters
     # (BE-1001/1002/1003). CE never imports saas/auth/social/.
-    "authlib>=1.8.0",
+    "authlib>=1.9.1",
 ]
 
 [project.optional-dependencies]
@@ -111,7 +112,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",  # parallel test workers (-n); CI unit step runs -n 6 with per-worker DBs
-    "fakeredis>=2.39.0",
+    "fakeredis>=2.40.0",
     "pre-commit>=4.7.0",
     "types-PyYAML",
 ]
@@ -163,7 +164,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-giljo_mcp = ["py.typed"]
+giljo_mcp = ["py.typed", "context_management/tiktoken_cache/*.gz"]
 
 [tool.coverage.run]
 branch = true

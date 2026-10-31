@@ -4,7 +4,6 @@
 # [CE] Community Edition.
 
 
-import random
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
@@ -23,6 +22,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message, Task
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.services.project_deletion_service import ProjectDeletionService
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 
@@ -301,7 +301,7 @@ async def _seed_project_with_approval(session, tenant_key):
         description="x",
         mission="x",
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()
@@ -443,7 +443,7 @@ async def _seed_project_with_many_children(session, tenant_key, n=3):
         description="x",
         mission="x",
         status="inactive",
-        series_number=random.randint(1, 9000),
+        series_number=next_series_number(),
     )
     session.add(project)
     await session.flush()
