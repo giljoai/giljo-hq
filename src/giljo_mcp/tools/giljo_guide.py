@@ -155,9 +155,9 @@ The server picks the phase; read the reply's `phase`, `message` and `next_action
   The canonical closeout sequence is `complete_job` -> `write_project_closeout`, which writes
   the single `project_closeout` 360 entry itself, so a separate `write_memory_entry` for the
   completion is REDUNDANT (it double-writes); keep `write_memory_entry` for other records, such
-  as a conductor's series-summary. A SOLO project then needs
-  `update_project(status='completed')` (the archive lifecycle; refused with `CLOSEOUT_BLOCKED`
-  without a closeout); a chain member does not.
+  as a conductor's series-summary. On a SOLO project the closeout also runs the archive
+  lifecycle, so no `update_project(status='completed')` call follows (that call stays the
+  path for a project closed out elsewhere); a chain member's conductor completes it.
 - **deliverable**: a worker recording its result; the orchestrator reviews it, closes it with
   `finalize_job(job_id)`.
 Closeout arguments (`git_commits`, the 16 `tags`, caps, `force`) are in

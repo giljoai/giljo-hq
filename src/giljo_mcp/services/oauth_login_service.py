@@ -74,6 +74,16 @@ async def family_is_live(db: AsyncSession, *, tenant_key: str, family_id: str) -
     return bool(result.scalar())
 
 
+async def login_app_names(db: AsyncSession, *, tenant_key: str, family_id: str) -> tuple[str | None, str | None]:
+    result = await db.execute(
+        select(OAuthLogin.client_name, OAuthLogin.last_mcp_client_name).where(
+            OAuthLogin.family_id == family_id, OAuthLogin.tenant_key == tenant_key
+        )
+    )
+    row = result.first()
+    return (row[0], row[1]) if row else (None, None)
+
+
 async def ensure_login(
     db: AsyncSession,
     *,
@@ -133,8 +143,10 @@ async def record_use(
             last_used_at=func.now(),
             last_ip=ip,
             last_user_agent=_cap(user_agent, _UA_CAP),
-            last_mcp_client_name=_cap(mcp_client_name, _MCP_CLIENT_CAP),
-            last_mcp_client_version=_cap(mcp_client_version, _MCP_VERSION_CAP),
+            last_mcp_client_name=func.coalesce(_cap(mcp_client_name, _MCP_CLIENT_CAP), OAuthLogin.last_mcp_client_name),
+            last_mcp_client_version=func.coalesce(
+                _cap(mcp_client_version, _MCP_VERSION_CAP), OAuthLogin.last_mcp_client_version
+            ),
         )
         .returning(OAuthLogin.id)
     )

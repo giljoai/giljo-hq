@@ -43,6 +43,7 @@ from giljo_mcp.services.mission_orchestration_builders import (
     build_category_metadata,
     build_execution_mode_fields,
     build_orchestrator_identity_block,
+    build_related_past_work,
     check_staging_redirect,
     maybe_build_ctx_self_close_directive,
 )
@@ -164,6 +165,9 @@ class MissionOrchestrationService:
                         tenant_key=tenant_key,
                     )
 
+                ctx["related_past_work"] = await build_related_past_work(
+                    self.db_manager, tenant_key, ctx["product"], ctx["project"], self._test_session
+                )
                 response = self._build_orchestrator_response(ctx, job_id, tenant_key)
                 await start_staging_session(
                     session, ctx["execution"], ctx["agent_job"], tenant_key, self._websocket_manager
@@ -554,6 +558,7 @@ class MissionOrchestrationService:
                 "project_path": project_path,
             },
             "agent_templates": template_list,
+            "related_past_work": ctx.get("related_past_work", []),
             "phase_filter_note": phase_filter_note,
             "mcp_tools_available": list(ORCHESTRATOR_AVAILABLE_TOOLS),
             "field_toggles": field_toggles,

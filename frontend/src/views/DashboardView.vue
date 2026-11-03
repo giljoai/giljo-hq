@@ -48,7 +48,7 @@
         :class="['stat-pill smooth-border main-window-reveal', `main-window-delay-${pill.delay}`]"
       >
         <div class="stat-pill-label">{{ pill.label }}</div>
-        <div class="stat-pill-value">{{ pill.data.total }}<small>{{ pill.unit }}</small></div>
+        <div class="stat-pill-value">{{ pill.headline ?? pill.data.total }}<small>{{ pill.unit }}</small></div>
         <div class="micro-bar">
           <div
             v-for="seg in pill.data.segments"
@@ -283,7 +283,7 @@ const agentRolePill = computed(() =>
 
 const statPills = computed(() => [
   { label: 'Status Distribution', unit: 'projects', delay: 3, data: statusPill.value },
-  { label: 'Project Types', unit: 'types', delay: 4, data: taxonomyPill.value },
+  { label: 'Project Types', unit: 'types', delay: 4, data: taxonomyPill.value, headline: taxonomyPill.value.segments.length },
   { label: 'Agent Roles', unit: 'spawned', delay: 5, data: agentRolePill.value },
 ])
 

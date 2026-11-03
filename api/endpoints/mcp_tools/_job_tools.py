@@ -24,6 +24,7 @@ from api.endpoints.mcp_tools._base import (
     mcp,
     validation_rejection,
 )
+from api.endpoints.mcp_tools._harness import _hub_harness_for_call
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.services.orchestrator_caller_guard import ORCHESTRATOR_ONLY
@@ -92,7 +93,7 @@ async def report_progress(
         list[dict] | None,
         Field(
             max_length=LIST_ITEMS_MAX,
-            description="FULL TODO list (replaces existing). Each item: {content: str, status: 'pending'|'in_progress'|'completed'}. Include ALL items — completed + in_progress + pending. Never a partial list.",
+            description="FULL TODO list (replaces existing). Each item: {content: str, status: 'pending'|'in_progress'|'completed'|'skipped'}. Include ALL items — completed + in_progress + pending. Never a partial list.",
         ),
     ] = None,
     todo_append: Annotated[
@@ -257,7 +258,7 @@ async def dismiss_job(
 @mcp.tool(
     title="Set Agent Status",
     description=(
-        "Set agent resting/blocked status: 'blocked' (needs human help), 'idle' (monitoring), or "
+        "Set agent resting/blocked status: 'blocked' (an error you cannot clear; tell your orchestrator), 'idle' (monitoring), or "
         "'sleeping' (periodic check-in). All three auto-wake to 'working' on report_progress(). "
         "Server-locked for the orchestrator during staging (403 STAGING_LOCK) -- use "
         "report_progress instead. Spawned non-orchestrator agents bypass the lock."
@@ -370,6 +371,7 @@ async def get_job_mission(
             "preset_name": preset_name,
             "detected_harness": detected_harness,
             "section": section,
+            "hub_harness": await _hub_harness_for_call(ctx),
         },
     )
 

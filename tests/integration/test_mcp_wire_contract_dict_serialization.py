@@ -67,6 +67,7 @@ async def wire_contract_client(monkeypatch):
             preset_name: str | None = None,
             detected_harness: str | None = None,
             section: str = "",
+            hub_harness: str | None = None,
         ):
             return _FakeMissionResponse(
                 job_id=job_id,
@@ -144,6 +145,7 @@ async def test_call_tool_helper_normalises_basemodel_to_dict():
             preset_name: str | None = None,
             detected_harness: str | None = None,
             section: str = "",
+            hub_harness: str | None = None,
         ):
             return _FakeMissionResponse(job_id=job_id, mission="x")
 

@@ -31,6 +31,22 @@ REVIEWABLE_STATUSES = frozenset({ProjectStatus.COMPLETED, ProjectStatus.TERMINAT
 
 class ArchiveMixin:
 
+    async def complete_after_closeout(
+        self,
+        project_id: str,
+        tenant_key: str,
+        websocket_manager: Any | None = None,
+    ) -> str | None:
+        if await self._has_active_chain_run(project_id, tenant_key):
+            return None
+        proj = await self.get_project(project_id=project_id, tenant_key=tenant_key)
+        if proj.status in LIFECYCLE_FINISHED_STATUSES:
+            return None
+        archived = await self.archive_project(
+            project_id=project_id, tenant_key=tenant_key, websocket_manager=websocket_manager
+        )
+        return self._build_archive_message(archived)
+
     async def archive_project(
         self,
         project_id: str,

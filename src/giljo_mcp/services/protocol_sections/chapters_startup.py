@@ -62,7 +62,10 @@ def _build_ch2_fetch_calls(
             "depth_aware": False,
         },
         "memory_360": {
-            "framing": "Recent project closeouts. [continuing prior work; skip if description already cites it]",
+            "framing": (
+                "Newest project closeouts. Past work matching this project's title is already in this reply as "
+                "related_past_work. [skip unless you need the newest closeouts]"
+            ),
             "depth_aware": True,
             "default_depth": 3,
         },

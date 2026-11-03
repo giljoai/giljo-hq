@@ -264,6 +264,20 @@ class McpAdapterMixin:
 
         project = await self.get_project(project_id=project_id, tenant_key=effective_tenant_key)
 
+        only_status = (name, description, project_type, series_number, subseries, successor_project_id) == (None,) * 6
+        if (
+            only_status
+            and status == ProjectStatus.COMPLETED
+            and project.status in (ProjectStatus.COMPLETED, ProjectStatus.TERMINATED)
+        ):
+            return {
+                "success": True,
+                "project_id": project.id,
+                "name": project.name,
+                "status": project.status,
+                "message": f"Project '{project.name}' is already {project.status}; nothing to do.",
+            }
+
         project_type = await self._validate_taxonomy_for_update(
             project, project_type, series_number, subseries, effective_tenant_key, project_id
         )

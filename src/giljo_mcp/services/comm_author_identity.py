@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.harness_resolver import GENERIC_HARNESS
+from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.utils.identity import validate_from_agent
 
 
@@ -105,7 +106,9 @@ async def resolve_and_register_author(
         identity = AuthorIdentity(
             agent_id=from_agent,
             kind="agent",
-            display_name=(participant.display_name if participant else None) or from_agent,
+            display_name=(participant.display_name if participant else None)
+            or await AgentOperationsRepository().get_agent_display_name(session, tenant_key, from_agent)
+            or from_agent,
             warning=(
                 None
                 if participant

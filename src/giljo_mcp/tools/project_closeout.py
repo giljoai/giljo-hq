@@ -107,8 +107,7 @@ async def _handle_force_close(
                 "hint": (
                     "write_memory_entry() does not stamp the closeout record archiving requires -- "
                     "only write_project_closeout() does. Complete your own job first, then "
-                    "write_project_closeout(); a solo project is then archived with "
-                    "update_project(status='completed') from here, or from the dashboard."
+                    "write_project_closeout(), which also completes a solo project."
                 ),
             },
         )

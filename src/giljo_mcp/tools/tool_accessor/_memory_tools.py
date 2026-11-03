@@ -6,7 +6,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from giljo_mcp.exceptions import BaseGiljoError
+from giljo_mcp.utils.log_sanitizer import sanitize
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryToolsMixin:
@@ -25,7 +32,7 @@ class MemoryToolsMixin:
     ) -> dict[str, Any]:
         from giljo_mcp.tools.project_closeout import close_project_and_update_memory as tool_func
 
-        return await tool_func(
+        result = await tool_func(
             project_id=project_id,
             summary=summary,
             key_outcomes=key_outcomes,
@@ -38,6 +45,18 @@ class MemoryToolsMixin:
             no_code_changes=no_code_changes,
             websocket_manager=self._websocket_manager,
         )
+        if not result.get("entry_id"):
+            return result
+        try:
+            completed = await self._project_service.complete_after_closeout(
+                project_id, tenant_key, websocket_manager=self._websocket_manager
+            )
+        except BaseGiljoError as exc:
+            logger.warning("Closeout of %s written, completion step refused: %s", sanitize(project_id), exc)
+            return result
+        if completed:
+            result["message"] = f"360 Memory updated successfully. {completed}"
+        return result
 
     async def search_memory(
         self,

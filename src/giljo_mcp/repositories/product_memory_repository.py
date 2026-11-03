@@ -583,7 +583,8 @@ class ProductMemoryRepository:
     @staticmethod
     def _fts_stmt(base_filters: list, limit: int, search_query: str):
         fts_doc = literal_column(_FTS_DOCUMENT_SQL)
-        tsquery = func.plainto_tsquery(literal_column("'english'"), search_query)
+        all_words = cast(func.plainto_tsquery(literal_column("'english'"), search_query), Text)
+        tsquery = func.to_tsquery(literal_column("'english'"), func.replace(all_words, " & ", " | "))
         return (
             select(ProductMemoryEntry)
             .where(*base_filters, fts_doc.op("@@")(tsquery))

@@ -1,6 +1,6 @@
 # Giljo HQ: Installation Guide
 
-*Last updated: 2026-04-15*
+*Last updated: 2026-11-02*
 
 Giljo HQ, a GiljoAI product, is a self-hosted AI agent orchestration platform. This guide covers
 installing the server, completing the setup wizard, and connecting your AI coding tools.

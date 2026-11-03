@@ -64,11 +64,25 @@ def test_started_worker_blocker_still_advises_complete_job() -> None:
 
 
 def test_blocked_is_not_described_as_needing_human_help() -> None:
+    from api.endpoints.mcp_tools import _job_tools
     from giljo_mcp.services.orchestration_agent_state_service import OrchestrationAgentStateService
     from giljo_mcp.services.protocol_sections import orchestrator_body
 
-    for source in (inspect.getsource(orchestrator_body), inspect.getsource(OrchestrationAgentStateService)):
+    for source in (
+        inspect.getsource(orchestrator_body),
+        inspect.getsource(OrchestrationAgentStateService),
+        inspect.getsource(_job_tools),
+    ):
         assert "needs human help" not in source
+
+
+def test_report_progress_lists_every_todo_status_the_server_accepts() -> None:
+    from api.endpoints.mcp_tools import _job_tools
+    from giljo_mcp.services.progress_service import _VALID_TODO_STATUSES
+
+    source = inspect.getsource(_job_tools.report_progress)
+    for status in _VALID_TODO_STATUSES:
+        assert f"'{status}'" in source
 
 
 @pytest.mark.asyncio

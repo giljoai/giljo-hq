@@ -24,6 +24,15 @@ RESULT_BEARING_EXECUTION_STATUSES: tuple[str, ...] = ("complete", "closed")
 class AgentOperationsRepository(AgentHeartbeatSilenceMixin, AgentUnreadCountsMixin, AgentLivenessMixin):
 
 
+    async def get_agent_display_name(self, session: AsyncSession, tenant_key: str, agent_id: str) -> str | None:
+        query = (
+            select(AgentExecution.agent_display_name)
+            .where(AgentExecution.tenant_key == tenant_key, AgentExecution.agent_id == agent_id)
+            .order_by(AgentExecution.started_at.desc().nullslast())
+            .limit(1)
+        )
+        return (await session.execute(query)).scalar_one_or_none()
+
     async def get_active_agent_ids_for_project(
         self,
         session: AsyncSession,

@@ -30,6 +30,7 @@ EXPECTED_PUBLIC_METHODS = frozenset(
         "update_project",
         "launch_project",
         "archive_project",
+        "complete_after_closeout",
         "bulk_close_projects",
         "create_project_for_mcp",
         "render_ctx_bootstrap_mission",

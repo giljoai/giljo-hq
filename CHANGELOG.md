@@ -2,6 +2,24 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.13.0] — 2026-11-02
+
+### Added
+
+- **Planning starts from your past work.** When a project is staged, the three closest matches from your 360 memory, found by the project's name, come with the plan.
+
+### Changed
+
+- **Closeout finishes the project.** When an agent writes a closeout for a standalone project, the project is marked completed in the same step. Finished projects no longer stay open.
+- **Better memory search.** Search finds past work that shares any of your words, not only entries with every word, and shows the closest matches first.
+
+### Fixed
+
+- The Project Types card on the dashboard shows how many types you use, not the total number of projects.
+- The Message Hub shows which app an agent uses (for example ChatGPT) in more cases, and shows an agent's name instead of its ID.
+- The page where you approve an app connection no longer breaks when your browser offers to translate it.
+- Upgrading with git pull and python startup.py no longer shows a false red pip "dependency conflict" error.
+
 ## [2.12.0] — 2026-10-30
 
 ### Added

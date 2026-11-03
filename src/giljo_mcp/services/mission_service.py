@@ -110,6 +110,7 @@ class MissionService:
         preset_name: str | None = None,
         detected_harness: str | None = None,
         section: str = "",
+        hub_harness: str | None = None,
     ) -> MissionResponse:
         preset = get_preset(preset_name)
         try:
@@ -133,7 +134,8 @@ class MissionService:
                 if gate_response is not None:
                     return gate_response
 
-                comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key, detected_harness) or {}
+                enrol_as = hub_harness or detected_harness
+                comm_thread = await resolve_and_enrol(self, session, job, execution, tenant_key, enrol_as) or {}
 
                 all_project_executions, mission_lookup, current_team_state, job_links = await self._fetch_team_context(
                     session, job, execution, job_id, tenant_key
