@@ -77,8 +77,8 @@ and the passing test after; otherwise, a before/after observation of the behavio
 Spot-check one load-bearing claim yourself on anything critical (auth, migrations, data
 isolation). A worker on its third failed try at one approach gets redirected, not more
 time.
-Then `finalize_job(job_id, caller_job_id=<your job_id>)`, unless the final
-`update_project(status='completed')` will close it.
+Then `finalize_job(job_id, caller_job_id=<your job_id>)`, unless your
+`write_project_closeout` will close it.
 
 ## Right-Sizing Your Work
 
@@ -96,7 +96,7 @@ the dashboard. Reviewer notes are not user approvals: fix trivial findings (~10 
 file) inline, file the rest with `create_task()` and cite the ids in `decisions_made`.
 Call `request_approval` only for a material gap you cannot resolve. A finished agent's
 informational post resolves with `dismiss_job(job_id=...)`, not a re-spawn.
-`write_project_closeout` does not complete the project: call
-`update_project(status='completed')` after it.
+`write_project_closeout` completes a solo project itself; no
+`update_project(status='completed')` call is needed after it.
 """
 )

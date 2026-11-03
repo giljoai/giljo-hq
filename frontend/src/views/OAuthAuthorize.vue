@@ -1,5 +1,5 @@
 <template>
-  <v-container fluid class="fill-height oauth-container">
+  <v-container fluid class="fill-height oauth-container notranslate" translate="no">
     <v-row class="align-center justify-center">
       <v-col cols="12" sm="8" md="5" lg="4">
         <v-card elevation="8" class="oauth-card smooth-border">

@@ -17,6 +17,19 @@ from giljo_mcp.services.comm_author_identity import resolve_and_register_author
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def execution_names(monkeypatch):
+    names: dict[str, str] = {}
+
+    async def _lookup(self, session, tenant_key, agent_id):
+        return names.get(agent_id)
+
+    monkeypatch.setattr(
+        "giljo_mcp.repositories.agent_operations_repository.AgentOperationsRepository.get_agent_display_name", _lookup
+    )
+    return names
+
+
 @dataclass
 class _Row:
     display_name: str | None
@@ -74,6 +87,15 @@ async def test_agent_post_falls_back_to_the_slug_when_unregistered():
 
     assert identity.kind == "agent"
     assert identity.display_name == "lane-3-worker"
+
+
+async def test_an_unregistered_poster_takes_its_own_execution_name(execution_names):
+    execution_names["40a9d13b-0f15-4fed-83e7-04c0043b469b"] = "orchestrator"
+    repo = _FakeRepo(participant=None)
+    identity = await _resolve(repo, from_agent="40a9d13b-0f15-4fed-83e7-04c0043b469b")
+
+    assert identity.display_name == "orchestrator"
+    assert repo.registered["display_name"] == "orchestrator"
 
 
 async def test_a_uuid_shaped_slug_is_still_an_agent():

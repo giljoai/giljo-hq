@@ -358,6 +358,7 @@ class ProductMemoryService:
                     "summary": entry.summary or "",
                     "tags": _apply_legacy_tag_mapping(entry.tags or []),
                     "type": entry.entry_type,
+                    "date": entry.timestamp.date().isoformat() if entry.timestamp else None,
                     "score": _keyword_score(clean_query, haystack),
                 }
             )

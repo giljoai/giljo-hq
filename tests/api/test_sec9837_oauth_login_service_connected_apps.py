@@ -293,6 +293,31 @@ async def test_addresses_older_than_ninety_days_are_dropped_on_the_next_write(ap
     assert kept == {"198.51.100.1"}
 
 
+async def test_a_call_without_a_client_name_keeps_the_last_known_name(api_client, db_manager, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    app = await _connect_app(api_client, db_manager)
+    tenant_key = app["tenant_key"]
+    (login,) = await _logins(db_manager, tenant_key)
+    for ip, name in (("198.51.100.1", "Anthropic/ClaudeAI"), ("198.51.100.2", None)):
+        async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+            with tenant_session_context(session, tenant_key):
+                await oauth_login_service.record_use(
+                    session,
+                    tenant_key=tenant_key,
+                    family_id=str(login.family_id),
+                    ip=ip,
+                    user_agent=None,
+                    mcp_client_name=name,
+                )
+    async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+        with tenant_session_context(session, tenant_key):
+            names = await oauth_login_service.login_app_names(
+                session, tenant_key=tenant_key, family_id=str(login.family_id)
+            )
+    assert names[1] == "Anthropic/ClaudeAI"
+    assert names[0] == login.client_name
+
+
 async def test_one_user_never_sees_or_ends_another_users_login(api_client, db_manager, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     alice = await _connect_app(api_client, db_manager)

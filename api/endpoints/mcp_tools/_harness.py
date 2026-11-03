@@ -13,7 +13,7 @@ from starlette.requests import Request as StarletteRequest
 if TYPE_CHECKING:
     from mcp.types import ClientCapabilities
 
-from giljo_mcp.harness_resolver import hub_participant_harness, preset_from_client_info
+from giljo_mcp.harness_resolver import hub_participant_harness, hub_surface_from_app_name, preset_from_client_info
 from giljo_mcp.platform_registry import GENERIC_HARNESS, harness_from_client_info, select_effective_preset
 
 
@@ -43,6 +43,30 @@ def _hub_harness(ctx: Context) -> str:
     except Exception:  # noqa: BLE001 - a display hint, never raise into the tool
         name = None
     return hub_participant_harness(_detected_harness(ctx), name if isinstance(name, str) else None)
+
+
+async def _hub_harness_for_call(ctx: Context) -> str:
+    harness = _hub_harness(ctx)
+    if harness != GENERIC_HARNESS:
+        return harness
+    try:
+        state = ctx.request_context.request.scope.get("state", {})
+        family_id, tenant_key = state.get("oauth_family_id"), state.get("tenant_key")
+        if not (isinstance(family_id, str) and family_id and isinstance(tenant_key, str) and tenant_key):
+            return harness
+        from api.app_state import state as app_state
+        from giljo_mcp.services import oauth_login_service
+
+        async with app_state.db_manager.get_session_async() as db:
+            app_name, mcp_name = await oauth_login_service.login_app_names(
+                db, tenant_key=tenant_key, family_id=family_id
+            )
+    except Exception:  # noqa: BLE001 - a display hint, never raise into the tool
+        return harness
+    by_client = hub_participant_harness(None, mcp_name)
+    if by_client != GENERIC_HARNESS:
+        return by_client
+    return hub_surface_from_app_name(app_name) or harness
 
 
 def _persisted_preset(ctx: Context) -> str | None:

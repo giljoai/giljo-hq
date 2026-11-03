@@ -61,7 +61,7 @@ describe('DashboardView stat pills', () => {
       {
         classes: ['stat-pill', 'smooth-border', 'main-window-reveal', 'main-window-delay-4'],
         label: 'Project Types',
-        value: '4types',
+        value: '2types',
         segs: 2,
         legend: ['BE 3', 'Untyped 1'],
       },

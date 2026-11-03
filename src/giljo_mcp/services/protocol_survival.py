@@ -235,7 +235,7 @@ def _solo_orchestrator_implementation() -> list[str]:
         "3. Verify deliverables (get_agent_result only if a worker did not return inline); "
         "finalize_job only to accept one before you go on working.",
         "4. complete_job(job_id, ...) — your own orchestrator closeout.",
-        "5. write_project_closeout(project_id, ...) (commit SHA + decisions), then update_project(status='completed').",
+        "5. write_project_closeout(project_id, ...) (commit SHA + decisions); it completes a solo project.",
     ]
 
 

@@ -25,7 +25,7 @@ pytestmark = pytest.mark.asyncio
 
 PLAN = "BE-9831 plan: one implementer adds slugify with tests."
 BASELINE_CALLS = 25
-TARGET_CALLS = 20
+TARGET_CALLS = 19
 
 
 def _payload(result) -> dict:
@@ -45,7 +45,7 @@ class _Walk:
         return _payload(result)
 
 
-async def test_tiny_task_path_walk_is_twenty_calls_with_the_same_end_state(be9744a_client, db_manager):  # noqa: F811
+async def test_tiny_task_path_walk_is_nineteen_calls_with_the_same_end_state(be9744a_client, db_manager):  # noqa: F811
     client, tenant_key, _ws = be9744a_client
     project_id = await _seed(db_manager, tenant_key, mission="")
     calls: list[str] = []
@@ -151,9 +151,8 @@ async def test_tiny_task_path_walk_is_twenty_calls_with_the_same_end_state(be974
                     "git_commits": [],
                 },
             )
-            done = await orch.call("update_project", {"project_id": project_id, "status": "completed"})
 
-        assert done["status"] == "completed"
+        assert "update_project" not in calls
         assert len(calls) == TARGET_CALLS, calls
         assert len(calls) <= BASELINE_CALLS - 5
         for removed in ("update_job_mission", "get_agent_result", "finalize_job"):

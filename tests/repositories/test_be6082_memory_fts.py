@@ -113,6 +113,38 @@ class TestMemoryFullTextSearch:
         )
         assert [e.sequence for e in entries] == [1]
 
+    async def test_any_word_matches_and_more_words_rank_first(
+        self, db_session: AsyncSession, test_product, test_tenant_key
+    ):
+        repo = ProductMemoryRepository()
+        await _make_entry(
+            repo, db_session, test_product.id, test_tenant_key, sequence=1, summary="Chain detach on park"
+        )
+        await _make_entry(
+            repo, db_session, test_product.id, test_tenant_key, sequence=2, summary="Chain card shows staged state"
+        )
+        await _make_entry(
+            repo, db_session, test_product.id, test_tenant_key, sequence=3, summary="Unrelated billing work"
+        )
+
+        entries, _ = await repo.get_memory_entries_paginated(
+            session=db_session,
+            product_id=test_product.id,
+            tenant_key=test_tenant_key,
+            search_query="chain detach when a project is parked",
+        )
+        assert [e.sequence for e in entries] == [1, 2]
+
+    async def test_stopword_only_query_falls_back_to_substring(
+        self, db_session: AsyncSession, test_product, test_tenant_key
+    ):
+        repo = ProductMemoryRepository()
+        await _make_entry(repo, db_session, test_product.id, test_tenant_key, sequence=1, summary="the and of")
+        entries, _ = await repo.get_memory_entries_paginated(
+            session=db_session, product_id=test_product.id, tenant_key=test_tenant_key, search_query="the"
+        )
+        assert [e.sequence for e in entries] == [1]
+
     async def test_tenant_isolation(self, db_session: AsyncSession, test_product, test_tenant_key):
         repo = ProductMemoryRepository()
         await _make_entry(

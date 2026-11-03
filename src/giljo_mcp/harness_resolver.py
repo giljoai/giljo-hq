@@ -144,3 +144,12 @@ def hub_participant_harness(detected: str | None, client_name: str | None) -> st
         if name.startswith(prefix):
             return surface
     return GENERIC_HARNESS
+
+
+def hub_surface_from_app_name(app_name: str | None) -> str | None:
+    name = (app_name or "").strip()
+    if name.startswith("ChatGPT"):
+        return HUB_SURFACE_CHATGPT
+    if name == "Claude":
+        return HUB_SURFACE_CLAUDE
+    return None

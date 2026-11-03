@@ -95,6 +95,7 @@ from startup_support.migration_stamp import (  # noqa: F401 -- re-exported seam
     _get_database_url,
     _heal_schema_to_v37,
 )
+from startup_support.package_record import package_record_is_stale, refresh_package_record
 from startup_support.services import (
     _choose_browser_target,
     _launch_log_viewer,
@@ -608,6 +609,9 @@ def run_startup(
         return 0
 
     print_header("Installing Requirements")
+    project_root = Path(__file__).resolve().parent
+    if package_record_is_stale(project_root) and not refresh_package_record(project_root):
+        print_warning("Could not refresh the giljo-mcp package record; pip may report a harmless conflict")
     if not install_requirements():
         print_error("Failed to install requirements")
         print_info("Please install manually: pip install -r requirements.txt")

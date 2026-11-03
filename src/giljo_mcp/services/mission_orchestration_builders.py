@@ -9,12 +9,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.platform_registry import (
     GENERIC_SUBAGENT_SPAWN_SYNTAX,
     SUBAGENT_EXECUTION_MODES,
     get_harness,
 )
 from giljo_mcp.services.next_action import STAGING_COMPLETE
+from giljo_mcp.services.product_memory_service import ProductMemoryService
 from giljo_mcp.services.protocol_builder import _build_orchestrator_protocol
 from giljo_mcp.services.vision_hash import (
     compute_vision_inputs_hash,
@@ -123,6 +127,42 @@ async def build_category_metadata(
 
 
     return metadata
+
+
+RELATED_PAST_WORK_LIMIT = 3
+_HEADLINE_CHARS = 240
+_RELATED_SEARCH_FETCH = 8
+
+
+def _headline(summary: str) -> str:
+    return summary if len(summary) <= _HEADLINE_CHARS else summary[: _HEADLINE_CHARS - 3].rstrip() + "..."
+
+
+async def build_related_past_work(
+    db_manager: Any, tenant_key: str, product: Any | None, project: Any, test_session: Any = None
+) -> list[dict]:
+    if product is None or not (project.name or "").strip():
+        return []
+    memory_service = ProductMemoryService(db_manager=db_manager, tenant_key=tenant_key, test_session=test_session)
+    try:
+        found = await memory_service.search_memory(
+            product_id=str(product.id), query=project.name, limit=_RELATED_SEARCH_FETCH
+        )
+    except (ResourceNotFoundError, SQLAlchemyError):
+        logger.warning("[BE-0032] related past work search failed; staging continues without it", exc_info=True)
+        return []
+    own_id = str(project.id)
+    return [
+        {
+            "sequence": r["sequence"],
+            "project_name": r["project_name"],
+            "date": r["date"],
+            "summary": _headline(r["summary"]),
+            "tags": r["tags"],
+        }
+        for r in found["results"]
+        if r["project_id"] != own_id
+    ][:RELATED_PAST_WORK_LIMIT]
 
 
 def maybe_build_ctx_self_close_directive(ctx: dict[str, Any]) -> dict[str, Any] | None:
