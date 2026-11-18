@@ -1,3 +1,6 @@
+> **This repository is archived. Community Edition 2.14.0 is the final release.**
+> Community Edition gets no more updates, including security fixes. You can still install it, run it and change it under the Elastic License 2.0. For updates, use Giljo HQ hosted at [giljo.ai](https://giljo.ai).
+
 <div align="center">
 
 <img src="docs/images/giljo-logo.png" alt="Giljo HQ" width="420">
@@ -33,9 +36,6 @@ Define your product once. Every agent that connects gets the full picture.
 [Website](https://giljo.ai) · [Getting Started](https://giljo.ai/getting-started.html) · [Documentation](#documentation) · [User Guide](docs/USER_GUIDE.md)
 
 </div>
-
-> **This repository is archived. Community Edition 2.14.0 is the final release.**
-> Community Edition gets no more updates, including security fixes. You can still install it, run it and change it under the Elastic License 2.0. For updates, use Giljo HQ hosted at [giljo.ai](https://giljo.ai).
 
 <br>
 
