@@ -138,6 +138,7 @@ class NotificationService:
         cta_route: str | None = None,
         dismissible: bool = True,
         resurface_after_hours: int | None = None,
+        resurface_every_count: tuple[str, int] | None = None,
     ) -> Notification:
         validated_payload = self._validate_fields(notification_type, severity, surface, payload)
 
@@ -157,6 +158,7 @@ class NotificationService:
                     cta_route=cta_route,
                     dismissible=dismissible,
                     resurface_after_hours=resurface_after_hours,
+                    resurface_every_count=resurface_every_count,
                 )
                 await session.flush()
                 await session.commit()
@@ -200,6 +202,7 @@ class NotificationService:
                     cta_route=cta_route,
                     dismissible=dismissible,
                     resurface_after_hours=resurface_after_hours,
+                    resurface_every_count=resurface_every_count,
                 )
                 await session.flush()
                 await session.commit()
@@ -349,7 +352,19 @@ class NotificationService:
         cta_route: str | None,
         dismissible: bool,
         resurface_after_hours: int | None = None,
+        resurface_every_count: tuple[str, int] | None = None,
     ) -> None:
+        if resurface_every_count is not None and notification.dismissed_at is not None:
+            key, step = resurface_every_count
+            previous = notification.payload or {}
+            anchor = previous.get("dismissed_at_count")
+            if anchor is None:
+                anchor = previous.get(key, 0)
+            if payload.get(key, 0) >= anchor + step:
+                notification.dismissed_at = None
+            else:
+                payload = {**payload, "dismissed_at_count": anchor}
+
         notification.severity = severity
         notification.title = title
         notification.body = body

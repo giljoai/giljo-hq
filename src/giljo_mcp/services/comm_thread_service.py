@@ -48,6 +48,7 @@ from giljo_mcp.services.comm_baton_targets import (
     resolve_operator_alias,
 )
 from giljo_mcp.services.comm_post_validation import resolve_loop_interval, validate_post_vocabularies
+from giljo_mcp.services.taxonomy_ops import RESERVED_CHAT_THREAD_TYPE_ABBR, ensure_reserved_type
 from giljo_mcp.tenant import TenantManager
 
 
@@ -143,6 +144,7 @@ class CommThreadService(
                 product_id = await self._resolve_create_product_id(
                     session, tk, project_id=project_id, sequence_run_id=sequence_run_id
                 )
+            await ensure_reserved_type(session, tk, RESERVED_CHAT_THREAD_TYPE_ABBR)
             thread = await self._repo.create_thread(
                 session,
                 tk,

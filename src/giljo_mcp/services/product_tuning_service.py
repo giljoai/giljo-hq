@@ -91,6 +91,46 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
     "target_platforms": {"type": "direct", "field": "target_platforms"},
 }
 
+TUNING_FIELD_ALIASES: dict[str, str] = {"databases": "databases_storage"}
+
+
+def canonical_tuning_section(section: Any) -> Any:
+    if isinstance(section, str):
+        parent, sep, field = section.partition(".")
+        if sep and parent == "tech_stack" and field in TUNING_FIELD_ALIASES:
+            return f"{parent}.{TUNING_FIELD_ALIASES[field]}"
+    return section
+
+
+def canonical_tuning_value(section: Any, value: Any) -> Any:
+    if section != "tech_stack" or not isinstance(value, dict):
+        return value
+    renamed: dict[str, Any] = {}
+    for key, sub_value in value.items():
+        canonical = TUNING_FIELD_ALIASES.get(key, key)
+        if canonical != key and canonical in value:
+            continue
+        renamed[canonical] = sub_value
+    return renamed
+
+
+def canonicalize_tuning_proposals(proposals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    canonical: list[dict[str, Any]] = []
+    for proposal in proposals:
+        if not isinstance(proposal, dict):
+            canonical.append(proposal)
+            continue
+        section = canonical_tuning_section(proposal.get("section"))
+        canonical.append(
+            {
+                **proposal,
+                "section": section,
+                "proposed_value": canonical_tuning_value(section, proposal.get("proposed_value")),
+            }
+        )
+    return canonical
+
+
 STRUCTURED_TUNING_SECTIONS: frozenset[str] = frozenset(
     key for key, mapping in SECTION_FIELD_MAP.items() if mapping["type"] == "relation"
 )
@@ -138,7 +178,13 @@ Ground yourself in the actual codebase before making any judgments.{project_path
 5. Git history:    Run `git log --oneline -15` to see recent changes
 6. Project memory: Call `get_context(categories=["memory_360"], product_id="{product_id}", depth_config={{"memory_360": {{"shape": "full"}}}})` to get recent project closeout bodies — these describe what was built, decisions made, and outcomes (full shape required since headlines-only would drop the very content this prompt needs)
 
-If you cannot run terminal commands (e.g., web-based agent), skip steps 1-5 and rely on project memory from step 6.
+Project memory can be incomplete: some releases ship without a closeout, so memory alone
+misses changes that the git log and the code show. Always run the git and code steps
+(1-5) when you can.
+
+If you cannot run terminal commands (e.g., web-based agent), skip steps 1-5 and rely on
+project memory from step 6, but tell the user plainly that the project history may be
+incomplete and name which sections you could not verify against code.
 
 Do NOT present findings yet. Move to Phase 2.
 
@@ -222,8 +268,27 @@ apply_context_tuning(
       "reasoning": "<one sentence>"
     }}
   ],
-  overall_summary="<one paragraph on context health>"
+  overall_summary="<one paragraph on context health>",
+  force=true
 )
+
+force=true is required: the product already holds values, and without it the tool refuses
+to overwrite a populated field. The user has approved each section you include, so the
+overwrite is intended.
+
+Shape of proposed_value, by section key:
+- description, core_features, brand_guidelines, quality_standards: one plain string.
+- target_platforms: a list of strings, e.g. ["linux", "macos"].
+- tech_stack and architecture are structured and take an object, never a plain string.
+  Either one object keyed by field name:
+    {{"section": "tech_stack", "proposed_value": {{"infrastructure": "<text>", "databases_storage": "<text>"}}}}
+  or one proposal per field with a dotted section key and a plain string:
+    {{"section": "tech_stack.infrastructure", "proposed_value": "<text>"}}
+  tech_stack fields: programming_languages, frontend_frameworks, backend_frameworks,
+  databases_storage (get_context returns this field as "databases"; either name is accepted),
+  infrastructure, dev_tools.
+  architecture fields: primary_pattern, design_patterns, api_style, architecture_notes,
+  coding_conventions.
 
 Set drift_detected from the verdict: ADDED and CONTRADICTION are changes to apply, so
 drift_detected: true. INTENT keeps the item unchanged, so drift_detected: false and
@@ -493,6 +558,7 @@ class ProductTuningService:
     ) -> dict[str, Any]:
         from giljo_mcp.services.product_service import ProductService
 
+        proposals = canonicalize_tuning_proposals(proposals)
         update_kwargs, sections_applied = self._build_update_kwargs(proposals)
 
         intended_sections = [p.get("section") for p in proposals if p.get("drift_detected")]

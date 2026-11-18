@@ -10,7 +10,6 @@ import bcrypt
 import pytest
 
 from giljo_mcp.exceptions import (
-    AuthenticationError,
     AuthorizationError,
     ResourceNotFoundError,
     ValidationError,
@@ -67,6 +66,14 @@ def _make_service(session, tenant_key=TENANT_KEY):
 
 class TestChangePassword:
 
+    @pytest.fixture(autouse=True)
+    def _no_guess_limit_table(self, monkeypatch):
+
+        async def _bcrypt_only_check(session, user, supplied):
+            return bcrypt.checkpw(supplied.encode("utf-8"), user.password_hash.encode("utf-8"))
+
+        monkeypatch.setattr("giljo_mcp.services.user_auth_service.verify_current_password", _bcrypt_only_check)
+
     @pytest.mark.asyncio
     async def test_change_password_user_not_found_raises(self):
         session = _make_session()
@@ -99,7 +106,7 @@ class TestChangePassword:
         session.execute = AsyncMock(return_value=mock_result)
 
         service = _make_service(session)
-        with pytest.raises(AuthenticationError, match="Current password is incorrect"):
+        with pytest.raises(ValidationError, match="Current password is incorrect"):
             await service.change_password("user-1", "wrong-password", "newpass")
 
     @pytest.mark.asyncio

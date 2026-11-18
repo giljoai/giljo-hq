@@ -42,6 +42,16 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
+async def _announce_status_changed(ws_mgr, project) -> None:
+    if ws_mgr:
+        await ws_mgr.broadcast_project_update(
+            project_id=project.id,
+            update_type="status_changed",
+            project_data=_build_ws_project_data(project),
+            tenant_key=project.tenant_key,
+        )
+
+
 class ProjectLifecycleService(OrchestratorFixtureMixin):
 
     def __init__(
@@ -170,13 +180,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
             )
 
             ws_mgr = websocket_manager or self._websocket_manager
-            if ws_mgr:
-                await ws_mgr.broadcast_project_update(
-                    project_id=project.id,
-                    update_type="status_changed",
-                    project_data=_build_ws_project_data(project),
-                    tenant_key=project.tenant_key,
-                )
+            await _announce_status_changed(ws_mgr, project)
 
             await self._broadcast_agents_removed(
                 ws_mgr, resolved_tenant, project_id, removed, product_id=project.product_id
@@ -218,14 +222,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 stood_down["executions"],
             )
 
-            ws_mgr = websocket_manager or self._websocket_manager
-            if ws_mgr:
-                await ws_mgr.broadcast_project_update(
-                    project_id=project.id,
-                    update_type="status_changed",
-                    project_data=_build_ws_project_data(project),
-                    tenant_key=project.tenant_key,
-                )
+            await _announce_status_changed(websocket_manager or self._websocket_manager, project)
 
             return project
 
@@ -451,6 +448,9 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
                 self._logger.info(f"Cancelled project {project_id}")
 
+                project = await self._repo.get_by_id(session, tenant_key, project_id)
+                await _announce_status_changed(self._websocket_manager, project)
+
         except ResourceNotFoundError:
             raise
         except Exception as e:
@@ -490,19 +490,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
 
                 self._logger.info(f"Resumed project {project_id} with {len(resumed_ids)} agents resumed")
 
-                ws_mgr = self._websocket_manager
-                if ws_mgr:
-                    await ws_mgr.broadcast_project_update(
-                        project_id=project_id,
-                        update_type="status_changed",
-                        project_data={
-                            "name": project.name,
-                            "status": ProjectStatus.INACTIVE.value,
-                            "mission": project.mission,
-                            "product_id": project.product_id,
-                        },
-                        tenant_key=tenant_key,
-                    )
+                await _announce_status_changed(self._websocket_manager, project)
 
                 return ProjectResumeResult(
                     message="Project resumed successfully",

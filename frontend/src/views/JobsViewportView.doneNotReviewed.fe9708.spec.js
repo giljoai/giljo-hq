@@ -74,24 +74,27 @@ beforeEach(() => {
 })
 
 describe('Done, not reviewed group (FE-9708)', () => {
-  it('shows a folded group with the count and mounts no card until opened', async () => {
+  it('a group of two shows open by itself with the count and its cards', async () => {
     const wrapper = await mountBoard()
     const group = wrapper.find('[data-testid="jobs-done-group"]')
     expect(group.exists()).toBe(true)
     expect(group.find('[data-testid="jobs-done-group-count"]').text()).toContain('2')
     expect(group.text()).toContain('Done, not reviewed')
-    expect(group.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(0)
-    wrapper.unmount()
-  })
-
-  it('opening it shows the normal cards, each with its Review button; the live card stays outside', async () => {
-    const wrapper = await mountBoard()
-    await wrapper.find('[data-testid="jobs-done-group-toggle"]').trigger('click')
-    await flushPromises()
-    const cards = wrapper.findAll('[data-testid="jobs-done-group"] [data-testid="jobs-board-card-wrap"]')
+    const cards = group.findAll('[data-testid="jobs-board-card-wrap"]')
     expect(cards).toHaveLength(2)
     for (const card of cards) expect(card.find('[data-testid="jb-btn-review"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(3)
+    wrapper.unmount()
+  })
+
+  it('a group of four starts folded, mounts no card, and opens on a press', async () => {
+    server.active = [live('solo', 'FE-0100'), ...[1, 2, 3, 4].map((n) => done(`d${n}`, `FE-040${n}`))]
+    const wrapper = await mountBoard()
+    const group = wrapper.find('[data-testid="jobs-done-group"]')
+    expect(group.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(0)
+    await wrapper.find('[data-testid="jobs-done-group-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="jobs-done-group"] [data-testid="jobs-board-card-wrap"]')).toHaveLength(4)
     wrapper.unmount()
   })
 

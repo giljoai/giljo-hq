@@ -16,11 +16,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.endpoints.auth.session import _resolve_client_ip
 from api.endpoints.mcp_connected_apps import record_connected_app_use
+from api.endpoints.mcp_rate_limits import refuse_account_over_budget, refuse_unauthenticated_flood
 from api.endpoints.mcp_tools import logger
 from api.endpoints.mcp_transport import (
     _DISCOVER_METHOD,
     _INITIALIZE_METHOD,
     _MAX_MCP_BODY_BYTES,
+    _MAX_UNAUTHENTICATED_PEEK_BYTES,
     _BodyTooLargeError,
     _not_found_response,
     _peek_jsonrpc_capabilities,
@@ -110,13 +112,14 @@ class MCPAuthMiddleware:
         if ws_manager and tenant_key:
             from giljo_mcp.events.schemas import EventFactory
 
-            from giljo_mcp.harness_resolver import harness_for_connection
+            from giljo_mcp.harness_resolver import connector_surface_from_client_name, harness_for_connection
 
             harness = harness_for_connection(client_info, oauth_client_id)
             event = EventFactory.setup_tool_connected(
                 tenant_key=tenant_key,
                 user_id=str(user_id) if user_id else "unknown",
                 tool_name=harness,
+                surface=connector_surface_from_client_name((client_info or {}).get("name")),
             )
             await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
@@ -157,6 +160,8 @@ class MCPAuthMiddleware:
                     )
                     return
                 raise
+        if await refuse_unauthenticated_flood(request, send):
+            return
         resp = _unauthenticated_response(scope, "Invalid credentials")
         await resp(scope, receive, send)
 
@@ -168,7 +173,7 @@ class MCPAuthMiddleware:
         guard = await self._pre_auth_guard(scope, receive, send)
         if guard is None:
             return
-        receive, request, method, client_info, api_key_value, bearer_token = guard
+        request, api_key_value, bearer_token = guard
 
         tenant_key: str | None = None
         user_id: str | None = None
@@ -176,7 +181,6 @@ class MCPAuthMiddleware:
         auth_method: str | None = None
         token_scopes: list[str] | None = None
         must_change_password: bool | None = None
-        mcp_session_id: str | None = None
 
         if bearer_token and not api_key_value:
             expected_audience = get_canonical_mcp_resource_uri_from_scope(scope)
@@ -217,6 +221,8 @@ class MCPAuthMiddleware:
                             AuthErrorReason.INVALID_AUDIENCE: "Invalid token audience",
                         }.get(exc.reason, "Invalid credentials")
                         logger.warning("Rejecting JWT on /mcp (%s): %s", exc.reason.value, exc.detail)
+                        if await refuse_unauthenticated_flood(request, send):
+                            return
                         resp = _unauthenticated_response(scope, _msg)
                         await resp(scope, receive, send)
                         return
@@ -248,16 +254,6 @@ class MCPAuthMiddleware:
                         auth_method = "api_key"
                         must_change_password = user.must_change_password
 
-                        if method == _INITIALIZE_METHOD:
-                            session = await session_mgr.create_session(
-                                tenant_key=user.tenant_key,
-                                user_id=user.id,
-                                api_key_id=key_record.id,
-                                client_info=client_info,
-                                **_initialize_capture(scope),
-                            )
-                            mcp_session_id = session.session_id
-
                         if api_key_id:
                             client_ip = request.client.host if request.client else "unknown"
                             try:
@@ -278,6 +274,13 @@ class MCPAuthMiddleware:
             return
 
         self._stamp_auth_state(scope, tenant_key, user_id, auth_method, token_scopes, must_change_password)
+
+        frame = await self._read_jsonrpc_frame(scope, receive, send)
+        if frame is None:
+            return
+        receive, request, method, client_info = frame
+        if await refuse_account_over_budget(tenant_key, method, send):
+            return
 
         gate = _mcp_post_auth_gate
         if gate is not None:
@@ -310,7 +313,6 @@ class MCPAuthMiddleware:
             user_id=user_id,
             api_key_id=api_key_id,
             auth_method=auth_method,
-            mcp_session_id=mcp_session_id,
         )
         if send is None:
             return
@@ -330,7 +332,7 @@ class MCPAuthMiddleware:
 
     async def _pre_auth_guard(
         self, scope: Scope, receive: Receive, send: Send
-    ) -> tuple[Receive, StarletteRequest, str | None, dict[str, Any] | None, str | None, str | None] | None:
+    ) -> tuple[StarletteRequest, str | None, str | None] | None:
         if scope.get("method") == "GET":
             await _send_method_not_allowed(send)
             return None
@@ -341,6 +343,34 @@ class MCPAuthMiddleware:
             await _send_raw_status(send, status=413)
             return None
 
+        api_key_value: str | None = request.headers.get("x-api-key")
+        bearer_token: str | None = None
+
+        if not api_key_value:
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                bearer_token = auth_header[7:]
+
+        if api_key_value or bearer_token:
+            return request, api_key_value, bearer_token
+        if await refuse_unauthenticated_flood(request, send):
+            return None
+        if _validate_protocol_version(request, None) is not None:
+            try:
+                prefix = await _read_full_body(receive, max_bytes=_MAX_UNAUTHENTICATED_PEEK_BYTES)
+            except _BodyTooLargeError:
+                prefix = b""
+            version_error = _validate_protocol_version(request, _peek_jsonrpc_method(prefix))
+            if version_error is not None:
+                await version_error(scope, receive, send)
+                return None
+        resp = _unauthenticated_response(scope, "Authentication required (Authorization: Bearer or X-API-Key)")
+        await resp(scope, receive, send)
+        return None
+
+    async def _read_jsonrpc_frame(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> tuple[Receive, StarletteRequest, str | None, dict[str, Any] | None] | None:
         original_receive = receive
         try:
             buffered_body = await _read_full_body(original_receive, max_bytes=_MAX_MCP_BODY_BYTES)
@@ -351,34 +381,18 @@ class MCPAuthMiddleware:
         method = _peek_jsonrpc_method(buffered_body)
         if method == "tools/call":
             scope.setdefault("state", {})["mcp_tool_target"] = _peek_tool_target(buffered_body)
-        is_initialize = method == _INITIALIZE_METHOD
         client_info = _peek_jsonrpc_client_info(buffered_body) if announces_client(method) else None
-        if is_initialize:
+        if method == _INITIALIZE_METHOD:
             state_ = scope.setdefault("state", {})
             state_["mcp_protocol_version"] = _peek_jsonrpc_protocol_version(buffered_body)
             state_["mcp_client_capabilities"] = _peek_jsonrpc_capabilities(buffered_body)
 
         request = StarletteRequest(scope, receive)
-
         version_error = _validate_protocol_version(request, method)
         if version_error is not None:
             await version_error(scope, receive, send)
             return None
-
-        api_key_value: str | None = request.headers.get("x-api-key")
-        bearer_token: str | None = None
-
-        if not api_key_value:
-            auth_header = request.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer "):
-                bearer_token = auth_header[7:]
-
-        if not api_key_value and not bearer_token:
-            resp = _unauthenticated_response(scope, "Authentication required (Authorization: Bearer or X-API-Key)")
-            await resp(scope, receive, send)
-            return None
-
-        return receive, request, method, client_info, api_key_value, bearer_token
+        return receive, request, method, client_info
 
     async def _apply_session_lifecycle(
         self,
@@ -392,7 +406,6 @@ class MCPAuthMiddleware:
         user_id: str | None,
         api_key_id: str | None = None,
         auth_method: str | None,
-        mcp_session_id: str | None,
     ) -> Send | None:
         if method in (_DISCOVER_METHOD, _INITIALIZE_METHOD):
             _stamp_client_name(scope, client_info)
@@ -409,9 +422,10 @@ class MCPAuthMiddleware:
             return send
 
         if method == _INITIALIZE_METHOD:
-            session_id = mcp_session_id or await self._ensure_jwt_initialize_session(
+            session_id = await self._mint_initialize_session(
                 tenant_key=tenant_key,
                 user_id=user_id,
+                api_key_id=api_key_id,
                 auth_method=auth_method,
                 client_info=client_info,
                 **_initialize_capture(request.scope),
@@ -503,18 +517,19 @@ class MCPAuthMiddleware:
         except SQLAlchemyError:
             logger.warning("BE-9586d: could not record announced client (non-fatal)", exc_info=True)
 
-    async def _ensure_jwt_initialize_session(
+    async def _mint_initialize_session(
         self,
         *,
         tenant_key: str,
         user_id: str | None,
+        api_key_id: str | None,
         auth_method: str | None,
         client_info: dict[str, Any] | None = None,
         protocol_version: str | None = None,
         capabilities: dict[str, Any] | None = None,
         oauth_client_id: str | None = None,
     ) -> str | None:
-        if auth_method != "jwt" or not user_id:
+        if not user_id:
             return None
         from api.app_state import state
         from api.endpoints.mcp_session import MCPSessionManager
@@ -526,8 +541,9 @@ class MCPAuthMiddleware:
             session = await session_mgr.create_session(
                 tenant_key=tenant_key,
                 user_id=user_id,
+                api_key_id=api_key_id,
                 client_info=client_info,
-                auth_method="oauth_jwt",
+                auth_method="oauth_jwt" if auth_method == "jwt" else None,
                 protocol_version=protocol_version,
                 capabilities=capabilities,
                 oauth_client_id=oauth_client_id,

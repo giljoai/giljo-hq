@@ -27,7 +27,7 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.chain_member_detach import detach_chain_member
-from giljo_mcp.services.project_helpers import broadcast_deferred_events
+from giljo_mcp.services.project_helpers import _build_ws_project_data, broadcast_deferred_events
 from giljo_mcp.tenant import TenantManager
 
 
@@ -361,8 +361,9 @@ class ProjectDeletionService:
 
             if project.deleted_at is not None:
                 await self._repo.lock_rows_for_series_shared(session, tenant_key, project.product_id)
-                fresh_series = await self._repo.get_next_series_number_shared(session, tenant_key, project.product_id)
-                project.series_number = fresh_series
+                project.series_number = await self._repo.get_series_number_for_restore(
+                    session, tenant_key, project.product_id, project.id, project.series_number
+                )
 
             now = datetime.now(UTC)
             project.status = ProjectStatus.INACTIVE
@@ -373,6 +374,14 @@ class ProjectDeletionService:
             await session.commit()
 
             self._logger.info(f"Restored project {project_id}")
+
+            if self._websocket_manager:
+                await self._websocket_manager.broadcast_project_update(
+                    project_id=project_id,
+                    update_type="status_changed",
+                    project_data=_build_ws_project_data(project),
+                    tenant_key=tenant_key,
+                )
 
             return OperationResult(
                 message=f"Project {project_id} restored successfully",

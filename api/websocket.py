@@ -39,6 +39,7 @@ class WebSocketManager:
         self._broker_unsubscribe = None
         self._broker_origin = uuid4().hex
         self._publish_to_broker_enabled = False
+        self.tenant_revoked_at: dict[str, float] = {}
 
     def attach_broker(self, broker: WebSocketEventBroker) -> None:
         if self._broker_unsubscribe:
@@ -239,6 +240,10 @@ class WebSocketManager:
         new_tenant = (auth_context or {}).get("tenant_key")
         if existing is not None and self.auth_contexts.get(client_id, {}).get("tenant_key") != new_tenant:
             raise WebSocketException(code=1008, reason="Client id in use")
+        from api.ws_revocation import revoked_since_handshake
+
+        if revoked_since_handshake(self, auth_context or {}):
+            raise WebSocketException(code=1008, reason="Session revoked")
 
         self.active_connections[client_id] = websocket
         self.auth_contexts[client_id] = auth_context or {}
@@ -380,6 +385,9 @@ class WebSocketManager:
                 logger.exception("Heartbeat cycle failed; continuing")
 
     async def send_heartbeat(self):
+        from api.ws_revocation import close_expired_sockets
+
+        await close_expired_sockets(self)
         heartbeat = {"type": "ping", "timestamp": datetime.now(UTC).isoformat()}
 
         disconnected = []

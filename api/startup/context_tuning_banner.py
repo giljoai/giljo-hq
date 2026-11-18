@@ -57,6 +57,7 @@ async def compute_context_tuning_due(db_manager: DatabaseManager, tenant_key: st
         "product_id": str(product.id),
         "product_name": product.name,
         "projects_since_tune": int(staleness.get("projects_since_tune", 0) or 0),
+        "threshold": int(staleness["threshold"]),
     }
 
 
@@ -88,7 +89,7 @@ async def emit_context_tuning_due_banner(
         cta_label="Review context",
         cta_route=tools_route,
         dismissible=True,
-        resurface_after_hours=None,
+        resurface_every_count=("projects_since_tune", due["threshold"]),
         payload={
             "product_id": due["product_id"],
             "product_name": due["product_name"],

@@ -16,7 +16,7 @@ from giljo_mcp.platform_registry import (
 )
 
 
-SKILLS_VERSION = "1.1.21"
+SKILLS_VERSION = "1.1.22"
 
 
 
@@ -35,7 +35,6 @@ _GILJO_BODY = (
     "   - project-vs-task routing (create_project vs create_task),\n"
     "   - the chain convention (one shared series_number + a/b/c suffixes for ordered,\n"
     "     dependent steps),\n"
-    "   - the mandatory `Edition Scope: CE | SaaS | Both` line on every project,\n"
     "   - read-vs-write routing (reads: list_projects / list_tasks / get_context;\n"
     "     writes: create_* / update_*; never pass tenant_key; an active product is required),\n"
     "   - the staging -> human-gate -> implement lifecycle.\n"

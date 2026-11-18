@@ -34,7 +34,7 @@ export function useNavDrawerAccount({ giljoMode }) {
       case 'account_scheduled_for_deletion':
         return 'Account scheduled for deletion'
       case 'trial_expired':
-        return 'Trial expired'
+        return accountStateStoreRef.value?.trial?.notice ? 'No trial' : 'Trial expired'
       case 'trial_ending_soon':
         return 'Trial ending soon'
       default:

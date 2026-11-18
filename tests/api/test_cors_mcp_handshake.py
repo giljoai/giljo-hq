@@ -60,3 +60,31 @@ class TestCorsMcpProtocolHeaders:
         assert response.status_code == 200, response.text
         allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
         assert "mcp-session-id" in allowed_headers, f"Mcp-Session-Id not in allow_headers: {allowed_headers!r}"
+
+
+class TestCorsDashboardHeaders:
+
+    @pytest.mark.asyncio
+    async def test_preflight_refuses_the_tenant_key_header(self, api_client):
+        response = await api_client.options(
+            "/api/v1/products/",
+            headers={
+                "Origin": "http://localhost:7272",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-tenant-key",
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert "x-tenant-key" not in response.headers.get("access-control-allow-headers", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_control_preflight_still_allows_the_dashboard_headers(self, api_client):
+        response = await api_client.options(
+            "/api/v1/products/",
+            headers={
+                "Origin": "http://localhost:7272",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-csrf-token",
+            },
+        )
+        assert response.status_code == 200, response.text

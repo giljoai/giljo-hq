@@ -7,6 +7,7 @@
 from typing import Any
 
 from giljo_mcp.prompts._canonical_tool_list import render_worker_toolsearch_call
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.prompts.launch_command_synth import render_model_hints
 
 
@@ -50,7 +51,7 @@ def build_agent_prompt(
     job_id: str,
     template: Any = None,
 ) -> str:
-    head = f"""I am {agent_name} (Agent {agent_display_name}) for Project "{project_name}".
+    head = f"""I am {prompt_name(agent_name)} (Agent {prompt_name(agent_display_name)}) for Project "{prompt_name(project_name)}".
 
 ## MCP TOOL USAGE
 

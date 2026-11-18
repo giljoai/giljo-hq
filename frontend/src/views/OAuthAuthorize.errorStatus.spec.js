@@ -29,7 +29,6 @@ vi.mock('@/services/api', () => ({
     },
   },
   apiClient: { get: vi.fn(() => Promise.resolve({ data: {} })), post: vi.fn() },
-  setTenantKey: vi.fn(),
 }))
 
 vi.mock('@/sentry', () => ({

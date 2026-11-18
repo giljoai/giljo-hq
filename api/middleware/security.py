@@ -22,6 +22,8 @@ STATIC_MEDIA_MAX_AGE_SECONDS = 86400
 STATIC_MEDIA_CACHE_CONTROL = f"public, max-age={STATIC_MEDIA_MAX_AGE_SECONDS}"
 _STATIC_MEDIA_CONTENT_TYPES = ("image/", "font/")
 
+ONBOARDING_MEDIA_ORIGIN = "https://giljo.ai"
+
 _EXTRA_CSP_SCRIPT_HASHES: set[str] = set()
 _EXTRA_CSP_STYLE_HASHES: set[str] = set()
 _EXTRA_CSP_STYLE_ORIGINS: set[str] = set()
@@ -158,7 +160,9 @@ class SecurityHeadersMiddleware:
         if request.url.scheme == "https":
             response_headers["Strict-Transport-Security"] = f"max-age={self.hsts_max_age}; includeSubDomains; preload"
 
-        script_hashes = " ".join([CSP_SCRIPT_HASH_1, CSP_SCRIPT_HASH_2, *_EXTRA_CSP_SCRIPT_HASHES])
+        script_hashes = " ".join(
+            dict.fromkeys([CSP_SCRIPT_HASH_1, CSP_SCRIPT_HASH_2, *sorted(_EXTRA_CSP_SCRIPT_HASHES)])
+        )
         script_src = f"'self' {script_hashes} https://static.cloudflareinsights.com"
         if _EXTRA_CSP_SCRIPT_ORIGINS:
             script_src += " " + " ".join(sorted(_EXTRA_CSP_SCRIPT_ORIGINS))
@@ -188,7 +192,8 @@ class SecurityHeadersMiddleware:
             f"script-src {script_src}; "
             f"style-src {style_src}; "
             f"{style_src_attr_directive}"
-            "img-src 'self' data: https:; "
+            "img-src 'self' data:; "
+            f"media-src 'self' {ONBOARDING_MEDIA_ORIGIN}; "
             "font-src 'self' data:; "
             f"connect-src {connect_src}; "
             f"frame-src {frame_src}; "

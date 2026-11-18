@@ -2,7 +2,7 @@
   <div class="router-screen">
     <div class="beat-eyebrow">06 · Your first product</div>
     <h2 class="beat-title">How do you want to start?</h2>
-    <p class="beat-sub">Four doors, one destination: your product defined, activated, and ready for its first mission.</p>
+    <p class="beat-sub">Four doors, one destination: your product defined and ready for its first mission.</p>
 
     <div class="door-grid">
       <div
@@ -52,7 +52,7 @@
       >
         <v-icon size="23" class="door-icon">mdi-file-upload-outline</v-icon>
         <span class="door-title">I have a vision document</span>
-        <span class="door-desc">Upload it. GiljoAI stages an analysis and your agent proposes the product setup.</span>
+        <span class="door-desc">Upload it. Giljo HQ stages an analysis and your agent proposes the product setup.</span>
         <span class="door-expect" data-testid="door-expect-document">
           Upload the document, then copy the discovery prompt yourself and paste it into an
           agent connected to {{ PRODUCT_NAME }}. Nothing is copied for you.
@@ -73,7 +73,7 @@
         <span class="door-desc">The classic form: info, setup, tech, architecture, testing. Full control.</span>
         <span class="door-expect" data-testid="door-expect-manual">
           No agent involved. This leaves the tour and opens the product form, where you type
-          the details in yourself and activate when you are ready.
+          the details in yourself and save when you are ready.
         </span>
         <span class="door-tag">MANUAL · LEAVES THE TOUR</span>
       </div>

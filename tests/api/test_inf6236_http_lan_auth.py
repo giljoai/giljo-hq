@@ -23,7 +23,11 @@ class _CookieWebSocket:
 
     def __init__(self, cookie_header: str) -> None:
         self.query_params: dict[str, str] = {}
-        self.headers: dict[str, str] = {"cookie": cookie_header}
+        self.headers: dict[str, str] = {
+            "cookie": cookie_header,
+            "host": "192.0.2.10:7272",
+            "origin": "http://192.0.2.10:7272",
+        }
 
 
 async def _seed_user(db_session) -> tuple[str, str, str, str]:

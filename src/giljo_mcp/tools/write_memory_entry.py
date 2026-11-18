@@ -170,7 +170,7 @@ async def _check_and_emit_tuning_staleness(
             product_id=str(product.id),
             user_id=user_id,
         )
-        if staleness.get("is_stale"):
+        if staleness.get("is_stale") and staleness["projects_since_tune"] % staleness["threshold"] == 0:
             await emit_websocket_event(
                 event_type="notification:new",
                 tenant_key=tenant_key,

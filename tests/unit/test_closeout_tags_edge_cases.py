@@ -19,6 +19,11 @@ from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 from tests.helpers.model_factories import make_product, make_project
 
 
+@pytest.fixture(autouse=True)
+def _solo_closeout(monkeypatch):
+    monkeypatch.setattr("giljo_mcp.tools._closeout_finalize.mark_chain_member_status", AsyncMock(return_value=False))
+
+
 def _build_session_mocks(tenant_key: str):
     project_id = str(uuid4())
     product_id = str(uuid4())

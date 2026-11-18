@@ -59,19 +59,9 @@ async def shutdown(state: APIState) -> None:
     logger.debug("Shutdown step (%d/%d) %s...", step, total_steps, label)
     t0 = time.monotonic()
     try:
-        tasks_to_cancel = []
-        for task_attr in (
-            "heartbeat_task",
-            "cleanup_task",
-            "metrics_sync_task",
-            "system_banner_refresh_task",
-            "update_checker_task",
-            "access_log_purge_task",
-        ):
-            task = getattr(state, task_attr, None)
-            if task:
-                task.cancel()
-                tasks_to_cancel.append(task)
+        tasks_to_cancel = [value for value in vars(state).values() if isinstance(value, asyncio.Task)]
+        for task in tasks_to_cancel:
+            task.cancel()
         if tasks_to_cancel:
             done = await _run_with_timeout(
                 asyncio.gather(*tasks_to_cancel, return_exceptions=True),

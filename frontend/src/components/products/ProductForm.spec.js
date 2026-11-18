@@ -35,6 +35,7 @@ vi.mock('@/services/api', () => ({
   apiClient: {},
 }))
 
+const stageSpy = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/useVisionAnalysis', () => ({
   useVisionAnalysis: () => ({
     analysisPromptCopied: ref(false),
@@ -43,7 +44,7 @@ vi.mock('@/composables/useVisionAnalysis', () => ({
     analysisAgentConnected: ref(false),
     analysisHintVisible: ref(false),
     resetAnalysisState: vi.fn(),
-    stageAnalysis: vi.fn(),
+    stageAnalysis: stageSpy,
     onVisionAnalysisStarted: vi.fn(),
     onVisionAnalysisComplete: vi.fn(),
   }),
@@ -59,9 +60,10 @@ function findFooterPrimaryBtn(wrapper) {
     const html = b.html()
     return (
       html.includes('Next') ||
+      html.includes('Analyze') ||
       html.includes('Save Changes') ||
       html.includes('Create Product') ||
-      html.includes('Stage analysis') ||
+      html.includes('Skip, no document') ||
       html.includes('Analyzing')
     )
   })
@@ -73,29 +75,28 @@ describe('ProductForm.vue — flattened Setup tab', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders the Skip AI Analysis checkbox by default in create mode', () => {
+  it('hides the Skip AI Analysis checkbox in create mode while no document is attached', () => {
     const wrapper = mount(ProductForm, {
-      props: {
-        modelValue: true,
-        isEdit: false,
-        product: null,
-        existingVisionDocuments: [],
-      },
+      props: { modelValue: true, isEdit: false, product: null, existingVisionDocuments: [] },
+    })
+    expect(wrapper.html()).not.toContain('Skip AI Analysis')
+    wrapper.unmount()
+  })
+
+  it('shows the Skip AI Analysis checkbox in create mode once a document is attached', () => {
+    const wrapper = mount(ProductForm, {
+      props: { modelValue: true, isEdit: false, product: null, existingVisionDocuments: [{ id: 'doc-1', filename: 'vision.md', file_size_bytes: 100, created_at: '2026-01-01' }] },
     })
     expect(wrapper.html()).toContain('Skip AI Analysis')
     wrapper.unmount()
   })
 
-  it('renders the secondary "Create blank" affordance in create mode', () => {
+  it('no longer renders the yellow "create a blank product" link', () => {
     const wrapper = mount(ProductForm, {
-      props: {
-        modelValue: true,
-        isEdit: false,
-        product: null,
-        existingVisionDocuments: [],
-      },
+      props: { modelValue: true, isEdit: false, product: null, existingVisionDocuments: [] },
     })
-    expect(wrapper.find('[data-test="create-blank-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="create-blank-toggle"]').exists()).toBe(false)
+    expect(wrapper.html()).not.toContain('Or create a blank product')
     wrapper.unmount()
   })
 
@@ -169,7 +170,7 @@ describe('ProductForm.vue — flattened Setup tab', () => {
         modelValue: true,
         isEdit: false,
         product: null,
-        existingVisionDocuments: [],
+        existingVisionDocuments: [{ id: 'doc-1', filename: 'vision.md', file_size_bytes: 100, created_at: '2026-01-01' }],
       },
     })
     expect(wrapper.html()).not.toContain('document still uploads and is chunked')
@@ -268,17 +269,17 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
     return wrapper
   }
 
-  it('State 1: idle, no docs, Skip OFF → "Stage analysis" + disabled', async () => {
+  it('State 1: idle, no docs → "Skip, no document" + ENABLED', async () => {
     const wrapper = mountForm({ docs: [], name: 'My Product', skipVision: false })
     await nextTick()
     const btn = findFooterPrimaryBtn(wrapper)
     expect(btn).toBeDefined()
-    expect(btn.html()).toContain('Stage analysis')
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.html()).toContain('Skip, no document')
+    expect(btn.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
-  it('State 2: idle, ≥1 doc, Skip OFF, not yet analyzed → "Stage analysis" + enabled', async () => {
+  it('State 2: idle, ≥1 doc, Skip OFF, not yet analyzed → "Analyze" + enabled', async () => {
     const wrapper = mountForm({
       docs: [{ id: 'd1', filename: 'a.md' }],
       name: 'My Product',
@@ -288,8 +289,36 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
     await nextTick()
     const btn = findFooterPrimaryBtn(wrapper)
     expect(btn).toBeDefined()
-    expect(btn.html()).toContain('Stage analysis')
+    expect(btn.html()).toContain('Analyze')
+    expect(btn.html()).not.toContain('Next')
     expect(btn.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('"Analyze" press stages the analysis and does not advance the tab', async () => {
+    stageSpy.mockClear()
+    const wrapper = mountForm({ docs: [{ id: 'd1', filename: 'a.md' }], name: 'My Product' })
+    await nextTick()
+    const tab = wrapper.vm.dialogTab
+    const btn = findFooterPrimaryBtn(wrapper)
+    expect(btn.html()).toContain('Analyze')
+    await btn.trigger('click')
+    expect(stageSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.dialogTab).toBe(tab)
+    wrapper.unmount()
+  })
+
+  it('doc + Skip AI Analysis ticked → "Next"; the press advances and does not stage', async () => {
+    stageSpy.mockClear()
+    const wrapper = mountForm({ docs: [{ id: 'd1', filename: 'a.md' }], name: 'My Product', skipAiAnalysis: true })
+    await nextTick()
+    const tab = wrapper.vm.dialogTab
+    const btn = findFooterPrimaryBtn(wrapper)
+    expect(btn.html()).toContain('Next')
+    expect(btn.html()).not.toContain('Analyze')
+    await btn.trigger('click')
+    expect(stageSpy).not.toHaveBeenCalled()
+    expect(wrapper.vm.dialogTab).not.toBe(tab)
     wrapper.unmount()
   })
 
@@ -323,13 +352,13 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
     wrapper.unmount()
   })
 
-  it('State 5: Skip AI Analysis ON, name filled, but NO doc → "Next" + disabled (doc required)', async () => {
+  it('State 5: stale Skip AI Analysis flag, NO doc → "Skip, no document" + enabled (never locked)', async () => {
     const wrapper = mountForm({ docs: [], name: 'My Product', skipAiAnalysis: true })
     await nextTick()
     const btn = findFooterPrimaryBtn(wrapper)
     expect(btn).toBeDefined()
-    expect(btn.html()).toContain('Next')
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.html()).toContain('Skip, no document')
+    expect(btn.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -357,13 +386,58 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
     wrapper.unmount()
   })
 
-  it('Create blank ON but no name → "Next" + disabled (name required)', async () => {
+  it('Create blank ON but no name → "Next" + enabled; pressing it does not advance', async () => {
     const wrapper = mountForm({ docs: [], name: '', createBlank: true })
     await nextTick()
     const btn = findFooterPrimaryBtn(wrapper)
-    expect(btn).toBeDefined()
     expect(btn.html()).toContain('Next')
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.attributes('disabled')).toBeUndefined()
+    const tab = wrapper.vm.dialogTab
+    await btn.trigger('click')
+    expect(wrapper.vm.dialogTab).toBe(tab)
+    wrapper.unmount()
+  })
+
+  it('pressing "Skip, no document" with a name takes the blank path: createBlank set, tabs unlocked, advances', async () => {
+    const wrapper = mountForm({ docs: [], name: 'My Product' })
+    await nextTick()
+    const tab = wrapper.vm.dialogTab
+    await findFooterPrimaryBtn(wrapper).trigger('click')
+    await nextTick()
+    expect(wrapper.vm.createBlank).toBe(true)
+    expect(wrapper.vm.skipAiAnalysis).toBe(false)
+    expect(wrapper.vm.isTabLocked('info')).toBe(false)
+    expect(wrapper.vm.dialogTab).not.toBe(tab)
+    wrapper.unmount()
+  })
+
+  it('pressing "Skip, no document" with no name stays put and keeps the button enabled', async () => {
+    const wrapper = mountForm({ docs: [], name: '' })
+    await nextTick()
+    const tab = wrapper.vm.dialogTab
+    const btn = findFooterPrimaryBtn(wrapper)
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    expect(wrapper.vm.createBlank).toBe(false)
+    expect(wrapper.vm.dialogTab).toBe(tab)
+    wrapper.unmount()
+  })
+
+  it('the Skip AI Analysis tick clears when the last document is removed', async () => {
+    const wrapper = mountForm({ docs: [{ id: 'd1', filename: 'a.md' }], name: 'P', skipAiAnalysis: true })
+    await nextTick()
+    await wrapper.setProps({ existingVisionDocuments: [] })
+    expect(wrapper.vm.skipAiAnalysis).toBe(false)
+    expect(findFooterPrimaryBtn(wrapper).html()).toContain('Skip, no document')
+    wrapper.unmount()
+  })
+
+  it('edit mode is unchanged: "Save Changes", no Skip button', async () => {
+    const wrapper = mountForm({ docs: [], name: 'P', isEdit: true })
+    await nextTick()
+    expect(findFooterPrimaryBtn(wrapper).html()).toContain('Save Changes')
+    expect(wrapper.html()).not.toContain('Skip, no document')
+    expect(wrapper.html()).not.toContain('Skip AI Analysis')
     wrapper.unmount()
   })
 })
@@ -444,7 +518,8 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
     const wrapper = mountWithFlag({ visionAnalysisComplete: false, docs })
     await nextTick()
     let nextBtn = findFooterPrimaryBtn(wrapper)
-    expect(nextBtn.html()).toContain('Stage analysis')
+    expect(nextBtn.html()).toContain('Analyze')
+    expect(nextBtn.html()).not.toContain('Skip, no document')
 
     productStore.$patch({
       productsById: {
@@ -554,7 +629,7 @@ describe('ProductForm.vue — FE-9121 store-first gate (not selection-first)', (
     })
     await nextTick()
     let btn = findFooterPrimaryBtn(wrapper)
-    expect(btn.html()).toContain('Stage analysis')
+    expect(btn.html()).toContain('Analyze')
 
     productStore.$patch({
       productsById: { ...productStore.productsById, 'p-new': { ...product, vision_analysis_complete: true } },

@@ -167,6 +167,8 @@
     "ce_0110_fe9789b_retire_tenant_prompt_rung",
     "ce_0111_be9815_oauth_client_id_url_width",
     "ce_0112_heal_worker_bootstrap_first_call",
-    "ce_0113_sec9837_connected_apps"
+    "ce_0113_sec9837_connected_apps",
+    "ce_0114_fe0072e_users_intro_video_seen",
+    "ce_0115_fe0072c_users_guide_closed"
   ]
 }

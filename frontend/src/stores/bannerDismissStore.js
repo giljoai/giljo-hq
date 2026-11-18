@@ -64,6 +64,14 @@ export const useBannerDismissStore = defineStore('bannerDismiss', () => {
     saveKeys(keys.value, currentUserId.value)
   }
 
+  function undismiss(input) {
+    const gone = new Set((Array.isArray(input) ? input : [input]).filter(Boolean))
+    const kept = keys.value.filter((k) => !gone.has(k))
+    if (kept.length === keys.value.length) return
+    keys.value = kept
+    saveKeys(keys.value, currentUserId.value)
+  }
+
   function reconcile(prefix, liveKeys) {
     const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || [])
     const kept = keys.value.filter((k) => !k.startsWith(prefix) || live.has(k))
@@ -83,5 +91,5 @@ export const useBannerDismissStore = defineStore('bannerDismiss', () => {
     }
   }
 
-  return { keys, isDismissed, dismiss, reconcile, clear }
+  return { keys, isDismissed, dismiss, undismiss, reconcile, clear }
 })

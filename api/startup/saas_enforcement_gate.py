@@ -122,11 +122,20 @@ def _public_base_url_problem(pinned: str) -> str | None:
     return None
 
 
+_MCP_ENFORCEMENT_ENV = "GILJO_MCP_SUBSCRIPTION_ENFORCEMENT"
+
+
+def _require_explicit_enforcement_mode() -> None:
+    if os.environ.get(_MCP_ENFORCEMENT_ENV) is None:
+        raise ValueError(f"{_MCP_ENFORCEMENT_ENV} must be set explicitly in SaaS mode (off, warn or enforce).")
+
+
 def register_mcp_subscription_gate(*, giljo_mode: str) -> None:
     is_saas = giljo_mode == "saas"
     if not is_saas:
         return
     try:
+        _require_explicit_enforcement_mode()
         importlib.import_module("giljo_mcp.saas.billing.mcp_subscription_gate").register()
         logger.info("MCP subscription gate registered")
     except Exception:
@@ -135,6 +144,45 @@ def register_mcp_subscription_gate(*, giljo_mode: str) -> None:
             "(SEC-9131 fail-loud): /mcp billing enforcement must never be silently absent."
         )
         raise
+
+
+def start_oauth_client_reaper(state, *, giljo_mode: str) -> None:
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
+        return
+    from api.startup.background_jobs_gate import should_run_background_jobs
+
+    if not should_run_background_jobs():
+        return
+    try:
+        oauth_client = importlib.import_module("giljo_mcp.saas.auth.oauth_client")
+        state.oauth_client_reaper_task = oauth_client.start_unused_client_reaper(state.db_manager.AsyncSessionLocal)
+        logger.info("OAuth client reaper started (runs hourly)")
+    except Exception as e:  # noqa: BLE001 - optional startup phase: degrade and report, never abort boot
+        logger.warning("Optional startup phase [oauth_client_reaper] failed: %s — running without it", e)
+        state.degraded_services.append("oauth_client_reaper")
+
+
+def start_guest_book_monitor(state, *, giljo_mode: str) -> None:
+    is_saas = giljo_mode == "saas"
+    if not is_saas:
+        return
+    from api.startup.background_jobs_gate import should_run_background_jobs
+
+    if not should_run_background_jobs():
+        return
+    try:
+        monitor = importlib.import_module("giljo_mcp.saas.observability.guest_book_watch")
+        state.guest_book_monitor_task = monitor.start_guest_book_monitor(state.db_manager.AsyncSessionLocal)
+        logger.info("Guest book monitor started (runs hourly)")
+    except Exception as e:  # noqa: BLE001 - optional startup phase: degrade and report, never abort boot
+        logger.warning("Optional startup phase [guest_book_monitor] failed: %s — running without it", e)
+        state.degraded_services.append("guest_book_monitor")
+
+
+def start_oauth_client_jobs(state, *, giljo_mode: str) -> None:
+    start_oauth_client_reaper(state, giljo_mode=giljo_mode)
+    start_guest_book_monitor(state, giljo_mode=giljo_mode)
 
 
 async def install_access_log(state, *, giljo_mode: str) -> None:

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULTS: dict[str, int] = {
     "login": 5,
+    "login_account": 20,
     "register": 3,
     "password_reset_request": 5,
     "password_reset_confirm": 10,
@@ -30,6 +31,8 @@ DEFAULTS: dict[str, int] = {
     "api_key_auth_failed": 10,
     "social_login_start": 10,
     "social_login_callback": 10,
+    "social_signup_status": 60,
+    "social_link_status": 60,
     "social_login_confirm_link": 5,
     "set_initial_password": 5,
     "oauth_token": 30,

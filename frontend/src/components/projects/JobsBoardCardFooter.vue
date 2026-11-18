@@ -21,6 +21,7 @@
       :implement-ready="canImplement"
       :implement-busy="launching"
       :copying="copying"
+      :pulse-next="pulseNext"
       secondary-label="Jobs detail"
       @pick-mode="handleExecutionModeChange"
       @stage="onStage"
@@ -133,6 +134,10 @@ const props = defineProps({
     default: false,
   },
   compact: {
+    type: Boolean,
+    default: false,
+  },
+  pulseNext: {
     type: Boolean,
     default: false,
   },

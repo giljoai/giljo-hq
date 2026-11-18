@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.prompts.spawn_prompt import build_agent_prompt
 from giljo_mcp.services.protocol_sections.team_context import summarize_mission
 
@@ -37,7 +38,7 @@ class ExecutionPromptBuilderBase:
             f"# GiljoAI Implementation Phase - {self.platform_name}",
             "",
             "## Who You Are",
-            f"You are Orchestrator (job_id: {orchestrator_id}) for project '{project.name}'",
+            f"You are Orchestrator (job_id: {orchestrator_id}) for project '{prompt_name(project.name)}'",
             f"Project ID: {project.id}",
             f"Product ID: {project.product_id}",
             "",
@@ -92,9 +93,9 @@ class ExecutionPromptBuilderBase:
 
                 agent_spawn_lines.extend(
                     [
-                        f"**{idx}. {agent.agent_name}**",
+                        f"**{idx}. {prompt_name(agent.agent_name)}**",
                         self._build_agent_name_line(agent),
-                        f"   - Agent Type: `{agent.agent_display_name}` (display category)",
+                        f"   - Agent Type: `{prompt_name(agent.agent_display_name)}` (display category)",
                         f"   - Job ID: `{agent.job_id}`",
                         f"   - Status: {agent.status}",
                         f"   - Mission Summary: {mission_summary}",
@@ -127,7 +128,7 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_agent_name_line(self, agent) -> str:
-        return f"   - Agent Name: `{agent.agent_name}`"
+        return f"   - Agent Name: `{prompt_name(agent.agent_name)}`"
 
     def _build_execution_directive_text(self) -> list[str]:
         return [
@@ -159,7 +160,9 @@ class ExecutionPromptBuilderBase:
                 agent.job_id,
                 getattr(agent, "launch_template", None),
             )
-            lines.extend([f"### {agent.agent_name} (job_id: {agent.job_id})", "```", prompt.rstrip("\n"), "```", ""])
+            lines.extend(
+                [f"### {prompt_name(agent.agent_name)} (job_id: {agent.job_id})", "```", prompt.rstrip("\n"), "```", ""]
+            )
         return lines
 
     def _build_monitoring_section(self, project) -> list[str]:

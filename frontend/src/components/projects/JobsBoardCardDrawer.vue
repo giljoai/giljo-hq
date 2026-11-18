@@ -1,28 +1,28 @@
 <template>
   <div class="jb-drawer" data-testid="jb-drawer">
-    <section class="jb-dsec" data-testid="jb-drawer-description">
-      <div class="jb-dsec-k">
-        <span>Project description</span>
-        <span class="jb-sp" />
-        <button
-          type="button"
-          class="jb-pen"
-          title="Edit description"
-          aria-label="Edit description"
-          data-testid="jb-edit-description"
-          @click="emit('edit-description', project)"
-        >
-          <v-icon size="13">mdi-pencil</v-icon>
-        </button>
-      </div>
-      <p class="jb-dsec-t" :class="{ 'jb-dsec-t--empty': !project.description }">
-        {{ project.description || 'No description yet.' }}
+    <JobsBoardTextBlock
+      kind="description"
+      label="Project description"
+      :text="descriptionShown"
+      :can-edit="writable"
+      :save="(text) => saveField('description', text)"
+    >
+      <p class="jb-dsec-t" :class="{ 'jb-dsec-t--empty': !descriptionShown }">
+        {{ descriptionShown || 'No description yet.' }}
       </p>
-    </section>
+    </JobsBoardTextBlock>
 
-    <section class="jb-dsec" data-testid="jb-drawer-mission">
-      <div class="jb-dsec-k">
-        <span>Mission</span>
+    <JobsBoardTextBlock
+      kind="mission"
+      label="Mission"
+      :text="mission"
+      :can-edit="missionWritable"
+      :can-save="missionWritable"
+      allow-empty
+      :hint="MISSION_HINT"
+      :save="(text) => saveField('mission', text)"
+    >
+      <template #tag>
         <span v-if="missionState === 'written'" class="jb-otag" data-testid="jb-mission-tag">
           <v-icon size="11" aria-hidden="true">mdi-creation</v-icon>
           Orchestrator generated
@@ -31,7 +31,7 @@
           <v-icon size="11" aria-hidden="true">mdi-creation</v-icon>
           Orchestrator writing<LiveDots />
         </span>
-      </div>
+      </template>
       <p v-if="mission" class="jb-dsec-t jb-dsec-t--mono">{{ mission }}</p>
       <p v-else-if="closeoutText" class="jb-dsec-t" data-testid="jb-mission-closeout">{{ closeoutText }}</p>
       <div v-else-if="missionState === 'writing'" class="jb-dsec-empty" data-testid="jb-mission-live">
@@ -44,7 +44,7 @@
         <span v-else-if="chainMember">Written when the chain reaches this step.</span>
         <span v-else>No mission yet. Press <b>Stage</b> and the orchestrator writes it.</span>
       </div>
-    </section>
+    </JobsBoardTextBlock>
 
     <section class="jb-dsec" data-testid="jb-drawer-crew">
       <div class="jb-dsec-k"><span>Crew</span></div>
@@ -99,13 +99,15 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { getPrimaryAgentLabel, getAgentRoleLabel, isOrchestrator } from '@/utils/agentDisplay'
 import { jobStatusWord, jobStatusLabel, isLiveStatusWord } from '@/utils/jobStatusWord'
 import { closeoutMissionText, EMPTY_RUN_LABEL } from '@/utils/jobsBoardCardStats'
 import LiveDots from './LiveDots.vue'
+import JobsBoardTextBlock from './JobsBoardTextBlock.vue'
+import { useProjectStore } from '@/stores/projects'
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -117,7 +119,27 @@ const props = defineProps({
   finished: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['edit-description', 'agent-role', 'agent-mission-edit'])
+const emit = defineEmits(['changed', 'agent-role', 'agent-mission-edit'])
+
+const IMMUTABLE_STATUSES = new Set(['completed', 'cancelled', 'superseded'])
+const MISSION_HINT =
+  'Written by the orchestrator during staging; you can edit it. Clear it to regenerate on the next staging.'
+
+const projectStore = useProjectStore()
+const writable = computed(() => !IMMUTABLE_STATUSES.has(props.project?.status))
+const missionWritable = computed(() => writable.value && props.missionState !== 'writing')
+
+const savedDescription = ref(null)
+watch(() => props.project?.description, () => {
+  savedDescription.value = null
+})
+const descriptionShown = computed(() => savedDescription.value ?? props.project?.description ?? '')
+
+async function saveField(field, text) {
+  await projectStore.updateProject(props.project.id, { [field]: text })
+  if (field === 'description') savedDescription.value = text
+  emit('changed', props.project)
+}
 
 const closeoutText = computed(() => (props.finished ? closeoutMissionText(props.project) : ''))
 
@@ -161,10 +183,6 @@ function subLabel(agent) {
   letter-spacing: 0.07em;
   color: $color-text-secondary;
   margin-bottom: 6px;
-}
-
-.jb-sp {
-  flex: 1;
 }
 
 .jb-dsec-t {

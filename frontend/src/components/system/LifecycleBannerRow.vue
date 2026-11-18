@@ -6,8 +6,6 @@
 -->
 <template>
   <div
-    v-for="row in rows"
-    :key="row.id"
     class="lifecycle-banner-row"
     role="alert"
     data-testid="lifecycle-banner"
@@ -22,9 +20,22 @@
       >
         {{ row.taxonomyAlias }}
       </span>
-      <span class="lifecycle-banner-row__text" data-testid="lifecycle-banner-text">
-        {{ messageFor(row) }}
+      <span
+        :id="messageId"
+        ref="messageEl"
+        class="lifecycle-banner-row__text"
+        :class="{ 'is-expanded': expanded }"
+        data-testid="lifecycle-banner-text"
+        @click="onTextClick"
+      >
+        {{ message }}
       </span>
+      <BannerExpandToggle
+        v-if="expandable"
+        :expanded="expanded"
+        :controls="messageId"
+        @toggle="toggle"
+      />
     </div>
 
     <div class="lifecycle-banner-row__actions">
@@ -48,22 +59,25 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useLifecycleBannerStore } from '@/stores/lifecycleBannerStore'
+import { useBannerExpand } from '@/composables/useBannerExpand'
+import BannerExpandToggle from './BannerExpandToggle.vue'
 
-defineProps({
-  rows: {
-    type: Array,
-    default: () => [],
+const props = defineProps({
+  row: {
+    type: Object,
+    required: true,
   },
 })
 defineEmits(['open', 'dismiss'])
 
 const lifecycleBannerStore = useLifecycleBannerStore()
 
-function messageFor(row) {
-  const name = row.title || 'A project'
-  return `${name} ${lifecycleBannerStore.momentLabel(row.moment)}`
-}
+const message = computed(
+  () => `${props.row.title || 'A project'} ${lifecycleBannerStore.momentLabel(props.row.moment)}`,
+)
+const { messageEl, messageId, expanded, expandable, toggle, onTextClick } = useBannerExpand(message)
 </script>
 
 <style scoped lang="scss">

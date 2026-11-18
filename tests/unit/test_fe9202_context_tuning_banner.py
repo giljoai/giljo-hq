@@ -43,7 +43,7 @@ class TestComputeContextTuningDue:
             staleness={"is_stale": True, "projects_since_tune": 5, "threshold": 3, "enabled": True},
         )
         due = await ctb.compute_context_tuning_due(db_manager=object(), tenant_key="t1")
-        assert due == {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 5}
+        assert due == {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 5, "threshold": 3}
 
     @pytest.mark.asyncio
     async def test_none_when_not_stale_below_threshold(self, monkeypatch):
@@ -170,7 +170,7 @@ class TestPayloadValidator:
             "system.context_tuning_due",
             {"product_id": "p1", "product_name": "Acme", "projects_since_tune": 3},
         )
-        assert out == {"product_id": "p1", "product_name": "Acme", "projects_since_tune": 3}
+        assert out == {"product_id": "p1", "product_name": "Acme", "projects_since_tune": 3, "dismissed_at_count": None}
 
     def test_missing_field_rejected(self):
         import pydantic

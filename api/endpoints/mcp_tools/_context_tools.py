@@ -236,7 +236,7 @@ async def search_memory(
     title="Create Product",
     description=(
         "Create a new product for the user (agent-side bootstrap — the MCP twin of the "
-        "dashboard's product-create form). Establishes the product row only, INACTIVE; "
+        "dashboard's product-create form). Establishes the product row only, ACTIVE (shown); "
         "populate details afterwards via update_product_context and create_vision_document."
     ),
     annotations=_tool_hints("create_product"),

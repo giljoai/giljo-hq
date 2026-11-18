@@ -38,9 +38,10 @@
             </AppAlert>
           </v-card-text>
 
-          <v-card-text v-if="missingParams" class="pa-6">
+          <v-card-text v-if="damagedLink" class="pa-6" data-testid="oauth-damaged-link">
             <AppAlert type="warning" variant="tonal">
-              Invalid authorization request. Required OAuth parameters are missing.
+              <p class="text-body-medium">{{ DAMAGED_LINK_MESSAGE }}</p>
+              <p class="text-body-small mt-2">{{ DAMAGED_LINK_TIP }}</p>
             </AppAlert>
             <div class="text-center mt-4">
               <v-btn
@@ -109,6 +110,22 @@
                 {{ loading ? 'Signing in...' : 'Sign In' }}
               </v-btn>
             </v-form>
+
+            <component
+              :is="socialLoginButtonsComponent"
+              v-if="socialLoginButtonsComponent"
+              :return-to="route.fullPath"
+            />
+            <div v-if="socialLoginButtonsComponent" class="text-center mt-4">
+              <span class="text-body-small text-muted-a11y">New to {{ PRODUCT_NAME }}?</span>
+              <router-link
+                :to="createAccountLink"
+                class="text-body-small font-weight-bold ml-1"
+                data-testid="oauth-create-account"
+              >
+                Create account
+              </router-link>
+            </div>
           </v-card-text>
 
           <v-card-text v-else class="pa-6">
@@ -123,20 +140,17 @@
               @deny="handleDeny"
             />
             <template v-else>
-              <div class="d-flex align-center mb-4">
-                <v-avatar color="primary" size="48" class="mr-4">
+              <div class="d-flex align-start mb-4">
+                <v-avatar color="primary" size="48" class="mr-4 flex-shrink-0">
                   <v-icon size="24" color="white">mdi-application</v-icon>
                 </v-avatar>
-                <div>
-                  <p class="text-body-large font-weight-medium" data-testid="consent-client-name">{{ clientDisplayName }}</p>
-                  <p class="text-body-small text-muted-a11y">wants to access your account</p>
-                </div>
+                <ConsentAppIdentity :client="seamClient" class="flex-grow-1" />
               </div>
 
               <v-divider class="mb-4" />
 
               <p class="text-title-small font-weight-medium mb-2">Requested permissions</p>
-              <v-list density="compact" class="mb-4 bg-transparent">
+              <v-list density="compact" lines="three" class="mb-4 bg-transparent">
                 <v-list-item
                   v-for="permission in scopeDescriptions"
                   :key="permission.scope"
@@ -209,11 +223,13 @@ import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import AppAlert from '@/components/ui/AppAlert.vue'
+import ConsentAppIdentity from '@/components/oauth/ConsentAppIdentity.vue'
 import { apiClient } from '@/services/api'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import configService from '@/services/configService'
 import { useGiljoMode } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
+import { describeScopes } from '@/utils/oauthScopeCopy'
 
 const props = defineProps({
   overrideConsentComponent: {
@@ -256,10 +272,27 @@ const missingParams = computed(() => {
   return !params.client_id || !params.redirect_uri || !params.response_type
 })
 
+const DAMAGED_LINK_MESSAGE = 'This sign-in link is damaged. Go back to your AI tool and copy the link again.'
+const DAMAGED_LINK_TIP =
+  'Tip: let your tool copy it for you. A link copied by hand from a terminal can break at the line end.'
+const MALFORMED_CODE = 'AUTHORIZE_REQUEST_MALFORMED'
+const refusedAsMalformed = ref(false)
+
+const damagedLink = computed(() => {
+  const params = oauthParams.value
+  return (
+    missingParams.value ||
+    refusedAsMalformed.value ||
+    !params.code_challenge ||
+    params.code_challenge_method !== 'S256' ||
+    Object.keys(route.query).some((key) => /\s/.test(key))
+  )
+})
+
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 const currentUser = computed(() => userStore.currentUser)
 
-const registeredName = ref('')
+const clientRecord = ref(null)
 const CLIENT_NAME_MAX = 80
 const BUILTIN_CLIENT_ID = 'giljo-mcp-default'
 
@@ -268,23 +301,24 @@ function capName(name) {
   return text.length > CLIENT_NAME_MAX ? `${text.slice(0, CLIENT_NAME_MAX - 1)}\u2026` : text
 }
 
-async function loadRegisteredName() {
-  const clientId = oauthParams.value.client_id
-  registeredName.value = ''
-  if (!clientId || clientId === BUILTIN_CLIENT_ID) return
+async function loadClientRecord() {
+  const { client_id: clientId, redirect_uri: redirectUri } = oauthParams.value
+  clientRecord.value = null
+  if (!clientId || !redirectUri) return
   try {
-    const response = await apiClient.get('/api/oauth/authorize/client', { params: { client_id: clientId } })
-    const name = response.data?.client_name
-    if (typeof name === 'string' && name.trim()) registeredName.value = capName(name)
+    const response = await apiClient.get('/api/oauth/authorize/client', {
+      params: { client_id: clientId, redirect_uri: redirectUri },
+    })
+    clientRecord.value = response.data || null
   } catch {
-    // Unknown or unreachable: the page falls back to the client id.
+    // Unknown, unregistered redirect, or unreachable: shown as unverified.
   }
 }
 
 watch(
-  () => [isAuthenticated.value, oauthParams.value.client_id],
+  () => [isAuthenticated.value, oauthParams.value.client_id, oauthParams.value.redirect_uri],
   ([authed]) => {
-    if (authed) loadRegisteredName()
+    if (authed) loadClientRecord()
   },
   { immediate: true },
 )
@@ -292,59 +326,44 @@ watch(
 const clientDisplayName = computed(() => {
   const clientId = oauthParams.value.client_id
   if (clientId === BUILTIN_CLIENT_ID) return `${PRODUCT_NAME} Client`
-  return registeredName.value || capName(clientId)
+  const name = clientRecord.value?.client_name
+  return typeof name === 'string' && name.trim() ? capName(name) : capName(clientId)
 })
 
-const seamClient = computed(() => ({
-  id: oauthParams.value.client_id,
-  name: clientDisplayName.value,
-}))
+function hostOf(uri) {
+  try {
+    return new URL(uri).hostname.replace(/^\[|\]$/g, '') || ''
+  } catch {
+    return ''
+  }
+}
+
+const LOOPBACK_HOST = /^(localhost|127(\.\d{1,3}){3}|::1)$/
+
+const seamClient = computed(() => {
+  const record = clientRecord.value
+  const redirectHost = record?.redirect_host || hostOf(oauthParams.value.redirect_uri)
+  return {
+    id: oauthParams.value.client_id,
+    name: clientDisplayName.value,
+    verified: record?.verified === true,
+    redirectHost,
+    redirectIsLocal: record ? record.redirect_is_local === true : LOOPBACK_HOST.test(redirectHost),
+    clientIdHost: record?.client_id_host || '',
+  }
+})
 
 const saasOverrideComponent = shallowRef(null)
+
+const socialLoginButtonsComponent = shallowRef(null)
+
+const createAccountLink = computed(() => `/register?redirect=${encodeURIComponent(route.fullPath)}`)
 
 const resolvedOverrideComponent = computed(
   () => props.overrideConsentComponent || saasOverrideComponent.value,
 )
 
-const scopeDescriptions = computed(() => {
-  const scopeStr = oauthParams.value.scope || 'mcp:read mcp:write'
-  const scopes = scopeStr.split(' ').filter(Boolean)
-  const descriptions = {
-    'mcp:read': {
-      scope: 'mcp:read',
-      label: 'MCP Read Access',
-      description: 'Read your projects, tasks, and agent state via the MCP protocol',
-      icon: 'mdi-eye',
-    },
-    'mcp:write': {
-      scope: 'mcp:write',
-      label: 'MCP Write Access',
-      description: 'Create and modify projects, tasks, and agent state via the MCP protocol',
-      icon: 'mdi-pencil',
-    },
-    mcp: {
-      scope: 'mcp',
-      label: 'MCP Tool Access',
-      description: 'Execute tools and access resources via the MCP protocol',
-      icon: 'mdi-connection',
-    },
-    read: {
-      scope: 'read',
-      label: 'Read Access',
-      description: 'Read data from your account',
-      icon: 'mdi-eye',
-    },
-    write: {
-      scope: 'write',
-      label: 'Write Access',
-      description: 'Modify data in your account',
-      icon: 'mdi-pencil',
-    },
-  }
-  return scopes.map(
-    (s) => descriptions[s] || { scope: s, label: s, description: `Access: ${s}`, icon: 'mdi-key' },
-  )
-})
+const scopeDescriptions = computed(() => describeScopes(oauthParams.value.scope))
 
 async function handleLogin() {
   const { valid } = await loginForm.value.validate()
@@ -396,7 +415,9 @@ async function handleAuthorize() {
     }
   } catch (err) {
     authorizing.value = false
-    if (err.response?.data?.detail) {
+    if (err.response?.data?.error_code === MALFORMED_CODE) {
+      refusedAsMalformed.value = true
+    } else if (err.response?.data?.detail) {
       error.value = err.response.data.detail
     } else if (err.code === 'ERR_NETWORK' || !err.response) {
       error.value = 'Network error. Please check your connection and try again.'
@@ -466,6 +487,17 @@ onMounted(async () => {
         saasOverrideComponent.value = mod.default
       } catch (error) {
         console.warn('[OAuthAuthorize] DemoConsentScreen failed to load:', error)
+      }
+    }
+
+    const socialLoaders = import.meta.glob('@/saas/components/auth/SocialLoginButtons.vue')
+    const [socialLoader] = Object.values(socialLoaders)
+    if (socialLoader) {
+      try {
+        const mod = await socialLoader()
+        socialLoginButtonsComponent.value = mod.default
+      } catch (error) {
+        console.warn('[OAuthAuthorize] SocialLoginButtons failed to load:', error)
       }
     }
   }

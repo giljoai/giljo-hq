@@ -25,8 +25,7 @@ function mountOverlay(props = {}) {
       stubs: {
         Teleport: true,
         SetupStep2Connect: { template: '<div class="step-connect">Step2Connect stub</div>' },
-        SetupStep3Commands: { template: '<div class="step-commands">Step3Commands stub</div>' },
-        SetupStep4Complete: { template: '<div class="step-complete">Step4Complete stub</div>' },
+        SetupStep3Commands: { template: '<div class="step-commands">Step3 stub</div>' },
       },
     },
   })
@@ -53,41 +52,42 @@ describe('SetupWizardOverlay', () => {
       expect(wrapper.find('.setup-wizard-overlay').exists()).toBe(false)
     })
 
-    it('displays the rail title "Set up GiljoAI"', () => {
+    it('displays the rail title "Set up Giljo HQ"', () => {
       const wrapper = mountOverlay()
 
       // Gradient Rail redesign (FE-6259b): the old centered ".setup-wizard-title"
       // header only exists in learning mode now; setup mode's title lives in
       // the left rail (".rail-title").
-      expect(wrapper.find('.rail-title').text()).toBe('Set up GiljoAI')
+      expect(wrapper.find('.rail-title').text()).toBe('Set up Giljo HQ')
     })
 
-    it('renders all 4 step labels in the Gradient Rail stepper', () => {
+    it('renders the three step labels in the Gradient Rail stepper', () => {
       const wrapper = mountOverlay()
       const labels = wrapper.findAll('.rail-node-label')
 
-      expect(labels).toHaveLength(4)
-      expect(labels[0].text()).toBe('Choose Tools')
-      expect(labels[1].text()).toBe('Connect')
-      expect(labels[2].text()).toBe('Install')
-      expect(labels[3].text()).toBe('Launch')
+      expect(labels).toHaveLength(3)
+      expect(labels[0].text()).toBe('Choose tool')
+      expect(labels[1].text()).toBe('Connect it')
+      expect(labels[2].text()).toBe('Setup instructions')
     })
 
-    it('renders 4 tool cards on step 0 (FE-9204 / INF-9605a)', () => {
+    it('renders 6 tool cards on step 0 (FE-9204 / INF-9605a / FE-0034)', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
       const toolCards = wrapper.findAll('.tool-card')
 
-      expect(toolCards).toHaveLength(4)
+      expect(toolCards).toHaveLength(6)
     })
 
     it('displays tool names and a method tag per card (providers replaced by method tags)', () => {
       const wrapper = mountOverlay()
       const names = wrapper.findAll('.tool-name')
 
-      expect(names[0].text()).toBe('Claude Code')
-      expect(names[1].text()).toBe('Codex CLI')
-      expect(names[2].text()).toBe('OpenCode')
-      expect(names[3].text()).toBe('Generic MCP client')
+      expect(names[0].text()).toBe('Claude')
+      expect(names[1].text()).toBe('ChatGPT')
+      expect(names[2].text()).toBe('Claude Code')
+      expect(names[3].text()).toBe('Codex CLI')
+      expect(names[4].text()).toBe('OpenCode')
+      expect(names[5].text()).toBe('Generic MCP client')
 
       // Each card carries a method tag (SaaS default when edition is unresolved).
       expect(wrapper.find('[data-testid="tool-method-generic"]').text()).toBe('MANUAL CONFIG')
@@ -114,20 +114,19 @@ describe('SetupWizardOverlay', () => {
       const node = wrapper.find('[data-testid="rail-node-tools"]')
 
       expect(node.classes()).toContain('rail-node--active')
-      expect(node.find('.rail-node-label').text()).toBe('Choose Tools')
+      expect(node.find('.rail-node-label').text()).toBe('Choose tool')
     })
 
     it('marks completed steps with the --done class', () => {
-      const wrapper = mountOverlay({ currentStep: 2 })
+      const wrapper = mountOverlay({ currentStep: 1 })
 
       expect(wrapper.find('[data-testid="rail-node-tools"]').classes()).toContain('rail-node--done')
-      expect(wrapper.find('[data-testid="rail-node-connect"]').classes()).toContain('rail-node--done')
-      expect(wrapper.find('[data-testid="rail-node-install"]').classes()).toContain('rail-node--active')
+      expect(wrapper.find('[data-testid="rail-node-connect"]').classes()).toContain('rail-node--active')
     })
 
     it('leaves future steps without --done or --active (Gradient Rail has no separate future class)', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
-      for (const id of ['connect', 'install', 'launch']) {
+      for (const id of ['connect']) {
         const node = wrapper.find(`[data-testid="rail-node-${id}"]`)
         expect(node.classes()).not.toContain('rail-node--done')
         expect(node.classes()).not.toContain('rail-node--active')
@@ -135,8 +134,8 @@ describe('SetupWizardOverlay', () => {
     })
 
     it('the rail spine fill height tracks progress (replaces per-step connector fills)', () => {
-      const wrapper = mountOverlay({ currentStep: 2 })
-      const expectedPct = (Math.min(2, 3) / 3) * 100
+      const wrapper = mountOverlay({ currentStep: 1 })
+      const expectedPct = 50
 
       expect(wrapper.find('.spine-fill').attributes('style')).toContain(`height: ${expectedPct}%`)
     })
@@ -198,9 +197,9 @@ describe('SetupWizardOverlay', () => {
       const wrapper = mountOverlay({ selectedTools: ['codex_cli'] })
       const toolCards = wrapper.findAll('.tool-card')
 
-      expect(toolCards[0].attributes('aria-checked')).toBe('false')
-      expect(toolCards[1].attributes('aria-checked')).toBe('true')
       expect(toolCards[2].attributes('aria-checked')).toBe('false')
+      expect(toolCards[3].attributes('aria-checked')).toBe('true')
+      expect(toolCards[4].attributes('aria-checked')).toBe('false')
     })
   })
 
@@ -238,7 +237,7 @@ describe('SetupWizardOverlay', () => {
       expect(stepCompleteEvents).toBeTruthy()
       expect(stepCompleteEvents[0][0]).toEqual({
         step: 0,
-        data: { tools: ['claude_code'] },
+        data: { tools: ['claude'] },
       })
     })
 
@@ -260,8 +259,8 @@ describe('SetupWizardOverlay', () => {
       const wrapper = mountOverlay()
       const toolCards = wrapper.findAll('.tool-card')
 
-      await toolCards[0].trigger('click')
-      await toolCards[1].trigger('click')
+      await toolCards[2].trigger('click')
+      await toolCards[3].trigger('click')
 
       const nextBtn = wrapper.find('[data-testid="setup-next-btn"]')
       await nextBtn.trigger('click')
@@ -280,8 +279,8 @@ describe('SetupWizardOverlay', () => {
       expect(wrapper.emitted('update:currentStep')).toBeUndefined()
     })
 
-    it('footer is visible on step 3 with Back and Finish buttons', () => {
-      const wrapper = mountOverlay({ currentStep: 3, selectedTools: [] })
+    it('footer is visible on the Connect step', () => {
+      const wrapper = mountOverlay({ currentStep: 1, selectedTools: [] })
       // Gradient Rail redesign (FE-6259b): the footer chrome is ".wz-footer"
       // now (".setup-wizard-footer" only exists in the learning-mode panel).
       const footer = wrapper.find('.wz-footer')
@@ -289,12 +288,13 @@ describe('SetupWizardOverlay', () => {
       expect(footer.exists()).toBe(true)
     })
 
-    it('shows "Finish" button on the last step (step 3)', () => {
-      const wrapper = mountOverlay({ currentStep: 3 })
-      const nextBtn = wrapper.find('[data-testid="setup-finish-btn"]')
+    it('shows "Done" on the last step (Setup instructions), which closes the pop-up', () => {
+      const wrapper = mountOverlay({ currentStep: 2 })
+      const nextBtn = wrapper.find('[data-testid="setup-next-btn"]')
 
       expect(nextBtn.exists()).toBe(true)
-      expect(nextBtn.text()).toBe('Finish')
+      expect(nextBtn.text()).toBe('Done')
+      expect(wrapper.find('[data-testid="setup-finish-btn"]').exists()).toBe(false)
     })
 
     it('shows "Next" text on non-last steps', () => {
@@ -349,37 +349,25 @@ describe('SetupWizardOverlay', () => {
     })
 
     it('emits update:currentStep with previous step number when clicked', async () => {
-      const wrapper = mountOverlay({ currentStep: 2 })
+      const wrapper = mountOverlay({ currentStep: 1 })
       const backBtn = wrapper.find('.footer-back')
 
       await backBtn.trigger('click')
 
       const stepEvents = wrapper.emitted('update:currentStep')
       expect(stepEvents).toBeTruthy()
-      expect(stepEvents[0][0]).toBe(1)
+      expect(stepEvents[0][0]).toBe(0)
     })
   })
 
   // -------------------------------------------------------------------
   // Placeholder steps
   // -------------------------------------------------------------------
-  describe('Placeholder steps', () => {
+  describe('Steps', () => {
     it('step 1 renders SetupStep2Connect component (0855d)', () => {
       const wrapper = mountOverlay({ currentStep: 1, selectedTools: ['claude_code'] })
 
       expect(wrapper.find('.step-connect').exists()).toBe(true)
-    })
-
-    it('step 2 renders SetupStep3Commands component (0855e)', () => {
-      const wrapper = mountOverlay({ currentStep: 2, selectedTools: ['claude_code'] })
-
-      expect(wrapper.find('.step-commands').exists()).toBe(true)
-    })
-
-    it('step 3 renders SetupStep4Complete component (0855f)', () => {
-      const wrapper = mountOverlay({ currentStep: 3 })
-
-      expect(wrapper.find('.step-complete').exists()).toBe(true)
     })
   })
 
@@ -389,7 +377,7 @@ describe('SetupWizardOverlay', () => {
   describe('Playwright hooks — Choose-Tools screen (INF-6246)', () => {
     it('each tool card renders data-testid=tool-select-{id}', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
-      const expectedIds = ['claude_code', 'codex_cli', 'opencode', 'generic']
+      const expectedIds = ['claude', 'chatgpt', 'claude_code', 'codex_cli', 'opencode', 'generic']
       for (const id of expectedIds) {
         expect(wrapper.find(`[data-testid="tool-select-${id}"]`).exists()).toBe(true)
       }
@@ -398,7 +386,7 @@ describe('SetupWizardOverlay', () => {
     it('tool-select-{id} hooks match the tool card count', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
       const hooks = wrapper.findAll('[data-testid^="tool-select-"]')
-      expect(hooks).toHaveLength(4)
+      expect(hooks).toHaveLength(6)
     })
 
     it('renders data-testid=setup-next-btn on the Next button', () => {
@@ -442,9 +430,11 @@ describe('SetupWizardOverlay', () => {
       const wrapper = mountOverlay()
       const toolCards = wrapper.findAll('.tool-card')
 
-      expect(toolCards[0].attributes('aria-label')).toBe('Claude Code')
-      expect(toolCards[1].attributes('aria-label')).toBe('Codex CLI')
-      expect(toolCards[2].attributes('aria-label')).toBe('OpenCode')
+      expect(toolCards[0].attributes('aria-label')).toBe('Claude')
+      expect(toolCards[1].attributes('aria-label')).toBe('ChatGPT')
+      expect(toolCards[2].attributes('aria-label')).toBe('Claude Code')
+      expect(toolCards[3].attributes('aria-label')).toBe('Codex CLI')
+      expect(toolCards[4].attributes('aria-label')).toBe('OpenCode')
     })
 
     it('the active rail-node carries aria-current="step" (Gradient Rail replaces the progressbar role)', () => {
@@ -452,7 +442,6 @@ describe('SetupWizardOverlay', () => {
 
       expect(wrapper.find('[data-testid="rail-node-connect"]').attributes('aria-current')).toBe('step')
       expect(wrapper.find('[data-testid="rail-node-tools"]').attributes('aria-current')).toBeUndefined()
-      expect(wrapper.find('[data-testid="rail-node-install"]').attributes('aria-current')).toBeUndefined()
     })
   })
 
@@ -474,7 +463,7 @@ describe('SetupWizardOverlay', () => {
       const wrapper = mountOverlay({ mode: 'setup' })
 
       expect(wrapper.find('.wizard-rail').exists()).toBe(true)
-      expect(wrapper.find('.rail-title').text()).toBe('Set up GiljoAI')
+      expect(wrapper.find('.rail-title').text()).toBe('Set up Giljo HQ')
     })
   })
 })

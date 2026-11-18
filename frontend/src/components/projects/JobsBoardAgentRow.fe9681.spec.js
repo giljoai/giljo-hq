@@ -35,3 +35,22 @@ describe('JobsBoardAgentRow (FE-9681)', () => {
     expect(wrapper.emitted('steps')?.[0]?.[0]).toEqual(agent)
   })
 })
+
+describe('JobsBoardAgentRow monitoring (FE-0062)', () => {
+  const orchestrator = { agent_id: 'a-or', job_id: 'j-or', agent_display_name: 'orchestrator', status: 'working' }
+
+  it('a working orchestrator the card marks as monitoring reads Monitoring, not Not picked up or Working', () => {
+    const status = mountRow(orchestrator, { interactive: true, monitoring: true }).find('[data-testid="jb-agent-status"]')
+    expect(status.text()).toBe('Monitoring')
+  })
+
+  it('without the card marking it, a working orchestrator keeps its own word', () => {
+    expect(mountRow(orchestrator, { interactive: true }).find('[data-testid="jb-agent-status"]').text()).toMatch(/^Working/)
+  })
+
+  it('monitoring never overrides a stall: a waiting unopened orchestrator still reads Not picked up', () => {
+    const waiting = { ...orchestrator, status: 'waiting', not_picked_up: true }
+    const status = mountRow(waiting, { interactive: true, monitoring: true }).find('[data-testid="jb-agent-status"]')
+    expect(status.text()).toBe('Not picked up')
+  })
+})

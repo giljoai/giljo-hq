@@ -15,12 +15,10 @@ import pytest_asyncio
 from fastapi import HTTPException
 
 from api.endpoints.auth_models import (
-    CheckFirstLoginRequest,
     PinPasswordResetRequest,
 )
 from api.endpoints.auth_pin_recovery import (
     VerifyPinRequest,
-    check_first_login,
     verify_pin,
     verify_pin_and_reset_password,
 )
@@ -232,36 +230,3 @@ class TestVerifyPinAndResetDualLookup:
 
         assert exc.value.status_code == 400
         assert "Invalid username or PIN" in exc.value.detail
-
-
-
-
-class TestCheckFirstLoginDualLookup:
-    @pytest.mark.asyncio
-    async def test_by_username(self, db_session, pin_user):
-        user, _, _ = pin_user
-        req = CheckFirstLoginRequest(username=user.username)
-
-        resp = await check_first_login(request_data=req, db=db_session)
-
-        assert resp.must_change_password is True
-        assert resp.must_set_pin is False
-
-    @pytest.mark.asyncio
-    async def test_by_email(self, db_session, pin_user):
-        user, _, _ = pin_user
-        req = CheckFirstLoginRequest(username=user.email)
-
-        resp = await check_first_login(request_data=req, db=db_session)
-
-        assert resp.must_change_password is True
-        assert resp.must_set_pin is False
-
-    @pytest.mark.asyncio
-    async def test_unknown_identifier_returns_safe_defaults(self, db_session):
-        req = CheckFirstLoginRequest(username="ghost_ident")
-
-        resp = await check_first_login(request_data=req, db=db_session)
-
-        assert resp.must_change_password is False
-        assert resp.must_set_pin is False

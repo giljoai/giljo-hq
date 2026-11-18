@@ -227,9 +227,15 @@ describe('jobsSectionLabelFor on a parked project (FE-9835)', () => {
   })
 })
 
-describe('jobsSectionLabelFor on a project the server marks "staged" (FE-9843)', () => {
-  it('reads Staged, not Activated', () => {
+describe('jobsSectionLabelFor on a project the server marks "staged"', () => {
+  it('reads Planning: the Stage prompt was handed out, no plan exists yet', () => {
     expect(jobsSectionLabelFor({ staging_status: 'staged', implementation_launched_at: null }, [])).toBe(
+      JOBS_SECTION_LABELS.PLANNING,
+    )
+  })
+
+  it('reads Staged only once staging is complete', () => {
+    expect(jobsSectionLabelFor({ staging_status: 'staging_complete', implementation_launched_at: null }, [])).toBe(
       JOBS_SECTION_LABELS.STAGED,
     )
   })

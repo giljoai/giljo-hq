@@ -264,6 +264,7 @@ const visionAnalysisComplete = computed(() => {
 })
 
 const hasVisionDoc = computed(() => props.existingVisionDocuments.length > 0)
+watch(hasVisionDoc, (has) => { if (!has) skipAiAnalysis.value = false })
 
 const newProductUnlocked = computed(() => {
   if (createBlank.value) return true
@@ -299,7 +300,7 @@ const primaryButtonState = computed(() => {
   if (isLastTab.value) return 'create'
   if (analysisAgentConnected.value || analysisInProgress.value) return 'analyzing'
   if (newProductUnlocked.value) return 'next'
-  if (skipAiAnalysis.value) return 'next'
+  if (!hasVisionDoc.value) return 'skip'
   return 'stage'
 })
 
@@ -308,7 +309,8 @@ const primaryButtonLabel = computed(() => {
     case 'save': return 'Save Changes'
     case 'create': return 'Create Product'
     case 'analyzing': return 'Analyzing'
-    case 'stage': return 'Stage analysis'
+    case 'skip': return 'Skip, no document'
+    case 'stage': return 'Analyze'
     case 'next':
     default: return 'Next'
   }
@@ -316,24 +318,9 @@ const primaryButtonLabel = computed(() => {
 
 const nextOrSaveDisabled = computed(() => {
   if (saving.value) return true
-  if (props.isEdit) {
-    return !formValid.value || analysisInProgress.value
-  }
-  if (isLastTab.value) {
-    return !formValid.value
-  }
-  if (primaryButtonState.value === 'analyzing') return true
-  if (primaryButtonState.value === 'stage') {
-    const hasName = !!productForm.value.name?.trim()
-    return !hasName || !hasVisionDoc.value
-  }
-  if (primaryButtonState.value === 'next') {
-    const hasName = !!productForm.value.name?.trim()
-    if (createBlank.value) return !hasName
-    if (skipAiAnalysis.value) return !hasName || !hasVisionDoc.value
-    return false
-  }
-  return false
+  if (props.isEdit) return !formValid.value || analysisInProgress.value
+  if (isLastTab.value) return !formValid.value
+  return primaryButtonState.value === 'analyzing'
 })
 
 const VISION_HASH_PREFIX = 'sha256:'
@@ -573,7 +560,12 @@ function onPrimaryClick() {
     saveProduct()
     return
   }
-  if (primaryButtonState.value === 'stage') {
+  if (!productForm.value.name?.trim()) {
+    formRef.value?.validate?.()
+    return
+  }
+  if (primaryButtonState.value === 'skip') onCreateBlank(true)
+  else if (primaryButtonState.value === 'stage') {
     stageAnalysis()
     return
   }

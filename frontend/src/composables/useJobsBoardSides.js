@@ -113,6 +113,13 @@ export function useJobsBoardSides({
     },
   )
 
+  watch(
+    () => route.query.side,
+    (wanted) => {
+      if (landed && SIDES.includes(wanted) && side.value !== wanted) side.value = wanted
+    },
+  )
+
   const arrivalProjectId = computed(() => (typeof route.query.project === 'string' ? route.query.project : null))
   const highlightedRunId = computed(() => (typeof route.query.run === 'string' ? route.query.run : null))
 

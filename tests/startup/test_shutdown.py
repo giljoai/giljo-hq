@@ -306,3 +306,33 @@ async def test_shutdown_failed_step_named_at_warning_or_above(caplog):
     ]
     assert any("Health monitor" in msg for msg in warn_msgs)
     assert any("Shutdown:" in msg and "Health monitor" in msg for msg in warn_msgs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "task_attr",
+    [
+        "api_key_expiry_task",
+        "notification_purge_task",
+        "mcp_session_cleanup_task",
+        "oauth_code_cleanup_task",
+        "ws_metrics_sync_task",
+        "access_log_purge_task",
+        "a_task_added_later",
+    ],
+)
+async def test_shutdown_cancels_every_background_task_on_state(task_attr):
+    from api.startup.shutdown import shutdown
+
+    state = _quiet_state()
+
+    async def forever():
+        while True:
+            await asyncio.sleep(1)
+
+    task = asyncio.create_task(forever())
+    setattr(state, task_attr, task)
+
+    await shutdown(state)
+
+    assert task.cancelled()

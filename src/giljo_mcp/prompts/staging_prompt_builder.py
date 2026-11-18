@@ -12,6 +12,7 @@ from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
+from giljo_mcp.prompts._prompt_text import prompt_name
 
 
 
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 def _project_title(project: Any) -> str:
     has_taxonomy = bool(getattr(project, "project_type_id", None) or getattr(project, "series_number", None))
     if has_taxonomy:
-        return f"{project.taxonomy_alias} {project.name}"
-    return project.name
+        return prompt_name(f"{project.taxonomy_alias} {project.name}")
+    return prompt_name(project.name)
 
 
 class StagingPromptBuilder:
@@ -80,7 +81,7 @@ You are STAGING the project by creating a mission plan. You will NOT execute the
 Your job is to: 1) Analyze requirements, 2) Create mission plan, 3) Assign work to specialist agents.
 
 PROJECT CONTEXT (Inline - ~200 tokens):
-- Name: {project.name}
+- Name: "{prompt_name(project.name)}"
 - Description: {project.description or "(No description provided)"}
 - Mission: {project.mission or "(Mission will be created by you)"}
 
@@ -203,8 +204,8 @@ START NOW:
                 )
                 return regenerated
             logger.warning("[StagingPromptBuilder] No mission parts available for regeneration")
-            return project.mission or f"Mission for project: {project.name}"
+            return project.mission or f'Mission for project: "{prompt_name(project.name)}"'
 
         except Exception as _exc:
             logger.exception("[StagingPromptBuilder] Failed to regenerate mission")
-            return project.mission or f"Mission for project: {project.name}"
+            return project.mission or f'Mission for project: "{prompt_name(project.name)}"'

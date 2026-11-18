@@ -31,6 +31,7 @@ from giljo_mcp.services.login_lockout_service import (
     AccountLockedError,
     LoginLockoutService,
 )
+from giljo_mcp.services.user_auth_service import clear_pin_lockout
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .models import LoginRequest, LoginResponse, LogoutResponse, UserProfileResponse
@@ -188,7 +189,10 @@ async def login(
         HTTPException: 429 if rate limit exceeded
     """
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(request, limit=limit_for("login"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(
+        request, limit=limit_for("login"), window=60, raise_on_limit=True, policy="login"
+    )
+    await rate_limiter.check_login_account_ceiling(request, login_data.username)
 
     client_ip = _resolve_client_ip(request)
     identifier = login_data.username
@@ -216,6 +220,7 @@ async def login(
         raise
 
     await _login_lockout.clear(db, identifier, client_ip)
+    await clear_pin_lockout(db, user_id=auth_result.user_id, tenant_key=auth_result.tenant_key)
     await db.commit()
 
     token = auth_result.token
@@ -273,12 +278,9 @@ async def logout(
     access_token = request.cookies.get("access_token")
     tenant_key = None
     if access_token:
-        from giljo_mcp.services.oauth_revocation_service import revoke_dashboard_access_jwt
+        from giljo_mcp.services.oauth_revocation_service import sign_out_dashboard_session
 
-        await revoke_dashboard_access_jwt(db, token=access_token)
-        payload = JWTManager.verify_token_allow_expired(access_token)
-        if payload:
-            tenant_key = payload.get("tenant_key")
+        tenant_key = await sign_out_dashboard_session(db, token=access_token)
 
     db_cookie_domains = await _load_db_cookie_domains(db, tenant_key)
     cookie_params = _build_cookie_params(request, db_cookie_domains)
@@ -323,7 +325,7 @@ async def refresh_token(
         raise HTTPException(status_code=401, detail="No token present")
 
     payload = JWTManager.verify_token_allow_expired(access_token)
-    if not payload:
+    if not payload or JWTManager.is_resource_token(payload):
         raise HTTPException(status_code=401, detail="Token expired beyond grace period")
 
     user_id = payload.get("sub")
@@ -475,4 +477,6 @@ async def get_me(
         learning_complete=current_user.learning_complete,
         learning_beat=current_user.learning_beat,
         router_choice=current_user.router_choice,
+        intro_video_seen=current_user.intro_video_seen,
+        guide_closed=current_user.guide_closed,
     )

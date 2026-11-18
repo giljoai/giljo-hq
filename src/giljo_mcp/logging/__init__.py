@@ -26,9 +26,24 @@ class _McpHeartbeatAccessFilter(logging.Filter):
         return not (method == "GET" and path == "/mcp")
 
 
-_SENSITIVE_QUERY_PARAMS = frozenset({"token", "code", "state"})
+_SENSITIVE_QUERY_PARAMS = frozenset({"token", "code", "state", "api_key"})
 
 _DOWNLOAD_TOKEN_PATH_RE = re.compile(r"(/api/download/temp/)[^/?]+")
+
+
+def _redact_sensitive_path(full_path: str) -> str:
+    full_path = _DOWNLOAD_TOKEN_PATH_RE.sub(r"\1[REDACTED]", full_path)
+    if "?" not in full_path:
+        return full_path
+    path, _, query = full_path.partition("?")
+    redacted = []
+    for pair in query.split("&"):
+        name, sep, _value = pair.partition("=")
+        if sep and name.lower() in _SENSITIVE_QUERY_PARAMS:
+            redacted.append(f"{name}=[REDACTED]")
+        else:
+            redacted.append(pair)
+    return f"{path}?{'&'.join(redacted)}"
 
 
 class _SensitiveQueryAccessFilter(logging.Filter):
@@ -37,23 +52,22 @@ class _SensitiveQueryAccessFilter(logging.Filter):
         args = record.args
         if not (isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str)):
             return True
+        record.args = (*args[:2], _redact_sensitive_path(args[2]), *args[3:])
+        return True
 
-        full_path = _DOWNLOAD_TOKEN_PATH_RE.sub(r"\1[REDACTED]", args[2])
 
-        if "?" not in full_path:
-            if full_path != args[2]:
-                record.args = (*args[:2], full_path, *args[3:])
-            return True
+class _SensitiveWebSocketHandshakeFilter(logging.Filter):
 
-        path, _, query = full_path.partition("?")
-        redacted = []
-        for pair in query.split("&"):
-            name, sep, _value = pair.partition("=")
-            if sep and name.lower() in _SENSITIVE_QUERY_PARAMS:
-                redacted.append(f"{name}=[REDACTED]")
-            else:
-                redacted.append(pair)
-        record.args = (*args[:2], f"{path}?{'&'.join(redacted)}", *args[3:])
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if (
+            isinstance(record.msg, str)
+            and record.msg.startswith('%s - "WebSocket %s"')
+            and isinstance(args, tuple)
+            and len(args) >= 2
+            and isinstance(args[1], str)
+        ):
+            record.args = (args[0], _redact_sensitive_path(args[1]), *args[2:])
         return True
 
 
@@ -131,6 +145,7 @@ def configure_logging(
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.addFilter(_McpHeartbeatAccessFilter())
     access_logger.addFilter(_SensitiveQueryAccessFilter())
+    logging.getLogger("uvicorn.error").addFilter(_SensitiveWebSocketHandshakeFilter())
 
     shared_processors = [
         structlog.contextvars.merge_contextvars,

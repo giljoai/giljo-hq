@@ -313,7 +313,7 @@ async def test_get_roadmap_no_active_product_surfaces_error(roadmap_mcp_client, 
         result = await session.call_tool("get_roadmap", {})
 
     assert result.is_error is True
-    assert "active product" in _error_text(result).lower()
+    assert "create_product" in _error_text(result)
 
 
 async def test_removing_last_item_clears_summary_through_transport(roadmap_mcp_client, db_session):

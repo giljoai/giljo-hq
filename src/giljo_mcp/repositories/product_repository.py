@@ -124,6 +124,19 @@ class ProductRepository:
         )
         return (await session.execute(count_stmt)).scalar_one()
 
+    async def get_start_list_product_name(self, session: AsyncSession, tenant_key: str) -> str | None:
+        stmt = (
+            select(Product.name)
+            .where(
+                Product.tenant_key == tenant_key,
+                Product.deleted_at.is_(None),
+                func.btrim(Product.name) != "",
+            )
+            .order_by(Product.is_default.desc(), Product.created_at.desc())
+            .limit(1)
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
     async def find_other_default_products(
         self,
         session: AsyncSession,

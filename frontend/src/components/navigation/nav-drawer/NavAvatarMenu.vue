@@ -29,6 +29,17 @@
           <v-list-item-subtitle class="account-status-section__subtitle">
             {{ accountStatusSubtitle }}
           </v-list-item-subtitle>
+          <div v-if="showRetentionNotice" class="account-status-section__retention">
+            Limited records are kept as described in our
+            <a
+              href="https://giljo.ai/privacy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="privacy-link"
+              data-test="nav-privacy-link"
+              @click.stop
+            >Privacy Policy</a>.
+          </div>
           <div class="account-status-section__actions mt-2">
             <v-btn
               v-if="isAccountScheduledForDeletion"
@@ -200,6 +211,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { getLicenseCopy } from '@/i18n/licenseCopy'
 import { isCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
+import { useNotificationStore } from '@/stores/notifications'
 
 const props = defineProps({
   currentUser: {
@@ -275,6 +287,13 @@ defineEmits([
   'confirm-reset-password',
 ])
 
+const notificationStore = useNotificationStore()
+const showRetentionNotice = computed(
+  () =>
+    props.isAccountScheduledForDeletion &&
+    !notificationStore.bannerNotifications.some((n) => n.type === 'saas.account_deletion_scheduled'),
+)
+
 const aboutDialog = ref(false)
 const productName = PRODUCT_NAME
 const showResetPasswordConfirm = ref(false)
@@ -341,6 +360,11 @@ function getRoleColor(role) {
 }
 
 // account status section at top of the avatar dropdown.
+.privacy-link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
+}
+
 .account-status-section {
   flex-direction: column;
   align-items: flex-start;
@@ -372,6 +396,13 @@ function getRoleColor(role) {
     margin-top: 2px;
     white-space: normal;
     opacity: 1;
+  }
+
+  &__retention {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.35;
+    margin-top: 2px;
   }
 
   &__actions {

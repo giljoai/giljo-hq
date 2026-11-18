@@ -1654,6 +1654,8 @@ def upgrade() -> None:
                 nullable=True,
                 comment="BE-9201: tutorial router door picked (A|B|C|D); drives the bootstrap-card spotlight",
             ),
+            sa.Column("intro_video_seen", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+            sa.Column("guide_closed", sa.Boolean(), server_default=sa.text("false"), nullable=False),
             sa.CheckConstraint("((failed_pin_attempts >= 0))", name="ck_user_pin_attempts_positive"),
             sa.CheckConstraint("role IN ('admin', 'developer', 'viewer')", name="ck_user_role"),
             sa.PrimaryKeyConstraint("id", name="users_pkey"),

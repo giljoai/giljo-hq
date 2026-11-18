@@ -114,20 +114,26 @@ def get_port_from_sources() -> int:
 
 
 def get_default_host() -> str:
+    from giljo_mcp._config_io import get_config_path, read_config
+
     try:
-        from giljo_mcp._config_io import read_config
-
+        if not get_config_path().is_file():
+            logging.warning(f"No config file at {get_config_path()}, binding 127.0.0.1 (this machine only)")
+            return "127.0.0.1"
         config = read_config()
-        configured_host = config.get("services", {}).get("api", {}).get("host")
-        if configured_host:
-            logging.info(f"Using configured API host: {configured_host}")
-            return configured_host
-
-        logging.info("No host configured, defaulting to 0.0.0.0")
-        return "0.0.0.0"
     except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
-        logging.warning(f"Could not read config: {e}, defaulting to 0.0.0.0")
+        logging.warning(f"Could not read config: {e}, binding 127.0.0.1 (this machine only)")
+        return "127.0.0.1"
 
+    configured_host = config.get("services", {}).get("api", {}).get("host")
+    if configured_host:
+        logging.info(f"Using configured API host: {configured_host}")
+        return configured_host
+
+    logging.warning(
+        "config.yaml has no services.api.host, binding 0.0.0.0 (all network interfaces) as before. "
+        "Set services.api.host to 127.0.0.1 for this machine only, or 0.0.0.0 to keep network access."
+    )
     return "0.0.0.0"
 
 

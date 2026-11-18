@@ -50,6 +50,19 @@
             </AppAlert>
 
             <AppAlert
+              v-if="waitSeconds > 0"
+              type="warning"
+              variant="tonal"
+              class="mb-4"
+              data-testid="signin-wait"
+            >
+              {{ waitCopy }}
+            </AppAlert>
+            <div class="sr-only" aria-live="polite" data-testid="signin-wait-live">
+              {{ waitAnnouncement }}
+            </div>
+
+            <AppAlert
               v-if="signedOutNotice"
               type="info"
               variant="tonal"
@@ -73,6 +86,7 @@
             </AppAlert>
 
             <v-form ref="loginForm" @submit.prevent="handleLogin">
+              <template v-if="!socialSignupActive && !socialLinkActive">
               <v-text-field
                 v-model="username"
                 label="Email or username"
@@ -130,22 +144,28 @@
                   color="primary"
                   size="large"
                   :loading="loading"
-                  :disabled="!username || !password || loading"
+                  :disabled="!username || !password || loading || waitSeconds > 0"
                   data-testid="login-button"
                 >
                   <v-icon v-if="!loading" start>mdi-login</v-icon>
                   {{ loading ? 'Logging in...' : 'Sign In' }}
                 </v-btn>
               </div>
+              </template>
 
-              <component :is="socialLoginButtonsComponent" v-if="socialLoginButtonsComponent" />
+              <component
+                :is="socialLoginButtonsComponent"
+                v-if="socialLoginButtonsComponent"
+                @update:signup-active="onSocialSignupActive"
+                @update:link-active="onSocialLinkActive"
+              />
 
-              <div v-if="isSaas" class="text-center mt-3">
+              <div v-if="isSaas && !socialSignupActive && !socialLinkActive" class="text-center mt-3">
                 <span class="text-body-small text-muted-a11y">Don't have an account?</span>
                 <router-link to="/register" class="text-body-small font-weight-bold ml-1">Register</router-link>
               </div>
 
-              <div class="text-center mt-4">
+              <div v-if="!socialSignupActive" class="text-center mt-4">
                 <v-btn
                   variant="text"
                   color="primary"
@@ -192,7 +212,7 @@
 
 <script setup>
 // eslint-allow giljo-internal/no-manual-api-url-composition
-import { ref, computed, onMounted, shallowRef } from 'vue'
+import { ref, computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import ForgotPasswordPin from '@/components/ForgotPasswordPin.vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -205,10 +225,26 @@ import { PRODUCT_NAME } from '@/branding'
 const productName = PRODUCT_NAME
 import configService from '@/services/configService'
 import { isCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
+import {
+  SIGN_IN_WAIT_COPY,
+  SIGN_IN_WAIT_ANNOUNCE_EVERY_SECONDS,
+  isAccountLocked429,
+  waitSecondsFrom429,
+} from '@/utils/signInWait'
 
 const forgotPasswordEmailComponent = shallowRef(null)
 
 const socialLoginButtonsComponent = shallowRef(null)
+const socialSignupActive = ref(false)
+function onSocialSignupActive(active) {
+  socialSignupActive.value = active
+  if (active) password.value = ''
+}
+const socialLinkActive = ref(false)
+function onSocialLinkActive(active) {
+  socialLinkActive.value = active
+  if (active) password.value = ''
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -216,6 +252,13 @@ const userStore = useUserStore()
 
 const giljoMode = ref('ce')
 const isSaas = computed(() => isSaasModeValue(giljoMode.value))
+
+function firstLoginTarget() {
+  const returnTo = route.query.redirect
+  return isSaas.value && typeof returnTo === 'string' && returnTo
+    ? { path: '/first-login', query: { redirect: returnTo } }
+    : '/first-login'
+}
 const editionLabel = computed(() => {
   switch (giljoMode.value) {
     case 'saas': return 'SaaS Edition'
@@ -249,12 +292,51 @@ const successMessage = ref('')
 const signedOutNotice = ref('')
 const loginForm = ref(null)
 
+const waitSeconds = ref(0)
+const waitAnnouncement = ref('')
+const waitCopy = computed(() => SIGN_IN_WAIT_COPY.waiting(waitSeconds.value))
+let waitDeadline = 0
+let waitTimer = null
+
+function stopWait() {
+  if (waitTimer !== null) clearInterval(waitTimer)
+  waitTimer = null
+  waitSeconds.value = 0
+}
+
+function tickWait() {
+  const remaining = Math.ceil((waitDeadline - Date.now()) / 1000)
+  if (remaining <= 0) {
+    stopWait()
+    waitAnnouncement.value = SIGN_IN_WAIT_COPY.announceDone
+    return
+  }
+  waitSeconds.value = remaining
+  if (remaining % SIGN_IN_WAIT_ANNOUNCE_EVERY_SECONDS === 0) {
+    waitAnnouncement.value = SIGN_IN_WAIT_COPY.announceTick(remaining)
+  }
+}
+
+function startWait(seconds) {
+  stopWait()
+  waitDeadline = Date.now() + seconds * 1000
+  waitSeconds.value = seconds
+  waitAnnouncement.value = SIGN_IN_WAIT_COPY.announceStart(seconds)
+  waitTimer = setInterval(tickWait, 1000)
+}
+
+onUnmounted(() => {
+  stopWait()
+  password.value = ''
+})
+
 const rules = {
   username: (value) => !!value || 'Email or username is required',
   password: (value) => !!value || 'Password is required',
 }
 
 async function handleLogin() {
+  if (waitSeconds.value > 0) return
   const { valid } = await loginForm.value.validate()
   if (!valid) {
     return
@@ -271,7 +353,7 @@ async function handleLogin() {
       const firstLoginData = firstLoginResponse.data
 
       if (firstLoginData.must_change_password || firstLoginData.must_set_pin) {
-        router.push('/first-login')
+        router.push(firstLoginTarget())
         return
       }
     } catch (firstLoginErr) {
@@ -279,7 +361,7 @@ async function handleLogin() {
     }
 
     if (userStore.currentUser?.password_change_required) {
-      router.push('/first-login')
+      router.push(firstLoginTarget())
       return
     }
 
@@ -287,7 +369,12 @@ async function handleLogin() {
       try {
         const orgStatus = await fetchEditionOrgSetupStatus()
         if (orgStatus?.data?.needs_setup) {
-          router.push('/org-setup')
+          const returnTo = route.query.redirect
+          router.push(
+            typeof returnTo === 'string' && returnTo
+              ? { path: '/org-setup', query: { redirect: returnTo } }
+              : '/org-setup',
+          )
           return
         }
       } catch (orgErr) {
@@ -317,6 +404,7 @@ async function handleLogin() {
     const redirect = route.query.redirect || '/'
     router.push(redirect)
   } catch (err) {
+    let keepPasswordForWait = false
     if (err.response?.status === 401) {
       const detail = err.response?.data?.detail || ''
       if (detail.toLowerCase().includes('inactive')) {
@@ -340,6 +428,9 @@ async function handleLogin() {
         return
       }
       error.value = 'Access forbidden. Please contact your administrator.'
+    } else if (err.response?.status === 429 && !isAccountLocked429(err)) {
+      startWait(waitSecondsFrom429(err))
+      keepPasswordForWait = true
     } else if (err.response?.status === 429) {
       error.value = 'Too many sign-in attempts. Please wait a minute and try again.'
     } else if (err.response?.data?.detail) {
@@ -352,7 +443,7 @@ async function handleLogin() {
       error.value = 'Login failed. Please try again.'
     }
 
-    password.value = ''
+    if (!keepPasswordForWait) password.value = ''
   } finally {
     loading.value = false
   }
@@ -486,16 +577,19 @@ onMounted(async () => {
   font-weight: 500;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 /* Remove Vuetify field overlay tint so inputs match the card background */
 :deep(.v-field__overlay) {
   opacity: 0 !important;
-}
-
-/* Neutralize browser autofill background */
-:deep(input:-webkit-autofill),
-:deep(input:-webkit-autofill:hover),
-:deep(input:-webkit-autofill:focus) {
-  -webkit-box-shadow: 0 0 0 1000px rgb(var(--v-theme-surface)) inset !important;
-  -webkit-text-fill-color: rgb(var(--v-theme-on-surface)) !important;
 }
 </style>

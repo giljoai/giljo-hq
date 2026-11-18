@@ -22,7 +22,6 @@ vi.mock('@/services/api', () => ({
     },
   },
   apiClient: {},
-  setTenantKey: vi.fn(),
 }))
 
 vi.mock('@/sentry', () => ({

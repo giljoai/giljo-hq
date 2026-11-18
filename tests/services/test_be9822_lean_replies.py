@@ -262,7 +262,6 @@ def test_guide_still_routes_the_whole_lifecycle():
         "update_project(status='completed')",
         "## Verify before trusting",
         "PRODUCT_AMBIGUOUS",
-        "Edition Scope",
         "link_projects(",
         "promote_task_to_project(",
     ):

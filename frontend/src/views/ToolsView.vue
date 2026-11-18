@@ -41,12 +41,12 @@
       </button>
       <button
         class="pill-toggle smooth-border"
-        :class="{ 'pill-toggle--active': activeTab === 'startup' }"
-        data-testid="startup-settings-tab"
-        @click="activeTab = 'startup'"
+        :class="{ 'pill-toggle--active': activeTab === 'learning' }"
+        data-testid="learning-settings-tab"
+        @click="activeTab = 'learning'"
       >
-        <v-icon size="16" class="pill-toggle-icon">mdi-rocket-launch</v-icon>
-        Startup
+        <v-icon size="16" class="pill-toggle-icon">mdi-school-outline</v-icon>
+        Learning
       </button>
     </div>
 
@@ -60,35 +60,84 @@
         <TemplateManager />
       </v-window-item>
 
-      <v-window-item value="startup">
+      <v-window-item value="learning">
         <div class="tab-header mb-4">
-          <h2 class="text-title-large">Startup</h2>
-          <p class="text-body-medium text-muted-a11y mt-1">Setup wizard and getting started</p>
+          <h2 class="text-title-large">Learning</h2>
+          <p class="text-body-medium text-muted-a11y mt-1">Guides, videos and setup help for getting going with Giljo HQ</p>
         </div>
-        <div class="startup-cards" data-test="startup-settings">
+        <div class="learning-cards" data-testid="learning-cards">
           <div
-            class="startup-card smooth-border"
-            style="--card-accent: var(--color-accent-primary)"
-            @click="router.push({ path: '/home', query: { openSetup: 'true' } })"
+            class="learning-card smooth-border"
+            role="button"
+            tabindex="0"
+            data-testid="learning-card-getting-started"
+            style="--card-accent: var(--agent-implementer-primary)"
+            @click="bringGuideBack"
+            @keydown.enter.prevent="bringGuideBack"
+            @keydown.space.prevent="bringGuideBack"
           >
-            <div class="startup-card-icon" style="background: rgba(255,195,0,0.1); color: var(--color-accent-primary)">
-              <v-icon size="20">mdi-rocket-launch</v-icon>
+            <div class="learning-card-icon" style="background: var(--agent-implementer-tinted); color: var(--agent-implementer-primary)">
+              <v-icon size="20">mdi-format-list-checks</v-icon>
             </div>
-            <div class="startup-card-title">Setup Wizard</div>
-            <div class="startup-card-desc">Connect AI coding tools, install skills, and configure {{ productName }}.</div>
+            <div class="learning-card-title">Getting started checklist</div>
+            <div class="learning-card-desc">Bring back the step-by-step checklist.</div>
+            <div v-if="startList.loaded" class="learning-card-count" data-testid="learning-card-count">
+              {{ startList.allDone ? `All ${startList.stepCount} done` : `${startList.doneCount} of ${startList.stepCount} done` }}
+            </div>
+            <div v-if="guideBackFailed" class="learning-card-error" role="alert" data-testid="learning-card-error">
+              Could not bring the guide back. Please try again.
+            </div>
           </div>
           <div
-            class="startup-card smooth-border"
-            style="--card-accent: var(--agent-documenter-primary)"
-            @click="router.push({ path: '/home', query: { openGuide: 'true' } })"
+            class="learning-card smooth-border"
+            role="button"
+            tabindex="0"
+            data-testid="learning-card-connect"
+            style="--card-accent: var(--agent-reviewer-primary)"
+            @click="connectATool"
+            @keydown.enter.prevent="connectATool"
+            @keydown.space.prevent="connectATool"
           >
-            <div class="startup-card-icon" style="background: rgba(94,196,142,0.12); color: var(--agent-documenter-primary)">
+            <div class="learning-card-icon" style="background: var(--agent-reviewer-tinted); color: var(--agent-reviewer-primary)">
+              <v-icon size="20">mdi-connection</v-icon>
+            </div>
+            <div class="learning-card-title">Connect a tool</div>
+            <div class="learning-card-desc">Add another AI tool to Giljo HQ.</div>
+          </div>
+          <div
+            class="learning-card smooth-border"
+            role="button"
+            tabindex="0"
+            data-testid="learning-card-videos"
+            style="--card-accent: var(--agent-orchestrator-primary)"
+            @click="videosOpen = true"
+            @keydown.enter.prevent="videosOpen = true"
+            @keydown.space.prevent="videosOpen = true"
+          >
+            <div class="learning-card-icon" style="background: var(--agent-orchestrator-tinted); color: var(--agent-orchestrator-primary)">
+              <v-icon size="20">mdi-play-circle-outline</v-icon>
+            </div>
+            <div class="learning-card-title">Videos and animations</div>
+            <div class="learning-card-desc">The start video, the lessons and the animated tour.</div>
+          </div>
+          <div
+            class="learning-card smooth-border"
+            role="link"
+            tabindex="0"
+            data-testid="learning-card-user-guide"
+            style="--card-accent: var(--agent-documenter-primary)"
+            @click="router.push({ name: 'UserGuide' })"
+            @keydown.enter.prevent="router.push({ name: 'UserGuide' })"
+            @keydown.space.prevent="router.push({ name: 'UserGuide' })"
+          >
+            <div class="learning-card-icon" style="background: var(--agent-documenter-tinted); color: var(--agent-documenter-primary)">
               <v-icon size="20">mdi-book-open-variant</v-icon>
             </div>
-            <div class="startup-card-title">Learning</div>
-            <div class="startup-card-desc">Understand products, projects, agents, memory, and slash commands.</div>
+            <div class="learning-card-title">User guide</div>
+            <div class="learning-card-desc">Read the full guide to Giljo HQ.</div>
           </div>
         </div>
+        <VideosLibraryDialog :model-value="videosOpen" @close="videosOpen = false" @open-tour="openTour" />
       </v-window-item>
 
       <v-window-item value="notifications">
@@ -107,7 +156,7 @@
       <v-window-item value="connect">
         <div class="tab-header mb-4">
           <h2 class="text-title-large">Connect</h2>
-          <p class="text-body-medium text-muted-a11y mt-1">Connect external tools and services to your GiljoAI workspace</p>
+          <p class="text-body-medium text-muted-a11y mt-1">Connect external tools and services to your {{ productName }} workspace</p>
         </div>
 
         <ToolsConnectDirectory class="mb-5" />
@@ -141,6 +190,10 @@ import TemplateManager from '@/components/TemplateManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import ConnectedAppsManager from '@/components/ConnectedAppsManager.vue'
 import { PRODUCT_NAME } from '@/branding'
+import { useStartListStore } from '@/stores/startList'
+import { useGuideStore } from '@/stores/guide'
+import { useStartListLive } from '@/composables/useStartListLive'
+import VideosLibraryDialog from '@/components/onboarding/VideosLibraryDialog.vue'
 
 const productName = PRODUCT_NAME
 import AgentExport from '@/components/AgentExport.vue'
@@ -153,6 +206,25 @@ import BellPreferencesCard from '@/components/settings/BellPreferencesCard.vue'
 import PopoutPreferencesCard from '@/components/settings/PopoutPreferencesCard.vue'
 import ToastPreferencesCard from '@/components/settings/ToastPreferencesCard.vue'
 const router = useRouter()
+const startList = useStartListStore()
+const guide = useGuideStore()
+useStartListLive()
+const videosOpen = ref(false)
+
+const guideBackFailed = ref(false)
+
+async function bringGuideBack() {
+  guideBackFailed.value = false
+  guideBackFailed.value = (await guide.turnOn()) === false
+}
+
+function connectATool() {
+  router.push({ path: '/home', query: { openSetup: 'new' } })
+}
+
+function openTour() {
+  router.push({ path: '/home', query: { openGuide: 'true' } })
+}
 
 const { on, off } = useWebSocketStore()
 
@@ -160,7 +232,7 @@ const activeTab = ref('connect')
 
 function normalizeTab(tab) {
   if (!tab) return null
-  if (tab === 'general') return 'startup'
+  if (tab === 'general' || tab === 'startup') return 'learning'
   if (tab === 'integrations' || tab === 'api-keys') return 'connect'
   return tab
 }
@@ -254,13 +326,13 @@ function handleGitIntegrationUpdate(data) {
 }
 
 /* Startup quick-launch cards (mirrors Home page .quick-card) */
-.startup-cards {
+.learning-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 
-.startup-card {
+.learning-card {
   background: rgb(var(--v-theme-surface));
   border-radius: $border-radius-rounded;
   padding: 20px;
@@ -270,12 +342,12 @@ function handleGitIntegrationUpdate(data) {
   overflow: hidden;
 }
 
-.startup-card:hover {
+.learning-card:hover {
   transform: translateY(-3px);
   box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255,255,255,0.10)), 0 10px 20px -6px rgba(0,0,0,0.25);
 }
 
-.startup-card::before {
+.learning-card::before {
   content: '';
   position: absolute;
   top: 0;
@@ -287,11 +359,11 @@ function handleGitIntegrationUpdate(data) {
   transition: opacity $transition-normal;
 }
 
-.startup-card:hover::before {
+.learning-card:hover::before {
   opacity: 1;
 }
 
-.startup-card-icon {
+.learning-card-icon {
   width: 40px;
   height: 40px;
   border-radius: $border-radius-default;
@@ -300,22 +372,35 @@ function handleGitIntegrationUpdate(data) {
   margin-bottom: 12px;
 }
 
-.startup-card-title {
+.learning-card-title {
   font-size: 0.92rem;
   font-weight: 600;
   margin-bottom: 5px;
 }
 
-.startup-card-desc {
+.learning-card-desc {
   font-size: 0.75rem;
   color: var(--text-secondary);
   line-height: 1.4;
 }
 
+.learning-card-error {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: $color-status-error;
+}
+
+.learning-card-count {
+  margin-top: 10px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
 /* FE-9536: same tablet-band gap as WelcomeQuickGrid's .quick-grid (this
    mirrors it, per the comment above) -- add the missing 2-col step. */
 @media (max-width: $breakpoint-tablet) {
-  .startup-cards {
+  .learning-cards {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -350,13 +435,13 @@ function handleGitIntegrationUpdate(data) {
   opacity: 0.3;
 }
 
-.startup-help-icon {
+.learning-help-icon {
   cursor: pointer;
   opacity: 0.7;
   transition: opacity $transition-normal ease;
 }
 
-.startup-help-icon:hover {
+.learning-help-icon:hover {
   opacity: 1;
 }
 

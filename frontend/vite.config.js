@@ -10,26 +10,24 @@ import { sentryVitePlugin } from '@sentry/vite-plugin'
 // Load frontend port from environment or use default
 const FRONTEND_PORT = parseInt(process.env.VITE_FRONTEND_PORT || process.env.GILJO_FRONTEND_PORT || '7274', 10)
 
-// v3.0 Unified Architecture: Always read dashboard_host from config.yaml
-// Default to 0.0.0.0 (firewall controls access, not binding)
-let dashboardHost = '0.0.0.0'
+// Bind address comes from server.dashboard_host in config.yaml: the installer
+// writes the LAN address there when the user chose LAN access. With no
+// config.yaml, or no dashboard_host in it, the dev server stays on loopback.
+let dashboardHost = '127.0.0.1'
 try {
   const configPath = resolve(__dirname, '../config.yaml')
   if (fs.existsSync(configPath)) {
     const configData = yaml.load(fs.readFileSync(configPath, 'utf8'))
-    // v3.0: Read from server.dashboard_host (no mode-based logic)
-    dashboardHost = configData?.server?.dashboard_host || '0.0.0.0'
+    dashboardHost = configData?.server?.dashboard_host || '127.0.0.1'
     console.log(`[Vite] v3.0 binding to: ${dashboardHost}:${FRONTEND_PORT}`)
   }
   // No log when config.yaml is absent: that is the NORMAL state during install
   // (frontend builds before config generation) and for contributor checkouts —
   // a "not found" line there reads as an error to fresh installers (v2.0.0.1 QA).
 } catch (err) {
-  console.warn('[Vite] Could not read config.yaml, using default 0.0.0.0:', err.message)
+  console.warn('[Vite] Could not read config.yaml, binding to 127.0.0.1:', err.message)
 }
 
-// v3.0 Architecture: Always bind to what's in config (default 0.0.0.0)
-// Firewall controls actual network access (defense in depth)
 const HOST = dashboardHost
 
 // Derive API proxy target from config.yaml
@@ -98,6 +96,9 @@ export default defineConfig(({ mode }) => ({
         main: resolve(__dirname, 'index.html')
       },
       output: {
+        // SEC-0057: keep /*! ... */ licence notices (Vite drops them when minifying),
+        // so vendored third-party code ships with its licence notice.
+        comments: { legal: true },
         // Vite 8 (Rolldown) requires manualChunks as a function, not an
         // object. The function receives a module id (full path) and returns
         // a chunk name string, or undefined for default chunking.
@@ -116,7 +117,6 @@ export default defineConfig(({ mode }) => ({
     port: FRONTEND_PORT,
     host: HOST,
     strictPort: false, // Allow fallback to alternative port if occupied
-    cors: true,
     proxy: {
       // Proxy API to backend to avoid CORS in development
       '/api': {
@@ -146,10 +146,12 @@ export default defineConfig(({ mode }) => ({
       // /ws/{client_id} on the API root -- NOT under /api -- and in dev
       // getWsBaseUrl() returns '' so the app dials the Vite origin. Without a
       // rule here the upgrade matches nothing, hangs with no error, and no
-      // WS-driven UI can be tested locally (INF-9573).
+      // WS-driven UI can be tested locally (INF-9573). Host is NOT rewritten: the
+      // backend admits a cookie handshake whose Origin names the host it was sent
+      // to, and the browser's Origin here is the Vite address.
       '/ws': {
         target: API_TARGET.replace(/^http/, 'ws'),
-        changeOrigin: true,
+        changeOrigin: false,
         secure: false,
         ws: true,
       },
@@ -181,10 +183,12 @@ export default defineConfig(({ mode }) => ({
       },
     },
     fs: {
-      // Allow serving files outside root - needed for symlinked development setup
-      // NOTE: This only affects dev server, NOT production builds
-      strict: false,
-      allow: ['..']
+      // Strict mode stays on (Vite's default). Only the frontend itself and the
+      // three docs UserGuideView.vue imports from ../docs may be served.
+      allow: [
+        __dirname,
+        ...['PRODUCT_OVERVIEW.md', 'GETTING_STARTED.md', 'USER_GUIDE.md'].map((doc) => resolve(__dirname, '../docs', doc)),
+      ]
     }
   },
   resolve: {

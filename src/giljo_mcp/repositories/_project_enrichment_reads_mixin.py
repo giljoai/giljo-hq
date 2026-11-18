@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy import and_, case, func, not_, or_, select
+from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +19,25 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message
+from giljo_mcp.platform_registry import normalize_execution_mode
+
+
+REVIEW_STEP_RELEASED_AT = datetime(2026, 11, 16, tzinfo=UTC)
+
+_STAGE_PROMPT_HANDED_OUT = "staged"
+
+
+@dataclass(frozen=True)
+class StartListProjectFacts:
+
+    project_id: str | None
+    project_name: str | None
+    staged: bool
+    staged_mode: str | None
+    requested: bool
+    in_progress: bool
+    built: bool
+    reviewed: bool
 
 
 def project_not_trashed():
@@ -42,6 +62,65 @@ class ProjectEnrichmentReadsMixin:
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_start_list_project_facts(self, session: AsyncSession, tenant_key: str) -> StartListProjectFacts:
+        from giljo_mcp.services.next_action import STAGING_COMPLETE
+
+        live = project_not_trashed()
+        launched = Project.ever_launched_at.is_not(None)
+        staged = and_(live, or_(Project.staging_status == STAGING_COMPLETE, launched))
+        requested = and_(live, Project.staging_status == _STAGE_PROMPT_HANDED_OUT)
+        in_progress = and_(
+            live, Project.status == ProjectStatus.ACTIVE, Project.implementation_launched_at.is_not(None)
+        )
+        built = and_(
+            launched, or_(Project.status == ProjectStatus.COMPLETED, Project.closeout_executed_at.is_not(None))
+        )
+        finished_at = func.coalesce(Project.closeout_executed_at, Project.completed_at)
+        reviewed = and_(
+            built,
+            or_(
+                Project.reviewed_at.is_not(None),
+                finished_at.is_(None),
+                finished_at < REVIEW_STEP_RELEASED_AT,
+                not_(live),
+            ),
+        )
+
+        def ordered(column, condition, *, newest_first: bool):
+            order = (Project.created_at.desc(), Project.id.desc()) if newest_first else (Project.created_at, Project.id)
+            return func.array_agg(aggregate_order_by(column, *order)).filter(condition)
+
+        stmt = select(
+            ordered(Project.id, live, newest_first=False),
+            ordered(Project.name, live, newest_first=False),
+            func.count(case((staged, 1))),
+            ordered(Project.execution_mode, staged, newest_first=True),
+            func.count(case((requested, 1))),
+            func.count(case((in_progress, 1))),
+            func.count(case((built, 1))),
+            func.count(case((reviewed, 1))),
+        ).where(Project.tenant_key == tenant_key)
+        (
+            ids,
+            names,
+            staged_count,
+            staged_modes,
+            requested_count,
+            in_progress_count,
+            built_count,
+            reviewed_count,
+        ) = (await session.execute(stmt)).one()
+        return StartListProjectFacts(
+            project_id=ids[0] if ids else None,
+            project_name=names[0] if names else None,
+            staged=staged_count > 0,
+            staged_mode=normalize_execution_mode(staged_modes[0]) if staged_modes else None,
+            requested=requested_count > 0,
+            in_progress=in_progress_count > 0,
+            built=built_count > 0,
+            reviewed=reviewed_count > 0,
+        )
 
 
     async def get_active_projects(
@@ -75,27 +154,37 @@ class ProjectEnrichmentReadsMixin:
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_agent_jobs(
+    async def count_agent_jobs_for_projects(
         self,
         session: AsyncSession,
         tenant_key: str,
-        project_id: str,
-    ) -> int:
-        stmt = select(func.count(AgentJob.job_id)).where(
-            AgentJob.project_id == project_id, AgentJob.tenant_key == tenant_key
+        project_ids: list[str],
+    ) -> dict[str, int]:
+        if not project_ids:
+            return {}
+        stmt = (
+            select(AgentJob.project_id, func.count(AgentJob.job_id))
+            .where(AgentJob.project_id.in_(project_ids), AgentJob.tenant_key == tenant_key)
+            .group_by(AgentJob.project_id)
         )
         result = await session.execute(stmt)
-        return result.scalar() or 0
+        return dict(result.all())
 
-    async def count_messages(
+    async def count_messages_for_projects(
         self,
         session: AsyncSession,
         tenant_key: str,
-        project_id: str,
-    ) -> int:
-        stmt = select(func.count(Message.id)).where(Message.project_id == project_id, Message.tenant_key == tenant_key)
+        project_ids: list[str],
+    ) -> dict[str, int]:
+        if not project_ids:
+            return {}
+        stmt = (
+            select(Message.project_id, func.count(Message.id))
+            .where(Message.project_id.in_(project_ids), Message.tenant_key == tenant_key)
+            .group_by(Message.project_id)
+        )
         result = await session.execute(stmt)
-        return result.scalar() or 0
+        return dict(result.all())
 
     async def get_agent_job_type_summary(
         self,

@@ -2,7 +2,7 @@
   <div class="upload-screen">
     <div class="beat-eyebrow">Vision document · upload</div>
     <h2 class="beat-title">Attach your vision document.</h2>
-    <p class="beat-sub">GiljoAI ingests it, stages an analysis, and your agent proposes the product setup from it.</p>
+    <p class="beat-sub">Giljo HQ ingests it, stages an analysis, and your agent proposes the product setup from it.</p>
 
     <div class="upload-stage">
       <div

@@ -10,7 +10,7 @@
  * - Orchestrator check: agent.agent_display_name === 'orchestrator'
  * - Regular agents: previews the job's template_id (else exact name in the job's product)
  * - Orchestrator: fetches via system.getOrchestratorPrompt()
- * - Title: "System Orchestrator Prompt" or "Agent Details: {agent_name}"
+ * - Title: "Orchestrator prompt" or "Agent Details: {agent_name}"
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -335,7 +335,7 @@ describe('AgentDetailsModal Component', () => {
 
       await flushPromises()
 
-      expect(wrapper.text()).toContain('System Orchestrator Prompt')
+      expect(wrapper.text()).toContain('Orchestrator prompt')
     })
 
     it('handles orchestrator prompt fetch error', async () => {

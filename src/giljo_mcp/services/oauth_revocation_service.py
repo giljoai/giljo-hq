@@ -174,6 +174,20 @@ async def revoke_dashboard_access_jwt(db_session: AsyncSession, *, token: str) -
     return await _persist_access_jti_revocation(db_session, payload)
 
 
+async def sign_out_dashboard_session(db_session: AsyncSession, *, token: str) -> str | None:
+    payload = JWTManager.verify_token_allow_expired(token)
+    if payload is None:
+        return None
+    await _persist_access_jti_revocation(db_session, payload)
+    tenant_key = payload.get("tenant_key")
+    if tenant_key:
+        from giljo_mcp.services.session_eviction import SESSION_REVOKED, close_live_user_sockets
+
+        await db_session.commit()
+        await close_live_user_sockets(tenant_key, logger, reason=SESSION_REVOKED)
+    return tenant_key
+
+
 async def revoke_access_jti(
     db_session: AsyncSession,
     *,

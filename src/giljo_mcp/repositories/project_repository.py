@@ -28,7 +28,7 @@ from giljo_mcp.repositories._project_keyset import (
     keyset_axis_for_sort_key,
     project_keyset_after,
 )
-from giljo_mcp.repositories._series_allocation import lowest_free_series_number
+from giljo_mcp.repositories._series_allocation import lowest_free_series_number, number_for_restore
 
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,18 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             )
         return next_series_number
 
+    async def get_series_number_for_restore(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        product_id: str | None,
+        row_id: str,
+        current: int | None,
+    ) -> int:
+        if current is None:
+            return await self.get_next_series_number_shared(session, tenant_key, product_id)
+        return await number_for_restore(session, tenant_key, product_id, row_id, current)
+
     async def check_duplicate_taxonomy(
         self,
         session: AsyncSession,
@@ -107,7 +119,6 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,
             Project.series_number == series_number,
-            project_not_trashed(),
         )
         if project_type_id:
             dup_query = dup_query.where(Project.project_type_id == project_type_id)
@@ -159,13 +170,14 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         )
         return result.scalar_one_or_none()
 
-    async def stamp_reviewed(self, session: AsyncSession, tenant_key: str, project_id: str) -> None:
-        await session.execute(
+    async def stamp_reviewed(self, session: AsyncSession, tenant_key: str, project_id: str) -> bool:
+        result = await session.execute(
             update(Project)
             .where(Project.id == project_id, Project.tenant_key == tenant_key, Project.reviewed_at.is_(None))
             .values(reviewed_at=func.now())
             .execution_options(synchronize_session=False)
         )
+        return result.rowcount > 0
 
     async def project_type_exists(self, session: AsyncSession, tenant_key: str, type_id: str) -> bool:
         result = await session.execute(

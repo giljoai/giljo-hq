@@ -20,7 +20,7 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,10 +68,7 @@ class LoginLockoutService:
         if locked_until > now:
             raise AccountLockedError(int((locked_until - now).total_seconds()))
 
-    async def record_failure(self, session: AsyncSession, identifier: str, ip: str) -> LockoutOutcome:
-        ident = _normalize(identifier)
-        now = datetime.now(UTC)
-
+    async def _lock_row(self, session: AsyncSession, ident: str, ip: str, now: datetime) -> LoginLockout:
         await session.execute(
             pg_insert(LoginLockout)
             .values(
@@ -84,24 +81,47 @@ class LoginLockoutService:
             )
             .on_conflict_do_nothing(index_elements=["identifier", "ip_address"])
         )
-
         result = await session.execute(
             select(LoginLockout)
             .where(LoginLockout.identifier == ident, LoginLockout.ip_address == ip)
             .with_for_update()
         )
-        row = result.scalar_one()
+        return result.scalar_one()
 
-        if row.locked_until is not None and row.locked_until <= now:
-            count = 1
-            row.locked_until = None
-        else:
-            count = row.failed_count + 1
+    async def hold(self, session: AsyncSession, identifier: str, ip: str) -> None:
+        now = datetime.now(UTC)
+        row = await self._lock_row(session, _normalize(identifier), ip, now)
+        if row.locked_until is not None and row.locked_until > now:
+            raise AccountLockedError(int((row.locked_until - now).total_seconds()))
+
+    async def record_failure(
+        self,
+        session: AsyncSession,
+        identifier: str,
+        ip: str,
+        *,
+        lock_for: Callable[[int], timedelta | None] | None = None,
+    ) -> LockoutOutcome:
+        ident = _normalize(identifier)
+        now = datetime.now(UTC)
+        row = await self._lock_row(session, ident, ip, now)
 
         just_locked = False
-        if row.locked_until is None and count >= MAX_FAILED_ATTEMPTS:
-            row.locked_until = now + LOCKOUT_WINDOW
-            just_locked = True
+        if lock_for is not None:
+            count = row.failed_count + 1
+            duration = lock_for(count)
+            if duration is not None:
+                row.locked_until = now + duration
+                just_locked = True
+        else:
+            if row.locked_until is not None and row.locked_until <= now:
+                count = 1
+                row.locked_until = None
+            else:
+                count = row.failed_count + 1
+            if row.locked_until is None and count >= MAX_FAILED_ATTEMPTS:
+                row.locked_until = now + LOCKOUT_WINDOW
+                just_locked = True
 
         row.failed_count = count
         row.updated_at = now

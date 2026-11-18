@@ -91,6 +91,8 @@ class ContextTuningDuePayload(BaseModel):
     has completed since the last tune (the activity gate). Carries the product
     identity the banner renders and links back to. ``projects_since_tune`` is the
     completed-project count since the last tune (the activity signal).
+    ``dismissed_at_count`` is the count when the person dismissed the banner; it
+    returns once ``projects_since_tune`` has grown by the threshold from there.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -98,6 +100,7 @@ class ContextTuningDuePayload(BaseModel):
     product_id: str = Field(..., min_length=1, max_length=36)
     product_name: str = Field(..., min_length=1, max_length=255)
     projects_since_tune: int = Field(..., ge=0)
+    dismissed_at_count: int | None = Field(default=None, ge=0)
 
 
 class ProjectPrelaunchWorkproductPayload(BaseModel):

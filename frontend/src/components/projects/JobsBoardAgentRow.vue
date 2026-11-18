@@ -74,9 +74,9 @@
       v-else
       class="jb-state"
       data-testid="jb-agent-status"
-      :style="{ color: getStatusColor(statusWord) }"
+      :style="{ color: getStatusColor(shownWord) }"
     >
-      {{ jobStatusLabel(agent) }}<LiveDots v-if="live" />
+      {{ monitoringNow ? 'Monitoring' : jobStatusLabel(agent) }}<LiveDots v-if="live" />
     </span>
 
     <button
@@ -140,6 +140,13 @@
           rel="noopener noreferrer"
           data-testid="jb-agent-menu-pr"
         />
+        <v-list-item
+          v-else-if="prText"
+          prepend-icon="mdi-source-pull"
+          title="Pull request"
+          :subtitle="prText"
+          data-testid="jb-agent-menu-pr-text"
+        />
       </v-list>
     </v-menu>
   </div>
@@ -185,6 +192,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  monitoring: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['play', 'replay', 'messages', 'agent-role', 'agent-job', 'steps'])
@@ -194,16 +205,28 @@ const primaryLabel = computed(() => getPrimaryAgentLabel(props.agent))
 const roleLabel = computed(() => getAgentRoleLabel(props.agent))
 const duration = computed(() => formatAgentDuration(props.agent, props.now))
 const statusWord = computed(() => jobStatusWord(props.agent))
-const live = computed(() => !notPickedUp.value && isLiveStatusWord(statusWord.value))
+const monitoringNow = computed(() => props.monitoring && statusWord.value === 'working')
+const shownWord = computed(() => (monitoringNow.value ? 'monitoring' : statusWord.value))
+const live = computed(() => !notPickedUp.value && !monitoringNow.value && isLiveStatusWord(statusWord.value))
 const messagesWaiting = computed(() => props.agent?.messages_waiting_count ?? 0)
 const hasSteps = computed(
   () => Boolean(props.agent?.steps) && typeof props.agent.steps.completed === 'number' && typeof props.agent.steps.total === 'number',
 )
 const notPickedUp = computed(() => props.agent?.status === 'waiting' && props.agent?.not_picked_up === true)
-const prUrl = computed(() => {
+const prRaw = computed(() => {
   const url = props.agent?.result?.pr_url
   return typeof url === 'string' && url.trim() ? url.trim() : null
 })
+const prUrl = computed(() => {
+  if (!prRaw.value) return null
+  try {
+    const parsed = new URL(prRaw.value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
+  } catch {
+    return null
+  }
+})
+const prText = computed(() => (prRaw.value && !prUrl.value ? prRaw.value : null))
 </script>
 
 <style scoped lang="scss">

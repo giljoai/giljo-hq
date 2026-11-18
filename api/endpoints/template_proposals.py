@@ -79,6 +79,19 @@ def _service() -> TemplateProposalService:
     return TemplateProposalService(state.db_manager, system_prompt_service=state.system_prompt_service)
 
 
+async def _publish_decided(user: User, proposal_id: str, action: str) -> None:
+    try:
+        from api.app_state import state
+
+        if getattr(state, "event_bus", None):
+            await state.event_bus.publish(
+                "template:proposal_decided",
+                {"tenant_key": user.tenant_key, "proposal_id": proposal_id, "action": action},
+            )
+    except Exception as pub_err:  # noqa: BLE001 - fire-and-forget WS event
+        logger.warning("Failed to publish template proposal event: %s", sanitize(str(pub_err)))
+
+
 def _is_admin(user: User) -> bool:
     return user.role == "admin"
 
@@ -134,6 +147,7 @@ async def apply_template_proposal(
         raise HTTPException(status_code=400, detail="Invalid prompt content.") from exc
 
     logger.info("Applied template proposal %s", sanitize(proposal_id))
+    await _publish_decided(current_user, proposal_id, "apply")
     return TemplateProposalApplied(**result)
 
 
@@ -148,4 +162,5 @@ async def reject_template_proposal(
         await service.reject(tenant_key=current_user.tenant_key, proposal_id=proposal_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Proposal not found") from exc
+    await _publish_decided(current_user, proposal_id, "reject")
     return TemplateProposalRejected()

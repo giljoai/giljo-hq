@@ -15,7 +15,12 @@
       <p class="sca-hint" data-testid="sca-pickup-hint">No agent has picked this up yet</p>
     </template>
     <template v-else>
-      <span :id="labelId" class="sca-label" data-testid="sca-label">
+      <span
+        :id="labelId"
+        class="sca-label"
+        :class="{ 'sca-label--title': !modeLocked }"
+        data-testid="sca-label"
+      >
         {{ modeLocked ? 'Execution mode' : 'Select execution mode' }}
       </span>
       <span v-if="modeLocked" class="sca-mode-tag" :data-testid="ids.modeTag">
@@ -26,6 +31,7 @@
         v-else
         :model-value="mode"
         :labelled-by="labelId"
+        :class="{ 'next-press-pulse': pulseTarget === 'mode' }"
         :data-testid="ids.runAs"
         @change="(picked) => emit('pick-mode', picked)"
       />
@@ -47,7 +53,7 @@
       <template v-else>
         <v-btn
           class="jb-btn"
-          :class="`jb-btn-${stageLook}`"
+          :class="[`jb-btn-${stageLook}`, { 'next-press-pulse': pulseTarget === 'stage' }]"
           size="small"
           :variant="LOOK_VARIANT[stageLook]"
           :loading="stageBusy"
@@ -62,7 +68,7 @@
         </v-btn>
         <v-btn
           class="jb-btn"
-          :class="phase === 'staged' ? 'jb-btn-primary' : 'jb-btn-muted'"
+          :class="[phase === 'staged' ? 'jb-btn-primary' : 'jb-btn-muted', { 'next-press-pulse': pulseTarget === 'implement' }]"
           size="small"
           :variant="phase === 'staged' ? 'flat' : 'tonal'"
           :disabled="phase !== 'staged' || !implementReady || implementBusy"
@@ -117,6 +123,7 @@ const props = defineProps({
   implementReady: { type: Boolean, default: false },
   implementBusy: { type: Boolean, default: false },
   copying: { type: Boolean, default: false },
+  pulseNext: { type: Boolean, default: false },
   secondaryLabel: { type: String, default: '' },
   secondaryBusy: { type: Boolean, default: false },
   secondaryTitle: { type: String, default: '' },
@@ -154,6 +161,14 @@ const stageLook = computed(() => {
   if (props.stageRole === 'quiet') return 'ghost'
   if (props.stageRole === 'secondary' || props.phase === 'staged') return 'secondary'
   return 'primary'
+})
+
+const pulseTarget = computed(() => {
+  if (!props.pulseNext || props.variant !== 'project') return null
+  if (props.phase === 'staged') return props.implementReady && !props.implementBusy ? 'implement' : null
+  if (props.phase !== 'ready') return null
+  if (props.stageNeedsMode) return 'mode'
+  return props.stageRole === 'next' && !props.stageBlocked && !props.stageBusy ? 'stage' : null
 })
 
 const pulsing = ref(false)
@@ -233,6 +248,13 @@ watch(stageWaitsForMode, (waits) => {
   font-size: 0.72rem;
   font-weight: 600;
   color: $color-text-primary;
+
+  &--title {
+    align-self: stretch;
+    text-align: center;
+    font-size: 0.95rem;
+    color: $color-brand-yellow;
+  }
 }
 
 .sca-hint {

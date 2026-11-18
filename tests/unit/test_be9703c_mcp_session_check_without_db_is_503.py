@@ -42,7 +42,6 @@ async def test_session_check_without_a_database_answers_503(monkeypatch):
         tenant_key=_SESSION_TENANT,
         user_id="u1",
         auth_method="jwt",
-        mcp_session_id=None,
     )
 
     assert result is None

@@ -207,7 +207,7 @@ class EventFactory:
 
 
     @staticmethod
-    def setup_tool_connected(tenant_key: str, user_id: str, tool_name: str) -> dict:
+    def setup_tool_connected(tenant_key: str, user_id: str, tool_name: str, surface: str | None = None) -> dict:
         event = SetupToolConnectedEvent(
             timestamp=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             data=SetupToolConnectedData(
@@ -215,6 +215,7 @@ class EventFactory:
                 user_id=user_id,
                 tool_name=tool_name,
                 connected_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                surface=surface,
             ),
         )
         return event.model_dump(mode="json")

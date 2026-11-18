@@ -395,6 +395,13 @@ export const useCommHubStore = defineStore('commHub', () => {
     if (payload.content_truncated) {
       await hydrateThreadMessages(threadId)
     }
+    await refreshRosterIfNewAuthor(threadId, payload.from_agent_id)
+  }
+
+  async function refreshRosterIfNewAuthor(threadId, authorId) {
+    if (!authorId || !participantsByThreadId.value.has(threadId)) return
+    const known = participantsByThreadId.value.get(threadId).some((p) => p.participant_id === authorId)
+    if (!known) await loadParticipants(threadId)
   }
 
   async function hydrateThreadMessages(threadId) {

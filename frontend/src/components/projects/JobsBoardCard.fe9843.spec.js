@@ -35,7 +35,7 @@ const staged = {
 
 describe('JobsBoardCard staged chain member (FE-9843 rework)', () => {
   it('standalone staged card with headless off still shows the gate note', () => {
-    const w = mountCard({ project: staged, headlessAllowed: false })
+    const w = mountCard({ project: { ...staged, staging_status: 'staging_complete' }, headlessAllowed: false })
     expect(w.find('[data-testid="jb-gate-note"]').exists()).toBe(true)
     expect(w.text()).toContain('awaiting your go')
   })
@@ -44,6 +44,6 @@ describe('JobsBoardCard staged chain member (FE-9843 rework)', () => {
     const w = mountCard({ project: staged, headlessAllowed: false, chainCtx: { runId: 'r1' } })
     expect(w.find('[data-testid="jb-gate-note"]').exists()).toBe(false)
     expect(w.text()).not.toContain('awaiting your go')
-    expect(w.text()).not.toContain('Your launch required')
+    expect(w.text()).not.toContain('Your go is needed')
   })
 })

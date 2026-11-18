@@ -120,6 +120,19 @@ async def test_a_foreign_tenants_project_id_contributes_nothing(api_client, auth
 
 
 @pytest.mark.asyncio
+async def test_only_foreign_ids_answer_exactly_like_only_unknown_ids(api_client, auth_headers, db_manager):
+    foreign, _ = await _seed_project(db_manager, TenantManager.generate_tenant_key(), ("orchestrator", "tester"))
+    unknown = str(uuid4())
+
+    foreign_resp = await api_client.get("/api/agent-jobs/", params={"project_ids": foreign}, headers=auth_headers)
+    unknown_resp = await api_client.get("/api/agent-jobs/", params={"project_ids": unknown}, headers=auth_headers)
+
+    assert foreign_resp.status_code == unknown_resp.status_code == 200
+    assert foreign_resp.json() == unknown_resp.json() == {"jobs": [], "total": 0, "limit": 100, "offset": 0}
+    assert foreign not in foreign_resp.text
+
+
+@pytest.mark.asyncio
 async def test_project_id_and_project_ids_together_is_422(api_client, auth_headers, db_manager):
     tenant_key = _extract_tenant_key(auth_headers)
     p1, _ = await _seed_project(db_manager, tenant_key, ("orchestrator",))

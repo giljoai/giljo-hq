@@ -14,6 +14,9 @@ _TENANT_KEY_RE = re.compile(TENANT_KEY_SHAPE)
 _TENANT_KEY_REDACTION = "tk_[redacted]"
 
 
+_SERVER_ONLY_CONTEXT_KEYS = frozenset({"operation", "method", "tenant_key", "user_id", "org_id"})
+
+
 def _scrub(value):
     if isinstance(value, str):
         return _TENANT_KEY_RE.sub(_TENANT_KEY_REDACTION, value)
@@ -40,6 +43,12 @@ class BaseGiljoError(Exception):
     def __str__(self):
         if self.context:
             return f"{self.message} (Context: {_scrub(self.context)})"
+        return self.message
+
+    def agent_facing_str(self) -> str:
+        visible = {k: v for k, v in self.context.items() if k not in _SERVER_ONLY_CONTEXT_KEYS}
+        if visible:
+            return f"{self.message} (Context: {_scrub(visible)})"
         return self.message
 
     def to_dict(self) -> dict:

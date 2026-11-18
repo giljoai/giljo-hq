@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.endpoints import tenant_data
 from api.exception_handlers import register_exception_handlers
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_browser_session
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import (
     CommParticipant,
@@ -348,6 +348,7 @@ def _build_app(
             return user
 
         app.dependency_overrides[get_current_active_user] = _override_user
+        app.dependency_overrides[require_browser_session] = lambda: None
 
     if db_session is not None:
 

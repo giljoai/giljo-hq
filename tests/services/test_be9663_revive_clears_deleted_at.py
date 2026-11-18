@@ -119,7 +119,7 @@ class TestReviveClearsDeletedAt:
         )
 
     @pytest.mark.asyncio
-    async def test_reviving_via_update_project_mints_a_fresh_serial_like_restore_does(
+    async def test_reviving_via_update_project_keeps_its_serial_like_restore_does(
         self,
         project_service: ProjectService,
         db_session,
@@ -150,9 +150,7 @@ class TestReviveClearsDeletedAt:
 
         revived = await project_service.update_project(project_id=trashed.id, updates={"status": "inactive"})
 
-        assert revived.series_number != original_serial, (
-            "revive must mint a fresh serial, not resurrect the old (already-reused) number"
-        )
+        assert revived.series_number == original_serial
         assert revived.series_number != reused_by.series_number
 
 

@@ -12,6 +12,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_MAX_ENVIRONMENT_LENGTH = 64
+
+_TRACES_SAMPLE_RATE_ENV = "SENTRY_TRACES_SAMPLE_RATE"
+
 
 _PII_HEADERS_LOWER = frozenset(
     {
@@ -19,6 +23,13 @@ _PII_HEADERS_LOWER = frozenset(
         "cookie",
         "x-api-key",
         "x-csrf-token",
+        "cf-connecting-ip",
+        "forwarded",
+        "true-client-ip",
+        "x-envoy-external-address",
+        "x-forwarded-for",
+        "x-real-ip",
+        "x-giljo-origin-auth",
     }
 )
 
@@ -103,6 +114,20 @@ def _scrub_transaction(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str
     return event
 
 
+def _traces_sample_rate() -> float | None:
+    raw = os.environ.get(_TRACES_SAMPLE_RATE_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        rate = float(raw)
+    except ValueError:
+        logger.warning("%s is not a number; performance tracing stays off", _TRACES_SAMPLE_RATE_ENV)
+        return None
+    if not 0.0 < rate <= 1.0:
+        return None
+    return rate
+
+
 def init_sentry(mode: str | None = None) -> bool:
     if mode is None:
         resolved_mode = os.environ.get("GILJO_MODE", "ce").lower()
@@ -123,10 +148,11 @@ def init_sentry(mode: str | None = None) -> bool:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
 
+    environment = os.environ.get("SENTRY_ENVIRONMENT", "").strip()[:_MAX_ENVIRONMENT_LENGTH] or resolved_mode
     sentry_sdk.init(
         dsn=dsn,
-        environment=resolved_mode,
-        traces_sample_rate=0.1,
+        environment=environment,
+        traces_sample_rate=_traces_sample_rate(),
         sample_rate=1.0,
         send_default_pii=False,
         include_local_variables=False,
@@ -134,7 +160,7 @@ def init_sentry(mode: str | None = None) -> bool:
         before_send=_scrub_event,
         before_send_transaction=_scrub_transaction,
     )
-    logger.info("Sentry initialized (environment=%s)", resolved_mode)
+    logger.info("Sentry initialized (environment=%s)", environment)
     return True
 
 

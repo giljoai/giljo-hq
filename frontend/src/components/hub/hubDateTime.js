@@ -17,9 +17,16 @@ export function formatHubDateTime(iso) {
   return FORMAT.format(d)
 }
 
+export function lastMessageAt(thread) {
+  const embedded = thread?.last_message?.created_at || null
+  const activity = thread?.last_activity_at || null
+  if (!embedded || !activity) return embedded || activity
+  return new Date(activity) > new Date(embedded) ? activity : embedded
+}
+
 export function threadDates(thread) {
   return {
     created: formatHubDateTime(thread?.created_at),
-    lastMessage: formatHubDateTime(thread?.last_message?.created_at || thread?.last_activity_at),
+    lastMessage: formatHubDateTime(lastMessageAt(thread)),
   }
 }

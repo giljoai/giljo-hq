@@ -37,6 +37,10 @@ async def update_setup_state(
         current_user.learning_beat = payload.learning_beat
     if payload.router_choice is not None:
         current_user.router_choice = payload.router_choice
+    if payload.intro_video_seen is not None:
+        current_user.intro_video_seen = payload.intro_video_seen
+    if payload.guide_closed is not None:
+        current_user.guide_closed = payload.guide_closed
     await db.commit()
     await db.refresh(current_user)
     return {
@@ -46,4 +50,6 @@ async def update_setup_state(
         "learning_complete": current_user.learning_complete,
         "learning_beat": current_user.learning_beat,
         "router_choice": current_user.router_choice,
+        "intro_video_seen": current_user.intro_video_seen,
+        "guide_closed": current_user.guide_closed,
     }

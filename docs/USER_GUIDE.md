@@ -95,7 +95,7 @@ Common banners:
 - **Enable Git** — turn on the Git integration in your connect settings to give agents more context (retires once it is on).
 - **Tune your agents** — after your first project completes, a one-time nudge to make the default agent templates and product context your own.
 - **Activate your product** — shown when you have a product but none is active.
-- **Context review** — about two weeks after a product's context was last reviewed, once at least one project has completed since, Gil suggests tuning it so agents stay current. You can suppress it in notification settings.
+- **Context review**: after 10 projects finish on your default product since its context was last reviewed, Gil suggests tuning it so agents stay current. Dismiss it and it comes back after 10 more projects.
 
 > [!CE]
 > Community Edition also shows system notices for pending database migrations and available updates (the update banner points you to where to download the new version). Both editions show the skills-drift banner.

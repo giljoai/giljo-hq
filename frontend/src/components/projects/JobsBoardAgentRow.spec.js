@@ -165,4 +165,22 @@ describe('JobsBoardAgentRow (interactive, FE-9655c)', () => {
     expect(pr.exists()).toBe(true)
     expect(pr.attributes('href')).toBe('http://example.test/pr/7')
   })
+
+  it.each(['javascript:alert(document.cookie)', ' JavaScript:alert(1)', 'data:text/html,hi', 'vbscript:x'])(
+    'never puts a %s pr_url into an href',
+    (url) => {
+      const wrapper = mountLiveRow({ ...LIVE_AGENT, result: { pr_url: url } })
+      expect(wrapper.find('[data-testid="jb-agent-menu-pr"]').exists()).toBe(false)
+      expect(wrapper.html()).not.toMatch(/href="\s*(javascript|data|vbscript):/i)
+      const text = wrapper.find('[data-testid="jb-agent-menu-pr-text"]')
+      expect(text.exists()).toBe(true)
+      expect(text.attributes('href')).toBeUndefined()
+    },
+  )
+
+  it('keeps an https pr_url as a link', () => {
+    const wrapper = mountLiveRow({ ...LIVE_AGENT, result: { pr_url: 'https://git.example/o/r/pulls/9' } })
+    expect(wrapper.find('[data-testid="jb-agent-menu-pr"]').attributes('href')).toBe('https://git.example/o/r/pulls/9')
+    expect(wrapper.find('[data-testid="jb-agent-menu-pr-text"]').exists()).toBe(false)
+  })
 })

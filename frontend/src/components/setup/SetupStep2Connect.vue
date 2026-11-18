@@ -7,6 +7,7 @@
       :key="activeToolId"
       :tool-id="activeToolId"
       :connected="activeConnected"
+      :connected-before="activeConnectedBefore"
       :key-mode="!!keyMode[activeToolId]"
       :connected-next="connectedNext"
       :advance-label="advanceLabel"
@@ -21,8 +22,9 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useWebSocketStore } from '@/stores/websocket'
+import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import api from '@/services/api'
-import { toolName, toolIdForHarness } from '@/config/setupTools'
+import { toolName, toolIdForHarness, toolIdForSurface, sortByRegistry, isDirectoryTool } from '@/config/setupTools'
 import ConnectToolCard from './ConnectToolCard.vue'
 import ConnectAgentLink from './ConnectAgentLink.vue'
 
@@ -43,26 +45,28 @@ const connectionStatus = reactive(
 )
 const keyMode = reactive({})
 
-const order = computed(() => props.selectedTools)
+const order = computed(() => sortByRegistry(props.selectedTools))
 const activeToolId = computed(
   () => order.value[Math.min(toolIdx.value, Math.max(0, order.value.length - 1))] || order.value[0],
 )
 const activeToolName = computed(() => toolName(activeToolId.value))
 const activeConnected = computed(() => connectionStatus[activeToolId.value] === 'connected')
+const activeConnectedBefore = computed(() => connectionStatus[activeToolId.value] === 'connected_before')
 
 const isLast = computed(() => toolIdx.value >= order.value.length - 1)
 
 const eyebrow = computed(
   () => `02 · CONNECT · TOOL ${toolIdx.value + 1} OF ${order.value.length}`,
 )
-const title = computed(() =>
-  activeToolId.value === 'generic' ? 'Connect your MCP client.' : `Connect ${activeToolName.value}.`,
-)
+const title = computed(() => {
+  if (isDirectoryTool(activeToolId.value)) return 'Pick the tool you work in.'
+  return activeToolId.value === 'generic' ? 'Connect your MCP client.' : `Connect ${activeToolName.value}.`
+})
 const connectedNext = computed(() => {
-  if (isLast.value) return 'All tools connected. Agents and skills are next.'
+  if (isLast.value) return 'All tools connected. Next on your list: install the skills.'
   return `${toolName(order.value[toolIdx.value + 1])} is next. Same move.`
 })
-const advanceLabel = computed(() => (isLast.value ? 'Install agents & skills' : 'Next tool'))
+const advanceLabel = computed(() => (isLast.value ? '' : 'Next tool'))
 
 function toggleKeyMode() {
   keyMode[activeToolId.value] = !keyMode[activeToolId.value]
@@ -81,22 +85,33 @@ function markActiveConfigured() {
 }
 
 let wsUnsub = null
+let unregisterResync = null
 function handleToolConnected(payload) {
   const name = payload?.tool_name
   if (!name) return
+  const surfaceTool = toolIdForSurface(payload?.surface)
+  if (surfaceTool) {
+    if (Object.prototype.hasOwnProperty.call(connectionStatus, surfaceTool)) {
+      connectionStatus[surfaceTool] = 'connected'
+    }
+    return
+  }
   const mapped = toolIdForHarness(name)
-  const target = mapped && mapped !== 'generic' ? mapped : activeToolId.value
-  if (target) connectionStatus[target] = 'connected'
+  if (mapped && mapped !== 'generic') {
+    connectionStatus[mapped] = 'connected'
+    return
+  }
+  if (activeToolId.value && !isDirectoryTool(activeToolId.value)) connectionStatus[activeToolId.value] = 'connected'
 }
 
 const hasConnectedTool = computed(() =>
-  Object.values(connectionStatus).some((s) => s === 'connected'),
+  Object.values(connectionStatus).some((s) => s !== 'waiting'),
 )
 watch(hasConnectedTool, (val) => emit('can-proceed', val), { immediate: true })
 
 const connectedTools = computed(() =>
   Object.entries(connectionStatus)
-    .filter(([, status]) => status === 'connected')
+    .filter(([, status]) => status !== 'waiting')
     .map(([id]) => id),
 )
 watch(connectedTools, (val) => emit('step-data', { connectedTools: val }), { deep: true, immediate: true })
@@ -120,9 +135,13 @@ async function loadCredentialStatus() {
     const connectedHarnesses = data?.connected_harnesses || {}
     for (const [harness, stamp] of Object.entries(connectedHarnesses)) {
       const id = toolIdForHarness(harness)
-      if (id && Object.prototype.hasOwnProperty.call(connectionStatus, id) && isFresh(stamp)) {
-        connectionStatus[id] = 'connected'
-      }
+      if (!id || !Object.prototype.hasOwnProperty.call(connectionStatus, id)) continue
+      if (isFresh(stamp)) connectionStatus[id] = 'connected'
+      else if (connectionStatus[id] === 'waiting') connectionStatus[id] = 'connected_before'
+    }
+    for (const surface of data?.connected_surfaces || []) {
+      const id = toolIdForSurface(surface)
+      if (id && Object.prototype.hasOwnProperty.call(connectionStatus, id)) connectionStatus[id] = 'connected'
     }
   } catch (e) {
     console.warn('[SetupStep2Connect] Failed to fetch credential status:', e)
@@ -131,6 +150,7 @@ async function loadCredentialStatus() {
 
 onMounted(async () => {
   wsUnsub = wsStore.on('setup:tool_connected', handleToolConnected)
+  unregisterResync = registerReconnectResync(loadCredentialStatus)
   await loadCredentialStatus()
   const firstUnconnected = order.value.findIndex((id) => connectionStatus[id] !== 'connected')
   toolIdx.value = firstUnconnected === -1 ? 0 : firstUnconnected
@@ -138,6 +158,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (wsUnsub) wsUnsub()
+  if (unregisterResync) unregisterResync()
 })
 </script>
 

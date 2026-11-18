@@ -13,10 +13,10 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from starlette.requests import ClientDisconnect
 
 from api.middleware.auth_rate_limiter import get_rate_limiter
-from api.middleware.auth_rate_limits import limit_for
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_browser_session
 from giljo_mcp.http.url_resolver import (
     get_canonical_mcp_resource_uri,
     get_public_base_url,
@@ -164,10 +164,11 @@ async def validate_consent_request(oauth_service: OAuthService, body: AuthorizeR
         await oauth_service.validate_authorize_request(tenant_key=tenant_key, **body.model_dump(exclude={"state"}))
     except ValueError as exc:
         logger.warning("OAuth authorize validation failed: %s", sanitize(str(exc)))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid authorization request parameters.",
-        ) from exc
+        required = (body.client_id, body.redirect_uri, body.code_challenge)
+        malformed = not all(required) or (body.code_challenge_method, body.response_type) != ("S256", "code")
+        message = "Invalid authorization request parameters."
+        detail = {"error_code": "AUTHORIZE_REQUEST_MALFORMED", "message": message} if malformed else message
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
 
 
 def append_query_params(redirect_uri: str, params: dict[str, str]) -> str:
@@ -181,6 +182,7 @@ async def authorize(
     body: AuthorizeRequest,
     current_user: User = Depends(get_current_active_user),
     db=Depends(get_db_session),
+    _browser: None = Depends(require_browser_session),
 ):
     """Process OAuth authorization consent and generate an authorization code.
 
@@ -240,8 +242,9 @@ _OAUTH_FIELD_MAX_LENGTHS = {
 
 
 async def _parse_oauth_body(request: Request) -> dict:
-    content_type = request.headers.get("content-type", "").lower()
-    if "application/json" in content_type:
+    try:
+        if "application/json" not in request.headers.get("content-type", "").lower():
+            return dict((await request.form()).items())
         try:
             data = await request.json()
         except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as exc:
@@ -249,15 +252,18 @@ async def _parse_oauth_body(request: Request) -> dict:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="invalid_request: malformed JSON body",
             ) from exc
-        if not isinstance(data, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid_request: body must be a JSON object",
-            )
-        return data
-
-    form = await request.form()
-    return dict(form.items())
+    except ClientDisconnect as exc:
+        logger.info("OAuth %s: client disconnected before the body was complete", request.url.path)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: request body incomplete",
+        ) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_request: body must be a JSON object",
+        )
+    return data
 
 
 def _extract_basic_auth(request: Request) -> tuple[str | None, str | None]:
@@ -436,7 +442,7 @@ async def token(
         HTTPException 429: per-IP rate limit exceeded.
     """
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_token"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(request, raise_on_limit=True, policy="oauth_token")
 
     try:
         data = await _parse_oauth_body(request)
@@ -582,7 +588,7 @@ async def refresh(
         HTTPException 429: per-IP rate limit exceeded.
     """
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_refresh"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(request, raise_on_limit=True, policy="oauth_refresh")
 
     try:
         data = await _parse_oauth_body(request)

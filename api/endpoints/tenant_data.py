@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.middleware.auth_rate_limiter import get_rate_limiter
 from api.middleware.auth_rate_limits import limit_for
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_browser_session
 from giljo_mcp.http.url_resolver import get_public_base_url
 from giljo_mcp.models import User
 from giljo_mcp.services.tenant_export_service import TenantExportService
@@ -34,6 +34,7 @@ async def export_tenant_data(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
+    _browser: None = Depends(require_browser_session),
 ) -> dict:
     """Export the authenticated user's tenant data as a downloadable ZIP.
 
@@ -49,7 +50,11 @@ async def export_tenant_data(
         )
 
     await get_rate_limiter().check_rate_limit(
-        request, limit=limit_for("account_export"), window=_EXPORT_WINDOW_SECONDS, raise_on_limit=True
+        request,
+        limit=limit_for("account_export"),
+        window=_EXPORT_WINDOW_SECONDS,
+        raise_on_limit=True,
+        policy="account_export",
     )
 
     tenant_key = current_user.tenant_key

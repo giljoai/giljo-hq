@@ -17,7 +17,7 @@ vi.mock('@/services/api', async () => {
 vi.mock('@/composables/useJobActions', () => ({
   useJobActions: () => ({ handleMessages: vi.fn(), handleAgentRole: vi.fn(), handleAgentJob: vi.fn(), handleStepsClick: vi.fn() }),
 }))
-const notify = vi.hoisted(() => ({ failure: vi.fn(), clearMissionData: vi.fn() }))
+const notify = vi.hoisted(() => ({ failure: vi.fn() }))
 vi.mock('@/utils/notifyFailure', () => ({ notifyFailure: (...a) => notify.failure(...a) }))
 
 import JobsViewportView from './JobsViewportView.vue'
@@ -34,21 +34,6 @@ const router = createRouter({
 
 const stubs = {
   'v-tooltip': { template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>` },
-  ProjectCreateEditDialog: {
-    props: ['modelValue', 'editingProject'],
-    emits: ['clear-mission', 'saved', 'update:modelValue'],
-    setup(_, { expose }) {
-      expose({ clearMissionData: notify.clearMissionData })
-    },
-    template: `<div v-if="modelValue" data-testid="edit-dialog-stub">
-      <button data-testid="edit-dialog-clear" @click="$emit('clear-mission')">clear</button></div>`,
-  },
-  BaseDialog: {
-    props: ['modelValue', 'title'],
-    emits: ['confirm', 'cancel', 'update:modelValue'],
-    template: `<div v-if="modelValue" class="base-dialog-stub" :data-title="title">
-      <slot /><button class="dialog-confirm" @click="$emit('confirm')">go</button></div>`,
-  },
   CloseoutModal: { props: ['show', 'projectId'], template: '<div v-if="show" data-testid="closeout-stub">{{ projectId }}</div>' },
   DecisionModal: {
     props: ['show', 'orchestratorJobId'],
@@ -173,26 +158,7 @@ describe('JobsViewportView arrivals from the retired project page (FE-9681)', ()
   })
 })
 
-describe('JobsViewportView hosts what the page hosted around the edit dialog and the jobs load (FE-9681 D1, D2)', () => {
-  const STAGING = { ...DONE, id: 'p-stage', taxonomy_alias: 'BE-9', name: 'Waiting one', implementation_launched_at: null, staging_status: null, description: 'd', mission: 'm' }
-
-  it('D1: Clear Mission in the board-hosted edit dialog asks, then clears through the dialog', async () => {
-    h.getActive.mockResolvedValue({ data: [STAGING] })
-    h.listAgentJobs.mockResolvedValue(envelope([]))
-    const wrapper = await mountAt({})
-    await wrapper.find('[data-testid="jb-edit-description"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-testid="edit-dialog-stub"]').exists()).toBe(true)
-
-    await wrapper.find('[data-testid="edit-dialog-clear"]').trigger('click')
-    const confirm = wrapper.find('[data-testid="jobs-board-clear-mission-dialog"]')
-    expect(confirm.exists()).toBe(true)
-    expect(notify.clearMissionData).not.toHaveBeenCalled()
-
-    await confirm.find('.dialog-confirm').trigger('click')
-    expect(notify.clearMissionData).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="jobs-board-clear-mission-dialog"]').exists()).toBe(false)
-  })
+describe('JobsViewportView reports a failed jobs load (FE-9681 D2)', () => {
 
   it('D2: a failed agent-jobs load raises the "Agent jobs unavailable" notice instead of swallowing it', async () => {
     h.getActive.mockResolvedValue({ data: [RUNNING] })

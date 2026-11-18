@@ -118,3 +118,36 @@ describe('JobsBoardCard control row (FE-9655c)', () => {
     expect(b.find('[data-testid="jb-agent-play"]').exists()).toBe(true)
   })
 })
+
+describe('JobsBoardCard orchestrator row once implementing (FE-0062)', () => {
+  const ORCH = { agent_id: 'a-or', job_id: 'j-or', agent_display_name: 'orchestrator', agent_name: 'orchestrator', status: 'working', project_id: 'p-run' }
+  const WORKER = { ...IMPLEMENTER, status: 'working' }
+  const statusOf = (wrapper) =>
+    wrapper
+      .findAll('[data-testid="jb-agent-row"]')
+      .map((row) => row.find('[data-testid="jb-agent-status"]').text())
+      .join('|')
+
+  it('a subagent project with workers running shows its orchestrator as Monitoring and no pickup box', async () => {
+    const wrapper = mountCard({ ...LAUNCHED, execution_mode: 'subagent' }, [ORCH, WORKER])
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="jb-agent-row"]')
+    const orchStatus = rows.map((r) => r.find('[data-testid="jb-agent-status"]').text())
+    expect(orchStatus).toContain('Monitoring')
+    expect(statusOf(wrapper)).not.toMatch(/Not picked up/)
+    expect(wrapper.find('[data-testid="sca-pickup-hint"]').exists()).toBe(false)
+  })
+
+  it('a multi_terminal orchestrator that is working keeps its own word', async () => {
+    const wrapper = mountCard({ ...LAUNCHED, execution_mode: 'multi_terminal' }, [ORCH, WORKER])
+    await flushPromises()
+    expect(statusOf(wrapper)).not.toMatch(/Monitoring/)
+  })
+
+  it('control: a multi_terminal orchestrator nobody opened still reads Not picked up with its hint', async () => {
+    const waiting = { ...ORCH, status: 'waiting', not_picked_up: true }
+    const wrapper = mountCard({ ...LAUNCHED, execution_mode: 'multi_terminal' }, [waiting, { ...IMPLEMENTER, status: 'waiting' }])
+    await flushPromises()
+    expect(statusOf(wrapper)).toMatch(/Not picked up/)
+  })
+})

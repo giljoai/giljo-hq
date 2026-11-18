@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models.auth import User, UserFieldPriority
 
 
@@ -52,13 +53,17 @@ class UserRepository:
         return result.scalar_one_or_none()
 
     async def check_username_exists(self, session: AsyncSession, username: str) -> bool:
-        stmt = select(User).where(User.username == username)
-        result = await session.execute(stmt)
+        stmt = select(User.id).where(User.username == username).limit(1)
+        with tenant_isolation_bypass(session, reason="username uniqueness is global across tenants", models=(User,)):
+            result = await session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def check_email_exists(self, session: AsyncSession, email: str) -> bool:
-        stmt = select(User).where(User.email == email)
-        result = await session.execute(stmt)
+    async def check_email_exists(self, session: AsyncSession, email: str, exclude_user_id: str | None = None) -> bool:
+        stmt = select(User.id).where(func.lower(User.email) == email.strip().lower())
+        if exclude_user_id is not None:
+            stmt = stmt.where(User.id != exclude_user_id)
+        with tenant_isolation_bypass(session, reason="email uniqueness is global across tenants", models=(User,)):
+            result = await session.execute(stmt.limit(1))
         return result.scalar_one_or_none() is not None
 
     async def get_first_active_admin(self, session: AsyncSession, tenant_key: str) -> User | None:

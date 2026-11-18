@@ -80,15 +80,14 @@
       <div v-if="showGateNote" class="jb-gate-note" data-testid="jb-gate-note">
         <v-icon class="jb-gate-icon" size="14">mdi-hand-back-right-outline</v-icon>
         <div>
-          <strong>Your launch required</strong>
-          <span>
-            Headless self-advance is off, so agents stop at the staging gate and wait for you.
-            Turn it on in
-            <router-link :to="{ path: '/tools', query: { tab: 'agents' } }" data-testid="jb-gate-note-link">
-              Tools → Agents
-            </router-link>
-            to let a trusted agent implement on its own.
-          </span>
+          <strong>Your go is needed</strong>
+          <span>Agents stop here and wait for you. This is the staging gate.</span>
+          <small class="jb-gate-sub"
+            >To let a trusted agent go on its own later, turn on agent self-advance in
+            <router-link :to="{ path: '/tools', query: { tab: 'agents' } }" data-testid="jb-gate-note-link"
+              >Tools → Agents</router-link
+            >.</small
+          >
         </div>
       </div>
 
@@ -145,24 +144,11 @@
         </div>
       </div>
 
-      <JobsBoardSummaryRows
-        :project="project"
-        :mission="missionText"
+      <JobsBoardDetailsLine
+        :open="detailsOpen"
         :mission-state="missionState"
-        :chain-member="!!chainCtx"
-        :finished="finished"
-        @edit-description="(p) => emit('edit-description', p)"
+        @toggle="detailsOpen = !detailsOpen"
       />
-      <button
-        type="button"
-        class="jb-details-btn"
-        :aria-expanded="detailsOpen"
-        data-testid="jb-details-btn"
-        @click="detailsOpen = !detailsOpen"
-      >
-        <v-icon size="14" class="jb-details-chev" :class="{ 'jb-details-chev--open': detailsOpen }">mdi-chevron-right</v-icon>
-        Details
-      </button>
       <JobsBoardCardDrawer
         v-if="detailsOpen"
         :project="project"
@@ -172,7 +158,7 @@
         :launched="!stagingLayout"
         :chain-member="!!chainCtx"
         :finished="finished"
-        @edit-description="(p) => emit('edit-description', p)"
+        @changed="(p) => emit('changed', p)"
         @agent-role="(a) => emit('agent-role', a)"
         @agent-mission-edit="(a) => emit('agent-mission-edit', a)"
       />
@@ -188,6 +174,7 @@
           :play-faded="isPlayButtonFaded(agent)"
           :play-tooltip="playButtonTooltip(agent)"
           :can-replay="canReplay(agent)"
+          :monitoring="orchestratorMonitors && isOrchestrator(agent)"
           @play="handlePlay"
           @replay="handleReplay"
           @messages="(a) => emit('agent-messages', a, project)"
@@ -203,6 +190,7 @@
         :agents="sortedAgents"
         :show-staging="showStaging"
         :chain-turn="chainTurnHasCome"
+        :pulse-next="focused && !chainCtx"
         @open-detail="(p) => emit('open-detail', p)"
         @open-hub="(p) => emit('open-hub', p)"
         @changed="(p) => emit('changed', p)"
@@ -243,7 +231,7 @@ import { hexToRgba } from '@/utils/colorUtils'
 import { jobsSectionLabelFor, JOBS_SECTION_LABELS } from '@/utils/jobsSectionLabel'
 import { jobsBoardLifecycleColor, needsInputColor } from '@/utils/jobsBoardLifecycle'
 import { TEXT_SECONDARY } from '@/config/colorTokens'
-import { needsInputOwner } from '@/utils/jobStatusWord'
+import { jobStatusWord, needsInputOwner } from '@/utils/jobStatusWord'
 import { orderAgentsForDisplay } from '@/utils/agentDisplayOrder'
 import { taxonomyBadgeStyle, resolveTaxonomyColor } from '@/utils/taxonomyBadge'
 import { BOARD_DENSITIES } from '@/composables/useBoardDensity'
@@ -265,7 +253,7 @@ import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import JobsBoardAgentRow from '@/components/projects/JobsBoardAgentRow.vue'
 import JobsBoardCardFooter from '@/components/projects/JobsBoardCardFooter.vue'
 import JobsBoardCardSummary from '@/components/projects/JobsBoardCardSummary.vue'
-import JobsBoardSummaryRows from '@/components/projects/JobsBoardSummaryRows.vue'
+import JobsBoardDetailsLine from '@/components/projects/JobsBoardDetailsLine.vue'
 import JobsBoardCardDrawer from '@/components/projects/JobsBoardCardDrawer.vue'
 import JobsBoardMetaIcons from '@/components/projects/JobsBoardMetaIcons.vue'
 import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
@@ -298,6 +286,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  focused: {
+    type: Boolean,
+    default: false,
+  },
   density: {
     type: String,
     default: BOARD_DENSITIES.DETAILED,
@@ -319,7 +311,6 @@ const emit = defineEmits([
   'agent-messages',
   'agent-role',
   'agent-job',
-  'edit-description',
   'review',
   'steps',
   'agent-mission-edit',
@@ -404,6 +395,12 @@ const chainTurnHasCome = computed(
 const rowsInteractive = computed(
   () =>
     isProjectLaunched(props.project, projectStateStore.getProjectState(props.project?.id)) || chainTurnHasCome.value,
+)
+const orchestratorMonitors = computed(
+  () =>
+    rowsInteractive.value &&
+    isSubagentExecutionMode(props.project?.execution_mode) &&
+    props.agents.some((a) => !isOrchestrator(a) && jobStatusWord(a) === 'working'),
 )
 const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, handleReplay, handlePlay } = usePlayButton(
   computed(() => props.project),
@@ -578,39 +575,6 @@ const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, h
   min-width: 0;
 }
 
-.jb-details-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: 0;
-  color: $color-text-tertiary;
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 2px 6px 2px 2px;
-  border-radius: $border-radius-sharp;
-  margin: 0 0 10px;
-
-  &:hover,
-  &:focus-visible {
-    color: $color-brand-yellow;
-  }
-
-  &[aria-expanded='true'] {
-    color: $color-text-tertiary;
-  }
-}
-
-.jb-details-chev {
-  transition: transform 0.2s;
-
-  &--open {
-    transform: rotate(90deg);
-  }
-}
-
 .jb-gate-note {
   display: flex;
   align-items: flex-start;
@@ -638,6 +602,12 @@ const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip, canReplay, h
   }
 
   span {
+    color: $color-text-tertiary;
+  }
+
+  .jb-gate-sub {
+    display: block;
+    margin-top: 4px;
     color: $color-text-tertiary;
   }
 

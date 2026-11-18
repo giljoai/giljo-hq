@@ -287,9 +287,51 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     expect(h.push).toHaveBeenCalledWith({ name: 'Products', query: { tune: 'prod-7' } })
   })
 
+  it('skills update row (no CTA) shows the words, no action button, and still closes', async () => {
+    const body = 'Version 2.0.0 is out (you have 1.0.0). In each coding tool you use, tell your agent: run giljo_setup.'
+    const wrapper = await mountBanner({
+      rows: [
+        bannerRow({
+          id: 'sk1',
+          type: 'system.skills_drift',
+          title: 'Skills update ready',
+          body,
+          cta_label: null,
+          cta_route: null,
+        }),
+      ],
+    })
+    const notif = useNotificationStore()
+    const dismissSpy = vi.spyOn(notif, 'markDismissed').mockResolvedValue()
+
+    const row = wrapper.find('[data-testid="system-banner"]')
+    expect(row.text()).toContain(body)
+    expect(row.find('[data-testid="banner-cta-btn"]').exists()).toBe(false)
+    await row.find('[data-testid="banner-dismiss-btn"]').trigger('click')
+    expect(dismissSpy).toHaveBeenCalledWith('sk1')
+    expect(h.push).not.toHaveBeenCalled()
+  })
+
+  it('context_tuning_due row still shows its button', async () => {
+    const wrapper = await mountBanner({
+      rows: [
+        bannerRow({
+          id: 'ct2',
+          type: 'system.context_tuning_due',
+          cta_route: 'Tools',
+          cta_label: 'Review context',
+          payload: { product_id: 'prod-7', product_name: 'Acme' },
+        }),
+      ],
+    })
+    const btn = wrapper.find('[data-testid="banner-cta-btn"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toBe('Review context')
+  })
+
   it('two-sided regression: a plain system banner still routes to its bare cta_route', async () => {
     const wrapper = await mountBanner({
-      rows: [bannerRow({ id: 'sd1', type: 'system.skills_drift', cta_route: 'Tools', payload: null })],
+      rows: [bannerRow({ id: 'sd1', type: 'system.pending_migrations', cta_route: 'Tools', payload: null })],
     })
     await wrapper.find('[data-testid="banner-cta-btn"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({ name: 'Tools' })
@@ -332,5 +374,43 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="system-banner"]').exists()).toBe(false)
+  })
+
+  describe('saas.legal_updated', () => {
+    const NOTICE =
+      'We updated our Terms of Service and Privacy Policy. The free trial is now one per person, ' +
+      'and we describe a small record we keep to apply that rule. Nothing changes for your existing account.'
+
+    function legalRow() {
+      return bannerRow({ id: 'legal1', type: 'saas.legal_updated', title: NOTICE, body: null })
+    }
+
+    it('renders in SaaS mode as the exact plain-text notice, with no link and no CTA', async () => {
+      const wrapper = await mountBanner({ rows: [legalRow()], mode: 'saas' })
+      const row = wrapper.find('[data-testid="system-banner"]')
+      expect(row.exists()).toBe(true)
+      expect(row.find('.system-banner-alert__text').text()).toBe(NOTICE)
+      expect(row.find('a').exists()).toBe(false)
+      expect(row.find('[data-testid="banner-cta-btn"]').exists()).toBe(false)
+    })
+
+    it('dismisses through the notification store', async () => {
+      const wrapper = await mountBanner({ rows: [legalRow()], mode: 'saas' })
+      const dismissSpy = vi.spyOn(useNotificationStore(), 'markDismissed').mockResolvedValue()
+      await wrapper.find('[data-testid="banner-dismiss-btn"]').trigger('click')
+      expect(dismissSpy).toHaveBeenCalledWith('legal1')
+    })
+
+    it('folds with another strip row instead of stacking', async () => {
+      const rows = [legalRow(), bannerRow({ id: 'sd1', type: 'system.skills_drift', body: 'Skills drifted' })]
+      const wrapper = await mountBanner({ rows, mode: 'saas' })
+      expect(wrapper.findAll('[data-testid="system-banner"]').length).toBe(1)
+      expect(wrapper.find('[data-testid="banner-fold-qty"]').text()).toBe('2')
+    })
+
+    it('is not rendered in CE mode', async () => {
+      const wrapper = await mountBanner({ rows: [legalRow()], mode: 'ce' })
+      expect(wrapper.find('[data-testid="system-banner"]').exists()).toBe(false)
+    })
   })
 })

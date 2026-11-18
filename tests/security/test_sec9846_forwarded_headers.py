@@ -116,7 +116,7 @@ def test_configured_trusted_proxy_is_believed(serve):
     base = serve(wrap=True, proxy_headers=False, env={"GILJO_TRUSTED_PROXIES": "127.0.0.1"})
     assert httpx.get(base + "/who", headers=FORGED).json()["ip"] == "203.0.113.10"
     cf = httpx.get(base + "/who", headers={**FORGED, "CF-Connecting-IP": "198.51.100.7"}).json()
-    assert cf["ip"] == "198.51.100.7"
+    assert cf["ip"] == "203.0.113.10"
 
 
 def test_trusted_proxy_range_not_containing_peer_is_not_believed(serve):

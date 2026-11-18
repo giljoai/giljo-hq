@@ -9,7 +9,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import (
     ACCEPTED_EXECUTION_MODES,
@@ -112,6 +112,18 @@ def validate_update_fields(
 
 
 _RUNNING_STATUSES: frozenset[str] = frozenset({"running", "stalled"})
+
+
+async def require_own_ids(
+    session: AsyncSession, tenant_key: str, project_ids: list[str | None], *, stored_run=None
+) -> None:
+    known = {*(stored_run.project_ids or []), *(stored_run.project_statuses or {})} if stored_run else set()
+    wanted = {pid for pid in project_ids if pid and pid not in known}
+    if not wanted:
+        return
+    found = await session.scalars(select(Project.id).where(Project.tenant_key == tenant_key, Project.id.in_(wanted)))
+    if wanted - set(found):
+        raise ResourceNotFoundError(message="Project not found", context={"field": "project_ids"})
 
 
 async def refuse_mode_change_if_live(session: AsyncSession, run, run_id: str, tenant_key: str) -> None:

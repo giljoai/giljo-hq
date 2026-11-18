@@ -475,7 +475,9 @@ class _TaskMutationMixin:
 
             project_repo = ProjectRepository()
             await project_repo.lock_rows_for_series_shared(session, tenant_key, task.product_id)
-            task.series_number = await project_repo.get_next_series_number_shared(session, tenant_key, task.product_id)
+            task.series_number = await project_repo.get_series_number_for_restore(
+                session, tenant_key, task.product_id, task.id, task.series_number
+            )
 
         task.deleted_at = None
         await self._repo.flush_and_refresh(session, task)

@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 
 from api.app_state import GILJO_MODE, state
 from api.exception_handlers import register_exception_handlers
@@ -34,6 +35,23 @@ def resolve_static_dir() -> Path:
     if configured and not (dist_dir / "index.html").exists():
         logger.warning("paths.static=%s has no index.html; the dashboard is not served", dist_dir)
     return dist_dir
+
+
+_FORWARDING_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip")
+
+
+def _is_local_probe(request: Request) -> bool:
+    from api.endpoints.auth.session import _get_ip_resolver
+
+    if any(header in request.headers for header in _FORWARDING_HEADERS):
+        return False
+    client_ip, from_header = _get_ip_resolver().resolve_with_origin(request)
+    if from_header:
+        return False
+    try:
+        return ipaddress.ip_address(client_ip).is_loopback
+    except ValueError:
+        return False
 
 
 def register_event_handlers(app: FastAPI) -> None:
@@ -63,11 +81,12 @@ def register_event_handlers(app: FastAPI) -> None:
             }
 
     @app.get("/health")
-    async def health_check():
+    async def health_check(request: Request):
         """Liveness check: the API process, its WebSocket layer and, when configured, Redis.
 
         Database readiness is not part of it, so a busy database connection pool never
-        makes a running server look down.
+        makes a running server look down. Remote callers receive the overall status only;
+        a probe on the server itself also receives the individual checks.
         """
         checks = {"api": "healthy", "websocket": "unknown"}
 
@@ -101,6 +120,8 @@ def register_event_handlers(app: FastAPI) -> None:
             checks["degraded_services"] = list(state.degraded_services)
             status = "degraded"
 
+        if not _is_local_probe(request):
+            return {"status": status}
         return {"status": status, "checks": checks}
 
     from giljo_mcp.auth.dependencies import get_current_active_user

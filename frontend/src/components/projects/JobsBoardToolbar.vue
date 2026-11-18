@@ -20,6 +20,7 @@
         @click="emit('select-side', 'implementation')"
       >
         Implementation <span class="jb-filter-n" :class="countClass(sideCounts.implementation)">{{ sideCounts.implementation }}</span>
+        <span v-if="reviewCount" class="jb-side-review" data-testid="jobs-side-implementation-review">{{ reviewCount }} to review</span>
       </button>
     </div>
     <div class="jb-status-line" data-testid="jobs-status-counters">
@@ -52,6 +53,7 @@ import { BOARD_DENSITIES } from '@/composables/useBoardDensity'
 defineProps({
   side: { type: String, required: true },
   sideCounts: { type: Object, required: true },
+  reviewCount: { type: Number, default: 0 },
   statusCounts: { type: Array, required: true },
   isCompact: { type: Boolean, default: false },
 })
@@ -109,6 +111,12 @@ function onToggleCompact(on) {
       background: rgba($color-brand-yellow, 0.22);
     }
   }
+}
+
+.jb-side-review {
+  margin-left: 6px;
+  font-size: 0.68rem;
+  color: $color-brand-yellow;
 }
 
 .jb-filter-n {

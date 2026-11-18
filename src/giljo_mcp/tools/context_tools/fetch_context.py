@@ -264,7 +264,9 @@ async def _resolve_default_product_id(tenant_key: str, db_manager: DatabaseManag
     default_product = await product_service.get_default_product(eager_load=False)
     if default_product is None:
         raise ValidationError(
-            "No default product set. Please set a default product first.",
+            await product_service.lifecycle.missing_default_message(
+                "No default product set. Please set a default product first."
+            ),
             context={"tenant_key": tenant_key, "operation": "accessor.fetch_context"},
         )
     return str(default_product.id)

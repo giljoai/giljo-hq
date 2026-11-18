@@ -40,6 +40,8 @@ class APIState:
         self.mcp_session_cleanup_task: asyncio.Task | None = None
         self.oauth_code_cleanup_task: asyncio.Task | None = None
         self.access_log_purge_task: asyncio.Task | None = None
+        self.oauth_client_reaper_task: asyncio.Task | None = None
+        self.guest_book_monitor_task: asyncio.Task | None = None
         self.health_monitor: Any = None
         self.health_monitor_task: asyncio.Task | None = None
         self.silence_detector: Any = None
@@ -48,6 +50,7 @@ class APIState:
         self.mcp_tool_call_count: dict[tuple[str, str, date], int] = {}
         self.system_prompt_service: Any = None
         self.startup_complete: bool = False
+        self.ws_setup_complete: bool = False
         self.degraded_services: list[str] = []
         self.license: Any = None
         self.pending_migration: bool | None = False

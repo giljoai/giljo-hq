@@ -40,7 +40,6 @@ async def test_guide_carries_the_consolidated_recipe_sections():
     assert "create_task" in guide and "create_project" in guide
     assert "TSK" in guide
     assert "suffix" in guide and "series_number" in guide
-    assert "Edition Scope" in guide
     assert "tenant_key" in guide
     assert "PRODUCT_AMBIGUOUS" in guide
     assert "default product" in guide.lower()
@@ -161,3 +160,12 @@ async def test_guide_routes_a_session_handover_to_create_task():
     assert 'task_type="HND"' in guide
     assert "## Cannot testify" in guide, "the guide does not name the headings the server requires"
     assert 'list_tasks(task_type="HND")' in guide
+
+
+async def test_guide_carries_no_house_rules_of_the_repo_that_built_it():
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("get_giljo_guide", {})
+
+    guide = _payload(result)["guide"]
+    for house_rule in ("Edition Scope", "reuse map", "SaaS | Both"):
+        assert house_rule not in guide, house_rule

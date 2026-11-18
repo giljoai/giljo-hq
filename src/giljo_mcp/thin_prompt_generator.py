@@ -17,6 +17,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, orchestrator_placeholder_mission
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
 from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
 from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
@@ -44,7 +45,7 @@ def build_continuation_prompt(
     public_base = get_public_url()
     mcp_url = f"{public_base}/mcp"
 
-    project_display = f' "{project_name}"' if project_name else ""
+    project_display = f' "{prompt_name(project_name)}"' if project_name else ""
     product_param = product_id if product_id else "<fetch from project>"
 
     base_prompt = f"""I am Orchestrator for Project{project_display} (CONTINUATION SESSION).

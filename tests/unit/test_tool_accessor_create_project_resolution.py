@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.product_lifecycle_service import NO_PRODUCT_YET, ProductLifecycleService
 from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -174,6 +175,9 @@ class TestCreateProjectActiveProductResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
+            patch.object(
+                ProductLifecycleService, "missing_default_message", new_callable=AsyncMock, return_value=NO_PRODUCT_YET
+            ),
         ):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._project_service.create_project_for_mcp(
@@ -182,7 +186,7 @@ class TestCreateProjectActiveProductResolution:
                 )
 
             error_message = str(exc_info.value)
-            assert "default product" in error_message.lower()
+            assert "create_product" in error_message
 
     @pytest.mark.asyncio
     async def test_uses_tenant_manager_when_tenant_key_not_provided(self):

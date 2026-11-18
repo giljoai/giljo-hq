@@ -193,7 +193,7 @@ class TestCreateFirstAdmin429Boundary:
 
         limit = arlimits.limit_for("create_first_admin")
         rl = arl.RateLimiter()
-        bucket = rl._bucket_key("127.0.0.1", 60)
+        bucket = rl._bucket_key("create_first_admin:127.0.0.1", 60)
         for _ in range(limit):
             await rl._backend.incr(arl._RATE_LIMIT_TENANT_SENTINEL, bucket, ttl_seconds=60)
 

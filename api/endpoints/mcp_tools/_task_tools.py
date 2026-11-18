@@ -19,10 +19,10 @@ from api.endpoints.mcp_tools._base import (
     MCP_SHORT_TEXT_MAX,
     READ_PRODUCT_ID_DESC,
     _call_tool,
-    blank_text_rejection,
     mcp,
     validation_rejection,
 )
+from api.endpoints.mcp_tools._name_rules import name_text_rejection
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.services.handover_validation import (
@@ -119,8 +119,8 @@ async def create_task(
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    if not title.strip():
-        return blank_text_rejection("title", entity="Task")
+    if (rejection := name_text_rejection(title, "title", entity="Task")) is not None:
+        return rejection
     if (rejection := _task_type_rejection(task_type)) is not None:
         return rejection
     if task_type.strip() == HANDOVER_TYPE_ABBR and ((rejection := _handover_shape_rejection(description)) is not None):
@@ -193,8 +193,8 @@ async def update_task(
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"task_id": task_id}
     if title is not None:
-        if not title.strip():
-            return blank_text_rejection("title", entity="Task")
+        if (rejection := name_text_rejection(title, "title", entity="Task")) is not None:
+            return rejection
         params["title"] = title
     if description:
         params["description"] = description
@@ -250,8 +250,8 @@ async def promote_task_to_project(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    if title is not None and not title.strip():
-        return blank_text_rejection("title", entity="Project")
+    if title is not None and (rejection := name_text_rejection(title, "title", entity="Project")) is not None:
+        return rejection
     params: dict[str, Any] = {"task_id": task_id, "user_id": _base._resolve_user_id(ctx)}
     if title is not None:
         params["title"] = title

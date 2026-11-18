@@ -121,7 +121,7 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
       expect(mockOrchestratorPrompt).toHaveBeenCalled()
 
       // Verify orchestrator prompt is displayed
-      expect(wrapper.text()).toContain('System Orchestrator Prompt')
+      expect(wrapper.text()).toContain('Orchestrator prompt')
       expect(wrapper.text()).toContain('You are the system orchestrator')
     })
   })
@@ -282,7 +282,7 @@ describe('AgentDetailsModal - Handover 0244a Template Display', () => {
 
       await flushPromises()
 
-      expect(wrapper.text()).toContain('System Orchestrator Prompt')
+      expect(wrapper.text()).toContain('Orchestrator prompt')
     })
 
     it('displays correct title for non-orchestrator agent', async () => {

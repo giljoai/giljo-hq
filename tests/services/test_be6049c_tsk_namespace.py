@@ -192,7 +192,6 @@ async def test_cannot_create_project_as_tsk(db_session, two_tenant_service_setup
 
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
     await svc.ensure_reserved_task_type(tenant_a)
-    await svc.create_type(tenant_key=tenant_a, abbreviation="BE", label="Backend")
     await db_session.commit()
 
     assert await project_service_a.get_project_type_by_label(RESERVED_TASK_TYPE_ABBR, tenant_a) is None

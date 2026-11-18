@@ -7,12 +7,11 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
 from giljo_mcp.exceptions import (
-    AuthenticationError,
     AuthorizationError,
     BaseGiljoError,
     ResourceNotFoundError,
@@ -21,12 +20,12 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.auth import User
 from giljo_mcp.repositories.user_repository import UserRepository
 from giljo_mcp.services._session_helpers import tenant_context_session
-from giljo_mcp.services.login_lockout_service import LoginLockoutService
+from giljo_mcp.services.login_lockout_service import AccountLockedError, LoginLockoutService
 from giljo_mcp.services.oauth_refresh_service import (
     revoke_all_for_user as revoke_all_refresh_tokens_for_user,
 )
-from giljo_mcp.services.session_eviction import evict_user_tokens
-from giljo_mcp.utils.password_helper import async_hash_password, async_verify_password
+from giljo_mcp.services.session_eviction import SESSION_REVOKED, close_live_user_sockets, evict_user_tokens
+from giljo_mcp.utils.password_helper import DUMMY_BCRYPT_HASH, async_hash_password, async_verify_password
 
 
 logger = logging.getLogger(__name__)
@@ -76,8 +75,12 @@ class UserAuthService:
             if not old_password:
                 raise ValidationError(message="Current password is required", context={"user_id": user_id})
 
-            if not await async_verify_password(old_password, user.password_hash):
-                raise AuthenticationError(message="Current password is incorrect", context={"user_id": user_id})
+            if not await verify_current_password(session, user, old_password):
+                raise ValidationError(
+                    message="Current password is incorrect",
+                    error_code="CURRENT_PASSWORD_INCORRECT",
+                    context={"user_id": user_id},
+                )
 
         user.password_hash = await async_hash_password(new_password)
         user.must_change_password = False
@@ -92,6 +95,7 @@ class UserAuthService:
         )
 
         await session.commit()
+        await close_live_user_sockets(self.tenant_key, self._logger, reason=SESSION_REVOKED)
 
         self._logger.info(
             f"Password changed for user: {user.username} "
@@ -256,13 +260,68 @@ class UserAuthService:
 
 
 
+PIN_LOCKOUT_THRESHOLD = 5
+
+_ANY_ADDRESS = "any"
+
+_PIN_LOCKOUT_STEPS = (timedelta(minutes=15), timedelta(hours=1), timedelta(hours=4), timedelta(hours=24))
+
+
+def pin_lockout_duration(failed_attempts: int) -> timedelta | None:
+    if failed_attempts < PIN_LOCKOUT_THRESHOLD:
+        return None
+    step = min(failed_attempts - PIN_LOCKOUT_THRESHOLD, len(_PIN_LOCKOUT_STEPS) - 1)
+    return _PIN_LOCKOUT_STEPS[step]
+
+
+async def lock_pin_state(session: AsyncSession, user: User) -> None:
+    with tenant_session_context(session, user.tenant_key):
+        await session.execute(
+            select(User.id).where(User.id == user.id, User.tenant_key == user.tenant_key).with_for_update()
+        )
+        await session.refresh(user, attribute_names=["failed_pin_attempts", "pin_lockout_until"])
+
+
+def pin_locked(user: User) -> bool:
+    return user.pin_lockout_until is not None and datetime.now(UTC) < user.pin_lockout_until
+
+
 async def record_failed_pin_attempt(session: AsyncSession, user: User) -> None:
-    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
-    await session.refresh(user, attribute_names=["failed_pin_attempts", "pin_lockout_until"])
+    await lock_pin_state(session, user)
     user.failed_pin_attempts += 1
-    if user.failed_pin_attempts >= 5:
-        user.pin_lockout_until = datetime.now(UTC) + timedelta(minutes=15)
+    duration = pin_lockout_duration(user.failed_pin_attempts)
+    if duration is not None:
+        user.pin_lockout_until = datetime.now(UTC) + duration
     await session.commit()
+
+
+async def clear_pin_lockout(session: AsyncSession, *, user_id: str, tenant_key: str) -> None:
+    with tenant_session_context(session, tenant_key):
+        await session.execute(
+            update(User)
+            .where(User.id == user_id, User.tenant_key == tenant_key, User.failed_pin_attempts > 0)
+            .values(failed_pin_attempts=0, pin_lockout_until=None)
+        )
+
+
+def current_password_lock_key(user_id: str) -> str:
+    return f"current-password:{user_id}"
+
+
+async def verify_current_password(session: AsyncSession, user: User, supplied: str) -> bool:
+    lockout = LoginLockoutService()
+    key = current_password_lock_key(str(user.id))
+    await lockout.hold(session, key, _ANY_ADDRESS)
+    stored = user.password_hash
+    if await async_verify_password(supplied, stored or DUMMY_BCRYPT_HASH) and stored is not None:
+        await lockout.clear(session, key, _ANY_ADDRESS)
+        await session.commit()
+        return True
+    outcome = await lockout.record_failure(session, key, _ANY_ADDRESS, lock_for=pin_lockout_duration)
+    await session.commit()
+    if outcome.locked_until is not None:
+        raise AccountLockedError(int((outcome.locked_until - datetime.now(UTC)).total_seconds()))
+    return False
 
 
 async def reset_password_via_pin(session: AsyncSession, user: User, new_password: str) -> int:
@@ -274,9 +333,12 @@ async def reset_password_via_pin(session: AsyncSession, user: User, new_password
         revoked_count = await evict_user_tokens(session, user)
 
     try:
-        await LoginLockoutService().clear_for_identifiers(session, [user.username, user.email])
+        await LoginLockoutService().clear_for_identifiers(
+            session, [user.username, user.email, current_password_lock_key(str(user.id))]
+        )
     except Exception:  # noqa: BLE001 - never block a password reset on lockout cleanup
         logger.warning("login lockout clear on PIN reset failed", exc_info=True)
 
     await session.commit()
+    await close_live_user_sockets(user.tenant_key, logger, reason=SESSION_REVOKED)
     return revoked_count

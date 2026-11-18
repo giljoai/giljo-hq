@@ -27,8 +27,13 @@ describe('retiredHarness helpers (INF-9605a)', () => {
 })
 
 describe('setupTools after the retirement', () => {
-  it('offers exactly the four surviving tools', () => {
-    expect(SETUP_TOOLS.map((t) => t.id)).toEqual(['claude_code', 'codex_cli', 'opencode', 'generic'])
+  it('offers exactly the four terminal/generic tools after the two directory tools', () => {
+    expect(SETUP_TOOLS.map((t) => t.id).filter((id) => !['claude', 'chatgpt'].includes(id))).toEqual([
+      'claude_code',
+      'codex_cli',
+      'opencode',
+      'generic',
+    ])
   })
 
   it('no longer maps the retired harness tokens to a card', () => {

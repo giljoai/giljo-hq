@@ -67,7 +67,9 @@ class TestMCPSessionManagerJWT:
             username="oauth_user",
         )
 
-        mock_db.execute.assert_not_awaited()
+        (eviction,) = [call.args[0] for call in mock_db.execute.await_args_list]
+        assert eviction.is_delete
+        assert "LIMIT" in str(eviction.compile()), "only rows beyond the per-account cap may be deleted"
         mock_db.add.assert_called_once()
 
     @pytest.mark.asyncio

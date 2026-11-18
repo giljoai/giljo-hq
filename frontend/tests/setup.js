@@ -632,7 +632,6 @@ vi.mock('@/services/api', () => {
     // parallelism. Passthrough: just run the underlying request fn.
     dedupedRequest: (_key, requestFn) => Promise.resolve().then(requestFn),
     __resetRequestDedupe: vi.fn(),
-    setTenantKey: vi.fn(),
     updateApiBaseURL: vi.fn(),
     parseErrorResponse: vi.fn(() => ({ message: 'Mock error', isStructured: false })),
     getErrorMessage: vi.fn(() => 'Mock error message'),

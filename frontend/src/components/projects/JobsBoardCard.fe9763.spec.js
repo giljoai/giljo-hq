@@ -59,21 +59,18 @@ describe('JobsBoardCard, a completed project with no agent run (FE-9763)', () =>
     expect(wrapper.find('[data-testid="jb-meta"]').text()).not.toMatch(/---/)
   })
 
-  it('never says "Press Stage"; with no closeout the mission line reads "No mission recorded."', async () => {
+  it('never says "Press Stage"; with no closeout the mission reads "No mission recorded."', async () => {
     const wrapper = mountCard(emptyDone)
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toContain('No mission recorded.')
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toBe('No mission yet')
     await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
     expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toContain('No mission recorded.')
     expect(wrapper.text()).not.toMatch(/Press Stage/)
   })
 
-  it('with a closeout summary the mission line reads "Closeout: ..." with the full text on hover', async () => {
+  it('with a closeout summary the mission reads "Closeout: ..." in the panel', async () => {
     const summary = 'Shipped the export retry.\nThree attempts with backoff, covered by a service test.'
     const wrapper = mountCard({ ...emptyDone, closeout_summary: summary })
-    const row = wrapper.find('[data-testid="jb-row-mission"]')
-    expect(row.text()).toContain('Closeout: Shipped the export retry.')
-    expect(row.text()).not.toContain('Three attempts')
-    expect(row.find('[title]').attributes('title')).toBe(`Closeout: ${summary}`)
+    expect(wrapper.find('[data-testid="jb-drawer-mission"]').exists()).toBe(false)
     await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
     expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toContain('Closeout: Shipped the export retry.')
     expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toContain('Three attempts with backoff')
@@ -93,7 +90,7 @@ describe('JobsBoardCard, cards with a real agent run are unchanged (FE-9763)', (
     const wrapper = mountCard({ ...emptyDone, agent_count: 2, mission: 'Phase 1: fix it.' }, [orch, impl])
     expect(wrapper.find('[data-testid="jb-empty-run"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-stat-agents"]').text()).toBe('2')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toContain('Phase 1: fix it.')
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toBe('Mission written')
   })
 
   it('an agent count from the board read holds the strip while the agent list loads', () => {
@@ -102,9 +99,10 @@ describe('JobsBoardCard, cards with a real agent run are unchanged (FE-9763)', (
     expect(wrapper.find('[data-testid="jb-stat-steps"]').exists()).toBe(true)
   })
 
-  it('a not-yet-staged active card still tells the user to press Stage', () => {
+  it('a not-yet-staged active card still tells the user to press Stage', async () => {
     const wrapper = mountCard({ ...emptyDone, status: 'active', review_pending: false, completed_at: null })
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toMatch(/No mission yet\. Press Stage/)
+    await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toMatch(/No mission yet\. Press Stage/)
     expect(wrapper.find('[data-testid="jb-empty-run"]').exists()).toBe(false)
   })
 })
