@@ -266,6 +266,9 @@ async def _product_names(db: AsyncSession, tenant_key: str, product_ids: set[str
 
 
 async def log_out_app(db: AsyncSession, *, tenant_key: str, user_id: str, login_id: str) -> None:
+    from giljo_mcp.services import oauth_refresh_service as _refresh
+
+    await _refresh.lock_user_for_update(db, user_id=user_id, tenant_key=tenant_key)
     result = await db.execute(
         select(OAuthLogin.family_id).where(
             OAuthLogin.id == login_id,
@@ -276,12 +279,11 @@ async def log_out_app(db: AsyncSession, *, tenant_key: str, user_id: str, login_
     family_id = result.scalar_one_or_none()
     if family_id is None:
         raise ResourceNotFoundError("Connected app not found", context={"login_id": login_id})
-    from giljo_mcp.services import oauth_refresh_service as _refresh
-
     await _refresh.revoke_family(db, family_id=str(family_id), tenant_key=tenant_key)
 
 
 async def log_out_all_apps(db: AsyncSession, *, tenant_key: str, user_id: str) -> int:
     from giljo_mcp.services import oauth_refresh_service as _refresh
 
+    await _refresh.lock_user_for_update(db, user_id=user_id, tenant_key=tenant_key)
     return await _refresh.revoke_all_for_user(db, user_id=user_id, tenant_key=tenant_key)

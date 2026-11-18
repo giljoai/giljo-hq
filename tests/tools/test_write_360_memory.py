@@ -136,7 +136,7 @@ async def test_write_360_memory_emits_notification_when_threshold_exceeded(
     captured_events: list[dict] = []
 
     async def _stale_check(self, product_id, user_id):
-        return {"is_stale": True, "projects_since_tune": 5, "threshold": 3, "enabled": True}
+        return {"is_stale": True, "projects_since_tune": 6, "threshold": 3, "enabled": True}
 
     async def _capture_emit(*, event_type, tenant_key, product_id, data):
         captured_events.append(

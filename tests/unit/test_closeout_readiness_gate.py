@@ -19,6 +19,11 @@ from giljo_mcp.tools.project_closeout import (
 from tests.helpers.model_factories import make_agent_execution, make_product, make_project
 
 
+@pytest.fixture(autouse=True)
+def _solo_closeout(monkeypatch):
+    monkeypatch.setattr("giljo_mcp.tools._closeout_finalize.mark_chain_member_status", AsyncMock(return_value=False))
+
+
 def _make_execution(
     agent_id: str,
     display_name: str,

@@ -7,6 +7,7 @@
 from giljo_mcp.harness_resolver import HARNESS_CLAUDE_CODE
 from giljo_mcp.platform_registry import Platform
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line, render_worker_toolsearch_call
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
@@ -25,8 +26,8 @@ def build_agent_seed_lines(cli_tool: str, job_id: str) -> list[str]:
 def _project_title(project) -> str:
     has_taxonomy = bool(getattr(project, "project_type_id", None) or getattr(project, "series_number", None))
     if has_taxonomy:
-        return f"{project.taxonomy_alias} {project.name}"
-    return project.name
+        return prompt_name(f"{project.taxonomy_alias} {project.name}")
+    return prompt_name(project.name)
 
 
 class MultiTerminalPromptBuilder:
@@ -90,7 +91,7 @@ class MultiTerminalPromptBuilder:
             display = getattr(job, "agent_display_name", None) or "agent"
             job_id = getattr(job, "job_id", "")
             cli_tool = getattr(job, "cli_tool", None) or "claude"
-            out.extend(["", f"### Session: {display} (tool: {cli_tool})", "```"])
+            out.extend(["", f"### Session: {prompt_name(display)} (tool: {cli_tool})", "```"])
             out.extend(build_agent_seed_lines(cli_tool, job_id))
             out.append("```")
         return "\n".join(out)
@@ -117,7 +118,7 @@ class MultiTerminalPromptBuilder:
             display = getattr(job, "agent_display_name", None) or "agent"
             job_id = getattr(job, "job_id", "")
             cli_tool = getattr(job, "cli_tool", None) or "claude"
-            out.extend(["", f"### Session: {display} (tool: {cli_tool})", "```"])
+            out.extend(["", f"### Session: {prompt_name(display)} (tool: {cli_tool})", "```"])
             out.extend(build_agent_seed_lines(cli_tool, job_id))
             out.append("```")
         return render_capability_ladder(

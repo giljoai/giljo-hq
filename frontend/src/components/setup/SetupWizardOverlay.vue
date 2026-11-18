@@ -4,6 +4,7 @@
       <div
         v-if="modelValue"
         class="setup-wizard-overlay"
+        :style="{ right: `${guide.reservedWidth}px` }"
         data-testid="setup-wizard-overlay"
         role="dialog"
         aria-modal="true"
@@ -24,242 +25,193 @@
             <v-icon>mdi-close</v-icon>
           </v-btn>
 
-          <div v-if="closingWithCheckmarks" class="closing-confirmation">
-            <v-icon size="48" color="success" class="closing-icon">mdi-check-circle</v-icon>
-            <div class="closing-text">Setup complete</div>
-          </div>
-
-          <template v-else>
-            <aside class="wizard-rail">
-              <div class="rail-top">
-                <img src="/icons/Giljo_YW_Face.svg" alt="" class="rail-logo" />
-                <div>
-                  <div class="rail-title">Set up GiljoAI</div>
-                  <div class="rail-count">Step {{ Math.min(currentStep, 3) + 1 }} of 4</div>
-                </div>
+          <aside class="wizard-rail">
+            <div class="rail-top">
+              <img src="/icons/Giljo_YW_Face.svg" alt="" class="rail-logo" />
+              <div>
+                <div class="rail-title">Set up Giljo HQ</div>
+                <div class="rail-count">Step {{ currentStep + 1 }} of {{ STEPS.length }}</div>
               </div>
+            </div>
 
-              <div class="stepper">
-                <div class="spine">
-                  <div class="spine-fill" :style="{ height: spineFillPct + '%' }" />
+            <div class="stepper">
+              <div class="spine">
+                <div class="spine-fill" :style="{ height: spineFillPct + '%' }" />
+              </div>
+              <template v-for="(step, i) in STEPS" :key="step.id">
+                <div
+                  :style="{ '--nodecol': STEP_COLORS[i] }"
+                  :class="[
+                    'rail-node',
+                    {
+                      'rail-node--done': i < currentStep,
+                      'rail-node--active': i === currentStep,
+                      'rail-node--clickable': i < currentStep,
+                    },
+                  ]"
+                  :data-testid="`rail-node-${step.id}`"
+                  role="button"
+                  :tabindex="i < currentStep ? 0 : -1"
+                  :aria-current="i === currentStep ? 'step' : undefined"
+                  @click="goToStep(i)"
+                  @keydown.enter.prevent="goToStep(i)"
+                  @keydown.space.prevent="goToStep(i)"
+                >
+                  <span class="rail-dot">
+                    <v-icon v-if="i < currentStep" size="13">mdi-check</v-icon>
+                    <template v-else>{{ i + 1 }}</template>
+                  </span>
+                  <span class="rail-txt">
+                    <span class="rail-node-label">{{ step.label }}</span>
+                    <span class="rail-node-desc">{{ STEP_DESC[i] }}</span>
+                  </span>
                 </div>
-                <template v-for="(step, i) in STEPS" :key="step.id">
-                  <div
-                    :style="{ '--nodecol': STEP_COLORS[i] }"
-                    :class="[
-                      'rail-node',
-                      {
-                        'rail-node--done': i < currentStep,
-                        'rail-node--active': i === currentStep,
-                        'rail-node--clickable': i < currentStep,
-                      },
-                    ]"
-                    :data-testid="`rail-node-${step.id}`"
-                    role="button"
-                    :tabindex="i < currentStep ? 0 : -1"
-                    :aria-current="i === currentStep ? 'step' : undefined"
-                    @click="goToStep(i)"
-                    @keydown.enter.prevent="goToStep(i)"
-                    @keydown.space.prevent="goToStep(i)"
-                  >
-                    <span class="rail-dot">
-                      <v-icon v-if="i < currentStep" size="13">mdi-check</v-icon>
-                      <template v-else>{{ i + 1 }}</template>
-                    </span>
-                    <span class="rail-txt">
-                      <span class="rail-node-label">{{ step.label }}</span>
-                      <span class="rail-node-desc">{{ STEP_DESC[i] }}</span>
-                    </span>
-                  </div>
 
+                <div
+                  v-if="step.id === 'connect' && currentStep === 1 && connectSubRows.length"
+                  class="rail-subs"
+                >
                   <div
-                    v-if="step.id === 'connect' && currentStep === 1 && connectSubRows.length"
-                    class="rail-subs"
+                    v-for="sub in connectSubRows"
+                    :key="sub.id"
+                    class="rail-sub"
+                    :data-testid="`rail-sub-${sub.id}`"
                   >
+                    <span :class="['rail-sub-dot', `rail-sub-dot--${sub.state}`]" />
+                    <span class="rail-sub-label">{{ sub.name }}</span>
+                    <span class="rail-sub-status">{{ sub.statusText }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </aside>
+
+          <main class="wizard-main">
+            <div class="wizard-content" data-testid="wizard-content">
+              <div v-if="currentStep === 0" class="step-tools">
+                <p class="step-heading-grad">Choose your tools</p>
+                <p class="step-sub">
+                  Which AI coding agent(s) do you use? Pick one or more. You can add the rest later.
+                </p>
+
+                <div class="wiz-center">
+                  <div class="tools-grid tools-grid--six">
                     <div
-                      v-for="sub in connectSubRows"
-                      :key="sub.id"
-                      class="rail-sub"
-                      :data-testid="`rail-sub-${sub.id}`"
+                      v-for="tool in visibleTools"
+                      :key="tool.id"
+                      :class="['tool-card', 'tool-card--row', 'smooth-border', { 'tool-card--sel': isSelected(tool.id) }]"
+                      :data-testid="`tool-select-${tool.id}`"
+                      role="checkbox"
+                      :aria-checked="isSelected(tool.id)"
+                      :aria-label="tool.name"
+                      tabindex="0"
+                      @click="toggleTool(tool.id)"
+                      @keydown.enter.prevent="toggleTool(tool.id)"
+                      @keydown.space.prevent="toggleTool(tool.id)"
                     >
-                      <span :class="['rail-sub-dot', `rail-sub-dot--${sub.state}`]" />
-                      <span class="rail-sub-label">{{ sub.name }}</span>
-                      <span class="rail-sub-status">{{ sub.statusText }}</span>
+                      <span class="tool-card-well">
+                        <img v-if="tool.logo" :src="tool.logo" :alt="tool.name" class="tool-card-logo" />
+                        <v-icon v-else size="22">{{ tool.icon }}</v-icon>
+                      </span>
+                      <span class="tool-card-text">
+                        <span class="tool-name">{{ tool.name }}</span>
+                        <span class="tool-method" :data-testid="`tool-method-${tool.id}`">{{ toolMethodTag(tool.id) }}</span>
+                        <span
+                          v-if="connectedToolIds.has(tool.id)"
+                          class="tool-connected"
+                          :data-testid="`tool-connected-${tool.id}`"
+                        >Connected</span>
+                      </span>
+                      <span v-if="isSelected(tool.id)" class="tool-card-ring tool-card-ring--on"><v-icon size="12">mdi-check-bold</v-icon></span>
+                      <span v-else class="tool-card-ring" />
                     </div>
                   </div>
-                </template>
-              </div>
-            </aside>
-
-            <main class="wizard-main">
-              <div class="wizard-content" data-testid="wizard-content">
-                <div v-if="currentStep === 0" class="step-tools">
-                  <p class="step-heading-grad">Choose your tools</p>
-                  <p class="step-sub">
-                    Which AI coding agent(s) do you use? Pick one or more. You can add the rest later.
+                  <p class="step-fineprint">
+                    The named tools get a one-command setup. Generic MCP client covers anything else that
+                    speaks open MCP. Add more later in Tools &gt; Connect.
                   </p>
-
-                  <div class="wiz-center">
-                    <div class="tools-grid tools-grid--six">
-                      <div
-                        v-for="tool in SETUP_TOOLS"
-                        :key="tool.id"
-                        :class="['tool-card', 'tool-card--row', 'smooth-border', { 'tool-card--sel': isSelected(tool.id) }]"
-                        :data-testid="`tool-select-${tool.id}`"
-                        role="checkbox"
-                        :aria-checked="isSelected(tool.id)"
-                        :aria-label="tool.name"
-                        tabindex="0"
-                        @click="toggleTool(tool.id)"
-                        @keydown.enter.prevent="toggleTool(tool.id)"
-                        @keydown.space.prevent="toggleTool(tool.id)"
-                      >
-                        <span class="tool-card-well">
-                          <img v-if="tool.logo" :src="tool.logo" :alt="tool.name" class="tool-card-logo" />
-                          <v-icon v-else size="22">{{ tool.icon }}</v-icon>
-                        </span>
-                        <span class="tool-card-text">
-                          <span class="tool-name">{{ tool.name }}</span>
-                          <span class="tool-method" :data-testid="`tool-method-${tool.id}`">{{ toolMethodTag(tool.id) }}</span>
-                        </span>
-                        <span v-if="isSelected(tool.id)" class="tool-card-ring tool-card-ring--on"><v-icon size="12">mdi-check-bold</v-icon></span>
-                        <span v-else class="tool-card-ring" />
-                      </div>
-                    </div>
-                    <p class="step-fineprint">
-                      The named tools get a one-command setup. Generic MCP client covers anything else that
-                      speaks open MCP. Add more later in Tools &gt; Connect.
-                    </p>
-                  </div>
-                </div>
-
-                <SetupStep2Connect
-                  v-else-if="currentStep === 1"
-                  :selected-tools="localSelectedTools"
-                  @can-proceed="step2CanProceed = $event"
-                  @step-data="step2Data = $event"
-                  @walk-state="step2WalkState = $event"
-                  @advance-step="handleNext"
-                />
-
-                <SetupStep3Commands
-                  v-else-if="currentStep === 2"
-                  :connected-tools="step2ConnectedTools"
-                  @can-proceed="step3CanProceed = $event"
-                  @step-data="step3Data = $event"
-                />
-
-                <SetupStep4Complete v-else-if="currentStep === 3" />
-              </div>
-
-              <div class="wz-footer">
-                <div class="footer-row">
-                  <v-btn
-                    v-if="currentStep > 0"
-                    variant="text"
-                    class="footer-back"
-                    @click="handleBack"
-                  >
-                    Back
-                  </v-btn>
-                  <span class="footer-spacer" />
-
-                  <template v-if="currentStep === 3">
-                    <v-btn
-                      v-if="props.isRerun"
-                      variant="text"
-                      prepend-icon="mdi-restart"
-                      class="footer-restart"
-                      data-testid="setup-restart-btn"
-                      @click="showRestartConfirm = true"
-                    >
-                      Restart setup
-                    </v-btn>
-                    <v-btn
-                      color="primary"
-                      variant="flat"
-                      class="footer-next-btn"
-                      data-testid="setup-finish-btn"
-                      @click="handleFinish"
-                    >
-                      {{ props.isRerun ? 'Done' : 'Finish' }}
-                    </v-btn>
-                  </template>
-                  <template v-else>
-                    <v-btn
-                      color="primary"
-                      variant="flat"
-                      class="footer-next-btn"
-                      data-testid="setup-next-btn"
-                      :disabled="!canProceed"
-                      @click="handleNext"
-                    >
-                      Next
-                    </v-btn>
-                  </template>
-                </div>
-
-                <div v-if="footerSkipLabel" class="footer-skip">
-                  <button
-                    type="button"
-                    class="skiplink"
-                    :data-testid="footerSkipTestId"
-                    @click="handleFooterSkip"
-                  >
-                    {{ footerSkipLabel }}
-                  </button>
                 </div>
               </div>
-            </main>
-          </template>
+
+              <SetupStep2Connect
+                v-else-if="currentStep === 1"
+                :selected-tools="localSelectedTools"
+                @can-proceed="step2CanProceed = $event"
+                @step-data="step2Data = $event"
+                @walk-state="step2WalkState = $event"
+                @advance-step="handleNext"
+              />
+
+              <SetupStep3Commands v-else-if="currentStep === 2" :tools="localSelectedTools" />
+
+            </div>
+
+            <div class="wz-footer">
+              <div class="footer-row">
+                <v-btn
+                  v-if="currentStep > 0"
+                  variant="text"
+                  class="footer-back"
+                  @click="handleBack"
+                >
+                  Back
+                </v-btn>
+                <span class="footer-spacer" />
+
+                <v-btn
+                  color="primary"
+                  variant="flat"
+                  class="footer-next-btn"
+                  data-testid="setup-next-btn"
+                  :disabled="!canProceed"
+                  @click="handleNext"
+                >
+                  {{ isLastStep ? 'Done' : 'Next' }}
+                </v-btn>
+              </div>
+
+              <div v-if="footerSkipLabel" class="footer-skip">
+                <button
+                  type="button"
+                  class="skiplink"
+                  :data-testid="footerSkipTestId"
+                  @click="handleFooterSkip"
+                >
+                  {{ footerSkipLabel }}
+                </button>
+              </div>
+            </div>
+          </main>
         </div>
       </div>
     </Transition>
 
-    <v-dialog v-model="showRestartConfirm" max-width="380">
-      <v-card class="smooth-border">
-        <div class="dlg-header dlg-header--warning">
-          <v-icon class="dlg-icon">mdi-alert</v-icon>
-          <span class="dlg-title">Restart Setup</span>
-          <v-btn icon variant="text" size="small" class="dlg-close" @click="showRestartConfirm = false">
-            <v-icon icon="mdi-close" size="18" />
-          </v-btn>
-        </div>
-        <v-card-text class="pa-4">
-          Setup is already completed. Are you sure you want to restart?
-        </v-card-text>
-        <div class="dlg-footer">
-          <v-spacer />
-          <v-btn variant="text" @click="showRestartConfirm = false">Cancel</v-btn>
-          <v-btn variant="flat" color="warning" @click="handleRestartConfirmed">Yes</v-btn>
-        </div>
-      </v-card>
-    </v-dialog>
   </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import configService from '@/services/configService'
-import { SETUP_TOOLS, methodTag, toolName } from '@/config/setupTools'
-import { useConnectedToolsResumeSeed } from '@/composables/useConnectedToolsResumeSeed'
+import { setupToolsFor, methodTag, toolName } from '@/config/setupTools'
+import { useHostedAppPreselect } from '@/composables/useHostedAppPreselect'
 import { PRODUCT_NAME } from '@/branding'
+import { useGuideStore } from '@/stores/guide'
+import { useConnectedToolIds } from '@/composables/useConnectedToolIds'
 import SetupStep2Connect from './SetupStep2Connect.vue'
 import SetupStep3Commands from './SetupStep3Commands.vue'
-import SetupStep4Complete from './SetupStep4Complete.vue'
+const guide = useGuideStore()
 
 const setupAriaLabel = `Setup ${PRODUCT_NAME}`
 
 const STEPS = [
-  { id: 'tools', label: 'Choose Tools' },
-  { id: 'connect', label: 'Connect' },
-  { id: 'install', label: 'Install' },
-  { id: 'launch', label: 'Launch' },
+  { id: 'tools', label: 'Choose tool' },
+  { id: 'connect', label: 'Connect it' },
+  { id: 'setup', label: 'Setup instructions' },
 ]
 
-const STEP_DESC = ['Pick your AI agents', 'Attach them to GiljoAI', 'Skills & marker block', "You're ready"]
+const STEP_DESC = ['Pick your AI agents', 'Attach them to Giljo HQ', 'Get your tool ready']
 
-const STEP_COLORS = ['var(--gradient-step-1)', 'var(--gradient-step-2)', 'var(--gradient-step-3)', 'var(--gradient-step-4)']
+const STEP_COLORS = ['var(--gradient-step-1)', 'var(--gradient-step-3)', 'var(--gradient-step-4)']
 
 const props = defineProps({
   modelValue: {
@@ -274,13 +226,9 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  isRerun: {
+  fresh: {
     type: Boolean,
     default: false,
-  },
-  mode: {
-    type: String,
-    default: 'setup',
   },
 })
 
@@ -291,13 +239,11 @@ const emit = defineEmits([
   'step-complete',
 ])
 
-const localSelectedTools = ref([...props.selectedTools])
+const localSelectedTools = ref(props.fresh ? [] : [...props.selectedTools])
+const { connected: connectedToolIds, reload: reloadConnected } = useConnectedToolIds()
 const step2CanProceed = ref(false)
 const step2Data = ref({})
 const step2WalkState = ref(null)
-const step3CanProceed = ref(false)
-const step3Data = ref({})
-const showRestartConfirm = ref(false)
 
 const isCe = ref(false)
 async function loadEdition() {
@@ -310,31 +256,35 @@ async function loadEdition() {
   }
 }
 onMounted(loadEdition)
+const visibleTools = computed(() => setupToolsFor(isCe.value))
 
-useConnectedToolsResumeSeed({
+useHostedAppPreselect({
   currentStep: () => props.currentStep,
-  selectedTools: () => localSelectedTools.value,
-  step2Data,
+  savedTools: () => props.selectedTools,
+  selected: localSelectedTools,
+  visibleTools: () => visibleTools.value,
+  enabled: () => !props.fresh,
 })
 
 function toolMethodTag(toolId) {
   return methodTag(toolId, isCe.value)
 }
 
-function handleRestartConfirmed() {
-  showRestartConfirm.value = false
-  localSelectedTools.value = []
-  emit('update:currentStep', 0)
-}
-
 watch(
   () => props.selectedTools,
   (newVal) => {
-    localSelectedTools.value = [...newVal]
+    localSelectedTools.value = props.fresh ? [] : [...newVal]
   },
 )
 
-const step2ConnectedTools = computed(() => step2Data.value?.connectedTools || [])
+watch(
+  () => props.modelValue,
+  (open) => {
+    if (!open) return
+    if (props.fresh) localSelectedTools.value = []
+    reloadConnected()
+  },
+)
 
 const connectSubRows = computed(() => {
   const w = step2WalkState.value
@@ -342,17 +292,19 @@ const connectSubRows = computed(() => {
   return w.order.map((id) => {
     let state = 'ahead'
     if (w.conn?.[id] === 'connected') state = 'done'
-    else if (id === w.activeId) state = 'current'
+    else if (id === w.activeId && w.conn?.[id] !== 'connected_before') state = 'current'
     return {
       id,
       name: toolName(id),
       state,
-      statusText: state === 'done' ? 'CONNECTED' : state === 'current' ? 'WAITING' : '',
+      statusText: state === 'done' ? 'CONNECTED' : w.conn?.[id] === 'connected_before' ? 'CONNECTED BEFORE' : state === 'current' ? 'WAITING' : '',
     }
   })
 })
 
-const spineFillPct = computed(() => (Math.min(props.currentStep, 3) / 3) * 100)
+const isLastStep = computed(() => props.currentStep === STEPS.length - 1)
+
+const spineFillPct = computed(() => (props.currentStep / (STEPS.length - 1)) * 100)
 
 function goToStep(i) {
   if (i < props.currentStep) {
@@ -360,22 +312,8 @@ function goToStep(i) {
   }
 }
 
-const footerSkipLabel = computed(() => {
-  if (props.currentStep === 1) return 'Skip for now'
-  if (props.currentStep === 2) return "Skip, I'll do this later"
-  return ''
-})
-
-const footerSkipTestId = computed(() => {
-  if (props.currentStep === 1) return 'connect-skip'
-  if (props.currentStep === 2) return 'install-skip'
-  return null
-})
-
-function handleFooterSkip() {
-  if (props.currentStep === 1) handleStep2Skip()
-  else if (props.currentStep === 2) handleStep3Skip()
-}
+const footerSkipLabel = computed(() => (props.currentStep === 1 ? 'Skip for now' : ''))
+const footerSkipTestId = computed(() => (props.currentStep === 1 ? 'connect-skip' : null))
 
 function toggleTool(toolId) {
   const index = localSelectedTools.value.indexOf(toolId)
@@ -397,10 +335,7 @@ const canProceed = computed(() => {
   if (props.currentStep === 1) {
     return step2CanProceed.value
   }
-  if (props.currentStep === 2) {
-    return step3CanProceed.value
-  }
-  return false
+  return true
 })
 
 function handleNext() {
@@ -408,17 +343,16 @@ function handleNext() {
 
   if (props.currentStep === 0) {
     emit('step-complete', { step: 0, data: { tools: [...localSelectedTools.value] } })
-  } else if (props.currentStep === 1) {
+    emit('update:currentStep', 1)
+    return
+  }
+  if (props.currentStep === 1) {
     emit('step-complete', { step: 1, data: { ...step2Data.value } })
-  } else if (props.currentStep === 2) {
-    emit('step-complete', { step: 2, data: { ...step3Data.value } })
-  } else {
-    emit('step-complete', { step: props.currentStep, data: {} })
+    emit('update:currentStep', 2)
+    return
   }
-
-  if (props.currentStep < STEPS.length - 1) {
-    emit('update:currentStep', props.currentStep + 1)
-  }
+  emit('step-complete', { step: 2, data: {} })
+  handleDismiss()
 }
 
 function handleBack() {
@@ -427,39 +361,12 @@ function handleBack() {
   }
 }
 
-function handleStep2Skip() {
+function handleFooterSkip() {
   emit('step-complete', { step: 1, data: { connectedTools: [], skipped: true } })
-  if (props.currentStep < STEPS.length - 1) {
-    emit('update:currentStep', props.currentStep + 1)
-  }
-}
-
-function handleStep3Skip() {
-  emit('step-complete', { step: 2, data: { installedTools: [], skipped: true } })
-  if (props.currentStep < STEPS.length - 1) {
-    emit('update:currentStep', props.currentStep + 1)
-  }
-}
-
-function handleFinish() {
-  emit('step-complete', { step: 3, data: { action: 'home', route: '/home', setup_complete: true } })
   handleDismiss()
 }
 
-const closingWithCheckmarks = ref(false)
-
 function handleDismiss() {
-  if (props.mode === 'setup' && props.currentStep === 3 && !closingWithCheckmarks.value) {
-    closingWithCheckmarks.value = true
-    emit('update:currentStep', 4)
-    setTimeout(() => {
-      closingWithCheckmarks.value = false
-      emit('dismiss')
-      emit('update:modelValue', false)
-      emit('update:currentStep', 3)
-    }, 1200)
-    return
-  }
   emit('dismiss')
   emit('update:modelValue', false)
 }
@@ -517,10 +424,14 @@ function handleDismiss() {
   min-height: 540px;
   max-height: calc(100vh - 48px);
   overflow: hidden;
-  background: $elevation-raised;
+  background: $elevation-elevated;
   border-radius: $border-radius-rounded;
   display: grid;
   grid-template-columns: 258px 1fr;
+}
+
+.wizard-rail-panel.smooth-border {
+  box-shadow: inset 0 0 0 2px rgba($color-brand-yellow, 0.55), 0 24px 64px rgba(0, 0, 0, 0.7);
 }
 
 .wizard-rail-close-btn {
@@ -528,46 +439,6 @@ function handleDismiss() {
   top: 12px;
   right: 12px;
   z-index: 5;
-}
-
-/* ── Closing state (all-complete checkmark) ── */
-.closing-confirmation {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 400px;
-  gap: 12px;
-  animation: closing-fade-in 0.4s ease;
-}
-
-.closing-icon {
-  animation: closing-scale 0.5s ease;
-}
-
-.closing-text {
-  font-size: 1.1rem;
-  font-weight: 500;
-  color: rgb(var(--v-theme-success));
-}
-
-@keyframes closing-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes closing-scale {
-  0% { transform: scale(0.5); opacity: 0; }
-  60% { transform: scale(1.15); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .closing-confirmation,
-  .closing-icon {
-    animation: none;
-  }
 }
 
 /* ── Left rail ── */
@@ -771,110 +642,7 @@ function handleDismiss() {
   line-height: 1.5;
 }
 
-/* Tools grid: 2x3 for the six-tool choose step (FE-9204). */
-.tools-grid--six {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-/* Row card: icon well + name/method + check ring. */
-.tool-card--row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 16px 18px;
-  border-radius: $border-radius-md;
-  background: $elevation-elevated;
-  cursor: pointer;
-  user-select: none;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.tool-card--row:hover {
-  transform: translateY(-1px);
-  --smooth-border-color: #{rgba($color-brand-yellow, 0.4)};
-}
-
-.tool-card--row:focus-visible {
-  outline: 2px solid $color-brand-yellow;
-  outline-offset: 2px;
-}
-
-.tool-card--sel {
-  --smooth-border-color: #{$color-brand-yellow};
-  box-shadow: inset 0 0 0 2px $color-brand-yellow, 0 0 16px rgba($color-brand-yellow, 0.12) !important;
-  background: rgba($color-brand-yellow, 0.05);
-}
-
-.tool-card-well {
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  border-radius: $border-radius-default;
-  background: rgba(255, 255, 255, 0.05);
-  display: grid;
-  place-items: center;
-  color: $lightest-blue;
-}
-
-.tool-card-logo {
-  width: 22px;
-  height: 24px;
-  object-fit: contain;
-}
-
-.tool-card-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.tool-name {
-  font-family: 'Outfit', $typography-font-primary;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: $color-text-primary;
-}
-
-.tool-method {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.56rem;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-
-.tool-card-ring {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
-}
-
-.tool-card-ring--on {
-  background: rgba($color-brand-yellow, 0.16);
-  color: $color-brand-yellow;
-  box-shadow: none;
-  animation: ring-pop 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes ring-pop {
-  0% { transform: scale(0.6); opacity: 0; }
-  60% { transform: scale(1.15); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tool-card-ring--on {
-    animation: none;
-  }
-}
+@include wiz.setup-tool-cards;
 
 /* Connect-stage rail sub-rows */
 .rail-subs {
@@ -964,10 +732,6 @@ function handleDismiss() {
 
 .footer-back {
   color: $lightest-blue !important;
-}
-
-.footer-restart {
-  color: var(--text-muted) !important;
 }
 
 .footer-next-btn {

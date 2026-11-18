@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import re
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -14,9 +15,13 @@ from typing import Any
 from mcp.server.mcpserver.exceptions import MCPServerError, ToolError
 from mcp.shared.exceptions import MCPError
 
+from api.endpoints.mcp_tools import _base
+from api.endpoints.mcp_tools._announcement_hook import first_reply_hook_installed, first_reply_meta
 from api.endpoints.mcp_tools._base import _CLEAN_VALIDATION_ERRORS, _SQL_LEAK_SIGNATURE
 from giljo_mcp.exceptions import BaseGiljoError
 
+
+logger = logging.getLogger(__name__)
 
 _WRAPPED_MARKER = "__giljo_tool_error_surface__"
 
@@ -39,15 +44,40 @@ def is_anticipated_rejection(exc: BaseException) -> bool:
     return False
 
 
+async def _first_reply_additions(ctx: Any) -> dict[str, Any]:
+    if ctx is None or not first_reply_hook_installed():
+        return {}
+    try:
+        tenant_key = _base._resolve_tenant(ctx)
+    except (AttributeError, RuntimeError):
+        return {}
+    return await first_reply_meta(ctx, tenant_key, _base._resolve_user_id)
+
+
+def _with_notices(message: str, additions: dict[str, Any]) -> str:
+    parts = [message]
+    if hint := additions.get("setup_hint"):
+        parts.append(hint)
+    if notice := additions.get("announcement"):
+        parts.append(f"{notice['title']}. {notice['summary']} {notice['action']}")
+    return " ".join(parts)
+
+
 def _surface_rejections(fn: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
-            return await fn(*args, **kwargs)
+            result = await fn(*args, **kwargs)
         except Exception as exc:
             if is_anticipated_rejection(exc):
-                raise ToolError(redact_input_echo(str(exc))) from exc
+                logger.info("MCP tool rejection: %s", exc)
+                text = exc.agent_facing_str() if isinstance(exc, BaseGiljoError) else str(exc)
+                additions = await _first_reply_additions(kwargs.get("ctx"))
+                raise ToolError(_with_notices(redact_input_echo(text), additions)) from exc
             raise
+        if isinstance(result, dict) and (additions := await _first_reply_additions(kwargs.get("ctx"))):
+            result = {**result, "_meta": {**(result.get("_meta") or {}), **additions}}
+        return result
 
     setattr(wrapper, _WRAPPED_MARKER, True)
     return wrapper

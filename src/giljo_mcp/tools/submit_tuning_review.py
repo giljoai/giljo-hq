@@ -8,7 +8,10 @@ import logging
 from typing import Any
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.services.product_tuning_service import ProductTuningService
+from giljo_mcp.services.product_tuning_service import (
+    ProductTuningService,
+    canonical_tuning_section,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ def _validate_proposals(proposals: list[dict[str, Any]]) -> list[str]:
             errors.append(f"proposals[{i}]: must be an object")
             continue
 
-        section = proposal.get("section")
+        section = canonical_tuning_section(proposal.get("section"))
         if not section or section not in VALID_SECTIONS:
             errors.append(f"proposals[{i}]: invalid section '{section}', must be one of {sorted(VALID_SECTIONS)}")
 

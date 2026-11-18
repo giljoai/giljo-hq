@@ -32,6 +32,10 @@
 
         <AppAlert v-if="success" type="success" variant="tonal" class="mb-4">
           {{ success }}
+          <div class="mt-2" data-testid="reset-api-keys-reminder">
+            If you think someone else had access to your account, also
+            <router-link to="/tools?tab=connect" data-testid="reset-api-keys-link">replace your API keys in Tools</router-link>.
+          </div>
         </AppAlert>
 
         <AppAlert v-if="lockoutMessage" type="warning" variant="tonal" class="mb-4">
@@ -224,6 +228,9 @@ const props = defineProps({
 
 const emit = defineEmits(['update:show', 'success'])
 
+const API_KEY_REMINDER =
+  'If you think someone else had access to your account, also replace your API keys in Tools.'
+
 const internalShow = computed({
   get: () => props.show,
   set: (value) => emit('update:show', value),
@@ -344,7 +351,7 @@ async function handleResetPassword() {
 
     resetFormState()
     emit('update:show', false)
-    emit('success', 'Password reset successfully! Please log in with your new credentials.')
+    emit('success', `Password reset successfully! Please log in with your new credentials. ${API_KEY_REMINDER}`)
   } catch (err) {
     console.error('[ForgotPassword] Password reset failed:', err?.response?.status ?? err?.code)
 

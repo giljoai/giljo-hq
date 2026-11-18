@@ -2,6 +2,53 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.14.0] — 2026-11-17
+
+**Final release.** This is the last Community Edition release. After it, the repository is archived and gets no more updates, including security fixes.
+
+### Added
+
+- **A getting started guide on every page.** New accounts get a panel with six steps, from connecting your AI tool to finishing your first project. Each step ticks itself when it is really done and has a "Watch how" video. Fold it or close it, and turn it back on from Tools, Learning.
+- **A short start video.** The first time you sign in, a two-minute "How to get going" video plays. You can find it again in Tools, Learning.
+- **Links in replies.** When your AI tool creates a product, project, task or thread, its reply carries a link to it in the dashboard.
+- **Setup reminder in your AI tool.** While setup is not finished, your connected tool tells you where to finish it.
+
+### Changed
+
+- **Jobs board.** A project card shows its description and mission in one place, and you can edit both there. The card you have open glows on the next thing to press, and small "Done, not reviewed" groups open by themselves.
+- **The context review reminder comes back.** Dismiss it without reviewing and it returns after 10 more completed projects (or your own reminder setting). Running a review restarts the count.
+- **Clearer words after Stage.** The card says the prompt is copied and your tool writes the plan, and the staging gate note says "Your go is needed".
+- **The orchestrator reads "Monitoring" once a subagent project is running,** instead of "Not picked up".
+- **Creating a product.** With no document chosen, one press creates a blank product. With a document, the button says "Analyze" when it starts the AI reading.
+- **Sign-in waits when asked to slow down.** After too many attempts, the page shows a live countdown and keeps your typed password.
+- **Password reset reminds you about API keys,** which keep working after a reset.
+- **Skills update banner** tells you to ask your agent to run giljo_setup in each tool you use.
+- Setup, the tour and the starter prompts call the product Giljo HQ.
+
+### Fixed
+
+- **Tune context works on a product that already has values,** and the dialog no longer shows the previous product's prompt. The tech stack database field can be written back as "databases" or "databases_storage".
+- The Jobs board loads faster with many projects, and shows "1 to review" when finished projects wait for you.
+- A first product created by your AI tool shows as active at once, without a reload.
+- A new account can start its first Message Hub thread before it has a project, and new agents and message times update live.
+- Change password: a wrong current password counts as one try, not two.
+- A task or project restored from the trash keeps its number.
+- The live dashboard connection survives opening many pages quickly.
+- Saved passwords no longer show the label on top of the dots.
+
+### Security
+
+- **Contributor / Dev mode no longer exposes files outside the app.** The hot-reload frontend server could return any file the server account could read, including `.env`. If you run Dev mode, update now and rotate the secrets in `.env` if that server was ever reachable from a network you do not trust.
+- **A missing or damaged config file no longer opens the server to your network.** The server then listens on this machine only.
+- **Changing your own password or recovery PIN needs your current password,** and wrong guesses pause these changes for longer each time, up to a day.
+- **The recovery PIN can no longer be guessed over time.** Five wrong PINs lock recovery, longer each time. Recovery from the server machine itself is never locked.
+- **Agent sign-in tokens work only on the MCP connection,** not on the dashboard.
+- **The MCP connection has request limits,** and requests without valid credentials are refused early.
+- **The live connection closes when its sign-in ends** (password change, sign-out, revoked API key).
+- **Behind a reverse proxy, visitor addresses come only from your proxy,** never from a header the visitor typed.
+- Requests over 1 MB are refused, usernames cannot look like email addresses, names with line breaks are refused, agent posts no longer load outside images, links only point at your own records, and public endpoints say less.
+- Build and test tools updated to fixed versions.
+
 ## [2.13.0] — 2026-11-02
 
 ### Added

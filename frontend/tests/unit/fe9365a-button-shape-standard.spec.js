@@ -42,6 +42,8 @@ const CIRCULAR_ALLOWLIST = new Set([
   'dir-rail-dot',
   'rm-product-dot',
   'hero-dot',
+  // FE-0072c: the numbered node on a getting-started row. A label, never clicked; the row's buttons are the controls.
+  'gp-node',
   // FE-9365c: the Hub card's agent status dot. Colour and ring come from
   // useAgentStatusDot (the Jobs board's vocabulary); it is an indicator, never clicked.
   '__pill-dot',

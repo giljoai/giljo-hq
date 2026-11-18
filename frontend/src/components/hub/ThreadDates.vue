@@ -11,14 +11,14 @@
     </span>
     <span v-if="dates.lastMessage" class="thread-dates__item thread-dates__item--last" data-testid="thread-dates-last-message">
       <span class="thread-dates__label">{{ LAST_MESSAGE_LABEL }}</span>
-      <time :datetime="thread.last_message?.created_at || thread.last_activity_at">{{ dates.lastMessage }}</time>
+      <time :datetime="lastMessageAt(thread)">{{ dates.lastMessage }}</time>
     </span>
   </span>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { threadDates, CREATED_LABEL, LAST_MESSAGE_LABEL } from '@/components/hub/hubDateTime'
+import { threadDates, lastMessageAt, CREATED_LABEL, LAST_MESSAGE_LABEL } from '@/components/hub/hubDateTime'
 
 const props = defineProps({
   thread: { type: Object, required: true },

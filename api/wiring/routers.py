@@ -29,6 +29,7 @@ from api.endpoints import (
     oauth_register,
     oauth_revoke,
     oauth_well_known,
+    onboarding,
     products,
     project_statuses,
     projects,
@@ -87,6 +88,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(auth_pin_recovery.router, prefix="/api/auth", tags=["auth"])
     app.include_router(connect.router, prefix="/api/connect", tags=["connect"])
     app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
+    app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
     app.include_router(oauth_deny.router, prefix="/api/oauth", tags=["oauth"])
     app.include_router(oauth_client_info.router, prefix="/api/oauth", tags=["oauth"])
     app.include_router(oauth_revoke.router, prefix="/api/oauth", tags=["oauth"])

@@ -56,8 +56,10 @@ class OrgRepository:
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def slug_taken_by_other_org(self, session: AsyncSession, slug: str, exclude_org_id: str) -> bool:
-        stmt = select(Organization.id).where(Organization.slug == slug, Organization.id != exclude_org_id).limit(1)
+    async def slug_taken_by_other_org(self, session: AsyncSession, slug: str, exclude_org_id: str | None) -> bool:
+        stmt = select(Organization.id).where(Organization.slug == slug).limit(1)
+        if exclude_org_id is not None:
+            stmt = stmt.where(Organization.id != exclude_org_id)
         with tenant_isolation_bypass(
             session,
             reason="slug uniqueness is enforced by a global unique index; the collision check must see all tenants",

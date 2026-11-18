@@ -421,8 +421,8 @@ async def restore_task(
 ) -> TaskResponse:
     """Restore a soft-deleted (trashed) task.
 
-    Re-mints a fresh serial (the trashed number may have been reused) and clears
-    ``deleted_at``. Tenant-isolated.
+    The task comes back with the number it had (a fresh one only if a live item
+    has taken it) and ``deleted_at`` is cleared. Tenant-isolated.
 
     Raises:
         ResourceNotFoundError: No trashed task matched the id for the tenant

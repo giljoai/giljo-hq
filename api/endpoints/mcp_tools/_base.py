@@ -369,7 +369,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
 
     from api.app_state import state as app_state
-    from api.endpoints.mcp_tools._announcement_hook import announcement_notice
+    from api.endpoints.mcp_tools._announcement_hook import add_view_link, first_reply_meta
     from api.endpoints.mcp_tools._silence_scope import clear_silence_for_call, posthook_key, stale_board_line
 
     job_id = kwargs.get("job_id")
@@ -400,13 +400,13 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     result = scrub_tenant_key(result)
 
     if isinstance(result, dict):
+        add_view_link(method_name, result)
         meta = result.get("_meta")
         if not isinstance(meta, dict):
             meta = {}
         meta["skills_version"] = _SKILLS_VERSION
         if board := await stale_board_line(tenant_key, method_name, kwargs):
             meta["board"] = board
-        if notice := await announcement_notice(ctx, tenant_key, _resolve_user_id):
-            meta["announcement"] = notice
+        meta.update(await first_reply_meta(ctx, tenant_key, _resolve_user_id))
         result["_meta"] = meta
     return result

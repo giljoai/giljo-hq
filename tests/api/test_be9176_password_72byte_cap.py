@@ -45,13 +45,18 @@ def test_password_constants_byte_math():
 
 
 async def _seed_user(
-    db_manager, *, with_pin: bool = False, must_change_password: bool = False, role: str = "developer"
+    db_manager,
+    *,
+    with_pin: bool = False,
+    must_change_password: bool = False,
+    role: str = "developer",
+    tenant_key: str | None = None,
 ) -> tuple[str, str, str]:
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
 
-    tk = TenantManager.generate_tenant_key()
+    tk = tenant_key or TenantManager.generate_tenant_key()
     unique = uuid4().hex[:8]
     user_id = str(uuid4())
     username = f"be9176_user_{unique}"
@@ -261,13 +266,14 @@ async def test_update_user_route_password_over_72_bytes_is_422(api_client, db_ma
 @pytest.mark.asyncio
 async def test_update_user_route_exactly_72_bytes_reaches_the_hash(api_client, db_manager, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
-    user_id, username, tk = await _seed_user(db_manager)
+    admin_id, admin_name, tk = await _seed_user(db_manager, role="admin")
+    user_id, _username, _tk = await _seed_user(db_manager, tenant_key=tk)
     hashpw_calls = _spy_hashpw(monkeypatch)
 
     resp = await api_client.put(
         f"/api/v1/users/{user_id}",
         json={"password": EXACT_72_BYTES_EMOJI},
-        headers=_cookie_headers(_mint(user_id, username, tk)),
+        headers=_cookie_headers(_mint(admin_id, admin_name, tk, role="admin")),
     )
     assert resp.status_code == 200, resp.text
     assert hashpw_calls == [72]

@@ -15,11 +15,13 @@ from tests.helpers.route_surface import iter_effective_routes, route_signatures
 
 
 EXPECTED_MIDDLEWARE_ORDER = (
+    "BodySizeLimitMiddleware",
+    "ConnectorCorsMiddleware",
     "CORSMiddleware",
     "CSRFProtectionMiddleware",
+    "RateLimitMiddleware",
     "InputValidationMiddleware",
     "SecurityHeadersMiddleware",
-    "RateLimitMiddleware",
     "AuthMiddleware",
     "APIMetricsMiddleware",
 )
@@ -34,7 +36,7 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
     }
 )
 
-EXPECTED_ROUTE_COUNT = 266
+EXPECTED_ROUTE_COUNT = 267
 
 EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
     {
@@ -74,6 +76,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/auth/verify-pin-and-reset-password", frozenset({"POST"})),
         ("/api/connect/connections/{harness}", frozenset({"DELETE"})),
         ("/api/connect/credential-status", frozenset({"GET"})),
+        ("/api/onboarding/start-list", frozenset({"GET"})),
         ("/api/download/bootstrap-prompt", frozenset({"GET"})),
         ("/api/download/generate-token", frozenset({"POST"})),
         ("/api/download/install-script.{extension}", frozenset({"GET"})),

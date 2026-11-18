@@ -284,6 +284,3 @@ def pytest_sessionfinish(session, exitstatus):
 def pytest_collection_modifyitems(config, items):
     for item in items:
         item.add_marker(pytest.mark.postgresql)
-
-        if "slow" in item.nodeid.lower():
-            item.add_marker(pytest.mark.slow)

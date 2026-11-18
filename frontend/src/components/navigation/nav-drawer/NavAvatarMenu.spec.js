@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { markRaw } from 'vue'
 import NavAvatarMenu from './NavAvatarMenu.vue'
+import { useNotificationStore } from '@/stores/notifications'
 
 vi.mock('@/i18n/licenseCopy', () => ({
   getLicenseCopy: vi.fn(() => ({
@@ -171,6 +172,73 @@ describe('NavAvatarMenu', () => {
     it('renders no badge when the parent binds nothing', () => {
       const wrapper = mountViaTemplate(null)
       expect(wrapper.find('[data-test="account-status-badge-stub"]').exists()).toBe(false)
+    })
+  })
+
+  describe('SEC-0059f retention sentence in the scheduled-deletion status', () => {
+    const SENTENCE = 'Limited records are kept as described in our Privacy Policy.'
+    const scheduled = {
+      giljoMode: 'saas',
+      accountBadgeState: 'account_scheduled_for_deletion',
+      isAccountScheduledForDeletion: true,
+      accountBadgeStateModifier: 'danger',
+      accountStatusTitle: 'Account scheduled for deletion',
+      accountStatusSubtitle: 'Permanent purge on June 15, 2099.',
+    }
+
+    function mountScheduled(props) {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      return {
+        pinia,
+        mount: () =>
+          mount(NavAvatarMenu, {
+            props: { ...baseProps, ...props },
+            global: { stubs: globalStubs, plugins: [pinia] },
+          }),
+      }
+    }
+
+    function sectionText(wrapper) {
+      return wrapper.find('[data-test="account-status-section"]').text().replace(/\s+/g, ' ')
+    }
+
+    it('follows the purge promise with the linked sentence when no deletion banner is showing', () => {
+      const wrapper = mountScheduled(scheduled).mount()
+      expect(sectionText(wrapper)).toContain(`Permanent purge on June 15, 2099. ${SENTENCE}`)
+      const link = wrapper.find('[data-test="nav-privacy-link"]')
+      expect(link.exists()).toBe(true)
+      expect(link.text()).toBe('Privacy Policy')
+      expect(link.attributes('href')).toBe('https://giljo.ai/privacy.html')
+      expect(link.attributes('target')).toBe('_blank')
+      expect(link.attributes('rel')).toBe('noopener noreferrer')
+    })
+
+    it('leaves the sentence to the deletion banner when the banner is in the same view', () => {
+      const view = mountScheduled(scheduled)
+      useNotificationStore(view.pinia).notifications = [
+        {
+          id: 'n1',
+          type: 'saas.account_deletion_scheduled',
+          surface: 'banner',
+          dismissed_at: null,
+          resolved_at: null,
+        },
+      ]
+      const wrapper = view.mount()
+      expect(sectionText(wrapper)).toContain('Permanent purge on June 15, 2099.')
+      expect(sectionText(wrapper)).not.toContain(SENTENCE)
+    })
+
+    it('adds nothing to the trial status', () => {
+      const wrapper = mountScheduled({
+        giljoMode: 'saas',
+        accountBadgeState: 'trial_expired',
+        accountBadgeStateModifier: 'expired',
+        accountStatusTitle: 'Trial expired',
+        accountStatusSubtitle: 'Your workspace is read-only until you upgrade.',
+      }).mount()
+      expect(sectionText(wrapper)).not.toContain(SENTENCE)
     })
   })
 })

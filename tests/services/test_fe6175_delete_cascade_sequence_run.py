@@ -96,6 +96,7 @@ async def test_delete_member_of_pending_run_dissolves_it(db_session: AsyncSessio
     member_id = str(uuid.uuid4())
     other_id = str(uuid.uuid4())
     await _create_project(db_session, tenant, member_id)
+    await _create_project(db_session, tenant, other_id)
     run = await _create_run(db_session, tenant, [member_id, other_id], status="pending")
 
     before = await _seq_svc(db_session).list_active(tenant_key=tenant)

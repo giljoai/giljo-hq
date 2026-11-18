@@ -77,6 +77,27 @@ async def test_orchestrator_status_follows_the_staging_lifecycle(be9744a_client,
         assert await _status(db_manager, tenant_key, orch) == "waiting"
 
         await _call(client, "launch_implementation", {"project_id": project_id})
+        assert await _status(db_manager, tenant_key, orch) == "working"
+
+        await _call(client, "get_job_mission", {"job_id": orch})
+        assert await _status(db_manager, tenant_key, orch) == "working"
+    finally:
+        await _cleanup(db_manager, tenant_key)
+
+
+async def test_multi_terminal_launch_leaves_the_unopened_orchestrator_waiting(be9744a_client, db_manager):  # noqa: F811
+    client, tenant_key, _ws = be9744a_client
+    project_id = await _seed(db_manager, tenant_key, mission="")
+    try:
+        staged = await _call(client, "stage_project", {"project_id": project_id, "mode": "multi_terminal"})
+        orch = staged["orchestrator_id"]
+        await _call(client, "get_staging_instructions", {"job_id": orch})
+        await _call(client, "update_project_mission", {"project_id": project_id, "mission": "The plan."})
+        await _seed_worker(db_manager, tenant_key, project_id)
+        await _call(client, "complete_job", {"job_id": orch, "result": {"summary": "staged"}})
+        assert await _status(db_manager, tenant_key, orch) == "waiting"
+
+        await _call(client, "launch_implementation", {"project_id": project_id})
         assert await _status(db_manager, tenant_key, orch) == "waiting"
 
         await _call(client, "get_job_mission", {"job_id": orch})

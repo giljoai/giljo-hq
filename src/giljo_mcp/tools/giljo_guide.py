@@ -43,7 +43,7 @@ CLAUDE.md/AGENTS.md so later sessions pass it automatically.
 - **Project** (`create_project`): actionable, multi-step dev work. Pass a `project_type`
   (FE/BE/INF/...), NEVER `TSK`; omit `series_number` (serials auto-assign upward on ONE
   tenant+product line shared with tasks). An unknown type is rejected with the valid list.
-  Projects are created **inactive**; launching one makes it active (section 6).
+  Projects are created **inactive**; launching one makes it active (section 5).
 - **Update**: `list_projects` to find it, then `update_project`.
 - **A task turned out to be a project? PROMOTE it -- never rebuild it.**
   `promote_task_to_project(task_id)` converts it atomically (subtasks and roadmap card
@@ -57,8 +57,7 @@ Use a chain only when step b cannot start until step a ships.
 each keeps its own type).
 Create step `a` WITHOUT `series_number` but WITH `suffix='a'`, read the assigned number, then
 create `b`, `c`... with that explicit `series_number`; each description cites the previous
-alias and carries the Edition Scope line, a testable Definition of Done, a reuse map, the
-hand-off and what is out of scope.
+alias and carries a testable Definition of Done, the hand-off and what is out of scope.
 
 **Run linked projects as a chain HEADLESS -- you become the conductor.** When the user asks
 to RUN / LINK / JOIN / CHAIN two or more EXISTING projects into one back-to-back run, do NOT
@@ -83,11 +82,7 @@ stage them one at a time: `link_projects(project_ids=[...], execution_mode="suba
   post to the Hub first, treat the nudge as unacknowledged, and look the peer's address up
   again right before each send.
 
-## 3. Edition Scope -- mandatory on every project
-Every project description (and every commit it produces) states **`Edition Scope: CE | SaaS |
-Both`**: CE = self-hosted core, SaaS = hosted/billing/multi-org, Both = ships to each.
-
-## 4. Reads -- cheap-first routing
+## 3. Reads -- cheap-first routing
 - Find a project by name/alias: `list_projects(summary_only=true)` (the id field is
   `project_id`). One project's description/mission: `get_context(product_id, project_id,
   categories=["project"])`. Many in detail: `list_projects(mode="planning")`; `mode="audit"`
@@ -103,7 +98,7 @@ Both`**: CE = self-hosted core, SaaS = hosted/billing/multi-org, Both = ships to
   `INF-`, ...) is ALWAYS a project, and a bare serial (`0017`) is a project converted from a
   task, awaiting a type. The prefix is the only disambiguator.
 
-## 5. Writes -- which tools, and the universal rules
+## 4. Writes -- which tools, and the universal rules
 - **Never pass `tenant_key`** -- the security layer injects it from auth.
 - Creates need a product (section 1); updates (`update_project`, `update_task`,
   `update_project_mission`) address one row BY ID and never read product context. The list
@@ -122,7 +117,7 @@ Both`**: CE = self-hosted core, SaaS = hosted/billing/multi-org, Both = ships to
   | task    | `pending` `in_progress` `on_hold` `blocked` `completed` `cancelled` |
   | thread  | `open` `active` `resolved` `closed` |
 
-## 6. Lifecycle (orchestrated work)
+## 5. Lifecycle (orchestrated work)
 create project -> stage it -> **stop at the human gate** -> implement -> close out.
 - `stage_project(project_id, mode)` -- `mode` is EXECUTION STYLE ONLY: 'subagent' (one
   orchestrator session drives its workers in-session) or 'multi_terminal' (a terminal per
@@ -147,7 +142,7 @@ rules); there are no agent template files to install. `inherit` = same as the or
 **Wedged project? diagnose before you guess:** `diagnose_project_state(project_id)` is
 READ-ONLY and names the stuck condition with a `suggested_actions` recovery step.
 
-## 7. complete_job -- one tool, three phases (the response self-explains)
+## 6. complete_job -- one tool, three phases (the response self-explains)
 The server picks the phase; read the reply's `phase`, `message` and `next_action`.
 - **staging_end**: staging is done; `staging_directive.action='STOP'`. Stop; implementation
   starts when the user goes. No memory or closeout here.
@@ -164,7 +159,7 @@ Closeout arguments (`git_commits`, the 16 `tags`, caps, `force`) are in
 `write_project_closeout`'s own description. `spawn_job` details (two-phase spawn, `phase`,
 `predecessor_job_id`, `inline_seed`) are in its description.
 
-## 8. Agent Message Hub -- the persistent chat board (BBS)
+## 7. Agent Message Hub -- the persistent chat board (BBS)
 A message board for agent<->agent<->user chat that outlives any one job. Tenant isolation is
 automatic: never pass `tenant_key`; you cannot see or post to another tenant's threads.
 Nine tools:
@@ -188,14 +183,14 @@ Post with `loop_directive=true` to keep addressed agents checking until the thre
 4. Park on `get_my_turn(agent_id, wait_seconds=45)` only when you asked something or hold the baton.
 5. End it: `set_status="resolved"` (answered) or `"closed"` -- once.
 
-## 9. request_approval -- the human gate, and how it clears
+## 8. request_approval -- the human gate, and how it clears
 `request_approval(job_id, project_id, reason, options)` parks a decision and flips you to
 `awaiting_user`. Two doors clear it through one write: the ApprovalCard in the project's
 CloseoutModal, or `decide_approval(approval_id, option_id)` after the user chose in your
 terminal. `set_agent_status` and `report_progress` cannot clear it. With Headless OFF only the
 dashboard can answer (`decide_in: "dashboard"`): wait, and do not ask in chat.
 
-## 10. Product context and setup
+## 9. Product context and setup
 `update_product_context` merge-writes structured product fields (split a large analysis
 across calls, `emit_completion=true` on the last; `force=true` to overwrite);
 `apply_context_tuning` writes reviewed proposals; `giljo_setup` installs the /giljo skill and

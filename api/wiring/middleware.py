@@ -19,6 +19,8 @@ from api.app_state import state
 from api.middleware import (
     APIMetricsMiddleware,
     AuthMiddleware,
+    BodySizeLimitMiddleware,
+    ConnectorCorsMiddleware,
     CSRFProtectionMiddleware,
     InputValidationMiddleware,
     RateLimitMiddleware,
@@ -125,11 +127,6 @@ def configure_middleware(app: FastAPI) -> None:
         except (RuntimeError, ValueError, OSError, KeyError) as e:
             logger.warning(f"Network IP detection failed: {e} - continuing with static CORS config")
 
-    anthropic_connector_origins = ("https://claude.ai", "https://claude.com")
-    for origin in anthropic_connector_origins:
-        if origin not in cors_origins:
-            cors_origins.append(origin)
-
     logger.info(f"Configuring CORS with origins: {cors_origins}")
 
 
@@ -139,6 +136,10 @@ def configure_middleware(app: FastAPI) -> None:
         _register_saas_middleware_or_raise(app)
 
     app.add_middleware(AuthMiddleware, auth_manager=lambda: state.auth)
+
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    app.add_middleware(InputValidationMiddleware)
 
     rate_limit = int(os.getenv("API_RATE_LIMIT", "300"))
     if os.getenv("DISABLE_RATE_LIMIT", "false").lower() == "true":
@@ -151,10 +152,6 @@ def configure_middleware(app: FastAPI) -> None:
             exempt_paths=["/health", "/api/health", "/api/metrics"],
         )
 
-    app.add_middleware(SecurityHeadersMiddleware)
-
-    app.add_middleware(InputValidationMiddleware)
-
     app.add_middleware(
         CSRFProtectionMiddleware,
         exempt_paths=[
@@ -164,7 +161,6 @@ def configure_middleware(app: FastAPI) -> None:
             "/api/auth/login",
             "/api/auth/logout",
             "/api/auth/refresh",
-            "/api/auth/register",
             "/api/auth/create-first-admin",
             "/api/auth/check-first-login",
             "/api/auth/verify-pin",
@@ -187,21 +183,23 @@ def configure_middleware(app: FastAPI) -> None:
 
     app.state.cors_origins = cors_origins
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=[
+    cors_options = {
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": [
             "Content-Type",
             "Authorization",
             "X-API-Key",
-            "X-Tenant-Key",
             "X-CSRF-Token",
             "MCP-Protocol-Version",
             "Mcp-Session-Id",
             "Mcp-Method",
             "Mcp-Name",
         ],
-        expose_headers=["X-Total-Count"],
-    )
+        "expose_headers": ["X-Total-Count", "Retry-After"],
+    }
+
+    app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=True, **cors_options)
+
+    app.add_middleware(ConnectorCorsMiddleware, **cors_options)
+
+    app.add_middleware(BodySizeLimitMiddleware)

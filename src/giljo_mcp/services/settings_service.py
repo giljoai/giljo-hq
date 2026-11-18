@@ -8,7 +8,8 @@ import logging
 from typing import Any, ClassVar
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import select
+from sqlalchemy import Integer, Text, cast, delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_session_context
@@ -187,6 +188,36 @@ class SystemSettingsService:
 
         await self.session.commit()
         return new_value
+
+    async def advance_marker(self, key: str, value: str) -> bool:
+        stmt = pg_insert(SystemSetting).values(key=key, value=value)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[SystemSetting.key],
+            set_={"value": stmt.excluded.value, "updated_at": func.now()},
+            where=SystemSetting.value < stmt.excluded.value,
+        ).returning(SystemSetting.key)
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def add_to_counter(self, key: str, amount: int) -> None:
+        stmt = pg_insert(SystemSetting).values(key=key, value=str(amount))
+        total = cast(cast(SystemSetting.value, Integer) + cast(stmt.excluded.value, Integer), Text)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[SystemSetting.key], set_={"value": total, "updated_at": func.now()}
+        )
+        await self.session.execute(stmt)
+
+    async def sum_counters(self, prefix: str) -> int:
+        result = await self.session.execute(
+            select(SystemSetting.value).where(SystemSetting.key.startswith(prefix, autoescape=True))
+        )
+        return sum(int(value) for value in result.scalars() if value.isdigit())
+
+    async def delete_keys_before(self, prefix: str, bound: str) -> None:
+        await self.session.execute(
+            delete(SystemSetting).where(
+                SystemSetting.key.startswith(prefix, autoescape=True), SystemSetting.key < bound
+            )
+        )
 
 
 async def resolve_agent_checkin_cadence_minutes(

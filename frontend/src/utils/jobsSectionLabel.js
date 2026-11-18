@@ -43,10 +43,10 @@ export function jobsSectionLabelFor(project, agents = []) {
   if (project?.implementation_launched_at) {
     return JOBS_SECTION_LABELS.IMPLEMENTING
   }
-  if (project?.staging_status === 'staging_complete' || project?.staging_status === 'staged') {
+  if (project?.staging_status === 'staging_complete') {
     return JOBS_SECTION_LABELS.STAGED
   }
-  if (project?.staging_status === 'staging') {
+  if (project?.staging_status === 'staging' || project?.staging_status === 'staged') {
     return JOBS_SECTION_LABELS.PLANNING
   }
   return JOBS_SECTION_LABELS.ACTIVATED

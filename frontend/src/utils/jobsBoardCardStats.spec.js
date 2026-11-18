@@ -65,6 +65,20 @@ describe('jobsBoardMetaLine', () => {
     expect(line).not.toContain('staged ')
   })
 
+  it('Planning, Stage prompt handed out: says to paste it and that the tool writes the plan', () => {
+    const line = jobsBoardMetaLine(
+      { created_at: '2026-08-30T23:20:00Z', staging_status: 'staged' },
+      JOBS_SECTION_LABELS.PLANNING,
+      Date.now(),
+    )
+    expect(line).toBe('Prompt copied. Paste it in your AI tool. Your tool writes the plan.')
+  })
+
+  it('Planning, staging running: still "staging in progress"', () => {
+    const line = jobsBoardMetaLine({ staging_status: 'staging' }, JOBS_SECTION_LABELS.PLANNING, Date.now())
+    expect(line).toBe('staging in progress')
+  })
+
   it('Staged chain member: created time only, no gate prose', () => {
     const line = jobsBoardMetaLine(
       { created_at: '2026-08-30T23:20:00Z' },

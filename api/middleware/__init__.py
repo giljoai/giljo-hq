@@ -8,6 +8,7 @@ from .auth import AuthMiddleware
 from .auth_rate_limiter import RateLimiter as AuthRateLimiter
 from .auth_rate_limiter import get_rate_limiter
 from .csrf import CSRFProtectionMiddleware, get_csrf_token
+from .edge_guards import BodySizeLimitMiddleware, ConnectorCorsMiddleware
 from .input_validator import InputValidationMiddleware
 from .metrics import APIMetricsMiddleware
 from .rate_limiter import RateLimiter, RateLimitMiddleware
@@ -18,7 +19,9 @@ __all__ = [
     "APIMetricsMiddleware",
     "AuthMiddleware",
     "AuthRateLimiter",
+    "BodySizeLimitMiddleware",
     "CSRFProtectionMiddleware",
+    "ConnectorCorsMiddleware",
     "InputValidationMiddleware",
     "RateLimitMiddleware",
     "RateLimiter",

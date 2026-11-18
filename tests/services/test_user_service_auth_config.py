@@ -10,7 +10,6 @@ import bcrypt
 import pytest
 
 from giljo_mcp.exceptions import (
-    AuthenticationError,
     AuthorizationError,
     ResourceNotFoundError,
     ValidationError,
@@ -36,7 +35,7 @@ async def test_change_password_success(user_service, test_user, db_session):
 
 @pytest.mark.asyncio
 async def test_change_password_incorrect_old_password(user_service, test_user):
-    with pytest.raises(AuthenticationError) as exc_info:
+    with pytest.raises(ValidationError) as exc_info:
         await user_service.auth.change_password(
             user_id=test_user.id, old_password="WrongPassword", new_password="NewPassword456"
         )

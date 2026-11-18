@@ -17,12 +17,17 @@ function announceLifecycleMoment(projectId, moment) {
   })
 }
 
+const PROJECT_ENDED_STATUSES = new Set(['completed', 'terminated', 'cancelled', 'parked', 'deleted'])
+
 export const PROJECT_EVENT_ROUTES = {
   project_update: {
     handler: async (payload) => {
       await useProjectStore().handleRealtimeUpdate(payload)
       if (payload?.update_type === 'status_changed' && payload?.status === 'active') {
         announceLifecycleMoment(payload?.project_id, 'activated')
+      }
+      if (PROJECT_ENDED_STATUSES.has(payload?.status)) {
+        useLifecycleBannerStore().clearForProject(payload?.project_id)
       }
     },
   },

@@ -116,7 +116,7 @@ const isOrchestrator = computed(() => {
 
 const dialogTitle = computed(() => {
   return isOrchestrator.value
-    ? 'System Orchestrator Prompt'
+    ? 'Orchestrator prompt'
     : `Agent Details: ${props.agent?.agent_name || 'Unknown Agent'}`
 })
 

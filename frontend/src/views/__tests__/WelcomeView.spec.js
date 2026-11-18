@@ -6,8 +6,9 @@ import { PROJECT_TEMPLATES } from '@/composables/projectTemplates'
 
 
 const pushMock = vi.fn()
+const routeState = vi.hoisted(() => ({ query: {} }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {} }),
+  useRoute: () => routeState,
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }))
 
@@ -102,6 +103,35 @@ async function mountWelcome() {
 }
 
 
+
+describe('WelcomeView: the Learning card restarts the tour', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    routeState.query = {}
+    vi.clearAllMocks()
+  })
+
+  const tourStartOver = (wrapper) =>
+    wrapper.findComponent({ name: 'TutorialOverlay' }).attributes('start-over')
+
+  it('asks the tour to start over when opened from the Learning card', async () => {
+    routeState.query = { openGuide: 'true' }
+    const wrapper = await mountWelcome()
+    await flushPromises()
+
+    expect(tourStartOver(wrapper)).toBe('true')
+  })
+
+  it('leaves the tour resumable on a normal Home visit', async () => {
+    const wrapper = await mountWelcome()
+    await flushPromises()
+
+    expect(tourStartOver(wrapper)).toBe('false')
+  })
+})
 
 describe('WelcomeView — footer version label', () => {
   beforeEach(() => {

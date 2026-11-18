@@ -18,6 +18,10 @@ RETIRED_PHRASES: dict[str, str] = {
         "to the DEFAULT product (`is_default`). Say 'default product', or name the "
         "product_id the caller should pass."
     ),
+    "edition scope": (
+        "The Edition Scope line is a rule of this repository, not of the product: the "
+        "guide has no such section and customers must not be pointed at it."
+    ),
 }
 
 TOOL_SURFACE_CHAR_CEILING = 47_500
@@ -138,3 +142,17 @@ def test_the_retired_name_guard_can_actually_fire() -> None:
     doc = re.compile(r"\bget_vision_doc\b")
     assert doc.search("call get_vision_doc first"), "word-boundary match failed on a real hit"
     assert not doc.search("call get_vision_document first"), "matched the live tool it is a prefix of"
+
+
+def test_create_product_description_does_not_claim_the_product_is_inactive() -> None:
+    descriptions = {name: text for name, loc, text in _live_surface() if loc == "description"}
+    assert "inactive" not in descriptions["create_product"].lower()
+    assert "active" in descriptions["create_product"].lower()
+
+
+def test_installed_skill_templates_do_not_carry_the_repo_edition_scope_rule() -> None:
+    from giljo_mcp.tools.slash_command_templates import get_all_templates
+
+    for platform in ("claude_code", "codex_cli", "generic"):
+        for filename, content in get_all_templates(platform).items():
+            assert "edition scope" not in content.lower(), f"[{platform}] {filename} names Edition Scope"

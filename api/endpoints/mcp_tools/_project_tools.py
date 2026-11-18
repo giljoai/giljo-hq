@@ -23,10 +23,10 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     _detected_harness,
     _parse_iso_datetime_param,
-    blank_text_rejection,
     mcp,
     validation_rejection,
 )
+from api.endpoints.mcp_tools._name_rules import name_text_rejection
 from api.endpoints.mcp_tools._schema_helpers import enum_schema_without_default
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.services.project_service._mcp_list_bounds import (
@@ -99,7 +99,7 @@ async def diagnose_project_state(
         "launching its implementation activates it. The response names the product and carries two "
         "aliases: alias is the short permanent share code (e.g. A1B2C3), taxonomy_alias the "
         "human-readable serial (e.g. BE-0007); quote taxonomy_alias to people, use project_id in calls. "
-        "Chains, taxonomy errors and Edition Scope: get_giljo_guide."
+        "Chains and taxonomy errors: get_giljo_guide."
     ),
     annotations=_tool_hints("create_project"),
 )
@@ -202,8 +202,8 @@ async def create_project(
             account is rejected and nothing is created; it never falls back to
             the active or default product.
     """
-    if not name.strip():
-        return blank_text_rejection("name", entity="Project")
+    if (rejection := name_text_rejection(name, "name", entity="Project")) is not None:
+        return rejection
     params = {
         "name": name,
         "description": description,
@@ -513,8 +513,8 @@ async def update_project(
     """
     params: dict = {"project_id": project_id, "force": force}
     if name is not None:
-        if not name.strip():
-            return blank_text_rejection("name", entity="Project")
+        if (rejection := name_text_rejection(name, "name", entity="Project")) is not None:
+            return rejection
         params["name"] = name
     if description:
         params["description"] = description

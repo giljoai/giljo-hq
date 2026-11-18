@@ -135,7 +135,7 @@
     ></v-file-input>
 
     <v-checkbox
-      v-if="!isEdit"
+      v-if="!isEdit && existingVisionDocuments.length > 0"
       v-model="skipAiAnalysis"
       label="Skip AI Analysis"
       :disabled="createBlank"
@@ -146,7 +146,7 @@
     />
 
     <v-alert
-      v-if="!isEdit && skipAiAnalysis"
+      v-if="!isEdit && skipAiAnalysis && existingVisionDocuments.length > 0"
       type="info"
       variant="tonal"
       density="compact"
@@ -158,20 +158,8 @@
       </span>
     </v-alert>
 
-    <div v-if="!isEdit" class="mt-1 mb-2 d-flex align-center ga-2 flex-wrap">
+    <div v-if="!isEdit && createBlank" class="mt-1 mb-2">
       <v-btn
-        variant="text"
-        size="small"
-        color="primary"
-        density="comfortable"
-        data-test="create-blank-toggle"
-        @click="createBlank = !createBlank"
-      >
-        <v-icon start size="small">{{ createBlank ? 'mdi-check-circle' : 'mdi-file-document-outline' }}</v-icon>
-        {{ createBlank ? 'Creating a blank product' : 'Or create a blank product (no document)' }}
-      </v-btn>
-      <v-btn
-        v-if="createBlank"
         variant="text"
         size="small"
         density="comfortable"

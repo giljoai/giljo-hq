@@ -299,7 +299,7 @@ class TestGlobalSerialCounter:
             )
 
     @pytest.mark.asyncio
-    async def test_trash_keeps_the_number_and_restore_reallocates_fresh(
+    async def test_trash_keeps_the_number_and_restore_gives_it_back(
         self,
         project_service: ProjectService,
         db_session,
@@ -337,7 +337,7 @@ class TestGlobalSerialCounter:
         restored = (await db_session.execute(select(Project).where(Project.id == first.id))).scalar_one()
 
         assert restored.deleted_at is None
-        assert restored.series_number == 3
+        assert restored.series_number == 1
         assert restored.series_number != second.series_number
 
 

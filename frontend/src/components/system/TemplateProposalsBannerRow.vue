@@ -18,9 +18,22 @@
         size="18"
         class="template-proposals-row__icon"
       />
-      <span class="template-proposals-row__text" data-testid="template-proposals-banner-text">
+      <span
+        :id="messageId"
+        ref="messageEl"
+        class="template-proposals-row__text"
+        :class="{ 'is-expanded': expanded }"
+        data-testid="template-proposals-banner-text"
+        @click="onTextClick"
+      >
         {{ message }}
       </span>
+      <BannerExpandToggle
+        v-if="expandable"
+        :expanded="expanded"
+        :controls="messageId"
+        @toggle="toggle"
+      />
     </div>
 
     <div class="template-proposals-row__actions">
@@ -37,6 +50,8 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useBannerExpand } from '@/composables/useBannerExpand'
+import BannerExpandToggle from './BannerExpandToggle.vue'
 
 const props = defineProps({
   count: {
@@ -49,6 +64,7 @@ defineEmits(['open'])
 const message = computed(() =>
   props.count === 1 ? '1 template change waiting' : `${props.count} template changes waiting`,
 )
+const { messageEl, messageId, expanded, expandable, toggle, onTextClick } = useBannerExpand(message)
 </script>
 
 <style scoped lang="scss">

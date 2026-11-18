@@ -5,6 +5,7 @@
 
 
 import asyncio
+import ipaddress
 import logging
 from datetime import UTC, datetime
 
@@ -22,15 +23,23 @@ from api.endpoints.auth_models import (
     PinPasswordResetRequest,
     PinPasswordResetResponse,
 )
+from api.middleware._proxy_aware_ip import CLIENT_FROM_HEADER_SCOPE_KEY
 from api.middleware.auth_rate_limiter import get_rate_limiter
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.auth.dependencies import get_current_active_user, get_current_user, get_db_session
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import User
 from giljo_mcp.repositories.auth_repository import AuthRepository
 from giljo_mcp.services.oauth_refresh_service import (
     revoke_all_for_user as revoke_all_refresh_tokens_for_user,
 )
-from giljo_mcp.services.user_auth_service import record_failed_pin_attempt, reset_password_via_pin
+from giljo_mcp.services.session_eviction import SESSION_REVOKED, close_live_user_sockets
+from giljo_mcp.services.user_auth_service import (
+    lock_pin_state,
+    pin_locked,
+    record_failed_pin_attempt,
+    reset_password_via_pin,
+    verify_current_password,
+)
 from giljo_mcp.utils.password_helper import DUMMY_BCRYPT_HASH, async_verify_password
 
 
@@ -38,6 +47,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _GENERIC_INVALID_PIN_MESSAGE = "Invalid username or PIN"
+_FORWARDING_HEADERS = frozenset({"forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip"})
+
+
+def _is_console_caller(request: Request) -> bool:
+    client = getattr(request, "client", None)
+    if client is None or (getattr(request, "scope", None) or {}).get(CLIENT_FROM_HEADER_SCOPE_KEY):
+        return False
+    if any(name.lower() in _FORWARDING_HEADERS for name in request.headers):
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        return False
+
+
+async def _pin_guess_allowed(db: AsyncSession, user: User, http_request: Request) -> bool:
+    if _is_console_caller(http_request):
+        return True
+    if pin_locked(user):
+        return False
+    await lock_pin_state(db, user)
+    return not pin_locked(user)
+
+
+def _lockout_detail(user: User) -> str:
+    minutes = max(1, int((user.pin_lockout_until - datetime.now(UTC)).total_seconds() // 60))
+    return f"Account locked out due to too many failed attempts. Try again in {minutes} minutes."
 
 
 
@@ -52,18 +88,14 @@ async def verify_pin_and_reset_password(
     Security Features:
     - Generic error messages (doesn't reveal username existence)
     - IP-based rate limiting: 3 attempts per minute
-    - Account lockout: 5 failed attempts → 15 minute lockout (per-user)
+    - Account lockout: after 5 failed attempts recovery locks for 15 minutes,
+      and each further failure locks for longer (1 hour, 4 hours, then 24 hours)
+      until a successful reset or a password sign-in
+    - A request made directly on the server machine (localhost, no proxy) is
+      never locked out
     - Timing-safe PIN comparison (bcrypt)
     - PIN never stored in plaintext
     - Audit logging for security monitoring
-
-    Flow:
-    1. Check IP-based rate limit (3/min across all users)
-    2. Find user by username
-    3. Check per-user lockout status (pin_lockout_until)
-    4. Verify PIN with bcrypt
-    5. If invalid: Increment failed_pin_attempts, trigger lockout if >= 5
-    6. If valid: Reset password, clear lockout
 
     Args:
         http_request: FastAPI request object
@@ -81,7 +113,7 @@ async def verify_pin_and_reset_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True, policy="pin_recovery")
 
     if request_data.new_password != request_data.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match")
@@ -96,36 +128,21 @@ async def verify_pin_and_reset_password(
         logger.warning(f"PIN reset attempt for user without PIN: {user.username}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
-    if user.pin_lockout_until and datetime.now(UTC) < user.pin_lockout_until:
-        lockout_remaining = user.pin_lockout_until - datetime.now(UTC)
-        minutes_remaining = int(lockout_remaining.total_seconds() / 60)
-        logger.warning(
-            f"PIN reset attempt while locked out - user: {user.username}, remaining: {minutes_remaining} minutes"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Account locked out due to too many failed attempts. Try again in {minutes_remaining} minutes.",
-        )
+    if not await _pin_guess_allowed(db, user, http_request):
+        logger.warning(f"PIN reset attempt while locked out - user: {user.username}")
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=_lockout_detail(user))
 
     if not await async_verify_password(request_data.recovery_pin, user.recovery_pin_hash):
         await record_failed_pin_attempt(db, user)
 
-        if user.failed_pin_attempts >= 5:
+        if pin_locked(user):
             logger.warning(
                 f"PIN lockout triggered - user: {user.username}, "
                 f"attempts: {user.failed_pin_attempts}, lockout until: {user.pin_lockout_until}"
             )
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=_lockout_detail(user))
 
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Account locked out due to too many failed attempts. Try again in 15 minutes.",
-            )
-
-        attempts_remaining = 5 - user.failed_pin_attempts
-        logger.warning(
-            f"Invalid PIN attempt - user: {user.username}, "
-            f"attempts: {user.failed_pin_attempts}, remaining: {attempts_remaining}"
-        )
+        logger.warning(f"Invalid PIN attempt - user: {user.username}, attempts: {user.failed_pin_attempts}")
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
@@ -166,7 +183,7 @@ async def verify_pin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True, policy="pin_recovery")
 
     user = await AuthRepository().get_user_by_username_or_email(db, request_data.username)
 
@@ -174,7 +191,7 @@ async def verify_pin(
         await async_verify_password(request_data.recovery_pin, DUMMY_BCRYPT_HASH)
         return VerifyPinResponse(valid=False, message=_GENERIC_INVALID_PIN_MESSAGE)
 
-    if user.pin_lockout_until and datetime.now(UTC) < user.pin_lockout_until:
+    if not await _pin_guess_allowed(db, user, http_request):
         await async_verify_password(request_data.recovery_pin, DUMMY_BCRYPT_HASH)
         return VerifyPinResponse(valid=False, message=_GENERIC_INVALID_PIN_MESSAGE)
 
@@ -187,29 +204,31 @@ async def verify_pin(
 
 @router.post("/check-first-login", response_model=CheckFirstLoginResponse, tags=["auth"])
 async def check_first_login(
-    request_data: CheckFirstLoginRequest = Body(...), db: AsyncSession = Depends(get_db_session)
+    request_data: CheckFirstLoginRequest = Body(...),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Check if user must change password or set PIN on first login.
+    Check if the signed-in user must change password or set PIN on first login.
 
     Used by frontend after successful login to determine if additional
     setup is required before accessing the dashboard.
 
+    The flags always describe the signed-in caller, whatever ``username`` the
+    request carries (the field is accepted for older clients and not used), so
+    the endpoint never tells one account about another.
+
     Args:
-        request_data: Username to check
-        db: Database session
+        request_data: Accepted for compatibility; not used
+        current_user: The signed-in caller
 
     Returns:
-        must_change_password and must_set_pin flags (safe defaults for unknown users)
+        must_change_password and must_set_pin flags
     """
-    user = await AuthRepository().get_user_by_username_or_email(db, request_data.username)
+    must_set_pin = bool(current_user.must_set_pin) if GILJO_MODE in ("", "ce") else False
 
-    if not user:
-        return CheckFirstLoginResponse(must_change_password=False, must_set_pin=False)
-
-    must_set_pin = bool(user.must_set_pin) if GILJO_MODE in ("", "ce") else False
-
-    return CheckFirstLoginResponse(must_change_password=user.must_change_password or False, must_set_pin=must_set_pin)
+    return CheckFirstLoginResponse(
+        must_change_password=current_user.must_change_password or False, must_set_pin=must_set_pin
+    )
 
 
 @router.post("/complete-first-login", response_model=CompleteFirstLoginResponse, tags=["auth"])
@@ -242,8 +261,7 @@ async def complete_first_login(
     Raises:
         HTTPException: 400 if validation fails
     """
-    stored = current_user.password_hash
-    if not (await async_verify_password(request_data.current_password, stored or DUMMY_BCRYPT_HASH) and stored):
+    if not await verify_current_password(db, current_user, request_data.current_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
     if request_data.new_password == request_data.current_password:
@@ -280,6 +298,7 @@ async def complete_first_login(
         )
 
     await db.commit()
+    await close_live_user_sockets(current_user.tenant_key, logger, reason=SESSION_REVOKED)
 
     logger.info(
         f"First login completed - user: {current_user.username} "

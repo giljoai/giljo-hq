@@ -461,6 +461,10 @@ class MutationMixin:
                     context={"project_id": project_id},
                 )
 
+            type_id = updates.get("project_type_id")
+            if type_id and not await self._repo.project_type_exists(session, tenant_key, type_id):
+                raise ResourceNotFoundError(message="Project type not found", context={"project_type_id": type_id})
+
             self._apply_project_updates(project, updates)
 
             if updates.get("status") in CHAIN_DETACHING_STATUSES:

@@ -341,3 +341,41 @@ async def test_get_active_projects_carries_staging_status_and_execution_mode(
     assert len(result) == 1
     assert result[0].staging_status == "staged"
     assert result[0].execution_mode == "multi_terminal"
+
+
+@pytest.mark.asyncio
+async def test_get_active_projects_counts_in_one_query_not_one_per_project(query_service, db_session, test_tenant_key):
+    from sqlalchemy import event
+
+    with tenant_session_context(db_session, test_tenant_key):
+        projects = [await _seed_project(db_session, test_tenant_key, name=f"P{i}") for i in range(4)]
+        for i, project in enumerate(projects):
+            db_session.add_all([_job(test_tenant_key, project.id) for _ in range(i)])
+            db_session.add_all(
+                [
+                    Message(tenant_key=test_tenant_key, project_id=project.id, content="m", status="pending")
+                    for _ in range(i * 2)
+                ]
+            )
+        await db_session.flush()
+
+    statements: list[str] = []
+    sync_conn = (await db_session.connection()).sync_connection
+
+    def _record(_conn, _cursor, statement, _params, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(sync_conn, "before_cursor_execute", _record)
+    try:
+        result = await query_service.get_active_projects()
+    finally:
+        event.remove(sync_conn, "before_cursor_execute", _record)
+
+    by_name = {p.name: p for p in result}
+    assert [by_name[f"P{i}"].agent_count for i in range(4)] == [0, 1, 2, 3]
+    assert [by_name[f"P{i}"].message_count for i in range(4)] == [0, 2, 4, 6]
+
+    job_counts = [s for s in statements if "count(agent_jobs.job_id)" in s]
+    message_counts = [s for s in statements if "count(messages.id)" in s]
+    assert len(job_counts) == 1, f"agent_jobs counted {len(job_counts)} times for 4 projects (N+1)"
+    assert len(message_counts) == 1, f"messages counted {len(message_counts)} times for 4 projects (N+1)"

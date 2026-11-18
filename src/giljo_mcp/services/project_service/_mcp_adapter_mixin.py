@@ -21,6 +21,11 @@ from giljo_mcp.services.vision_hash import compute_vision_inputs_hash
 
 logger = logging.getLogger(__name__)
 
+_CODING_AGENT_NOTE = (
+    "A coding agent runs this project: connect one (for example Claude Code or Codex) "
+    "and ask it to stage and implement it."
+)
+
 
 class McpAdapterMixin:
 
@@ -127,7 +132,7 @@ class McpAdapterMixin:
             "series_number": project.series_number or 0,
             "taxonomy_alias": project.taxonomy_alias,
             "created_at": project.created_at,
-            "message": f"Project '{project.name}' created successfully",
+            "message": f"Project '{project.name}' created successfully. {_CODING_AGENT_NOTE}",
             "numbering": (
                 "auto-assigned (continue-upward, global across all types and tasks); you do not pick the series_number"
             ),

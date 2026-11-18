@@ -18,8 +18,8 @@ const SENTRY_DATA_COLLECTION = Object.freeze({
 
 async function loadSentry() {
   try {
-    const { init, browserTracingIntegration, setTag, setAttribute } = await import('@sentry/vue')
-    return { init, browserTracingIntegration, setTag, setAttribute }
+    const { init, setTag, setAttribute } = await import('@sentry/vue')
+    return { init, setTag, setAttribute }
   } catch (error) {
     console.warn('[Sentry] @sentry/vue not available; skipping init:', error?.message || error)
     return null
@@ -39,13 +39,8 @@ export async function initSentry(app, options = {}) {
     app,
     dsn,
     environment: environment || 'unknown',
-    tracesSampleRate: 0.1,
     sampleRate: 1.0,
     dataCollection: SENTRY_DATA_COLLECTION,
-    integrations: (defaultIntegrations) => [
-      ...defaultIntegrations,
-      Sentry.browserTracingIntegration(),
-    ],
   })
 
   _initialized = true

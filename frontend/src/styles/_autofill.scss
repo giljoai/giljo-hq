@@ -1,0 +1,31 @@
+// Browser autofill on Vuetify fields, app-wide.
+//
+// Chrome keeps an autofilled password hidden from scripts until the user
+// interacts, so Vuetify sees an empty field and leaves the label sitting
+// over the dots. These rules mirror Vuetify's own `.v-field--active` label
+// rules for a field whose input is autofilled, so the label floats at once.
+// The input rules paint over Chrome's autofill tint and stop its slow fade.
+
+.v-field:has(input:-webkit-autofill) {
+  .v-label.v-field-label {
+    visibility: hidden;
+  }
+
+  .v-label.v-field-label.v-field-label--floating {
+    visibility: unset;
+  }
+
+  &.v-field--variant-outlined .v-field__outline__notch::before {
+    opacity: 0;
+  }
+}
+
+.v-field input:-webkit-autofill,
+.v-field input:-webkit-autofill:hover,
+.v-field input:-webkit-autofill:focus,
+.v-field input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px rgb(var(--v-theme-surface)) inset !important;
+  -webkit-text-fill-color: rgb(var(--v-theme-on-surface)) !important;
+  caret-color: rgb(var(--v-theme-on-surface));
+  transition: background-color 0s 600000s, color 0s 600000s;
+}

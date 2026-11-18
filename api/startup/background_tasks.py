@@ -172,13 +172,13 @@ async def _emit_skills_drift_banner(service: NotificationService, tenant_key: st
         user_id=None,
         notification_type="system.skills_drift",
         severity="info",
-        title="A newer slash-command bundle is available",
+        title="Skills update ready",
         body=drift["message"],
         dedupe_key=_SKILLS_DRIFT_DEDUPE_KEY,
         surface="banner",
         role_filter="admin",
-        cta_label="Update bundle",
-        cta_route=_TOOLS_ROUTE,
+        cta_label=None,
+        cta_route=None,
         resurface_after_hours=_SKILLS_DRIFT_RESURFACE_HOURS,
         payload={
             "current": drift["current"],
@@ -202,8 +202,8 @@ async def _compute_skills_drift(db_manager: DatabaseManager, tenant_key: str) ->
         "current": SKILLS_VERSION,
         "announced": acknowledged,
         "message": (
-            f"Skills bundle updated to v{SKILLS_VERSION} (you have v{acknowledged}) — "
-            "re-run /giljo_setup on each machine to update."
+            f"Version {SKILLS_VERSION} is out (you have {acknowledged}). "
+            "In each coding tool you use, tell your agent: run giljo_setup."
         ),
     }
 

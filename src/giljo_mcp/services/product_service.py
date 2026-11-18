@@ -25,7 +25,7 @@ from giljo_mcp.product_slug import slugify_product_name
 from giljo_mcp.repositories.product_repository import ProductRepository
 from giljo_mcp.schemas.jsonb_validators import validate_product_memory
 from giljo_mcp.services._session_helpers import tenant_context_session
-from giljo_mcp.services.product_field_map import assemble_update_kwargs
+from giljo_mcp.services.product_field_map import assemble_update_kwargs, validate_text_lengths
 from giljo_mcp.services.product_lifecycle_service import ProductLifecycleService
 from giljo_mcp.services.product_memory_service import ProductMemoryService
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -200,6 +200,9 @@ class ProductService:
                     context={"operation": "create_product"},
                 )
             self._validate_project_path(project_path, operation="create_product")
+            texts = {"description": description, "core_features": core_features, "brand_guidelines": brand_guidelines}
+            texts.update(tech_stack=tech_stack, architecture=architecture, test_config=test_config)
+            validate_text_lengths(texts, current=None, context={"operation": "create_product"})
             if target_platforms is not None:
                 is_valid, error_msg = self._validate_target_platforms(target_platforms)
                 if not is_valid:
@@ -339,6 +342,7 @@ class ProductService:
                     raise ResourceNotFoundError(
                         message="Product not found", context={"product_id": product_id, "tenant_key": self.tenant_key}
                     )
+                validate_text_lengths(updates, current=product, context={"product_id": product_id})
 
 
                 tech_stack = updates.pop("tech_stack", None)
@@ -438,10 +442,7 @@ class ProductService:
             default_product = await self.get_default_product(eager_load=False)
             if not default_product:
                 raise ValidationError(
-                    "No default product is set, so an unscoped read has nowhere to resolve to. "
-                    "Pass product_id explicitly -- get_context(categories=['products']) lists your "
-                    "products and their ids. Choosing which product is the default is a dashboard "
-                    "action; there is no tool for it.",
+                    await self.lifecycle.missing_default_message(),
                     context={"tenant_key": self.tenant_key, "operation": operation},
                 )
             return default_product

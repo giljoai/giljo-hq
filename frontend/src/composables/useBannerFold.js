@@ -10,6 +10,7 @@ export function useBannerFold({
   showTutorial,
   showInteg,
   showAgent,
+  showIntroVideo = { value: false },
 }) {
   const bannerOrderKeys = computed(() => {
     const keys = []
@@ -22,6 +23,7 @@ export function useBannerFold({
     if (showTutorial.value) keys.push('tutorial')
     if (showInteg.value) keys.push('integ')
     if (showAgent.value) keys.push('agent')
+    if (showIntroVideo.value) keys.push('intro-video')
     return keys
   })
 

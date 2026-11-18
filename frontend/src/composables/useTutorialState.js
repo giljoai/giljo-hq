@@ -139,6 +139,21 @@ export function useTutorialState() {
     persist()
   }
 
+  function restart() {
+    s.screen = 'beats'
+    s.beat = BEAT_MIN
+    s.path = null
+    s.productId = null
+    persist()
+  }
+
+  function openAt(n) {
+    s.screen = 'beats'
+    s.beat = clampBeat(n)
+    s.path = null
+    s.productId = null
+  }
+
   function pick(path) {
     if (!VALID_PATHS.has(path)) return
     s.path = path
@@ -195,6 +210,8 @@ export function useTutorialState() {
     next,
     back,
     goTo,
+    restart,
+    openAt,
     pick,
     setProduct,
     releaseAbandonedDraft,

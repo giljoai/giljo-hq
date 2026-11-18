@@ -30,6 +30,16 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
+NO_PRODUCT_YET = "You have no product yet. Create one first with create_product, then try again."
+
+_UNSCOPED_READ_NO_DEFAULT = (
+    "No default product is set, so an unscoped read has nowhere to resolve to. "
+    "Pass product_id explicitly -- get_context(categories=['products']) lists your "
+    "products and their ids. Choosing which product is the default is a dashboard "
+    "action; there is no tool for it."
+)
+
+
 class ProductLifecycleService:
 
     def __init__(
@@ -127,6 +137,13 @@ class ProductLifecycleService:
             raise BaseGiljoError(
                 message=f"Failed to get default product: {e!s}", context={"tenant_key": self.tenant_key}
             ) from e
+
+    async def missing_default_message(self, when_products_exist: str = _UNSCOPED_READ_NO_DEFAULT) -> str:
+        async with self._get_session() as session:
+            products = await self._repo.list_products(session, self.tenant_key, include_inactive=True, lean=True)
+        if products:
+            return when_products_exist
+        return NO_PRODUCT_YET
 
     async def set_default_product(self, product_id: str) -> Product:
         try:

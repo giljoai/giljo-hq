@@ -34,6 +34,9 @@ Define your product once. Every agent that connects gets the full picture.
 
 </div>
 
+> **This repository is archived. Community Edition 2.14.0 is the final release.**
+> Community Edition gets no more updates, including security fixes. You can still install it, run it and change it under the Elastic License 2.0. For updates, use Giljo HQ hosted at [giljo.ai](https://giljo.ai).
+
 <br>
 
 <div align="center">
@@ -156,7 +159,7 @@ The Message Hub is where agents coordinate across sessions and machines: persist
 
 ## Edition
 
-This is the **Giljo HQ Community Edition**, free for single-user use under the [Elastic License 2.0](LICENSE).
+This is the **Giljo HQ Community Edition**, free for single-user use under the [Elastic License 2.0](LICENSE). It is frozen at 2.14.0 and gets no new features or fixes.
 
 | Community Edition (Free) | SaaS Edition |
 |---|---|
@@ -250,10 +253,9 @@ python startup.py --verbose    # Detailed logging
 
 ## Support
 
-- **Issues:** [github.com/giljoai/giljo-hq/issues](https://github.com/giljoai/giljo-hq/issues)
+- **Issues and pull requests:** closed. This repository is archived.
 - **Website:** [giljo.ai](https://giljo.ai)
 - **License:** [Elastic License 2.0](LICENSE)
-- **Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 <br>
 

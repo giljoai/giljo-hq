@@ -27,6 +27,25 @@ logger = logging.getLogger(__name__)
 _RATE_LIMIT_TENANT_SENTINEL = "_ratelimit"
 
 
+_BACKEND_PATH_PREFIXES = (
+    "/api",
+    "/ws",
+    "/mcp",
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/.well-known",
+    "/connect.md",
+)
+_FRONTEND_METHODS = frozenset({"GET", "HEAD"})
+_FRONTEND_SCOPE = "frontend"
+
+
+def is_frontend_request(method: str, path: str) -> bool:
+    return method in _FRONTEND_METHODS and not path.startswith(_BACKEND_PATH_PREFIXES)
+
+
 class _TestBypass:
 
     enabled: bool = False
@@ -97,6 +116,7 @@ class RateLimitMiddleware:
     def __init__(self, app: ASGIApp, requests_per_minute: int = 100, exempt_paths: list = None):
         self.app = app
         self.rate_limiter = RateLimiter(requests_per_minute)
+        self.frontend_rate_limiter = RateLimiter(requests_per_minute, scope=_FRONTEND_SCOPE)
         self.exempt_paths = exempt_paths or ["/api/health", "/api/metrics"]
         self._ip_resolver = ProxyAwareIpResolver()
         logger.info(
@@ -126,7 +146,8 @@ class RateLimitMiddleware:
 
         client_ip = self._get_client_ip(request)
 
-        decision = await self.rate_limiter.hit(client_ip)
+        limiter = self.frontend_rate_limiter if is_frontend_request(request.method, path) else self.rate_limiter
+        decision = await limiter.hit(client_ip)
         if not decision.allowed:
             logger.warning(
                 f"Rate limit exceeded for IP: {client_ip}, path: {request.url.path}, method: {request.method}"

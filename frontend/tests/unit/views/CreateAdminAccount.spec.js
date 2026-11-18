@@ -18,7 +18,6 @@ vi.mock('@/services/api', () => ({
       createFirstAdmin: vi.fn(),
     },
   },
-  setTenantKey: vi.fn(),
 }))
 
 // Mock setupService

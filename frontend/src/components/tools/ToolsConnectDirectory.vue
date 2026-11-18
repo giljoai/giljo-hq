@@ -36,7 +36,7 @@
         <h2 class="dir-title">Pick a tool to connect.</h2>
         <div class="dir-picker-grid">
           <div
-            v-for="tool in SETUP_TOOLS"
+            v-for="tool in pickerTools"
             :key="tool.id"
             class="dir-picker-card smooth-border"
             :data-testid="`dir-pick-${tool.id}`"
@@ -93,7 +93,16 @@ import { useWebSocketStore } from '@/stores/websocket'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { parseErrorResponse } from '@/utils/errorMessages'
-import { SETUP_TOOLS, TOOL_META, toolName, toolIdForHarness, harnessForToolId } from '@/config/setupTools'
+import {
+  TOOL_META,
+  toolName,
+  toolIdForHarness,
+  toolIdForSurface,
+  harnessForToolId,
+  setupToolsFor,
+  sortByRegistry,
+} from '@/config/setupTools'
+import configService from '@/services/configService'
 import ConnectToolCard from '@/components/setup/ConnectToolCard.vue'
 import ConnectAgentLink from '@/components/setup/ConnectAgentLink.vue'
 
@@ -103,14 +112,29 @@ const wsStore = useWebSocketStore()
 
 const fleetIds = ref([...(userStore.currentUser?.setup_selected_tools ?? [])])
 const fleet = computed(() =>
-  fleetIds.value.filter((id) => TOOL_META[id]).map((id) => ({ id, name: toolName(id) })),
+  sortByRegistry(fleetIds.value.filter((id) => TOOL_META[id])).map((id) => ({ id, name: toolName(id) })),
 )
+
+const isCe = ref(false)
+const pickerTools = computed(() => setupToolsFor(isCe.value))
+async function loadEdition() {
+  try {
+    const cfg = await configService.fetchConfig()
+    // eslint-disable-next-line giljo-internal/no-scattered-mode-checks
+    isCe.value = cfg?.giljo_mode === 'ce'
+  } catch {
+    isCe.value = false
+  }
+}
+
+const liveSurfaceTools = ref(new Set())
 
 const credStatus = reactive({
   has_valid_api_key: false,
   has_valid_oauth: false,
   has_expired_oauth: false,
   connected_harnesses: {},
+  connected_surfaces: [],
 })
 const optimisticConfigured = ref(false)
 const justDeleted = ref(false)
@@ -125,8 +149,10 @@ const hasWorkspaceCredential = computed(
   () => credStatus.has_valid_api_key || credStatus.has_valid_oauth || optimisticConfigured.value,
 )
 
+const storedSurfaceToolIds = computed(() => new Set((credStatus.connected_surfaces || []).map(toolIdForSurface)))
+
 const connectedToolIds = computed(() => {
-  const ids = new Set()
+  const ids = new Set([...liveSurfaceTools.value, ...storedSurfaceToolIds.value])
   for (const harness of Object.keys(credStatus.connected_harnesses || {})) {
     const id = toolIdForHarness(harness)
     if (id) ids.add(id)
@@ -147,7 +173,11 @@ const freshlyConnectedToolIds = computed(() => {
 })
 
 const isConfigured = computed(
-  () => freshlyConnectedToolIds.value.has(selectedId.value) || optimisticConfigured.value,
+  () =>
+    freshlyConnectedToolIds.value.has(selectedId.value) ||
+    liveSurfaceTools.value.has(selectedId.value) ||
+    storedSurfaceToolIds.value.has(selectedId.value) ||
+    optimisticConfigured.value,
 )
 const isReauth = computed(
   () => !isConfigured.value && credStatus.has_expired_oauth && !credStatus.has_valid_api_key,
@@ -158,8 +188,9 @@ async function fetchCredentialStatus() {
     const { data } = await api.connect.credentialStatus()
     credStatus.has_valid_api_key = !!data?.has_valid_api_key
     credStatus.has_valid_oauth = !!data?.has_valid_oauth
-  credStatus.has_expired_oauth = !!data?.has_expired_oauth
+    credStatus.has_expired_oauth = !!data?.has_expired_oauth
     credStatus.connected_harnesses = data?.connected_harnesses || {}
+    credStatus.connected_surfaces = data?.connected_surfaces || []
     optimisticConfigured.value = false
   } catch (e) {
     console.warn('[ToolsConnectDirectory] Failed to fetch credential status:', e)
@@ -229,6 +260,7 @@ async function addTool(id) {
 async function removeTool(id) {
   const saved = await persistFleet(fleetIds.value.filter((t) => t !== id), fleetIds.value, `remove ${toolName(id)}`)
   if (!saved) return
+  liveSurfaceTools.value = new Set([...liveSurfaceTools.value].filter((t) => t !== id))
   const harness = harnessForToolId(id)
   if (harness) {
     try {
@@ -257,6 +289,8 @@ function markConfigured() {
 
 let wsUnsub = null
 async function handleToolConnected(payload) {
+  const surfaceTool = toolIdForSurface(payload?.surface)
+  if (surfaceTool) liveSurfaceTools.value = new Set([...liveSurfaceTools.value, surfaceTool])
   if (payload?.tool_name) {
     await fetchCredentialStatus()
   }
@@ -267,6 +301,7 @@ onMounted(() => {
   window.addEventListener('api-key-created', fetchCredentialStatus)
   window.addEventListener('api-key-revoked', handleKeyRevoked)
   fetchCredentialStatus()
+  loadEdition()
 })
 onUnmounted(() => {
   if (wsUnsub) wsUnsub()

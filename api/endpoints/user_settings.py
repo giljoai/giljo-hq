@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.auth.dependencies import get_db_session, require_admin
+from giljo_mcp.auth.dependencies import get_db_session, require_admin, require_browser_session
 from giljo_mcp.models import User
 from giljo_mcp.services.settings_service import SettingsService
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -245,6 +245,7 @@ async def update_headless_launch(
     request: HeadlessLaunchUpdateRequest,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
+    _browser: None = Depends(require_browser_session),
 ) -> HeadlessLaunchResponse:
     """Set the account-wide Headless-vs-HITL launch toggle (admin only).
 

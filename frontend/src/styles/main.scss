@@ -1,7 +1,10 @@
 @use "sass:color";
 @use "./variables.scss" as *;
 @use "./design-tokens.scss" as *;
+@use "./agent-colors";
 @use "./live-activity";
+@use "./autofill";
+@use "./next-press-pulse";
 
 // CSS Variables for theme switching with smooth transitions
 :root {

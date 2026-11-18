@@ -158,7 +158,6 @@ describe('authGuard end-to-end with the real setupService (FE-9233)', () => {
 
     vi.doMock('@/services/api', () => ({
       default: { auth: { me: vi.fn().mockResolvedValue({ data: { id: 1, username: 'patrik' } }) } },
-      setTenantKey: vi.fn(),
     }))
 
     ;({ createAuthGuard } = await import('@/router/authGuard'))
@@ -216,7 +215,6 @@ describe('userStore.checkAuth transient failure (FE-9233)', () => {
     setActivePinia(createPinia())
     vi.doMock('@/services/api', () => ({
       default: { auth: { me: vi.fn() } },
-      setTenantKey: vi.fn(),
     }))
     ;({ default: api } = await import('@/services/api'))
     ;({ useUserStore } = await import('@/stores/user'))

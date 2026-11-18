@@ -17,6 +17,8 @@
         </p>
       </div>
 
+      <IntroVideoHomeCard />
+
       <div class="section-label">Quick Launch</div>
       <WelcomeQuickGrid
         :cards="quickCards"
@@ -31,17 +33,7 @@
         :has-product="hasAnyProduct"
       />
 
-      <div v-if="!setupComplete && onboardingComplete" class="setup-cta-section">
-        <div class="setup-cta smooth-border" @click="openSetup">
-          <v-icon size="24" color="var(--color-accent-primary)">mdi-rocket-launch</v-icon>
-          <div class="setup-cta-text">
-            <div class="setup-cta-title">{{ setupCtaLabel }}</div>
-            <div class="setup-cta-desc">Configure AI tools, manage connections, and learn the basics.</div>
-          </div>
-          <v-icon size="18" style="color:var(--text-muted);">mdi-chevron-right</v-icon>
-        </div>
-      </div>
-      <div v-else-if="onboardingComplete && recentProjects.length > 0" class="recent-projects-section">
+      <div v-if="onboardingComplete && recentProjects.length > 0" class="recent-projects-section">
         <div class="recent-projects-panel smooth-border">
           <div class="rp-header">
             <span class="rp-title">Recent Projects</span>
@@ -70,23 +62,23 @@
       :model-value="showSetupOverlay && setupOverlayMode === 'setup'"
       :current-step="setupStep"
       :selected-tools="setupSelectedTools"
-      :is-rerun="forceSetupMode"
-      :mode="setupOverlayMode"
+      :fresh="freshSetup"
       @update:model-value="showSetupOverlay = $event"
       @update:current-step="setupStep = $event"
       @step-complete="handleStepComplete"
-      @dismiss="handleDismiss"
+      @dismiss="handleWizardDismiss"
     />
     <TutorialOverlay
       :model-value="showSetupOverlay && setupOverlayMode === 'learning'"
+      :start-over="startTourOver"
       @update:model-value="showSetupOverlay = $event"
-      @dismiss="handleDismiss"
+      @dismiss="handleTourDismiss"
     />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useProductStore } from '@/stores/products'
@@ -95,6 +87,7 @@ import { getAgentColor } from '@/config/agentColors'
 import { templateRowActive } from '@/components/templates/templateTableConfig'
 import api from '@/services/api'
 import { PRODUCT_NAME } from '@/branding'
+import { sortByRegistry } from '@/config/setupTools'
 import GilMascot from '@/components/GilMascot.vue'
 import SetupWizardOverlay from '@/components/setup/SetupWizardOverlay.vue'
 import TutorialOverlay from '@/components/tutorial/TutorialOverlay.vue'
@@ -102,43 +95,46 @@ import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import configService from '@/services/configService'
 import { PROJECT_TEMPLATES } from '@/composables/projectTemplates'
-import { useToast } from '@/composables/useToast'
+import { useStarterProject } from '@/composables/useStarterProject'
 import { useDeferredHomeData } from '@/composables/useDeferredHomeData'
 import { useWelcomeGreeting } from '@/composables/useWelcomeGreeting'
 import WelcomeQuickGrid from './welcome/WelcomeQuickGrid.vue'
 import WelcomeTeamSection from './welcome/WelcomeTeamSection.vue'
+import IntroVideoHomeCard from '@/components/onboarding/IntroVideoHomeCard.vue'
+import { useGuideStore } from '@/stores/guide'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const productStore = useProductStore()
 const projectStore = useProjectStore()
-const { showToast } = useToast()
-
-const busyTemplateId = ref(null)
+const { busyTemplateId, createFromTemplate } = useStarterProject()
+const guide = useGuideStore()
 
 const showSetupOverlay = ref(false)
 const setupStep = ref(0)
 const forceSetupMode = ref(false)
+const freshSetup = ref(false)
+const startTourOver = ref(false)
+const tourRequested = ref(false)
 
 const setupComplete = computed(() => userStore.currentUser?.setup_complete ?? false)
 const learningComplete = computed(() => userStore.currentUser?.learning_complete ?? false)
 const setupOverlayMode = computed(() => {
   if (forceSetupMode.value) return 'setup'
-  return setupComplete.value ? 'learning' : 'setup'
+  return tourRequested.value ? 'learning' : 'setup'
 })
+
 const setupStepCompleted = computed(() => userStore.currentUser?.setup_step_completed ?? 0)
 const setupSelectedTools = computed(() => userStore.currentUser?.setup_selected_tools ?? [])
 
-const setupCtaLabel = computed(() => {
-  if (setupStepCompleted.value > 0) return 'Resume Setup'
-  return 'Getting Started'
-})
-
 async function handleStepComplete({ step, data }) {
   if (step === 0 && data.tools) {
+    const tools = freshSetup.value
+      ? sortByRegistry([...new Set([...setupSelectedTools.value, ...data.tools])])
+      : data.tools
     await userStore.updateSetupState({
-      setup_selected_tools: data.tools,
+      setup_selected_tools: tools,
       setup_step_completed: 1,
     })
   } else if (step === 1) {
@@ -149,50 +145,58 @@ async function handleStepComplete({ step, data }) {
     await userStore.updateSetupState({
       setup_step_completed: 3,
     })
-  } else if (step === 3 && data.setup_complete) {
-    await userStore.updateSetupState({
-      setup_complete: true,
-      setup_step_completed: 4,
-    })
-    showSetupOverlay.value = false
-
-    if (!forceSetupMode.value) {
-      setTimeout(() => {
-        showSetupOverlay.value = true
-      }, 1600)
-    } else if (data.route) {
-      router.push(data.route)
-    }
   }
 }
 
-async function handleDismiss() {
-  const wasFirstTimeFinish = setupStep.value >= 3 && !setupComplete.value && !forceSetupMode.value
-  const wasLearningMode = setupOverlayMode.value === 'learning'
+async function handleTourDismiss() {
   showSetupOverlay.value = false
   forceSetupMode.value = false
+  tourRequested.value = false
+  startTourOver.value = false
 
-  if (wasLearningMode && !learningComplete.value) {
+  if (!learningComplete.value) {
     await userStore.updateSetupState({ learning_complete: true })
   }
+}
 
-  if (wasFirstTimeFinish || (setupStep.value >= 3 && !setupComplete.value)) {
-    await userStore.updateSetupState({
-      setup_complete: true,
-      setup_step_completed: 4,
-    })
+function handleWizardDismiss() {
+  showSetupOverlay.value = false
+  forceSetupMode.value = false
+  freshSetup.value = false
+}
 
-    if (wasFirstTimeFinish) {
-      setTimeout(() => {
-        showSetupOverlay.value = true
-      }, 600)
-    }
-  }
+function initialSetupStep() {
+  if (!setupSelectedTools.value.length) return 0
+  return Math.min(Math.max(Number(setupStepCompleted.value) || 0, 0), 1)
 }
 
 function openSetup() {
+  freshSetup.value = false
+  setupStep.value = initialSetupStep()
   showSetupOverlay.value = true
 }
+
+function revealSetup() {
+  const ask = route.query.openSetup
+  if (ask !== 'true' && ask !== 'new') return
+  forceSetupMode.value = true
+  freshSetup.value = ask === 'new'
+  setupStep.value = freshSetup.value ? 0 : initialSetupStep()
+  showSetupOverlay.value = true
+  router.replace({ path: '/home' })
+}
+watch(() => route.query.openSetup, revealSetup)
+
+watch(
+  () => showSetupOverlay.value && setupOverlayMode.value === 'setup',
+  (open) => {
+    guide.setupWizardOpen = open
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  guide.setupWizardOpen = false
+})
 
 const templates = ref([])
 const totalSlots = ref(16)
@@ -227,16 +231,6 @@ const setupCard = {
   iconColor: 'var(--color-accent-primary)',
   accent: 'var(--color-accent-primary)',
   action: openSetup,
-}
-
-const learnCard = {
-  title: 'Learn',
-  description: 'Understand products, projects, agents, and slash commands.',
-  icon: 'mdi-book-open-variant',
-  iconBg: 'rgba(94,196,142,0.12)',
-  iconColor: getAgentColor('documenter').hex,
-  accent: getAgentColor('documenter').hex,
-  action: () => { showSetupOverlay.value = true },
 }
 
 const dashboardCard = {
@@ -332,34 +326,6 @@ const templateCards = computed(() =>
   }))
 )
 
-async function createFromTemplate(tmpl) {
-  if (busyTemplateId.value) return
-  const productId = productStore.effectiveProductId
-  if (!productId) {
-    showToast({
-      message: 'No product is open. Add a product before creating a project.',
-      color: 'error',
-    })
-    return
-  }
-  busyTemplateId.value = tmpl.id
-  try {
-    await projectStore.createProject({
-      name: tmpl.projectName,
-      description: tmpl.projectDescription,
-      product_id: productId,
-    })
-    busyTemplateId.value = null
-    router.push('/Projects')
-  } catch (err) {
-    busyTemplateId.value = null
-    showToast({
-      message: err?.message || 'Failed to create project from template',
-      color: 'error',
-    })
-  }
-}
-
 function onCardClick(card) {
   if (card.busy) return
   if (typeof card.action === 'function') {
@@ -374,11 +340,8 @@ function onCardClick(card) {
 const onboardingComplete = computed(() => hasActiveProduct.value && hasAnyProject.value)
 
 const quickCards = computed(() => {
-  if (!setupComplete.value) {
+  if (!setupComplete.value && !guide.visible) {
     return [setupCard]
-  }
-  if (!learningComplete.value) {
-    return [learnCard]
   }
   if (!hasAnyProduct.value) {
     return [newProductCard.value]
@@ -435,17 +398,12 @@ onMounted(async () => {
   } catch { /* config may fail on first load */ }
 
   if (route.query.openGuide === 'true') {
+    startTourOver.value = true
+    tourRequested.value = true
     showSetupOverlay.value = true
     router.replace({ path: '/home' })
-  } else if (route.query.openSetup === 'true' || !setupComplete.value) {
-    forceSetupMode.value = route.query.openSetup === 'true'
-    setupStep.value = Math.min(setupStepCompleted.value, 3)
-
-    showSetupOverlay.value = true
-
-    if (route.query.openSetup) {
-      router.replace({ path: '/home' })
-    }
+  } else {
+    revealSetup()
   }
 
   const productsLoaded = productStore.fetchProducts().catch(() => {})
@@ -552,43 +510,6 @@ onMounted(async () => {
   color: var(--text-muted);
   margin-bottom: 12px;
   font-weight: 500;
-}
-
-/* ═══ SETUP CTA ═══ */
-.setup-cta-section {
-  margin-bottom: 36px;
-  animation: fadeSlideUp 0.45s ease-out 0.42s both;
-}
-
-.setup-cta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
-  background: rgb(var(--v-theme-surface));
-  border-radius: $border-radius-rounded;
-  cursor: pointer;
-  transition: all $transition-normal;
-}
-
-.setup-cta:hover {
-  transform: translateY(-2px);
-  box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255,255,255,0.10)), 0 6px 16px -4px rgba(0,0,0,0.25);
-}
-
-.setup-cta-text {
-  flex: 1;
-}
-
-.setup-cta-title {
-  font-size: 0.92rem;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.setup-cta-desc {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
 }
 
 /* ═══ RECENT PROJECTS ═══ */

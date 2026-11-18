@@ -47,6 +47,9 @@ from api.wiring.openapi import build_openapi_servers as _build_openapi_servers
 from api.wiring.routers import register_routers as _register_routers
 
 
+MIN_SAAS_JWT_SECRET_BYTES = 32
+
+
 def _load_env_from_dotfile() -> None:
     from dotenv import load_dotenv
 
@@ -58,6 +61,10 @@ def _load_env_from_dotfile() -> None:
     _reconcile_giljo_mode_after_dotenv()
 
     jwt_secret = os.getenv("JWT_SECRET") or os.getenv("GILJO_MCP_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if GILJO_MODE == "saas" and len((jwt_secret or "").encode()) < MIN_SAAS_JWT_SECRET_BYTES:
+        raise RuntimeError(
+            f"JWT_SECRET must be at least {MIN_SAAS_JWT_SECRET_BYTES} bytes in saas mode; refusing to start."
+        )
     if jwt_secret:
         logger.info("JWT secret key found in environment")
     else:
@@ -209,11 +216,17 @@ async def lifespan(app: FastAPI):
         register_mcp_subscription_gate,
         register_saas_tenant_scoped_models,
         require_public_base_url,
+        start_oauth_client_jobs,
     )
 
     require_public_base_url(giljo_mode=GILJO_MODE)
     register_saas_tenant_scoped_models(giljo_mode=GILJO_MODE)
     register_mcp_subscription_gate(giljo_mode=GILJO_MODE)
+
+    if GILJO_MODE == "saas":
+        import importlib
+
+        importlib.import_module("giljo_mcp.saas.billing").check_billing_config_at_boot()
 
     from api.startup.oauth_hydration_gate import run_saas_oauth_hydration
 
@@ -244,6 +257,7 @@ async def lifespan(app: FastAPI):
         _backup_scheduler_task = await start_backup_scheduler_phase(state)
 
     await install_access_log(state, giljo_mode=GILJO_MODE)
+    start_oauth_client_jobs(state, giljo_mode=GILJO_MODE)
 
     if GILJO_MODE == "saas":
         try:
@@ -428,7 +442,8 @@ def _wrap_saas_edge(inner):
     if GILJO_MODE == "saas":
         import importlib
 
-        return importlib.import_module("api.saas_middleware.founder_forwarder").wrap_with_founder_forwarder(inner)
+        forwarded = importlib.import_module("api.saas_middleware.founder_forwarder").wrap_with_founder_forwarder(inner)
+        return importlib.import_module("api.saas_middleware.origin_lock").wrap_with_origin_lock(forwarded)
     return inner
 
 

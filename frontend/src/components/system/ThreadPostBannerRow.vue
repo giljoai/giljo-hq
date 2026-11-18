@@ -33,9 +33,22 @@
       >
         +{{ pillOverflowCount }}
       </span>
-      <span class="thread-post-banner-row__text" data-testid="thread-post-banner-text">
+      <span
+        :id="messageId"
+        ref="messageEl"
+        class="thread-post-banner-row__text"
+        :class="{ 'is-expanded': expanded }"
+        data-testid="thread-post-banner-text"
+        @click="onTextClick"
+      >
         {{ message }}
       </span>
+      <BannerExpandToggle
+        v-if="expandable"
+        :expanded="expanded"
+        :controls="messageId"
+        @toggle="toggle"
+      />
     </div>
 
     <div class="thread-post-banner-row__actions">
@@ -60,6 +73,8 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useBannerExpand } from '@/composables/useBannerExpand'
+import BannerExpandToggle from './BannerExpandToggle.vue'
 
 const MAX_PILLS = 4
 
@@ -98,6 +113,7 @@ const message = computed(() => {
 })
 
 const cta = computed(() => (rowCount.value > 1 ? 'Open Message Hub' : 'Open thread'))
+const { messageEl, messageId, expanded, expandable, toggle, onTextClick } = useBannerExpand(message)
 
 const pills = computed(() => {
   const seen = new Set()

@@ -378,10 +378,8 @@ class MissionOrchestrationService:
 
         project_type_abbreviation: str | None = None
         if project.project_type_id:
-            tt_result = await session.execute(
-                select(TaxonomyType.abbreviation).where(TaxonomyType.id == project.project_type_id)
-            )
-            project_type_abbreviation = tt_result.scalar_one_or_none()
+            stmt = select(TaxonomyType.abbreviation).where(TaxonomyType.tenant_key == tenant_key)
+            project_type_abbreviation = await session.scalar(stmt.where(TaxonomyType.id == project.project_type_id))
 
         is_staging = execution.status == "waiting" or is_planning_session(execution)
         chain_ctx = await self._chain.resolve(

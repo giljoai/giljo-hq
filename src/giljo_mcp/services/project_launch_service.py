@@ -16,6 +16,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, orchestrator_placeholder_mission
 from giljo_mcp.models.projects import Project
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
@@ -238,7 +239,7 @@ class ProjectLaunchService:
 
     @staticmethod
     def _generate_launch_prompt(project_name: str, project_id: str, mission: str | None, job_id: str) -> str:
-        return f"""Launch orchestrator for project: {project_name}
+        return f"""Launch orchestrator for project: "{prompt_name(project_name)}"
 
 Project ID: {project_id}
 Mission: {mission}

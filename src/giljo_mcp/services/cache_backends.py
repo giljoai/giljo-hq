@@ -24,6 +24,8 @@ GLOBAL_RATE_LIMIT_BACKEND_NAME = "global_rate_limiter"
 
 LICENSE_CACHE_BACKEND_NAME = "license_cache"
 
+FIRST_REPLY_TOLD_BACKEND_NAME = "first_reply_told"
+
 
 @runtime_checkable
 class CacheBackend(Protocol):

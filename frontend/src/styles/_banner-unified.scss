@@ -14,7 +14,8 @@
  * (rgba(var(--v-theme-error), 0.22)) gives the full-width strip a faint edge.
  * Yellow CTA keeps dark --badge-text (#0e1c2d on #ffc300 = 10.68:1 ✅).
  *
- * Consumers: SystemStatusBanner, LapsedStateBanner, TrialBanner, AccountDeletionBanner.
+ * Consumers: SystemStatusBanner and its strip rows, LapsedStateBanner, TrialBanner,
+ * AccountDeletionBanner, SetPasswordNudgeBanner.
  * Import via: @use '@/styles/banner-unified' as banner; then @include banner.unified-banner-chrome;
  */
 
@@ -55,6 +56,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  // SEC-0059h: the user asked to read a cut-off message in full (useBannerExpand).
+  &.is-expanded {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+// SEC-0059h: on the bar root while its message is cut off or expanded, so the
+// whole bar reads as clickable.
+@mixin unified-banner-expandable {
+  &.is-expandable {
+    cursor: pointer;
+  }
 }
 
 // ─── Shared button styles ─────────────────────────────────────────────────────
@@ -97,6 +112,110 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+}
+
+// SEC-0059h: the quiet "More" / "Less" text control for a cut-off message.
+// Never yellow (yellow is the action) and never a chevron (the fold owns it).
+@mixin unified-banner-expand-toggle {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--color-text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+  }
+}
+
+// ─── SEC-0059h: the strip's avatar + text + CTA + dismiss row ────────────────
+// One copy for the system-notice rows (SystemNoticeBannerRow) and the
+// onboarding nudges (OnboardingNudgeRow); include at the top of a scoped style.
+
+@mixin unified-system-row {
+  .system-banner-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 16px;
+    font-size: 13px;
+    border-radius: 0;
+    background: var(--banner-bg);
+    --smooth-border-color: var(--banner-border);
+    @include unified-banner-expandable;
+
+    &__content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    // FE-9202: Gil avatar, the strip speaks in Gil's voice.
+    &__avatar {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    &__text {
+      @include unified-banner-message;
+    }
+
+    &__actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+  }
+
+  .system-banner-btn {
+    border: none;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.15s ease;
+    line-height: 1;
+
+    &:hover {
+      opacity: 0.85;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-accent-primary);
+      outline-offset: 2px;
+    }
+
+    &--cta {
+      background-color: var(--color-accent-primary);
+      color: var(--badge-text);
+      padding: 5px 12px;
+    }
+
+    &--dismiss {
+      background: transparent;
+      color: rgba(255, 255, 255, 0.7);
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
   }
 }
 

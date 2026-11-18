@@ -94,19 +94,17 @@ describe('JobsBoardCard actionable controls share the Jobs detail link colour (F
   const MUTED = /color:\s*\$color-text-secondary/
   const block = (source, selector) => source.match(new RegExp(`${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`))?.[1] || ''
 
-  it('fold chevron and Details chevron', async () => {
+  it('fold chevron', async () => {
     const source = (await import('./JobsBoardCard.vue?raw')).default
     expect(block(source, '.jb-fold-btn')).toMatch(LINK)
     expect(block(source, '.jb-fold-btn')).not.toMatch(MUTED)
-    expect(block(source, '.jb-details-btn')).toMatch(LINK)
-    expect(block(source, '.jb-details-btn')).not.toMatch(MUTED)
   })
 
-  it('edit pencils on the rows and in the drawer', async () => {
-    const rows = (await import('./JobsBoardSummaryRows.vue?raw')).default
+  it('edit pencils in the panel blocks and the crew rows', async () => {
+    const blockSource = (await import('./JobsBoardTextBlock.vue?raw')).default
     const drawer = (await import('./JobsBoardCardDrawer.vue?raw')).default
-    expect(block(rows, '.jb-pen')).toMatch(LINK)
-    expect(block(rows, '.jb-pen')).not.toMatch(MUTED)
+    expect(block(blockSource, '.jb-pen')).toMatch(LINK)
+    expect(block(blockSource, '.jb-pen')).not.toMatch(MUTED)
     expect(block(drawer, '.jb-pen')).toMatch(LINK)
     expect(block(drawer, '.jb-pen')).not.toMatch(MUTED)
   })

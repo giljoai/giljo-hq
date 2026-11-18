@@ -43,6 +43,10 @@ export const createConnectApi = (apiClient) => ({
   removeConnection: (harness) => apiClient.delete(`/api/connect/connections/${harness}`),
 })
 
+export const createOnboardingApi = (apiClient) => ({
+  startList: () => apiClient.get('/api/onboarding/start-list'),
+})
+
 export const createOrganizationsApi = (apiClient) => ({
   list: () => apiClient.get('/api/organizations'),
   get: (orgId) => apiClient.get(`/api/organizations/${orgId}`),

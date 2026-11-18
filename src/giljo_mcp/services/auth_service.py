@@ -37,6 +37,8 @@ from giljo_mcp.schemas.service_responses import (
     SetupStateInfo,
     UserInfo,
 )
+from giljo_mcp.services.account_identifiers import normalize_email, require_username_without_at
+from giljo_mcp.services.session_eviction import SESSION_REVOKED, close_live_user_sockets
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 from giljo_mcp.utils.password_helper import DUMMY_BCRYPT_HASH, async_hash_password, async_verify_password
@@ -80,9 +82,7 @@ class AuthService:
     async def authenticate_user(self, username: str, password: str) -> AuthResult:
         try:
             async with self._get_session() as session:
-                user = await self._repo.get_user_by_username(session, username)
-                if user is None:
-                    user = await self._repo.get_user_by_email(session, username)
+                user = await self._repo.get_user_by_username_or_email(session, username)
 
             return await self._authenticate_user_impl(user, username, password)
 
@@ -149,9 +149,7 @@ class AuthService:
     async def find_user_for_lockout_notice(self, identifier: str) -> dict | None:
         try:
             async with self._get_session() as session:
-                user = await self._repo.get_user_by_username(session, identifier)
-                if user is None:
-                    user = await self._repo.get_user_by_email(session, identifier)
+                user = await self._repo.get_user_by_username_or_email(session, identifier)
                 if user is None or not user.email:
                     return None
                 return {
@@ -330,6 +328,7 @@ class AuthService:
                 message=f"Failed to revoke API key: {e!s}", context={"key_id": key_id, "user_id": user_id}
             ) from e
 
+        await close_live_user_sockets(tenant_key, self._logger, reason=SESSION_REVOKED)
         if notification_service is not None:
             await notification_service.resolve_by_dedupe_key(tenant_key, f"api_key.expiring_soon:{key_id}")
 
@@ -433,6 +432,7 @@ class AuthService:
         org_role: str = "member",
         registration_ip: str | None = None,
     ) -> UserInfo:
+        username, email = require_username_without_at(username), normalize_email(email)
         if await self._repo.check_username_exists(session, username):
             raise ValidationError(
                 message=f"Username '{username}' already exists", context={"username": username, "field": "username"}
@@ -575,6 +575,7 @@ class AuthService:
             raise ValidationError(
                 message="Administrator account already exists", context={"reason": "users_exist", "count": total_users}
             )
+        username, email = require_username_without_at(username), normalize_email(email)
 
         if len(password) < 8:
             raise ValidationError(

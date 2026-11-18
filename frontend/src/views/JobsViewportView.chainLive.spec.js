@@ -192,7 +192,8 @@ describe('FE-9777: chain member cards follow their project live', () => {
     card = memberCard(wrapper, 'm2')
     expect(card.attributes('data-lifecycle')).toBe('Implementing')
     expect(card.find('[data-testid="jb-stat-duration"]').text()).toMatch(/^1m \d+s$/)
-    expect(card.text()).toContain('About FE-0202')
+    await card.find('[data-testid="jb-details-btn"]').trigger('click')
+    expect(card.find('[data-testid="jb-drawer-description"]').text()).toContain('About FE-0202')
 
     wrapper.unmount()
   })

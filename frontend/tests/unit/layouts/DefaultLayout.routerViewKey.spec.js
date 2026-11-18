@@ -52,6 +52,7 @@ vi.mock('@/components/LicensingDialog.vue', () => ({
 
 vi.mock('@/stores/websocket', () => ({
   useWebSocketStore: () => ({
+    on: vi.fn(() => vi.fn()),
     connect: vi.fn().mockResolvedValue(),
     disconnect: vi.fn(),
   }),

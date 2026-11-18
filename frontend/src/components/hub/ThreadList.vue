@@ -111,6 +111,7 @@ import ThreadCard from '@/components/hub/ThreadCard.vue'
 import { OPEN_THREAD_CAP, useThreadListFold } from '@/components/hub/useThreadListFold'
 import { useThreadProjectBadges } from '@/components/hub/useThreadProjectBadges'
 import { useThreadResolve } from '@/components/hub/useThreadResolve'
+import { lastMessageAt } from '@/components/hub/hubDateTime'
 
 const commHub = useCommHubStore()
 const userStore = useUserStore()
@@ -142,10 +143,13 @@ const scopedThreads = computed(() => {
 
 const sortedThreads = computed(() => {
   const rows = [...scopedThreads.value]
-  const at = (t) => t.last_message?.created_at || t.last_activity_at || t.created_at || ''
+  const at = (t) => {
+    const ms = Date.parse(lastMessageAt(t) || t.created_at || '')
+    return Number.isNaN(ms) ? 0 : ms
+  }
   if (props.sort === 'created') return rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
   if (props.sort === 'serial') return rows.sort((a, b) => String(a.chat_id || '').localeCompare(String(b.chat_id || '')))
-  return rows.sort((a, b) => String(at(b)).localeCompare(String(at(a))))
+  return rows.sort((a, b) => at(b) - at(a))
 })
 
 const displayThreads = computed(() => {

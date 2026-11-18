@@ -95,6 +95,7 @@ def _replay_receive(body: bytes, original_receive: Receive) -> Receive:
 
 
 _MAX_MCP_BODY_BYTES = 5 * 1024 * 1024
+_MAX_UNAUTHENTICATED_PEEK_BYTES = 64 * 1024
 
 
 class _BodyTooLargeError(Exception):

@@ -20,6 +20,7 @@ from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.models import User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import seed_projects
 from tests.helpers.test_db_helper import purge_tenant_rows
 
 
@@ -34,8 +35,6 @@ pytestmark = [
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 _EXECUTION_MODE = "claude_code_cli"
-_PROJ_A = str(uuid.uuid4())
-_PROJ_B = str(uuid.uuid4())
 
 
 
@@ -94,6 +93,10 @@ async def seed_user(db_manager):
     async def _factory() -> dict:
         seeded = await _seed_user(db_manager)
         minted.append(seeded["tenant_key"])
+        seeded["project_ids"] = [str(uuid.uuid4()) for _ in range(10)]
+        async with db_manager.get_session_async(tenant_key=seeded["tenant_key"]) as session:
+            await seed_projects(session, seeded["tenant_key"], seeded["project_ids"])
+            await session.commit()
         return seeded
 
     yield _factory
@@ -153,9 +156,9 @@ async def api_client(db_manager):
 
 
 
-def _run_payload(project_ids=None, resolved_order=None, extra: dict | None = None) -> dict:
-    pids = project_ids or [_PROJ_A, _PROJ_B]
-    ro = resolved_order or [_PROJ_A, _PROJ_B]
+def _run_payload(tenant: dict, project_ids=None, resolved_order=None, extra: dict | None = None) -> dict:
+    pids = project_ids or tenant["project_ids"][:2]
+    ro = resolved_order or list(pids)
     body = {
         "project_ids": pids,
         "resolved_order": ro,
@@ -178,7 +181,7 @@ async def test_tenant_a_run_invisible_to_tenant_b(api_client, seed_user):
 
     create_resp = await api_client.post(
         "/api/v1/sequence-runs",
-        json=_run_payload(),
+        json=_run_payload(tenant_a),
         headers=tenant_a["headers"],
     )
     assert create_resp.status_code == 201, create_resp.text
@@ -201,7 +204,7 @@ async def test_current_index_persists_and_resumes(api_client, seed_user):
 
     create_resp = await api_client.post(
         "/api/v1/sequence-runs",
-        json=_run_payload(extra={"current_index": 0, "status": "running"}),
+        json=_run_payload(tenant, extra={"current_index": 0, "status": "running"}),
         headers=tenant["headers"],
     )
     assert create_resp.status_code == 201, create_resp.text
@@ -228,7 +231,7 @@ async def test_current_index_persists_and_resumes(api_client, seed_user):
 
 async def test_create_rejects_invalid_execution_mode(api_client, seed_user):
     tenant = await seed_user()
-    bad_payload = _run_payload(extra={"execution_mode": "not_a_real_mode"})
+    bad_payload = _run_payload(tenant, extra={"execution_mode": "not_a_real_mode"})
     resp = await api_client.post("/api/v1/sequence-runs", json=bad_payload, headers=tenant["headers"])
     assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
@@ -251,10 +254,10 @@ async def test_create_rejects_too_many_projects(api_client, seed_user):
 
 async def test_create_accepts_ten_projects(api_client, seed_user):
     tenant = await seed_user()
-    ten = [str(uuid.uuid4()) for _ in range(10)]
+    ten = tenant["project_ids"]
     resp = await api_client.post(
         "/api/v1/sequence-runs",
-        json=_run_payload(project_ids=ten, resolved_order=ten),
+        json=_run_payload(tenant, project_ids=ten, resolved_order=ten),
         headers=tenant["headers"],
     )
     assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text}"

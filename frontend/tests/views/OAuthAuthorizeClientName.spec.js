@@ -62,7 +62,9 @@ describe('OAuthAuthorize.vue -- registered app name (FE-9850)', () => {
   it('shows the registered name returned by the server, not the client id', async () => {
     h.get.mockResolvedValue({ data: { client_id: 'dcr-7f3a9c', client_name: 'Acme Notes' } })
     const wrapper = await mountView()
-    expect(h.get).toHaveBeenCalledWith('/api/oauth/authorize/client', { params: { client_id: 'dcr-7f3a9c' } })
+    expect(h.get).toHaveBeenCalledWith('/api/oauth/authorize/client', {
+      params: { client_id: 'dcr-7f3a9c', redirect_uri: 'https://example.com/cb' },
+    })
     expect(nameText(wrapper)).toBe('Acme Notes')
     expect(wrapper.text()).not.toContain('dcr-7f3a9c')
   })
@@ -88,10 +90,11 @@ describe('OAuthAuthorize.vue -- registered app name (FE-9850)', () => {
     expect(nameText(wrapper)).toBe('dcr-7f3a9c')
   })
 
-  it('keeps the built-in client label without a lookup', async () => {
+  // SEC-0058: the built-in client is looked up too, for the server's verdict on the redirect.
+  it('keeps the built-in client label whatever the lookup returns', async () => {
     h.clientId = 'giljo-mcp-default'
+    h.get.mockResolvedValue({ data: { client_name: 'Giljo HQ (built-in)', verified: true } })
     const wrapper = await mountView()
     expect(nameText(wrapper)).toContain('Client')
-    expect(h.get).not.toHaveBeenCalled()
   })
 })

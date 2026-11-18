@@ -1,7 +1,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import api, { setTenantKey } from '@/services/api'
+import api from '@/services/api'
 import { setSentryTenantKey } from '@/sentry'
 import { useTaskStore } from '@/stores/tasks'
 
@@ -60,7 +60,6 @@ export const useUserStore = defineStore('user', () => {
       orgRole.value = response.data?.org_role || null
 
       if (currentUser.value?.tenant_key) {
-        setTenantKey(currentUser.value.tenant_key)
         setSentryTenantKey(currentUser.value.tenant_key)
       }
 
@@ -111,8 +110,6 @@ export const useUserStore = defineStore('user', () => {
 
       _checkAuthAt = 0
       _checkAuthPending = null
-
-      setTenantKey(null)
 
       try {
         localStorage.removeItem('remembered_username')
@@ -179,7 +176,6 @@ export const useUserStore = defineStore('user', () => {
       orgRole.value = response.data?.org_role || null
 
       if (currentUser.value?.tenant_key) {
-        setTenantKey(currentUser.value.tenant_key)
         setSentryTenantKey(currentUser.value.tenant_key)
       }
 
@@ -216,6 +212,8 @@ export const useUserStore = defineStore('user', () => {
       if (data.setup_selected_tools !== undefined) currentUser.value.setup_selected_tools = data.setup_selected_tools
       if (data.setup_step_completed !== undefined) currentUser.value.setup_step_completed = data.setup_step_completed
       if (data.learning_complete !== undefined) currentUser.value.learning_complete = data.learning_complete
+      if (data.intro_video_seen !== undefined) currentUser.value.intro_video_seen = data.intro_video_seen
+      if (data.guide_closed !== undefined) currentUser.value.guide_closed = data.guide_closed
       if (data.learning_beat !== undefined) currentUser.value.learning_beat = data.learning_beat
       if (data.router_choice !== undefined) currentUser.value.router_choice = data.router_choice
     }

@@ -60,6 +60,8 @@ class UserProfileResponse(BaseModel):
     learning_complete: bool = False
     learning_beat: int | None = None
     router_choice: str | None = None
+    intro_video_seen: bool = False
+    guide_closed: bool = False
 
 
 
@@ -96,6 +98,8 @@ class SetupStateUpdate(BaseModel):
     learning_complete: bool | None = None
     learning_beat: int | None = Field(None, ge=1, le=6)
     router_choice: Literal["A", "B", "C", "D"] | None = None
+    intro_video_seen: Literal[True] | None = None
+    guide_closed: bool | None = None
 
 
 class APIKeyCreateResponse(BaseModel):

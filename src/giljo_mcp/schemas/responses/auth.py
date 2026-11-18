@@ -66,6 +66,8 @@ class CredentialStatusResult(BaseModel):
 
     connected_harnesses: dict[str, str] = {}
 
+    connected_surfaces: list[str] = []
+
     model_config = ConfigDict(from_attributes=True)
 
 

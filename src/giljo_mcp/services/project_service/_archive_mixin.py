@@ -20,6 +20,8 @@ from giljo_mcp.services.bulk_close import (
     unique_ids,
 )
 from giljo_mcp.services.project_closeout_readiness import shape_readiness_blockers
+from giljo_mcp.services.project_helpers import broadcast_deferred_events
+from giljo_mcp.services.project_review import stamp_review
 from giljo_mcp.services.sequence_run_service import active_chain_run
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -107,7 +109,9 @@ class ArchiveMixin:
     async def mark_project_reviewed(self, project_id: str, tenant_key: str | None = None) -> datetime:
         resolved_tenant = tenant_key or self.tenant_manager.get_current_tenant()
         async with self._get_session(resolved_tenant) as session:
-            return await self._stamp_review(session, resolved_tenant, project_id)
+            reviewed_at = await self._stamp_review(session, resolved_tenant, project_id)
+        await broadcast_deferred_events(session)
+        return reviewed_at
 
     async def _stamp_review(self, session: Any, tenant_key: str, project_id: str) -> datetime:
         project = await self._repo.get_by_id(session, tenant_key, project_id)
@@ -120,7 +124,7 @@ class ArchiveMixin:
                 message=f"Only a finished project can be reviewed (status is '{project.status}')",
                 context={"project_id": project_id, "status": project.status},
             )
-        await self._repo.stamp_reviewed(session, tenant_key, project_id)
+        await stamp_review(session, self._websocket_manager, tenant_key, project_id)
         await session.refresh(project)
         return project.reviewed_at
 
@@ -143,6 +147,7 @@ class ArchiveMixin:
                     skipped.append({"id": project_id, "reason": "not_finished"})
                 else:
                     marked += 1
+        await broadcast_deferred_events(session)
         return {"marked": marked, "skipped": skipped}
 
     async def bulk_close_projects(

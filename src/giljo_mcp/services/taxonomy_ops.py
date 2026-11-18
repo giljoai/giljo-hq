@@ -66,41 +66,38 @@ DEFAULT_TAXONOMY_TYPES: list[dict[str, Any]] = [
 ]
 
 
-async def ensure_default_types_seeded(session: AsyncSession, tenant_key: str) -> None:
-    count = await _repo.count_for_tenant(session, tenant_key)
-    if count:
-        return
-
-    logger.info("Seeding %d default taxonomy types for tenant %s", len(DEFAULT_TAXONOMY_TYPES), sanitize(tenant_key))
-
-    for i, td in enumerate(DEFAULT_TAXONOMY_TYPES):
-        taxonomy_type = TaxonomyType(
-            tenant_key=tenant_key,
-            abbreviation=td["abbr"],
-            label=td["label"],
-            color=td["color"],
-            sort_order=i,
-        )
-        await _repo.add_taxonomy_type(session, taxonomy_type)
-
-    await _repo.flush(session)
-
-
-async def ensure_reserved_type(session: AsyncSession, tenant_key: str, abbreviation: str) -> TaxonomyType:
-    spec = next(t for t in DEFAULT_TAXONOMY_TYPES if t["abbr"] == abbreviation)
+async def _insert_type_if_absent(session: AsyncSession, tenant_key: str, spec: dict[str, str], sort_order: int) -> None:
     stmt = (
         pg_insert(TaxonomyType.__table__)
         .values(
             id=generate_uuid(),
             tenant_key=tenant_key,
-            abbreviation=abbreviation,
+            abbreviation=spec["abbr"],
             label=spec["label"],
             color=spec["color"],
-            sort_order=len(DEFAULT_TAXONOMY_TYPES) + DEFAULT_TAXONOMY_TYPES.index(spec),
+            sort_order=sort_order,
         )
         .on_conflict_do_nothing(constraint="uq_taxonomy_type_abbr")
     )
     await session.execute(stmt)
+
+
+async def ensure_default_types_seeded(session: AsyncSession, tenant_key: str) -> None:
+    if await _repo.count_excluding_abbreviations(session, tenant_key, RESERVED_TYPE_ABBRS):
+        return
+
+    logger.info("Seeding %d default taxonomy types for tenant %s", len(DEFAULT_TAXONOMY_TYPES), sanitize(tenant_key))
+
+    for i, td in enumerate(DEFAULT_TAXONOMY_TYPES):
+        await _insert_type_if_absent(session, tenant_key, td, i)
+
+
+async def ensure_reserved_type(session: AsyncSession, tenant_key: str, abbreviation: str) -> TaxonomyType:
+    spec = next(t for t in DEFAULT_TAXONOMY_TYPES if t["abbr"] == abbreviation)
+    await ensure_default_types_seeded(session, tenant_key)
+    await _insert_type_if_absent(
+        session, tenant_key, spec, len(DEFAULT_TAXONOMY_TYPES) + DEFAULT_TAXONOMY_TYPES.index(spec)
+    )
 
     row = await _repo.get_by_abbreviation(session, tenant_key, abbreviation)
     if row is None:  # pragma: no cover - insert+select within one tx always resolves

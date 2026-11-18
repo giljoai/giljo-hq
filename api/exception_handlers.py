@@ -14,6 +14,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from giljo_mcp.exceptions import BaseGiljoError
+from giljo_mcp.services.login_lockout_service import AccountLockedError
 
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,19 @@ def register_exception_handlers(app):
                 "timestamp": datetime.now(UTC).isoformat(),
             },
             headers=getattr(exc, "headers", None),
+        )
+
+    @app.exception_handler(AccountLockedError)
+    async def account_locked_handler(request: Request, exc: AccountLockedError):
+        minutes = max(1, exc.retry_after_seconds // 60)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error_code": "ACCOUNT_LOCKED",
+                "message": f"Account locked out due to too many failed attempts. Try again in {minutes} minutes.",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
         )
 
     @app.exception_handler(PoolTimeoutError)

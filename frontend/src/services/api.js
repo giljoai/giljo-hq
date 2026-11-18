@@ -1,6 +1,7 @@
 import axios from 'axios'
-import { API_CONFIG, getDefaultTenantKey } from '@/config/api'
+import { API_CONFIG } from '@/config/api'
 import { parseErrorResponse, getErrorMessage } from '@/utils/errorMessages'
+import { readCsrfToken } from '@/utils/csrfCookie'
 import { sequenceRunsApi } from './sequenceRunsApi.js'
 import { promptsApi } from './promptsApi.js'
 import { templatesApi, assignmentsApi, templateProposalsApi } from './agentsApi.js'
@@ -21,6 +22,7 @@ import {
   createApiKeysApi,
   createConnectedAppsApi,
   createConnectApi,
+  createOnboardingApi,
   createOrganizationsApi,
 } from './api/accounts.js'
 import { createSettingsApi, createHealthApi, createSetupApi, createGitApi } from './api/settings.js'
@@ -43,12 +45,6 @@ const apiClient = axios.create({
 // eslint-disable-next-line giljo-internal/no-orphaned-exports -- imported in tests/saas/ and tests/setup.js (both outside src/); rule's scan stops at src/ boundary
 export function updateApiBaseURL(newBaseURL) {
   apiClient.defaults.baseURL = newBaseURL
-}
-
-let currentTenantKey = null
-
-export function setTenantKey(tenantKey) {
-  currentTenantKey = tenantKey
 }
 
 let isRefreshing = false
@@ -98,16 +94,11 @@ async function routeToPendingStep(errorCode) {
 }
 
 function getCsrfToken() {
-  const match = document.cookie.match(/csrf_token=([^;]+)/)
-  return match ? match[1] : null
+  return readCsrfToken(document.cookie)
 }
 
 apiClient.interceptors.request.use(
   (config) => {
-    if (!config.headers['X-Tenant-Key'] || !currentTenantKey) {
-      config.headers['X-Tenant-Key'] = currentTenantKey || getDefaultTenantKey()
-    }
-
     if (['post', 'put', 'patch', 'delete'].includes(config.method)) {
       const csrfToken = getCsrfToken()
       if (csrfToken) {
@@ -292,6 +283,7 @@ export const api = {
   apiKeys: createApiKeysApi(apiClient),
   connectedApps: createConnectedAppsApi(apiClient),
   connect: createConnectApi(apiClient),
+  onboarding: createOnboardingApi(apiClient),
   git: createGitApi(apiClient),
   agentJobs: createAgentJobsApi(apiClient),
   organizations: createOrganizationsApi(apiClient),

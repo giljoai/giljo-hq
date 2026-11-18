@@ -18,6 +18,9 @@ pytestmark = pytest.mark.asyncio
 
 class _FakeWS:
     def __init__(self) -> None:
+        self.headers = {"authorization": "Bearer jwt"}
+        self.query_params: dict[str, str] = {}
+        self.scope: dict = {}
         self.accepted = False
         self.closed_with: tuple[int, str] | None = None
 
@@ -29,7 +32,7 @@ class _FakeWS:
 
 
 def _auth_as(tenant_key: str):
-    async def _authenticate(websocket, db=None):
+    async def _authenticate(websocket, db=None, **_):
         return {"user": {"tenant_key": tenant_key}, "context": "normal"}
 
     return _authenticate

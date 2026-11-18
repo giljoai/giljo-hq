@@ -20,6 +20,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -71,7 +72,7 @@ async def _seed_project(
         description="chain member",
         mission="build it",
         status=status,
-        series_number=uuid.uuid4().int % 9000 + 1,
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         staging_status=staging_status,
         implementation_launched_at=implementation_launched_at,

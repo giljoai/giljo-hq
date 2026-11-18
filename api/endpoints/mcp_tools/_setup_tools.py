@@ -35,6 +35,8 @@ from giljo_mcp.services.product_tuning_service import (
     SECTION_FIELD_MAP,
     STRUCTURED_TUNING_SECTIONS,
     TUNING_PROPOSED_VALUE_MAX,
+    canonical_tuning_section,
+    canonical_tuning_value,
 )
 from giljo_mcp.services.template_proposal_service import (
     ADDITIONS_TEXT_MAX_BYTES,
@@ -65,7 +67,7 @@ async def health_check(ctx: Context = None) -> dict[str, Any]:
     title="Get GiljoAI Guide",
     description=(
         "Return the GiljoAI cross-tool guide: the routing/judgment layer for the project/task "
-        "tools (chain convention, Edition Scope, read-vs-write routing, the staging -> human-gate "
+        "tools (chain convention, read-vs-write routing, the staging -> human-gate "
         "-> implement lifecycle). No arguments. Call once, early, to become competent before "
         "creating or reading projects and tasks."
     ),
@@ -202,7 +204,9 @@ async def giljo_setup(
         )
         await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
-    return result
+    from api.endpoints.mcp_tools._announcement_hook import add_setup_hint
+
+    return await add_setup_hint(result, tenant_key, user_id)
 
 
 
@@ -258,7 +262,8 @@ class _TuningProposal(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape_and_size(self) -> "_TuningProposal":
-        if self.section not in SECTION_FIELD_MAP:
+        section = canonical_tuning_section(self.section)
+        if section not in SECTION_FIELD_MAP:
             raise ValueError(f"unknown section {self.section!r}, must be one of {sorted(SECTION_FIELD_MAP)}")
 
         v = self.proposed_value
@@ -270,6 +275,7 @@ class _TuningProposal(BaseModel):
                 )
             return self
 
+        v = canonical_tuning_value(section, v)
         if self.section in STRUCTURED_TUNING_SECTIONS:
             known_fields = SECTION_FIELD_MAP[self.section].get("fields", {})
             if isinstance(v, str):

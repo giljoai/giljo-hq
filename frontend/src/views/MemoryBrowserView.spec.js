@@ -97,6 +97,20 @@ describe('MemoryBrowserView — FE-5042', () => {
     expect(body.find('.mem-markdown').html()).toContain('<strong>tenant</strong>')
   })
 
+  it('SEC-0057: a remote image in a summary renders as a link, never an <img>', async () => {
+    const url = 'https://collector.example/m.png?d=1'
+    api.products.getMemoryEntries.mockImplementation(() =>
+      Promise.resolve({
+        data: { entries: [entry({ id: 'img', summary: `Done ![x](${url})` })], total_count: 1, filtered_count: 1 },
+      }),
+    )
+    const wrapper = await mountView()
+    await wrapper.find('[data-test="memory-row-img"] .mem-row-head').trigger('click')
+    const md = wrapper.find('[data-test="memory-body-img"] .mem-markdown')
+    expect(md.find('img').exists()).toBe(false)
+    expect(md.find('a').attributes('href')).toBe(url)
+  })
+
   it('shows the filtered-empty state when search matches nothing', async () => {
     const wrapper = await mountView()
     const memoryStore = useMemoryStore()

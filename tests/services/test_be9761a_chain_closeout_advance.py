@@ -22,6 +22,7 @@ from giljo_mcp.services.sequence_chain_context import chain_member_phase, resolv
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -60,7 +61,7 @@ async def _seed_member(session: AsyncSession, tenant_key: str) -> str:
         staging_status="staged",
         tenant_key=tenant_key,
         product_id=product.id,
-        series_number=uuid.uuid4().int % 9000 + 1,
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
     )

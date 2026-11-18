@@ -26,6 +26,7 @@ class WebSocketEventListener:
         await self.event_bus.subscribe("agent:created", self.handle_agent_created)
         await self.event_bus.subscribe("product:status:changed", self.handle_product_status_changed)
         await self.event_bus.subscribe("template:updated", self.handle_template_updated)
+        await self.event_bus.subscribe("template:proposal_decided", self.handle_template_proposal_decided)
 
         self.logger.info(
             "WebSocket event listener started",
@@ -35,6 +36,7 @@ class WebSocketEventListener:
                     "agent:created",
                     "product:status:changed",
                     "template:updated",
+                    "template:proposal_decided",
                 ],
             },
         )
@@ -120,6 +122,20 @@ class WebSocketEventListener:
             f"Template update broadcasted to {sent_count} client(s)",
             extra={"template_id": template_id, "tenant_key": tenant_key, "sent_count": sent_count},
         )
+
+    async def handle_template_proposal_decided(self, data: dict[str, Any]) -> None:
+        tenant_key = data.get("tenant_key")
+        proposal_id = data.get("proposal_id")
+        if not tenant_key or not proposal_id:
+            self.logger.error("Missing required fields for template proposal decision", extra={"data": data})
+            return
+
+        event = EventFactory.tenant_envelope(
+            event_type="template:proposal_decided",
+            tenant_key=tenant_key,
+            data={"proposal_id": proposal_id, "action": data.get("action")},
+        )
+        await self.ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
 
     async def handle_agent_created(self, data: dict[str, Any]) -> None:
         tenant_key = data.get("tenant_key")

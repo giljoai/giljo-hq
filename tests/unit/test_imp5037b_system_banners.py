@@ -181,6 +181,63 @@ class TestSkillsDriftBanner:
         assert drift_rows[0].payload["current"] == "2.0.0"
 
 
+class TestSkillsDriftBannerWords:
+
+    @pytest.mark.asyncio
+    async def test_old_shape_row_gets_new_words_and_loses_button(
+        self, monkeypatch, db_manager, db_session, tenant_key, patched_service
+    ):
+        from unittest.mock import patch
+
+        from giljo_mcp.services.settings_service import TenantSkillsAckService
+
+        admin_id = await _make_user(db_session, tenant_key, "admin")
+        service = NotificationService()
+        old = await service.upsert_by_dedupe_key(
+            tenant_key=tenant_key,
+            user_id=None,
+            notification_type="system.skills_drift",
+            severity="info",
+            title="A newer slash-command bundle is available",
+            body="Skills bundle updated to v2.0.0 (you have v1.0.0) \u2014 re-run /giljo_setup on each machine to update.",
+            dedupe_key="system.skills_drift",
+            surface="banner",
+            role_filter="admin",
+            cta_label="Update bundle",
+            cta_route="Tools",
+            payload={"current": "2.0.0", "announced": "1.0.0", "message": "old"},
+        )
+        assert old.cta_label == "Update bundle"
+        assert old.cta_route == "Tools"
+
+        async with db_manager.get_session_async() as session:
+            await TenantSkillsAckService(session, tenant_key).acknowledge("1.0.0")
+
+        with patch("giljo_mcp.tools.slash_command_templates.SKILLS_VERSION", "2.0.0"):
+            drift = await background_tasks._compute_skills_drift(db_manager, tenant_key)
+        await background_tasks._emit_skills_drift_banner(service, tenant_key, drift)
+
+        rows = [
+            r
+            for r in await service.list_for_user(tenant_key, admin_id, surface="banner")
+            if r.type == "system.skills_drift"
+        ]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.id == old.id
+        expected = (
+            "Version 2.0.0 is out (you have 1.0.0). In each coding tool you use, tell your agent: run giljo_setup."
+        )
+        assert row.title == "Skills update ready"
+        assert row.body == expected
+        assert row.payload["message"] == expected
+        assert row.cta_label is None
+        assert row.cta_route is None
+        assert row.dismissible is True
+        assert row.role_filter == "admin"
+        assert row.dedupe_key == "system.skills_drift"
+
+
 async def _none_async(_db_manager, _tenant_key=None):
     return None
 
@@ -285,7 +342,7 @@ class TestContextTuningDueBanner:
         self._patch_quiet(monkeypatch)
 
         async def _due(_db_manager, _tenant_key):
-            return {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 3}
+            return {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 3, "threshold": 3}
 
         monkeypatch.setattr(background_tasks, "compute_context_tuning_due", _due)
 
@@ -319,7 +376,7 @@ class TestContextTuningDueBanner:
         self._patch_quiet(monkeypatch)
 
         async def _due(_db_manager, _tenant_key):
-            return {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 1}
+            return {"product_id": "prod-1", "product_name": "Acme", "projects_since_tune": 1, "threshold": 3}
 
         monkeypatch.setattr(background_tasks, "compute_context_tuning_due", _due)
 

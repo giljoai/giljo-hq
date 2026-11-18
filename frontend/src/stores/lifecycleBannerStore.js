@@ -42,9 +42,14 @@ export const useLifecycleBannerStore = defineStore('lifecycleBanner', () => {
     rows.value = rows.value.filter((row) => row.id !== id)
   }
 
+  function clearForProject(projectId) {
+    if (!projectId) return
+    rows.value = rows.value.filter((row) => row.projectId !== projectId)
+  }
+
   function momentLabel(moment) {
     return LIFECYCLE_MOMENT_LABELS[moment] || 'has updated'
   }
 
-  return { rows, announce, dismiss, momentLabel }
+  return { rows, announce, dismiss, clearForProject, momentLabel }
 })

@@ -20,6 +20,7 @@ from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.models import Product, Project, User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
@@ -63,7 +64,7 @@ async def _seed_user_with_product(db_manager, *, product_active: bool = True) ->
             tenant_key=tenant_key,
             product_id=product.id,
             status="inactive",
-            series_number=uuid.uuid4().int % 9000 + 1,
+            series_number=next_series_number(),
         )
         session.add(project)
         await session.commit()

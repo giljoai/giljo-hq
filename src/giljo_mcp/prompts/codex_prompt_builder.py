@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+from giljo_mcp.prompts._prompt_text import prompt_name
 from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
 
@@ -22,7 +23,7 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
         ]
 
     def _build_agent_name_line(self, agent) -> str:
-        return f"   - Agent Name: `{agent.agent_name}` \u2192 Codex: `gil-{agent.agent_name}`"
+        return f"   - Agent Name: `{prompt_name(agent.agent_name)}` \u2192 Codex: `gil-{prompt_name(agent.agent_name)}`"
 
     def _build_execution_directive_text(self) -> list[str]:
         return [

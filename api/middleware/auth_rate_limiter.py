@@ -4,7 +4,9 @@
 # [CE] Community Edition.
 
 
+import hashlib
 import logging
+import os
 import time
 
 from fastapi import HTTPException, Request, status
@@ -33,6 +35,15 @@ _RATE_LIMIT_TENANT_SENTINEL = "_ratelimit"
 
 _TRUSTED_PROXIES_ENV = TRUSTED_PROXIES_ENV
 
+LOGIN_ACCOUNT_WINDOW_SECONDS = 300
+_LOGIN_ATTEMPTS_PER_ADDRESS_PAST_CEILING = 1
+PER_ADDRESS_PAST_CEILING_ENV = "GILJO_LOGIN_PER_ADDRESS_PAST_CEILING"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _per_address_hold_enabled() -> bool:
+    return os.getenv(PER_ADDRESS_PAST_CEILING_ENV, "").strip().lower() in _TRUTHY
+
 
 class RateLimiter:
 
@@ -47,25 +58,45 @@ class RateLimiter:
     def _get_client_ip(self, request: Request) -> str:
         return self._ip_resolver.resolve(request)
 
+    def _admission_ip(self, request: Request) -> str | None:
+        ip, from_header = self._ip_resolver.resolve_with_origin(request)
+        if not from_header and is_exempt_ip(ip):
+            return None
+        return ip
+
     @staticmethod
-    def _bucket_key(ip: str, window: int) -> str:
+    def _bucket_key(subject: str, window: int) -> str:
         bucket = int(time.time()) // window
-        return f"{ip}:{bucket}"
+        return f"{subject}:{bucket}"
+
+    @staticmethod
+    def _policy_key(request: Request, policy: str | None) -> str:
+        if policy:
+            return policy
+        route = (getattr(request, "scope", None) or {}).get("route")
+        return getattr(route, "path", None) or request.url.path
 
     async def check_rate_limit(
-        self, request: Request, limit: int, window: int = 60, raise_on_limit: bool = False
+        self,
+        request: Request,
+        limit: int | None = None,
+        window: int = 60,
+        raise_on_limit: bool = False,
+        *,
+        policy: str | None = None,
     ) -> bool:
         if is_test_bypass_enabled():
             return True
 
-        ip = self._get_client_ip(request)
-
-        if is_exempt_ip(ip):
+        ip = self._admission_ip(request)
+        if ip is None:
             return True
+        if limit is None:
+            limit = limit_for(policy)
 
         count = await self._backend.incr(
             _RATE_LIMIT_TENANT_SENTINEL,
-            self._bucket_key(ip, window),
+            self._bucket_key(f"{self._policy_key(request, policy)}:{ip}", window),
             ttl_seconds=window,
         )
 
@@ -96,6 +127,41 @@ class RateLimiter:
 
         return False
 
+    async def check_login_account_ceiling(self, request: Request, identifier: str) -> None:
+        if is_test_bypass_enabled():
+            return
+        ip = self._admission_ip(request)
+        if ip is None:
+            return
+
+        window = LOGIN_ACCOUNT_WINDOW_SECONDS
+        account = hashlib.sha256(identifier.strip().lower().encode()).hexdigest()[:32]
+        attempts = await self._backend.incr(
+            _RATE_LIMIT_TENANT_SENTINEL,
+            self._bucket_key(f"login_account:{account}", window),
+            ttl_seconds=window,
+        )
+        if attempts <= limit_for("login_account"):
+            return
+        logger.warning("Login account ceiling exceeded - account=%s attempts=%d", account, attempts)
+        if not _per_address_hold_enabled():
+            return
+        from_this_address = await self._backend.incr(
+            _RATE_LIMIT_TENANT_SENTINEL,
+            self._bucket_key(f"login_account_ip:{account}:{ip}", window),
+            ttl_seconds=window,
+        )
+        if from_this_address <= _LOGIN_ATTEMPTS_PER_ADDRESS_PAST_CEILING:
+            return
+
+        logger.warning("Login account ceiling hold - IP: %s, account=%s", sanitize(ip), account)
+        retry_after = max(1, int((int(time.time()) // window + 1) * window - time.time()))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many sign-in attempts for this account. Try again in a few minutes.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
 
 class _RateLimiterHolder:
 
@@ -123,4 +189,5 @@ async def enforce_api_key_auth_failure(request: Request) -> None:
         limit=limit_for("api_key_auth_failed"),
         window=60,
         raise_on_limit=True,
+        policy="api_key_auth_failed",
     )

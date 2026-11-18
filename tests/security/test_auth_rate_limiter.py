@@ -65,7 +65,7 @@ class TestClientIpProxyAware:
         arl._RateLimiterHolder.reset_for_tests()
         limiter = arl.RateLimiter()
         req = _make_request(client_host="192.0.2.9", forwarded_for="203.0.113.7, 198.51.100.1")
-        assert limiter._get_client_ip(req) == "203.0.113.7"
+        assert limiter._get_client_ip(req) == "198.51.100.1"
 
     def test_spoofed_xff_ignored_when_peer_untrusted(self, monkeypatch):
         monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, "198.51.100.200")
@@ -101,21 +101,28 @@ class TestClientIpProxyAware:
         assert limiter._get_client_ip(req) == "203.0.113.7"
 
 
-    def test_cf_connecting_ip_preferred_when_peer_is_trusted_proxy(self, monkeypatch):
+    def test_cf_connecting_ip_preferred_when_peer_is_cloudflare(self, monkeypatch):
+        monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, "172.64.0.0/13")
+        arl._RateLimiterHolder.reset_for_tests()
+        limiter = arl.RateLimiter()
+        req = _make_request(client_host="172.68.54.64", cf_connecting_ip="203.0.113.38")
+        assert limiter._get_client_ip(req) == "203.0.113.38"
+
+    def test_cf_connecting_ip_from_a_non_cloudflare_proxy_is_not_believed(self, monkeypatch):
         monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, "192.0.2.0/24")
         arl._RateLimiterHolder.reset_for_tests()
         limiter = arl.RateLimiter()
-        req = _make_request(client_host="192.0.2.9", cf_connecting_ip="203.0.113.38")
-        assert limiter._get_client_ip(req) == "203.0.113.38"
+        req = _make_request(client_host="192.0.2.9", cf_connecting_ip="203.0.113.38", forwarded_for="198.51.100.1")
+        assert limiter._get_client_ip(req) == "198.51.100.1"
 
-    def test_cf_connecting_ip_wins_over_xff_first_hop(self, monkeypatch):
+    def test_cf_connecting_ip_wins_when_the_appended_hop_is_cloudflare(self, monkeypatch):
         monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, "192.0.2.0/24")
         arl._RateLimiterHolder.reset_for_tests()
         limiter = arl.RateLimiter()
         req = _make_request(
             client_host="192.0.2.9",
             cf_connecting_ip="203.0.113.38",
-            forwarded_for="172.68.54.64, 198.51.100.1",
+            forwarded_for="198.51.100.1, 172.68.54.64",
         )
         assert limiter._get_client_ip(req) == "203.0.113.38"
 

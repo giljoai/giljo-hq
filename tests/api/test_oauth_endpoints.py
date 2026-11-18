@@ -384,6 +384,45 @@ class TestOAuthAuthorizeEndpoint:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["", "S25  6", "plain"])
+    @pytest.mark.parametrize("path", ["/api/oauth/authorize", "/api/oauth/authorize/deny"])
+    async def test_damaged_challenge_method_is_refused_with_stable_code(self, api_client, auth_headers, path, method):
+        body = _deny_body(code_challenge_method=method)
+        response = await api_client.post(path, headers=auth_headers, json=body, follow_redirects=False)
+        assert response.status_code == 400, response.text
+        data = response.json()
+        assert data["error_code"] == "AUTHORIZE_REQUEST_MALFORMED"
+        assert "S25" not in response.text
+        assert "plain" not in response.text
+        assert "redirect_uri" not in data
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"code_challenge": ""}, {"redirect_uri": ""}, {"client_id": ""}, {"response_type": ""}],
+    )
+    async def test_missing_required_param_is_refused_with_stable_code(self, api_client, auth_headers, overrides):
+        response = await api_client.post(
+            "/api/oauth/authorize", headers=auth_headers, json=_deny_body(**overrides), follow_redirects=False
+        )
+        assert response.status_code == 400, response.text
+        assert response.json()["error_code"] == "AUTHORIZE_REQUEST_MALFORMED"
+
+    @pytest.mark.asyncio
+    async def test_other_refusal_keeps_plain_code(self, api_client, auth_headers):
+        response = await api_client.post(
+            "/api/oauth/authorize", headers=auth_headers, json=_deny_body(client_id="invalid-client-id")
+        )
+        assert response.status_code == 400
+        assert response.json()["error_code"] == "HTTP_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_known_good_request_is_not_flagged_malformed(self, api_client, auth_headers):
+        response = await api_client.post("/api/oauth/authorize", headers=auth_headers, json=_deny_body())
+        assert response.status_code == 200, response.text
+        assert "error_code" not in response.json()
+
+    @pytest.mark.asyncio
     async def test_authorize_endpoint_requires_auth(self, api_client):
         _verifier, challenge = _generate_pkce_pair()
         response = await api_client.post(

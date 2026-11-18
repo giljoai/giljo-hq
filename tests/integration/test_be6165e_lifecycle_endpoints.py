@@ -136,8 +136,7 @@ async def api_client(db_manager):
     state.auth = _saved_state["auth"]
 
 
-def _payload(extra: dict | None = None) -> dict:
-    pa, pb = str(uuid.uuid4()), str(uuid.uuid4())
+def _payload(pa: str, pb: str, extra: dict | None = None) -> dict:
     body = {
         "project_ids": [pa, pb],
         "resolved_order": [pa, pb],
@@ -151,8 +150,7 @@ def _payload(extra: dict | None = None) -> dict:
     return body
 
 
-async def _seed_live_members(db_manager, tenant_key: str, run: dict) -> None:
-    member_ids = list(dict.fromkeys((run.get("resolved_order") or []) + (run.get("project_ids") or [])))
+async def _seed_live_members(db_manager, tenant_key: str, member_ids: list[str]) -> None:
     async with db_manager.get_session_async() as session:
         for pid in member_ids:
             product_id = str(uuid.uuid4())
@@ -179,13 +177,12 @@ async def _seed_live_members(db_manager, tenant_key: str, run: dict) -> None:
         await session.commit()
 
 
-async def _create_run(api_client, tenant: dict, extra: dict | None = None, *, db_manager=None) -> dict:
-    resp = await api_client.post("/api/v1/sequence-runs", json=_payload(extra), headers=tenant["headers"])
+async def _create_run(api_client, tenant: dict, extra: dict | None = None, *, db_manager) -> dict:
+    pa, pb = str(uuid.uuid4()), str(uuid.uuid4())
+    await _seed_live_members(db_manager, tenant["tenant_key"], [pa, pb])
+    resp = await api_client.post("/api/v1/sequence-runs", json=_payload(pa, pb, extra), headers=tenant["headers"])
     assert resp.status_code == 201, resp.text
-    run = resp.json()
-    if db_manager is not None:
-        await _seed_live_members(db_manager, tenant["tenant_key"], run)
-    return run
+    return resp.json()
 
 
 
@@ -247,7 +244,7 @@ async def test_release_cancel_ends_run_no_project_mutation(api_client, db_manage
 
 async def test_release_graceful_requires_inflight_closed(api_client, db_manager):
     tenant = await _seed_user(db_manager)
-    run = await _create_run(api_client, tenant)
+    run = await _create_run(api_client, tenant, db_manager=db_manager)
 
     rejected = await api_client.post(
         f"/api/v1/sequence-runs/{run['id']}/release", params={"mode": "graceful"}, headers=tenant["headers"]
@@ -269,7 +266,7 @@ async def test_release_graceful_requires_inflight_closed(api_client, db_manager)
 
 async def test_release_rejects_bad_mode(api_client, db_manager):
     tenant = await _seed_user(db_manager)
-    run = await _create_run(api_client, tenant)
+    run = await _create_run(api_client, tenant, db_manager=db_manager)
     resp = await api_client.post(
         f"/api/v1/sequence-runs/{run['id']}/release", params={"mode": "nuke"}, headers=tenant["headers"]
     )

@@ -106,7 +106,15 @@ class RoadmapService:
             )
         resolved = await self._resolve_default_product_id(tenant_key)
         if not resolved:
-            raise ResourceNotFoundError(message="No active product set.", context={"operation": operation})
+            from giljo_mcp.services.product_service import ProductService
+
+            product_service = ProductService(
+                db_manager=self.db_manager, tenant_key=tenant_key, test_session=self._session
+            )
+            raise ResourceNotFoundError(
+                message=await product_service.lifecycle.missing_default_message("No active product set."),
+                context={"operation": operation},
+            )
         return resolved
 
 

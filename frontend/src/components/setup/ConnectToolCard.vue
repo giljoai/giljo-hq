@@ -1,5 +1,5 @@
 <template>
-  <div class="connect-tool-card" :data-testid="`connect-card-${toolId}`">
+  <div class="connect-tool-card" :data-testid="`connect-card-${toolId}`" :data-state="cardState">
     <div class="server-line">
       <span class="server-line-label">SERVER</span>
       <span class="server-line-url" data-testid="server-url-field">{{ serverUrl }}</span>
@@ -48,6 +48,29 @@
     <p v-else-if="method === 'key'" class="connect-subline">
       Generate a key, then paste one command.
     </p>
+    <template v-else-if="method === 'directory'">
+      <p class="connect-subline" data-testid="directory-subline">
+        Giljo HQ is in the {{ toolLabel }} directory. Connect from there, then sign in once.
+      </p>
+      <div class="directory-block" data-testid="directory-section">
+        <div class="directory-actions">
+          <a
+            class="directory-open-btn"
+            :href="directoryUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="directory-open-btn"
+          >Open in {{ toolLabel }} directory</a>
+          <span class="directory-badge smooth-border" data-testid="directory-badge">Sign-in, no key</span>
+        </div>
+        <details class="directory-fold" data-testid="directory-desktop-fold">
+          <summary>On the {{ toolLabel }} desktop app</summary>
+          <ol class="directory-steps">
+            <li v-for="step in desktopSteps" :key="step">{{ step }}</li>
+          </ol>
+        </details>
+      </div>
+    </template>
     <p v-else class="connect-subline">
       Paste one command. Your browser opens for a one-click sign-in.
     </p>
@@ -105,7 +128,17 @@
     </div>
 
     <div :class="['status-hero', connected ? 'status-hero--connected' : 'status-hero--waiting']" data-testid="status-hero">
-      <template v-if="!connected">
+      <template v-if="connectedBefore && !connected">
+        <span class="hero-dot hero-dot--before" data-testid="hero-before-dot" />
+        <div class="hero-body">
+          <span class="hero-title" data-testid="hero-before-title">{{ toolLabel }} is already connected to your account.</span>
+          <span class="hero-sub" data-testid="hero-before-sub">Setting up another computer? Paste the command there. This turns green when it connects.</span>
+        </div>
+        <button v-if="advanceLabel" class="hero-advance" data-testid="hero-advance" @click="$emit('advance')">
+          {{ advanceLabel }}
+        </button>
+      </template>
+      <template v-else-if="!connected">
         <span class="hero-dot hero-dot--waiting" data-testid="hero-dot" />
         <div class="hero-body">
           <span class="hero-title">Waiting for {{ toolLabel }} to connect&hellip;</span>
@@ -169,12 +202,13 @@ import {
   makeKeyName,
   getAuthCapabilities,
 } from '@/composables/useMcpConfig'
-import { toolName } from '@/config/setupTools'
+import { toolName, TOOL_META } from '@/config/setupTools'
 import SetupStep2KeyFlow from './SetupStep2KeyFlow.vue'
 
 const props = defineProps({
   toolId: { type: String, required: true },
   connected: { type: Boolean, default: false },
+  connectedBefore: { type: Boolean, default: false },
   keyMode: { type: Boolean, default: false },
   connectedNext: { type: String, default: '' },
   advanceLabel: { type: String, default: '' },
@@ -186,6 +220,7 @@ defineEmits(['advance', 'toggle-key-mode', 'mark-configured'])
 const { copy: clipboardCopy } = useClipboard()
 const { showToast } = useToast()
 
+const cardState = computed(() => (props.connected ? 'connected' : props.connectedBefore ? 'connected_before' : 'waiting'))
 const toolLabel = computed(() => toolName(props.toolId))
 const normalizedId = computed(() => normalizeToolId(props.toolId))
 const caps = computed(() => getAuthCapabilities(props.toolId))
@@ -212,6 +247,7 @@ const serverUrl = computed(() => {
 })
 
 const baseMethod = computed(() => {
+  if (TOOL_META[props.toolId]?.method === 'directory') return 'directory'
   if (props.toolId === 'generic') return 'manual'
   if (isCe.value) return 'key'
   return supportsOauth.value ? 'oauth' : 'key'
@@ -219,6 +255,8 @@ const baseMethod = computed(() => {
 const method = computed(() =>
   baseMethod.value === 'oauth' && props.keyMode ? 'key' : baseMethod.value,
 )
+const directoryUrl = computed(() => TOOL_META[props.toolId]?.directoryUrl || '')
+const desktopSteps = computed(() => TOOL_META[props.toolId]?.desktopSteps || [])
 const showFallback = computed(() => baseMethod.value === 'oauth')
 const showKeyStep = computed(() => method.value === 'key' || method.value === 'manual')
 
@@ -379,6 +417,61 @@ onMounted(() => {
   margin: 0;
 }
 
+/* Directory method (FE-0034b) */
+.directory-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.directory-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.directory-open-btn {
+  background: $color-brand-yellow;
+  color: $color-on-yellow-ink;
+  font-family: 'Outfit', $typography-font-primary;
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 11px 22px;
+  border-radius: $border-radius-default;
+  text-decoration: none;
+}
+
+.directory-open-btn:focus-visible {
+  outline: 2px solid $color-text-primary;
+  outline-offset: 2px;
+}
+
+.directory-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: $border-radius-pill;
+}
+
+.directory-fold summary {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.directory-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 /* Command card (numbered) */
 .command-card {
   background: $elevation-elevated;
@@ -464,6 +557,10 @@ onMounted(() => {
 /* FE-9569: unified onto the authoritative Waiting token (design-system-
    sample-v2.html "Status & Brand Colors" -- Waiting #ffd700, its own
    distinct status, not the disconnected/error red this used to borrow). */
+.hero-dot--before {
+  background: $color-text-muted;
+}
+
 .hero-dot--waiting {
   background: $color-status-waiting;
   animation: hero-wait 1.6s ease infinite;

@@ -16,6 +16,7 @@ from giljo_mcp.auth.principal import PrincipalValidationError, validate_principa
 from giljo_mcp.auth.terms_gate import terms_claim_violation
 from giljo_mcp.exceptions import AuthorizationError, BaseGiljoError
 from giljo_mcp.models import APIKey, User
+from giljo_mcp.services.user_auth_service import verify_current_password
 from giljo_mcp.signals import SIGNAL_ACCOUNT_ACCESS_OBSERVED, publish_signal
 
 
@@ -81,6 +82,20 @@ def _announce_api_key_access(request: Request, principal) -> None:
     )
 
 
+_NOT_AUTHENTICATED = "Not authenticated. Please login or provide a valid API key."
+
+
+def _require_one_tenant(request: Request, principal) -> None:
+    stamped = getattr(getattr(request, "state", None), "tenant_key", None)
+    if stamped and stamped != principal.tenant_key:
+        logger.warning("[AUTH] credential tenant mismatch on %s; request refused", request.url.path)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_NOT_AUTHENTICATED,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def get_current_user(
     request: Request,
     access_token: str | None = Cookie(None),
@@ -106,6 +121,7 @@ async def get_current_user(
         try:
             principal = await validate_principal(db, jwt_token=access_token, prefetched_user=prefetched)
             logger.debug("[AUTH] JWT cookie SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
+            _require_one_tenant(request, principal)
             _stamp_auth_credential(request, "cookie", terms_version=principal.terms_version)
             return principal.user
         except PrincipalValidationError as exc:
@@ -115,6 +131,7 @@ async def get_current_user(
         try:
             principal = await validate_principal(db, jwt_token=bearer_token, prefetched_user=prefetched)
             logger.debug("[AUTH] Bearer JWT SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
+            _require_one_tenant(request, principal)
             _stamp_auth_credential(request, "bearer", terms_version=principal.terms_version)
             return principal.user
         except PrincipalValidationError as exc:
@@ -129,6 +146,7 @@ async def get_current_user(
 
             await enforce_api_key_auth_failure(request)
         else:
+            _require_one_tenant(request, principal)
             await _record_api_key_usage(db, request, principal.api_key_id)
             _announce_api_key_access(request, principal)
             logger.debug("[AUTH] API key SUCCESS - User: %s, Tenant: %s", principal.username, principal.tenant_key)
@@ -144,7 +162,7 @@ async def get_current_user(
         logger.info(f"[AUTH] anonymous request to {request.url.path} (no cookie, no api_key)")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated. Please login or provide a valid API key.",
+        detail=_NOT_AUTHENTICATED,
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -274,6 +292,16 @@ def enforce_sensitive_account_field_guard(request: Request, payload: object) -> 
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Recovery PIN is not available in hosted mode.",
             )
+
+
+async def require_current_password(session: AsyncSession, user: User, supplied: str | None) -> None:
+    if not supplied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Changing your own recovery PIN needs your current password.",
+        )
+    if not await verify_current_password(session, user, supplied):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
 
 async def get_current_user_optional(

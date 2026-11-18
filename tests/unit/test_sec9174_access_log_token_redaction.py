@@ -145,3 +145,37 @@ class TestFilterRegisteredOnUvicornAccess:
             )
         assert "live-plaintext-token" not in caplog.text
         assert "token=[REDACTED]" in caplog.text
+
+
+class TestWebSocketHandshakeLineRedacted:
+
+    @pytest.mark.parametrize(
+        ("message", "extra"),
+        [
+            ('%s - "WebSocket %s" [accepted]', ()),
+            ('%s - "WebSocket %s" 403', ()),
+            ('%s - "WebSocket %s" %d', (500,)),
+        ],
+    )
+    def test_handshake_line_has_no_credential_value(self, caplog, message, extra):
+        configure_logging()
+        logger = logging.getLogger("uvicorn.error")
+        with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+            logger.info(message, "198.51.100.9:44100", "/ws/qa-1?api_key=gk_live_secret&token=jwt-secret", *extra)
+        assert "gk_live_secret" not in caplog.text
+        assert "jwt-secret" not in caplog.text
+        assert "/ws/qa-1?api_key=[REDACTED]&token=[REDACTED]" in caplog.text
+
+    def test_api_key_query_value_redacted_on_access_lines(self):
+        record = _access_record("/api/anything?api_key=gk_live_secret&page=2")
+        _SensitiveQueryAccessFilter().filter(record)
+        line = record.getMessage()
+        assert "gk_live_secret" not in line
+        assert "api_key=[REDACTED]&page=2" in line
+
+    def test_other_uvicorn_error_lines_pass_untouched(self, caplog):
+        configure_logging()
+        logger = logging.getLogger("uvicorn.error")
+        with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+            logger.info("Started server process [%d]", 4242)
+        assert "Started server process [4242]" in caplog.text

@@ -25,6 +25,7 @@ from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -58,7 +59,7 @@ async def _seed_member(db_session, tenant_key: str) -> str:
         mission="build it",
         status="inactive",
         staging_status="staged",
-        series_number=uuid.uuid4().int % 9000 + 1,
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
     )

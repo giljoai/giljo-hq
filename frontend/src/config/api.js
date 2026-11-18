@@ -22,10 +22,6 @@ export async function initializeApiConfig() {
     API_CONFIG.REST_API.baseURL = newBaseURL
     API_CONFIG.WEBSOCKET.url = runtimeConfig.websocket?.url || getWsBaseUrl() || DEFAULT_WS_URL
 
-    if (runtimeConfig.security?.default_tenant_key) {
-      API_CONFIG.REST_API.headers['X-Tenant-Key'] = runtimeConfig.security.default_tenant_key
-    }
-
     const { updateApiBaseURL } = await import('@/services/api')
     updateApiBaseURL(newBaseURL)
 
@@ -44,17 +40,12 @@ export function getApiBaseURL() {
   return window.API_BASE_URL || API_CONFIG.REST_API.baseURL || getApiBaseUrl()
 }
 
-export function getDefaultTenantKey() {
-  return runtimeConfig?.security?.default_tenant_key || import.meta.env.VITE_DEFAULT_TENANT_KEY || ''
-}
-
 export const API_CONFIG = {
   REST_API: {
     baseURL: DEFAULT_BASE_URL,
     timeout: 30000,
     headers: {
       'Content-Type': 'application/json',
-      'X-Tenant-Key': import.meta.env.VITE_DEFAULT_TENANT_KEY || '',
     },
   },
   WEBSOCKET: {

@@ -18,6 +18,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import seed_projects
 
 
 pytestmark = pytest.mark.asyncio
@@ -43,6 +44,7 @@ def _service(session: AsyncSession) -> SequenceRunService:
 
 async def _create_run(svc: SequenceRunService, tenant_key: str) -> dict:
     pa, pb = str(uuid.uuid4()), str(uuid.uuid4())
+    await seed_projects(svc._session, tenant_key, [pa, pb])
     return await svc.create(
         project_ids=[pa, pb],
         resolved_order=[pa, pb],

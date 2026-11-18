@@ -222,3 +222,14 @@ def restored_global_protected_surface_patterns():
         yield
     finally:
         gate._edition_patterns = original
+
+
+@contextlib.contextmanager
+def restored_global_mcp_reply_providers():
+    from api.endpoints.mcp_tools import _announcement_hook as hook
+
+    original = (hook._provider, hook._hint_provider, hook._view_link_builder)
+    try:
+        yield
+    finally:
+        hook._provider, hook._hint_provider, hook._view_link_builder = original

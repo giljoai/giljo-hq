@@ -321,4 +321,4 @@ async def test_search_memory_no_active_product_surfaces_error(search_memory_mcp_
         result = await session.call_tool("search_memory", {"query": "anything"})
 
     assert result.is_error is True
-    assert "default product" in _error_text(result).lower()
+    assert "create_product" in _error_text(result)

@@ -45,6 +45,7 @@ from tests.fixtures.base_fixtures import (  # noqa: E402
     db_session,
     restored_app_state,
     restored_global_client_resolver,
+    restored_global_mcp_reply_providers,
     restored_global_protected_surface_patterns,
     restored_global_terms_gate,
     restored_global_wake_relay,
@@ -232,6 +233,12 @@ def _restore_global_terms_gate():
 @pytest.fixture(autouse=True)
 def _restore_global_protected_surface_patterns():
     with restored_global_protected_surface_patterns():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_mcp_reply_providers():
+    with restored_global_mcp_reply_providers():
         yield
 
 

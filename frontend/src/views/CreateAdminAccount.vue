@@ -455,12 +455,4 @@ const createAdmin = async () => {
 .footer-brand {
   color: $gradient-brand-start;
 }
-
-/* Neutralize browser autofill background (matches Login.vue) */
-:deep(input:-webkit-autofill),
-:deep(input:-webkit-autofill:hover),
-:deep(input:-webkit-autofill:focus) {
-  -webkit-box-shadow: 0 0 0 1000px rgb(var(--v-theme-surface)) inset !important;
-  -webkit-text-fill-color: rgb(var(--v-theme-on-surface)) !important;
-}
 </style>

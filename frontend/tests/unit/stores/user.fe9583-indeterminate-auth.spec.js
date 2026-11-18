@@ -42,7 +42,6 @@ vi.mock('@/services/api', () => ({
       logout: vi.fn(),
     },
   },
-  setTenantKey: vi.fn(),
 }))
 
 const VERIFIED_USER = { id: 7, username: 'admin', role: 'admin', tenant_key: 'tk_fe9583' }

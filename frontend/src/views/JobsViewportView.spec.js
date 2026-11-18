@@ -360,17 +360,6 @@ describe('JobsViewportView sides (FE-9679)', () => {
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(1)
   })
 
-  it('a card asking to edit its description opens the one project edit dialog on the board', async () => {
-    h.getActive.mockResolvedValue({ data: [ACTIVATED] })
-    const wrapper = mountView()
-    await flushPromises()
-    await flushPromises()
-    expect(wrapper.find('[data-testid="jobs-board-edit-dialog"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="jb-edit-description"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-testid="jobs-board-edit-dialog"]').exists()).toBe(true)
-  })
-
   const FULL_PROJECT = {
     id: 'p-full',
     taxonomy_alias: 'BE-9707',
@@ -384,19 +373,27 @@ describe('JobsViewportView sides (FE-9679)', () => {
     implementation_launched_at: null,
   }
 
-  it('the pencil opens Edit Project PRE-FILLED with the project current fields, not empty', async () => {
+  it('no control on the board opens the project pop-up for description or mission (FE-0076)', async () => {
     h.getActive.mockResolvedValue({ data: [FULL_PROJECT] })
     const wrapper = mountView()
     await flushPromises()
     await flushPromises()
+    await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
 
-    await wrapper.find('[data-testid="jb-edit-description"]').trigger('click')
-    await flushPromises()
-    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ProjectCreateEditDialog' }).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="jobs-board-edit-dialog"]').exists()).toBe(false)
+    const editControls = wrapper
+      .findAll('button')
+      .filter((b) => /edit/i.test(`${b.attributes('aria-label') || ''} ${b.attributes('title') || ''}`))
+      .map((b) => b.attributes('data-testid'))
+    expect(editControls).toEqual(['jb-edit-description', 'jb-edit-mission'])
 
-    expect(wrapper.find('[aria-label="Project name"]').attributes('modelvalue')).toBe(FULL_PROJECT.name)
-    expect(wrapper.find('[aria-label="Project description"]').attributes('modelvalue')).toBe(FULL_PROJECT.description)
-    expect(wrapper.find('[aria-label="Orchestrator mission"]').attributes('modelvalue')).toBe(FULL_PROJECT.mission)
+    for (const id of editControls) {
+      await wrapper.find(`[data-testid="${id}"]`).trigger('click')
+      await flushPromises()
+      expect(wrapper.findComponent({ name: 'ProjectCreateEditDialog' }).exists()).toBe(false)
+      expect(wrapper.find('[aria-label="Project name"]').exists()).toBe(false)
+    }
   })
 })
 

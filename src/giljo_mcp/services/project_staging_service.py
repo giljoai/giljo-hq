@@ -33,7 +33,11 @@ from giljo_mcp.services.project_helpers import (
 )
 from giljo_mcp.services.sequence_chain_context import chain_predecessor_open_error, resolve_chain_launch_gate
 from giljo_mcp.services.sequence_run_service import broadcast_deferred_sequence_updates
-from giljo_mcp.services.staging_session import is_planning_session
+from giljo_mcp.services.staging_session import (
+    broadcast_orchestrator_started,
+    is_planning_session,
+    start_parked_orchestrator_on_launch,
+)
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -286,6 +290,7 @@ class ProjectStagingService:
                 )
 
             already_launched = project.implementation_launched_at is not None
+            started_orchestrator = None
 
             if not already_launched:
                 is_chain_member, blocking_predecessor = await resolve_chain_launch_gate(
@@ -306,11 +311,15 @@ class ProjectStagingService:
                     )
 
                 stamp_launch(project)
+                started_orchestrator = await start_parked_orchestrator_on_launch(session, project, effective_tenant)
 
                 await self._advance_chain_on_launch(session, project_id, effective_tenant, websocket_manager=ws)
                 await session.commit()
                 await broadcast_deferred_sequence_updates(session)
                 await self._project_repo.refresh(session, project)
+                if started_orchestrator is not None:
+                    await session.refresh(started_orchestrator[0])
+                    await session.refresh(started_orchestrator[1])
 
             launched_at_iso = project.implementation_launched_at.isoformat()
             project_active = project.status == ProjectStatus.ACTIVE
@@ -324,6 +333,9 @@ class ProjectStagingService:
                 launched_by or "unknown",
             )
 
+        if started_orchestrator is not None:
+            execution, job, old_status = started_orchestrator
+            await broadcast_orchestrator_started(ws, execution, job, effective_tenant, old_status)
         await self._broadcast_launch_event(
             ws,
             tenant_key=effective_tenant,

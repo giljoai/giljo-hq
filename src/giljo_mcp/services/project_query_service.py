@@ -129,43 +129,43 @@ class ProjectQueryService:
                     session, tenant_key, [p.id for p in projects if p.status == ProjectStatus.COMPLETED.value]
                 )
 
-                details = []
-                for project in projects:
-                    agent_count = await self._repo.count_agent_jobs(session, tenant_key, project.id)
-                    message_count = await self._repo.count_messages(session, tenant_key, project.id)
-                    details.append(
-                        ActiveProjectDetail(
-                            id=str(project.id),
-                            alias=project.alias or "",
-                            name=project.name,
-                            mission=project.mission or "",
-                            description=project.description,
-                            status=project.status,
-                            staging_status=project.staging_status,
-                            execution_mode=project.execution_mode,
-                            product_id=project.product_id,
-                            created_at=project.created_at.isoformat() if project.created_at else None,
-                            updated_at=project.updated_at.isoformat() if project.updated_at else None,
-                            completed_at=project.completed_at.isoformat() if project.completed_at else None,
-                            implementation_launched_at=(
-                                project.implementation_launched_at.isoformat()
-                                if project.implementation_launched_at
-                                else None
-                            ),
-                            reviewed_at=project.reviewed_at.isoformat() if project.reviewed_at else None,
-                            review_pending=is_review_pending(project.status, project.reviewed_at),
-                            closeout_summary=summaries.get(project.id),
-                            deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
-                            agent_count=agent_count,
-                            message_count=message_count,
-                            project_type_id=project.project_type_id,
-                            project_type=project.project_type,
-                            series_number=project.series_number,
-                            subseries=project.subseries,
-                            taxonomy_alias=project.taxonomy_alias,
-                        )
+                project_ids = [p.id for p in projects]
+                agent_counts = await self._repo.count_agent_jobs_for_projects(session, tenant_key, project_ids)
+                message_counts = await self._repo.count_messages_for_projects(session, tenant_key, project_ids)
+
+                return [
+                    ActiveProjectDetail(
+                        id=str(project.id),
+                        alias=project.alias or "",
+                        name=project.name,
+                        mission=project.mission or "",
+                        description=project.description,
+                        status=project.status,
+                        staging_status=project.staging_status,
+                        execution_mode=project.execution_mode,
+                        product_id=project.product_id,
+                        created_at=project.created_at.isoformat() if project.created_at else None,
+                        updated_at=project.updated_at.isoformat() if project.updated_at else None,
+                        completed_at=project.completed_at.isoformat() if project.completed_at else None,
+                        implementation_launched_at=(
+                            project.implementation_launched_at.isoformat()
+                            if project.implementation_launched_at
+                            else None
+                        ),
+                        reviewed_at=project.reviewed_at.isoformat() if project.reviewed_at else None,
+                        review_pending=is_review_pending(project.status, project.reviewed_at),
+                        closeout_summary=summaries.get(project.id),
+                        deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
+                        agent_count=agent_counts.get(project.id, 0),
+                        message_count=message_counts.get(project.id, 0),
+                        project_type_id=project.project_type_id,
+                        project_type=project.project_type,
+                        series_number=project.series_number,
+                        subseries=project.subseries,
+                        taxonomy_alias=project.taxonomy_alias,
                     )
-                return details
+                    for project in projects
+                ]
 
         except ValidationError:
             raise

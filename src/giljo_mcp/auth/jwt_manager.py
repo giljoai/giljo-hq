@@ -79,6 +79,10 @@ class JWTManager:
             payload["fid"] = family_id
         return jwt.encode(payload, secret_key, algorithm=cls.ALGORITHM)
 
+    @staticmethod
+    def is_resource_token(payload: dict) -> bool:
+        return "aud" in payload or "fid" in payload
+
     @classmethod
     def verify_token(cls, token: str, expected_audience: str | None = None) -> dict:
         try:

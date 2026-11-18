@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.endpoints.auth_models import BoundedPassword
+from api.endpoints.auth_models import BCRYPT_MAX_PASSWORD_BYTES, BoundedPassword
 from api.endpoints.dependencies import get_user_service
 from api.endpoints.users_notification_prefs import router as users_notification_prefs_router
 from giljo_mcp.auth.dependencies import (
@@ -20,6 +20,7 @@ from giljo_mcp.auth.dependencies import (
     get_current_active_user,
     get_db_session,
     require_admin,
+    require_current_password,
 )
 from giljo_mcp.models import User
 from giljo_mcp.services import UserService
@@ -29,6 +30,7 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_OWN_PASSWORD_ROUTE = "Change your own password at PUT /api/v1/users/{user_id}/password (it checks the current one)."
 
 
 class UserCreate(BaseModel):
@@ -63,6 +65,7 @@ class UserUpdate(BaseModel):
     recovery_pin: str | None = Field(
         None, min_length=4, max_length=4, pattern="^[0-9]{4}$", description="4-digit recovery PIN"
     )
+    current_password: str | None = Field(None, max_length=BCRYPT_MAX_PASSWORD_BYTES, description="Your own password")
 
     @field_validator("last_name")
     @classmethod
@@ -411,17 +414,14 @@ async def update_user(
     request: Request,
     current_user: User = Depends(get_current_active_user),
     user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db_session),
 ) -> UserResponse:
     """
     Update user profile.
 
     Admin can update any user in their tenant. Non-admin can only update themselves.
-
-    Args:
-        user_id: UUID of user to update
-        user_data: Fields to update
-        current_user: Current authenticated user
-        user_service: User service for database operations
+    A new password for your own account goes through PUT /api/v1/users/{user_id}/password;
+    a new recovery PIN for your own account needs `current_password` in the same request.
 
     Returns:
         Updated user data (password excluded)
@@ -436,10 +436,13 @@ async def update_user(
 
     enforce_sensitive_account_field_guard(request, user_data)
 
+    if user_data.password is not None and str(user_id) == str(current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OWN_PASSWORD_ROUTE)
+    if user_data.recovery_pin is not None and str(user_id) == str(current_user.id):
+        await require_current_password(db, current_user, user_data.current_password)
+
     is_admin = current_user.role == "admin"
-
     user = await user_service.get_user(str(user_id))
-
     if not is_admin and str(user.id) != str(current_user.id):
         logger.warning("Non-admin %s tried to update user %s", sanitize(current_user.username), sanitize(user.username))
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot update other users' profiles")
@@ -613,7 +616,7 @@ async def change_password(
 
     Raises:
         ValidationError: Old password not provided (400)
-        AuthenticationError: Old password incorrect (401)
+        ValidationError: Old password incorrect (400)
         AuthorizationError: Non-admin tries to change other users' passwords (403)
         ResourceNotFoundError: User not found (404)
         BaseGiljoError: Database operation failed (500)

@@ -293,3 +293,188 @@ async def test_setup_state_roundtrip(api_client, auth_headers):
     assert data["setup_step_completed"] == 2
     assert data["setup_selected_tools"] == ["claude_code", "windsurf"]
     assert data["setup_complete"] is False
+
+
+
+
+def test_setup_state_update_refuses_false_for_intro_video_seen():
+    assert SetupStateUpdate(intro_video_seen=True).intro_video_seen is True
+    assert SetupStateUpdate().intro_video_seen is None
+    with pytest.raises(ValidationError):
+        SetupStateUpdate(intro_video_seen=False)
+
+
+@pytest.mark.asyncio
+async def test_get_me_returns_intro_video_seen_false_and_created_at_for_a_new_user(api_client, auth_headers):
+    response = await api_client.get("/api/auth/me", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["intro_video_seen"] is False
+    assert isinstance(data["created_at"], str) and data["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_patch_intro_video_seen_true_saves_and_roundtrips(api_client, auth_headers):
+    response = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"intro_video_seen": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["intro_video_seen"] is True
+
+    me = await api_client.get("/api/auth/me", headers=auth_headers)
+    assert me.json()["intro_video_seen"] is True
+
+
+@pytest.mark.asyncio
+async def test_patch_intro_video_seen_false_is_422_and_saves_nothing(api_client, auth_headers):
+    assert (
+        await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"intro_video_seen": True})
+    ).status_code == 200
+
+    response = await api_client.patch(
+        "/api/auth/me/setup-state", headers=auth_headers, json={"intro_video_seen": False}
+    )
+    assert response.status_code == 422, response.text
+
+    me = await api_client.get("/api/auth/me", headers=auth_headers)
+    assert me.json()["intro_video_seen"] is True
+
+
+@pytest.mark.asyncio
+async def test_intro_video_seen_is_scoped_to_the_calling_user(api_client, auth_headers, db_manager):
+    from uuid import uuid4
+
+    from giljo_mcp.auth.jwt_manager import JWTManager
+    from giljo_mcp.models import User
+    from giljo_mcp.models.organizations import Organization
+    from giljo_mcp.tenant import TenantManager
+
+    suffix = uuid4().hex[:8]
+    tenant_key = TenantManager.generate_tenant_key()
+    async with db_manager.get_session_async() as session:
+        org = Organization(name=f"Other {suffix}", slug=f"other-{suffix}", tenant_key=tenant_key, is_active=True)
+        session.add(org)
+        await session.flush()
+        other = User(
+            username=f"other_{suffix}",
+            email=f"other_{suffix}@example.com",
+            password_hash="x",
+            tenant_key=tenant_key,
+            role="developer",
+            org_id=org.id,
+        )
+        session.add(other)
+        await session.commit()
+        other_id = other.id
+        token = JWTManager.create_access_token(
+            user_id=other_id, username=other.username, role="developer", tenant_key=tenant_key
+        )
+    other_headers = {
+        "Cookie": f"access_token={token}; csrf_token={auth_headers['X-CSRF-Token']}",
+        "X-CSRF-Token": auth_headers["X-CSRF-Token"],
+    }
+
+    saved = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"intro_video_seen": True})
+    assert saved.status_code == 200
+
+    other_me = await api_client.get("/api/auth/me", headers=other_headers)
+    assert other_me.json()["intro_video_seen"] is False
+
+    spoof = await api_client.patch(
+        "/api/auth/me/setup-state",
+        headers=other_headers,
+        json={"intro_video_seen": True, "user_id": "someone-else", "tenant_key": "tk_other"},
+    )
+    assert spoof.status_code == 200
+    mine = await api_client.get("/api/auth/me", headers=auth_headers)
+    assert mine.json()["intro_video_seen"] is True
+    assert mine.json()["tenant_key"] != "tk_other"
+
+
+
+
+def test_setup_state_update_accepts_both_values_for_guide_closed():
+    assert SetupStateUpdate(guide_closed=True).guide_closed is True
+    assert SetupStateUpdate(guide_closed=False).guide_closed is False
+    assert SetupStateUpdate().guide_closed is None
+
+
+@pytest.mark.asyncio
+async def test_get_me_returns_guide_closed_false_for_a_new_user(api_client, auth_headers):
+    response = await api_client.get("/api/auth/me", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["guide_closed"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_guide_closed_writes_both_ways_and_roundtrips(api_client, auth_headers):
+    closed = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"guide_closed": True})
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["guide_closed"] is True
+    assert (await api_client.get("/api/auth/me", headers=auth_headers)).json()["guide_closed"] is True
+
+    reopened = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"guide_closed": False})
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["guide_closed"] is False
+    assert (await api_client.get("/api/auth/me", headers=auth_headers)).json()["guide_closed"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_without_guide_closed_leaves_it_alone(api_client, auth_headers):
+    await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"guide_closed": True})
+
+    other = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"setup_step_completed": 1})
+
+    assert other.status_code == 200, other.text
+    assert other.json()["guide_closed"] is True
+
+
+@pytest.mark.asyncio
+async def test_patch_guide_closed_rejects_a_non_boolean(api_client, auth_headers):
+    response = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"guide_closed": "banana"})
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.asyncio
+async def test_guide_closed_is_scoped_to_the_calling_user(api_client, auth_headers, db_manager):
+    from uuid import uuid4
+
+    from giljo_mcp.auth.jwt_manager import JWTManager
+    from giljo_mcp.models import User
+    from giljo_mcp.models.organizations import Organization
+    from giljo_mcp.tenant import TenantManager
+
+    suffix = uuid4().hex[:8]
+    tenant_key = TenantManager.generate_tenant_key()
+    async with db_manager.get_session_async() as session:
+        org = Organization(name=f"Other {suffix}", slug=f"other-{suffix}", tenant_key=tenant_key, is_active=True)
+        session.add(org)
+        await session.flush()
+        other = User(
+            username=f"other_{suffix}",
+            email=f"other_{suffix}@example.com",
+            password_hash="x",
+            tenant_key=tenant_key,
+            role="developer",
+            org_id=org.id,
+        )
+        session.add(other)
+        await session.commit()
+        token = JWTManager.create_access_token(
+            user_id=other.id, username=other.username, role="developer", tenant_key=tenant_key
+        )
+    other_headers = {
+        "Cookie": f"access_token={token}; csrf_token={auth_headers['X-CSRF-Token']}",
+        "X-CSRF-Token": auth_headers["X-CSRF-Token"],
+    }
+
+    saved = await api_client.patch("/api/auth/me/setup-state", headers=auth_headers, json={"guide_closed": True})
+    assert saved.status_code == 200
+
+    assert (await api_client.get("/api/auth/me", headers=other_headers)).json()["guide_closed"] is False
+
+    spoof = await api_client.patch(
+        "/api/auth/me/setup-state",
+        headers=other_headers,
+        json={"guide_closed": False, "user_id": "someone-else", "tenant_key": "tk_other"},
+    )
+    assert spoof.status_code == 200
+    assert (await api_client.get("/api/auth/me", headers=auth_headers)).json()["guide_closed"] is True

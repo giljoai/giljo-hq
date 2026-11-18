@@ -49,14 +49,10 @@ class OrgService:
             if not slug:
                 slug = self._generate_slug(name)
 
-            try:
-                existing = await self.get_organization_by_slug(slug)
-                if existing:
-                    raise AlreadyExistsError(
-                        message=f"Organization with slug '{slug}' already exists", context={"slug": slug}
-                    )
-            except ResourceNotFoundError:
-                pass
+            if await self._repo.slug_taken_by_other_org(self.session, slug, exclude_org_id=None):
+                raise AlreadyExistsError(
+                    message=f"Organization with slug '{slug}' already exists", context={"slug": slug}
+                )
 
             org = Organization(name=name, tenant_key=tenant_key, slug=slug, settings=settings or {})
             await self._repo.add_organization(self.session, org)

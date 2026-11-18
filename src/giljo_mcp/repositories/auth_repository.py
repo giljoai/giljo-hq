@@ -38,7 +38,12 @@ class AuthRepository:
         return result.scalar_one_or_none()
 
     async def get_user_by_email(self, session: AsyncSession, email: str) -> User | None:
-        stmt = select(User).where(func.lower(User.email) == email.lower())
+        stmt = (
+            select(User)
+            .where(func.lower(User.email) == email.lower())
+            .order_by((User.email == email).desc(), User.created_at)
+            .limit(1)
+        )
         with tenant_isolation_bypass(
             session,
             reason="login email lookup resolves tenant before authentication",
@@ -48,10 +53,14 @@ class AuthRepository:
         return result.scalar_one_or_none()
 
     async def get_user_by_username_or_email(self, session: AsyncSession, identifier: str) -> User | None:
-        user = await self.get_user_by_username(session, identifier)
-        if user is None:
-            user = await self.get_user_by_email(session, identifier)
-        return user
+        lookups = (self.get_user_by_email, self.get_user_by_username)
+        if "@" not in identifier:
+            lookups = lookups[::-1]
+        for lookup in lookups:
+            user = await lookup(session, identifier)
+            if user is not None:
+                return user
+        return None
 
     async def get_user_by_id(self, session: AsyncSession, user_id: str) -> User | None:
         stmt = select(User).where(User.id == user_id)
@@ -195,7 +204,7 @@ class AuthRepository:
         return result.scalar_one_or_none() is not None
 
     async def check_email_exists(self, session: AsyncSession, email: str) -> bool:
-        stmt = select(User).where(User.email == email)
+        stmt = select(User).where(func.lower(User.email) == email.strip().lower()).limit(1)
         with tenant_isolation_bypass(
             session,
             reason="global email uniqueness check before user creation",

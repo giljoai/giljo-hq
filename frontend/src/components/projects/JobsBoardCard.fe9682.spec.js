@@ -51,44 +51,41 @@ const staged = {
   mission: 'Phase 1 frontend: BillingView copy.\nPhase 2 tester: specs.',
 }
 
-describe('JobsBoardCard summary rows (FE-9682)', () => {
-  it('renders Description and Mission as the only one-line rows under the stat strip', () => {
+describe('JobsBoardCard Description and mission line (FE-9682, FE-0076)', () => {
+  it('renders the one line under the stat strip and no summary rows', () => {
     const wrapper = mountCard(staged, [orch, impl, tester])
-    const rows = wrapper.find('[data-testid="jb-summary-rows"]')
-    expect(rows.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="jb-row-description"]').text()).toContain('The nightly CSV export fails silently')
-    expect(wrapper.find('[data-testid="jb-row-description"]').text()).not.toContain('Retry three times')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="jb-summary-rows"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="jb-details-btn"]').text()).toContain('Description and mission')
     expect(wrapper.find('[data-testid="jb-row-crew"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid="jb-edit-description"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="jb-edit-description"]')).toHaveLength(0)
     expect(wrapper.find('[data-testid="jb-staging-panels"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-crew-tile"]').exists()).toBe(false)
   })
 
-  it('Mission row, no mission: hollow dot and the Stage hint', () => {
+  it('Mission pill, no mission: grey, and the panel gives the Stage hint', async () => {
     const wrapper = mountCard(base)
     const state = wrapper.find('[data-testid="jb-mission-state"]')
     expect(state.attributes('data-state')).toBe('none')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toMatch(/No mission yet\. Press Stage and the orchestrator writes it\./)
+    await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toMatch(/No mission yet\. Press Stage and the orchestrator writes it\./)
   })
 
-  it('Mission row, staging in progress: pulsing dot and "Orchestrator writing"', () => {
+  it('Mission pill, staging in progress: "Writing mission"', () => {
     const wrapper = mountCard({ ...base, id: 'p-planning', staging_status: 'staging', execution_mode: 'subagent' }, [
       { ...orch, status: 'working' },
     ])
     const state = wrapper.find('[data-testid="jb-mission-state"]')
     expect(state.attributes('data-state')).toBe('writing')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toContain('Orchestrator writing')
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toContain('Writing mission')
   })
 
-  it('Mission row, written: green dot, the word Written and the first line', () => {
+  it('Mission pill, written: green, and the panel holds the full mission', async () => {
     const wrapper = mountCard(staged, [orch, impl, tester])
     const state = wrapper.find('[data-testid="jb-mission-state"]')
     expect(state.attributes('data-state')).toBe('written')
-    const row = wrapper.find('[data-testid="jb-row-mission"]')
-    expect(row.text()).toContain('Written')
-    expect(row.text()).toContain('Phase 1 frontend: BillingView copy.')
-    expect(row.text()).not.toContain('Phase 2 tester')
+    expect(state.text()).toBe('Mission written')
+    await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="jb-drawer-mission"]').text()).toContain('Phase 2 tester: specs.')
   })
 
   it('the bottom work pane, not a summary row, is the one crew listing before staging', () => {
@@ -98,11 +95,6 @@ describe('JobsBoardCard summary rows (FE-9682)', () => {
     expect(wrapper.findAll('[data-testid="jb-agent-row"]')).toHaveLength(3)
   })
 
-  it('the Description pencil on the row asks the board to open the edit dialog', async () => {
-    const wrapper = mountCard(base)
-    await wrapper.find('[data-testid="jb-row-description"] [data-testid="jb-edit-description"]').trigger('click')
-    expect(wrapper.emitted('edit-description')?.[0]?.[0]).toMatchObject({ id: 'p-stage' })
-  })
 })
 
 describe('JobsBoardCard Details drawer (FE-9682)', () => {
@@ -148,11 +140,12 @@ describe('JobsBoardCard Details drawer (FE-9682)', () => {
     expect(wrapper.emitted('agent-role')?.[0]?.[0]).toMatchObject({ agent_id: 'a-or' })
   })
 
-  it('the drawer pencil on the full description opens the same edit dialog', async () => {
+  it('the pencil on the full description edits in the panel, not in the project dialog', async () => {
     const wrapper = mountCard(staged, [orch])
     await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
     await wrapper.find('[data-testid="jb-drawer-description"] [data-testid="jb-edit-description"]').trigger('click')
-    expect(wrapper.emitted('edit-description')?.[0]?.[0]).toMatchObject({ id: 'p-staged' })
+    expect(wrapper.find('[data-testid="jb-drawer-description"] textarea').exists()).toBe(true)
+    expect(wrapper.emitted('edit-description')).toBeUndefined()
   })
 })
 
@@ -188,14 +181,14 @@ describe('JobsBoardCard meta line icons and the retired Agent Lab (FE-9682)', ()
     expect(git.classes()).not.toContain('jb-int--off')
   })
 
-  it('the icons show on an implementing card too, and the summary rows sit above the live agent rows', () => {
+  it('the icons show on an implementing card too, and the Description and mission line sits above the live agent rows', () => {
     const running = { ...staged, id: 'p-run', implementation_launched_at: '2026-09-26T05:00:00Z' }
     const wrapper = mountCard(running, [{ ...orch, status: 'working', steps: { completed: 1, total: 3 } }, impl], {
       integrationsResolved: true,
       gitEnabled: true,
     })
     expect(wrapper.find('[data-testid="jb-meta"] [data-testid="git-status-icon"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="jb-summary-rows"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="jb-details-btn"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="jb-agents-list"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="jb-agent-status"]').length).toBeGreaterThan(0)
   })

@@ -4,6 +4,9 @@
 # [CE] Community Edition.
 
 
+import re
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -71,6 +74,13 @@ def test_csp_core_directives(app):
     assert "frame-ancestors 'none'" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
+
+
+def test_csp_img_src_allows_only_first_party_images(app):
+    csp = TestClient(app).get("/").headers["Content-Security-Policy"]
+
+    assert "img-src 'self' data:;" in csp
+    assert "https:;" not in csp.split("img-src", 1)[1].split(";", 1)[0] + ";"
 
 
 
@@ -168,3 +178,46 @@ def test_non_asset_html_policy_unchanged(app):
 
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
+
+
+
+_ONBOARDING_MEDIA_DIRECTIVE = "media-src 'self' https://giljo.ai"
+
+_POLICY_BEFORE_INF_0072B = (
+    "default-src 'self'; "
+    "script-src 'self' 'sha256-LRJOHmw/kARrWFQNFXTam7BNVjtucN2V1FzuxKtEUg0=' "
+    "'sha256-T+y4FnL+BP2aiGWNs6H5HdyLosVMnGaNc9v+5DaNNJM=' https://static.cloudflareinsights.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' ws: wss: https://cloudflareinsights.com; "
+    "frame-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+def test_csp_allows_media_only_from_self_and_the_website(app):
+    csp = TestClient(app).get("/").headers["Content-Security-Policy"]
+
+    directives = [d.strip() for d in csp.split(";")]
+    assert _ONBOARDING_MEDIA_DIRECTIVE in directives
+    assert sum(d.startswith("media-src") for d in directives) == 1
+
+
+def test_csp_other_directives_unchanged_by_media_src(app):
+    csp = TestClient(app).get("/").headers["Content-Security-Policy"]
+
+    without_media = "; ".join(d.strip() for d in csp.split(";") if not d.strip().startswith("media-src"))
+    assert without_media == _POLICY_BEFORE_INF_0072B
+    assert "img-src 'self' data:;" in csp
+    assert "connect-src 'self' ws: wss: https://cloudflareinsights.com;" in csp
+
+
+def test_media_policy_host_equals_the_registry_host(app):
+    registry = (Path(__file__).resolve().parents[2] / "frontend/src/content/onboarding/videos.js").read_text()
+    registry_host = re.search(r"export const MEDIA_HOST = '([^']+)'", registry).group(1)
+    csp = TestClient(app).get("/").headers["Content-Security-Policy"]
+
+    assert f"media-src 'self' {registry_host}" in [d.strip() for d in csp.split(";")]
