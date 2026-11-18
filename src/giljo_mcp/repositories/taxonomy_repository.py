@@ -25,9 +25,16 @@ class TaxonomyRepository:
     def __init__(self) -> None:
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    async def count_for_tenant(self, session: AsyncSession, tenant_key: str) -> int:
+    async def count_excluding_abbreviations(
+        self, session: AsyncSession, tenant_key: str, excluded_abbreviations: frozenset[str]
+    ) -> int:
         result = await session.execute(
-            select(func.count()).select_from(TaxonomyType).where(TaxonomyType.tenant_key == tenant_key)
+            select(func.count())
+            .select_from(TaxonomyType)
+            .where(
+                TaxonomyType.tenant_key == tenant_key,
+                TaxonomyType.abbreviation.not_in(excluded_abbreviations),
+            )
         )
         return result.scalar() or 0
 
@@ -147,7 +154,6 @@ class TaxonomyRepository:
                 Project.tenant_key == tenant_key,
                 Project.product_id == product_id,
                 Project.series_number.is_not(None),
-                project_not_trashed(),
             )
             .order_by(Project.series_number)
         )
@@ -168,7 +174,6 @@ class TaxonomyRepository:
             Project.tenant_key == tenant_key,
             Project.series_number == series_number,
             Project.product_id == product_id,
-            project_not_trashed(),
         )
         if type_id:
             query = query.where(Project.project_type_id == type_id)
@@ -200,7 +205,6 @@ class TaxonomyRepository:
             Project.series_number == series_number,
             Project.product_id == product_id,
             Project.subseries.isnot(None),
-            project_not_trashed(),
         )
         if type_id:
             query = query.where(Project.project_type_id == type_id)

@@ -172,6 +172,75 @@ async def test_a_logged_out_app_is_refused_on_its_next_call(api_client, db_manag
     assert await _mcp_call(db_manager, token) == 401
 
 
+async def _live_family_rows(db_manager, tenant_key: str, family_id: str) -> int:
+    from giljo_mcp.models.oauth import OAuthRefreshToken
+
+    async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+        with tenant_session_context(session, tenant_key):
+            rows = await session.execute(
+                select(OAuthRefreshToken).where(
+                    OAuthRefreshToken.tenant_key == tenant_key,
+                    OAuthRefreshToken.family_id == family_id,
+                    OAuthRefreshToken.revoked.is_(False),
+                )
+            )
+            return len(rows.scalars().all())
+
+
+@pytest.mark.parametrize("log_out_all", [False, True], ids=["one_app", "all_apps"])
+async def test_log_out_wins_against_a_refresh_in_flight(api_client, db_manager, monkeypatch, log_out_all):
+    import asyncio
+
+    from giljo_mcp.services import oauth_refresh_service
+
+    monkeypatch.setenv("JWT_SECRET", "test_secret_key")
+    app = await _connect_app(api_client, db_manager)
+    tenant_key = app["tenant_key"]
+    (login,) = await _logins(db_manager, tenant_key)
+
+    async def _log_out():
+        async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+            with tenant_session_context(session, tenant_key):
+                if log_out_all:
+                    await oauth_login_service.log_out_all_apps(session, tenant_key=tenant_key, user_id=login.user_id)
+                else:
+                    await oauth_login_service.log_out_app(
+                        session, tenant_key=tenant_key, user_id=login.user_id, login_id=login.id
+                    )
+
+    real_issue = oauth_refresh_service.issue_refresh_token
+    raced: dict = {}
+
+    async def _issue_then_log_out(*args, **kwargs):
+        raw = await real_issue(*args, **kwargs)
+        raced["task"] = asyncio.create_task(_log_out())
+        await asyncio.sleep(0.5)
+        raced["blocked_while_refresh_open"] = not raced["task"].done()
+        return raw
+
+    monkeypatch.setattr(oauth_refresh_service, "issue_refresh_token", _issue_then_log_out)
+    restore = _install_confidential_resolver((app["client_id"], _bcrypt_hash(app["secret"]), [_REDIRECT]))
+    try:
+        response = await api_client.post(
+            "/api/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": app["tokens"]["refresh_token"],
+                "client_id": app["client_id"],
+                "client_secret": app["secret"],
+            },
+        )
+    finally:
+        restore()
+    await asyncio.wait_for(raced["task"], timeout=10)
+
+    assert response.status_code == 200, response.text
+    assert raced["blocked_while_refresh_open"], "the log-out must wait for the refresh, not run beside it"
+    assert await _live_family_rows(db_manager, tenant_key, str(login.family_id)) == 0, (
+        "the token the refresh minted outlived the log-out"
+    )
+
+
 async def test_log_out_all_refuses_every_app_of_the_user(api_client, db_manager, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     app = await _connect_app(api_client, db_manager)
@@ -211,7 +280,7 @@ async def test_a_spoofed_cf_connecting_ip_is_ignored_without_a_trusted_proxy(api
     assert login.last_ip == "127.0.0.1"
 
 
-async def test_cf_connecting_ip_is_honoured_from_a_trusted_proxy(api_client, db_manager, monkeypatch):
+async def test_forwarded_client_is_honoured_from_a_trusted_proxy(api_client, db_manager, monkeypatch):
     from api.endpoints.auth.session import _get_ip_resolver
 
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
@@ -223,7 +292,7 @@ async def test_cf_connecting_ip_is_honoured_from_a_trusted_proxy(api_client, db_
         await _mcp_call(
             db_manager,
             app["tokens"]["access_token"],
-            extra_headers=[(b"cf-connecting-ip", b"203.0.113.9")],
+            extra_headers=[(b"x-forwarded-for", b"203.0.113.9"), (b"cf-connecting-ip", b"198.51.100.66")],
         )
     finally:
         _get_ip_resolver.cache_clear()

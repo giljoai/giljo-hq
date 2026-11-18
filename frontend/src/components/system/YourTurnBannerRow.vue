@@ -14,9 +14,22 @@
   >
     <div class="your-turn-banner-row__content">
       <v-icon icon="mdi-hand-back-right-outline" size="18" class="your-turn-banner-row__hand" />
-      <span class="your-turn-banner-row__text" data-testid="your-turn-banner-text">
+      <span
+        :id="messageId"
+        ref="messageEl"
+        class="your-turn-banner-row__text"
+        :class="{ 'is-expanded': expanded }"
+        data-testid="your-turn-banner-text"
+        @click="onTextClick"
+      >
         {{ message }}
       </span>
+      <BannerExpandToggle
+        v-if="expandable"
+        :expanded="expanded"
+        :controls="messageId"
+        @toggle="toggle"
+      />
     </div>
 
     <div class="your-turn-banner-row__actions">
@@ -41,6 +54,8 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useBannerExpand } from '@/composables/useBannerExpand'
+import BannerExpandToggle from './BannerExpandToggle.vue'
 
 import { threadDisplayName } from '@/components/hub/threadDisplayName'
 
@@ -62,6 +77,7 @@ const message = computed(() => {
 })
 
 const cta = computed(() => (props.threads.length > 1 ? 'Open next' : 'Open thread'))
+const { messageEl, messageId, expanded, expandable, toggle, onTextClick } = useBannerExpand(message)
 </script>
 
 <style scoped lang="scss">

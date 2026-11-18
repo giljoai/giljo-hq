@@ -6,7 +6,7 @@
         class="jb-done-h"
         :aria-expanded="open"
         data-testid="jobs-done-group-toggle"
-        @click="open = !open"
+        @click="toggle"
       >
         <v-icon size="14">{{ open ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
         <span class="jb-done-k">Done, not reviewed</span>
@@ -71,7 +71,12 @@ const emit = defineEmits(['changed'])
 
 const projectStore = useProjectStore()
 const { showToast } = useToast()
-const open = ref(false)
+const OPEN_BY_ITSELF_UP_TO = 3
+const personChoice = ref(null)
+const open = computed(() => personChoice.value ?? props.count <= OPEN_BY_ITSELF_UP_TO)
+function toggle() {
+  personChoice.value = !open.value
+}
 const confirming = ref(false)
 const busy = ref(false)
 

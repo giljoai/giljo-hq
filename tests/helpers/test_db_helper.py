@@ -76,6 +76,33 @@ async def create_database_lock_async(conn):
         await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": DB_CREATE_LOCK_KEY})
 
 
+@contextlib.contextmanager
+def hold_session_advisory_lock(conn, key: int):
+    conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": key})
+    try:
+        yield conn
+    finally:
+        conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+
+
+def start_advisory_lock_holder(dsn: str, key: int):
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, time, psycopg2\n"
+        "c = psycopg2.connect(sys.argv[1]); c.autocommit = True\n"
+        "c.cursor().execute('SELECT pg_advisory_lock(%s)', (int(sys.argv[2]),))\n"
+        "print('LOCKED', flush=True)\n"
+        "time.sleep(600)\n"
+    )
+    holder = subprocess.Popen([sys.executable, "-c", code, dsn, str(key)], stdout=subprocess.PIPE, text=True)
+    if holder.stdout.readline().strip() != "LOCKED":
+        holder.kill()
+        raise RuntimeError("advisory-lock holder child did not take the lock")
+    return holder
+
+
 def worker_suffix() -> str:
     worker = os.environ.get("PYTEST_XDIST_WORKER", "")
     if worker.startswith("gw") and worker[2:].isdigit():

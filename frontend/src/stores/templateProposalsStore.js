@@ -67,6 +67,18 @@ export const useTemplateProposalsStore = defineStore('templateProposals', () => 
     }
   }
 
+  async function handleDecided(id) {
+    if (!id) return
+    if (proposals.value.some((p) => p.id === id)) return settle(id)
+    if (!loaded.value) {
+      try {
+        await fetchCount()
+      } catch {
+        /* the next page load reads the count again */
+      }
+    }
+  }
+
   async function apply(id) {
     const res = await api.templateProposals.apply(id)
     await settle(id)
@@ -88,6 +100,7 @@ export const useTemplateProposalsStore = defineStore('templateProposals', () => 
     fetchCount,
     fetchAll,
     ensureLoaded,
+    handleDecided,
     apply,
     reject,
   }

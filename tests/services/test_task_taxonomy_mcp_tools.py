@@ -510,4 +510,4 @@ async def test_list_tasks_requires_active_product(db_session, db_manager):
     with pytest.raises(ValidationError) as excinfo:
         await task_service.list_tasks_for_mcp(tenant_key=tenant_key, mode="summary")
 
-    assert "default product" in str(excinfo.value).lower()
+    assert "create_product" in str(excinfo.value)

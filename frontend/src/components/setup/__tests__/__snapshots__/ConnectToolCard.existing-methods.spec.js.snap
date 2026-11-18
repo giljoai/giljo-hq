@@ -1,0 +1,275 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ConnectToolCard: existing four cards render unchanged > claude_code (ce) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-claude_code" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-pencil" aria-label="Editable server URL">mdi-pencil-outline</i><span data-v-a2dec1b3="" class="server-line-hint">editable</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline" data-testid="apikey-only-note">Claude Code uses an API key. Browser sign-in is not supported. Two moves: </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
+       methods, or when a sign-in tool's fallback is toggled on. -->
+  <div data-v-13097013="" data-v-a2dec1b3="" class="key-flow" data-testid="key-flow-section">
+    <!-- Card 1 — Generate key -->
+    <div data-v-13097013="" class="numbered-card"><span data-v-13097013="" class="numbered-card-step">1.</span>
+      <div data-v-13097013="" class="numbered-card-body">
+        <!-- Checking for existing key -->
+        <!-- No key at all -->
+        <div data-v-13097013="" class="api-key-status api-key-status--empty" data-testid="key-status-empty"><span data-v-13097013="" class="status-text">Create the API key this tool will use</span><button data-v-13097013="" class="v-btn-stub" size="small" color="primary" variant="flat" prepend-icon="mdi-key-plus" data-testid="generate-key-btn" loading="false"> Generate API Key </button></div>
+        <!--v-if-->
+      </div>
+    </div><!-- Card 2 — Configuration command (only when key is available) -->
+    <!--v-if-->
+  </div><!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <!--v-if-->
+  <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Claude Code to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row">
+    <!--v-if--><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span>
+  </div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > claude_code (saas) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-claude_code" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-lock" aria-label="Managed server URL">mdi-lock-outline</i><span data-v-a2dec1b3="" class="server-line-hint">managed</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline"> Paste one command. Your browser opens for a one-click sign-in. </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!--v-if-->
+  <!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <div data-v-a2dec1b3="" class="command-card" data-testid="oauth-section">
+    <div data-v-a2dec1b3="" class="command-card-head"><span data-v-a2dec1b3="" class="command-step">1.</span>
+      <!-- FE-9383: the snippet names the client it targets. Each client's CLI has its
+             own flag syntax, so a command that does not say which tool it is for invites
+             pasting it into the wrong one. --><span data-v-a2dec1b3="" class="command-label" data-testid="oauth-command-label">Paste in your Claude Code terminal</span><button data-v-a2dec1b3="" class="copy-pill" data-testid="oauth-copy-btn"><i data-v-a2dec1b3="" class="v-icon-stub" size="11">mdi-content-copy</i>COPY </button>
+    </div><pre data-v-a2dec1b3="" class="command-code config-code">claude mcp add --transport http giljo_hq http://localhost:3000/mcp --scope user</pre>
+  </div><!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Claude Code to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row"><span data-v-a2dec1b3="" class="fallback-link" role="button" tabindex="0" data-testid="fallback-toggle" aria-pressed="false">Use an API key instead</span><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span></div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > codex_cli (ce) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-codex_cli" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-pencil" aria-label="Editable server URL">mdi-pencil-outline</i><span data-v-a2dec1b3="" class="server-line-hint">editable</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline" data-testid="apikey-only-note">Codex CLI uses an API key. Browser sign-in is not supported. Two moves: </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
+       methods, or when a sign-in tool's fallback is toggled on. -->
+  <div data-v-13097013="" data-v-a2dec1b3="" class="key-flow" data-testid="key-flow-section">
+    <!-- Card 1 — Generate key -->
+    <div data-v-13097013="" class="numbered-card"><span data-v-13097013="" class="numbered-card-step">1.</span>
+      <div data-v-13097013="" class="numbered-card-body">
+        <!-- Checking for existing key -->
+        <!-- No key at all -->
+        <div data-v-13097013="" class="api-key-status api-key-status--empty" data-testid="key-status-empty"><span data-v-13097013="" class="status-text">Create the API key this tool will use</span><button data-v-13097013="" class="v-btn-stub" size="small" color="primary" variant="flat" prepend-icon="mdi-key-plus" data-testid="generate-key-btn" loading="false"> Generate API Key </button></div>
+        <!--v-if-->
+      </div>
+    </div><!-- Card 2 — Configuration command (only when key is available) -->
+    <!--v-if-->
+  </div><!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <!--v-if-->
+  <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Codex CLI to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row">
+    <!--v-if--><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span>
+  </div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > codex_cli (saas) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-codex_cli" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-lock" aria-label="Managed server URL">mdi-lock-outline</i><span data-v-a2dec1b3="" class="server-line-hint">managed</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline"> Paste one command. Your browser opens for a one-click sign-in. </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!--v-if-->
+  <!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <div data-v-a2dec1b3="" class="command-card" data-testid="oauth-section">
+    <div data-v-a2dec1b3="" class="command-card-head"><span data-v-a2dec1b3="" class="command-step">1.</span>
+      <!-- FE-9383: the snippet names the client it targets. Each client's CLI has its
+             own flag syntax, so a command that does not say which tool it is for invites
+             pasting it into the wrong one. --><span data-v-a2dec1b3="" class="command-label" data-testid="oauth-command-label">Paste in your Codex CLI terminal</span><button data-v-a2dec1b3="" class="copy-pill" data-testid="oauth-copy-btn"><i data-v-a2dec1b3="" class="v-icon-stub" size="11">mdi-content-copy</i>COPY </button>
+    </div><pre data-v-a2dec1b3="" class="command-code config-code">codex mcp add giljo_hq --url http://localhost:3000/mcp</pre>
+  </div><!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Codex CLI to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row"><span data-v-a2dec1b3="" class="fallback-link" role="button" tabindex="0" data-testid="fallback-toggle" aria-pressed="false">Use an API key instead</span><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span></div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > generic (ce) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-generic" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-pencil" aria-label="Editable server URL">mdi-pencil-outline</i><span data-v-a2dec1b3="" class="server-line-hint">editable</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline"> Copy this server config into your client’s MCP settings. </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <div data-v-a2dec1b3="" class="command-card" data-testid="web-endpoint-block">
+    <div data-v-a2dec1b3="" class="command-card-head"><span data-v-a2dec1b3="" class="command-label">Connector URL</span><button data-v-a2dec1b3="" class="copy-pill" data-testid="web-endpoint-copy-btn"><i data-v-a2dec1b3="" class="v-icon-stub" size="11">mdi-content-copy</i>COPY </button></div><pre data-v-a2dec1b3="" class="command-code config-code">http://localhost:3000/mcp</pre>
+    <p data-v-a2dec1b3="" class="connect-subline"> Connecting a web app or IDE instead? Paste this URL into its MCP connector settings (claude.ai, ChatGPT, and most IDEs), then sign in when the browser opens. Browser sign-in needs your server on HTTPS; over plain HTTP, use the key-based config below. </p>
+  </div><!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
+       methods, or when a sign-in tool's fallback is toggled on. -->
+  <div data-v-13097013="" data-v-a2dec1b3="" class="key-flow" data-testid="key-flow-section">
+    <!-- Card 1 — Generate key -->
+    <div data-v-13097013="" class="numbered-card"><span data-v-13097013="" class="numbered-card-step">1.</span>
+      <div data-v-13097013="" class="numbered-card-body">
+        <!-- Checking for existing key -->
+        <!-- No key at all -->
+        <div data-v-13097013="" class="api-key-status api-key-status--empty" data-testid="key-status-empty"><span data-v-13097013="" class="status-text">Create the API key this tool will use</span><button data-v-13097013="" class="v-btn-stub" size="small" color="primary" variant="flat" prepend-icon="mdi-key-plus" data-testid="generate-key-btn" loading="false"> Generate API Key </button></div>
+        <!--v-if-->
+      </div>
+    </div><!-- Card 2 — Configuration command (only when key is available) -->
+    <!--v-if-->
+  </div><!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <!--v-if-->
+  <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Generic MCP client to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row">
+    <!--v-if--><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span>
+  </div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > generic (saas) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-generic" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-lock" aria-label="Managed server URL">mdi-lock-outline</i><span data-v-a2dec1b3="" class="server-line-hint">managed</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline"> Copy this server config into your client’s MCP settings. </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <div data-v-a2dec1b3="" class="command-card" data-testid="web-endpoint-block">
+    <div data-v-a2dec1b3="" class="command-card-head"><span data-v-a2dec1b3="" class="command-label">Connector URL</span><button data-v-a2dec1b3="" class="copy-pill" data-testid="web-endpoint-copy-btn"><i data-v-a2dec1b3="" class="v-icon-stub" size="11">mdi-content-copy</i>COPY </button></div><pre data-v-a2dec1b3="" class="command-code config-code">http://localhost:3000/mcp</pre>
+    <p data-v-a2dec1b3="" class="connect-subline"> Connecting a web app or IDE instead? Paste this URL into its MCP connector settings (claude.ai, ChatGPT, and most IDEs), then sign in when the browser opens. No key needed. </p>
+  </div><!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
+       methods, or when a sign-in tool's fallback is toggled on. -->
+  <div data-v-13097013="" data-v-a2dec1b3="" class="key-flow" data-testid="key-flow-section">
+    <!-- Card 1 — Generate key -->
+    <div data-v-13097013="" class="numbered-card"><span data-v-13097013="" class="numbered-card-step">1.</span>
+      <div data-v-13097013="" class="numbered-card-body">
+        <!-- Checking for existing key -->
+        <!-- No key at all -->
+        <div data-v-13097013="" class="api-key-status api-key-status--empty" data-testid="key-status-empty"><span data-v-13097013="" class="status-text">Create the API key this tool will use</span><button data-v-13097013="" class="v-btn-stub" size="small" color="primary" variant="flat" prepend-icon="mdi-key-plus" data-testid="generate-key-btn" loading="false"> Generate API Key </button></div>
+        <!--v-if-->
+      </div>
+    </div><!-- Card 2 — Configuration command (only when key is available) -->
+    <!--v-if-->
+  </div><!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <!--v-if-->
+  <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for Generic MCP client to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row">
+    <!--v-if--><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span>
+  </div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > opencode (ce) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-opencode" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-pencil" aria-label="Editable server URL">mdi-pencil-outline</i><span data-v-a2dec1b3="" class="server-line-hint">editable</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline" data-testid="apikey-only-note">OpenCode uses an API key. Browser sign-in is not supported. Two moves: </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
+       methods, or when a sign-in tool's fallback is toggled on. -->
+  <div data-v-13097013="" data-v-a2dec1b3="" class="key-flow" data-testid="key-flow-section">
+    <!-- Card 1 — Generate key -->
+    <div data-v-13097013="" class="numbered-card"><span data-v-13097013="" class="numbered-card-step">1.</span>
+      <div data-v-13097013="" class="numbered-card-body">
+        <!-- Checking for existing key -->
+        <!-- No key at all -->
+        <div data-v-13097013="" class="api-key-status api-key-status--empty" data-testid="key-status-empty"><span data-v-13097013="" class="status-text">Create the API key this tool will use</span><button data-v-13097013="" class="v-btn-stub" size="small" color="primary" variant="flat" prepend-icon="mdi-key-plus" data-testid="generate-key-btn" loading="false"> Generate API Key </button></div>
+        <!--v-if-->
+      </div>
+    </div><!-- Card 2 — Configuration command (only when key is available) -->
+    <!--v-if-->
+  </div><!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <!--v-if-->
+  <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for OpenCode to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row">
+    <!--v-if--><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span>
+  </div>
+</div>"
+`;
+
+exports[`ConnectToolCard: existing four cards render unchanged > opencode (saas) 1`] = `
+"<div data-v-a2dec1b3="" class="connect-tool-card" data-testid="connect-card-opencode" data-state="waiting">
+  <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
+  <div data-v-a2dec1b3="" class="server-line"><span data-v-a2dec1b3="" class="server-line-label">SERVER</span><span data-v-a2dec1b3="" class="server-line-url" data-testid="server-url-field">http://localhost:3000</span><i data-v-a2dec1b3="" class="v-icon-stub server-line-icon" size="14" data-testid="server-url-lock" aria-label="Managed server URL">mdi-lock-outline</i><span data-v-a2dec1b3="" class="server-line-hint">managed</span></div>
+  <div data-v-a2dec1b3=""></div><!-- Key-only note (tools without browser sign-in) -->
+  <p data-v-a2dec1b3="" class="connect-subline"> Paste one command. Your browser opens for a one-click sign-in. </p>
+  <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+  <!--v-if-->
+  <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
+  <!--v-if-->
+  <!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
+  <div data-v-a2dec1b3="" class="command-card" data-testid="oauth-section">
+    <div data-v-a2dec1b3="" class="command-card-head"><span data-v-a2dec1b3="" class="command-step">1.</span>
+      <!-- FE-9383: the snippet names the client it targets. Each client's CLI has its
+             own flag syntax, so a command that does not say which tool it is for invites
+             pasting it into the wrong one. --><span data-v-a2dec1b3="" class="command-label" data-testid="oauth-command-label">Paste in your OpenCode terminal</span><button data-v-a2dec1b3="" class="copy-pill" data-testid="oauth-copy-btn"><i data-v-a2dec1b3="" class="v-icon-stub" size="11">mdi-content-copy</i>COPY </button>
+    </div><pre data-v-a2dec1b3="" class="command-code config-code">opencode mcp add giljo_hq --url http://localhost:3000/mcp
+opencode mcp auth giljo_hq</pre>
+  </div><!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
+  <div data-v-a2dec1b3="" class="status-hero status-hero--waiting" data-testid="status-hero"><span data-v-a2dec1b3="" class="hero-dot hero-dot--waiting" data-testid="hero-dot"></span>
+    <div data-v-a2dec1b3="" class="hero-body"><span data-v-a2dec1b3="" class="hero-title">Waiting for OpenCode to connect…</span><span data-v-a2dec1b3="" class="hero-sub">The moment your tool connects, this flips green. Nothing to click.</span></div>
+  </div><!-- Fallback links (per method matrix) + "I already configured this" -->
+  <div data-v-a2dec1b3="" class="fallback-row"><span data-v-a2dec1b3="" class="fallback-link" role="button" tabindex="0" data-testid="fallback-toggle" aria-pressed="false">Use an API key instead</span><span data-v-a2dec1b3="" class="already-link" role="button" tabindex="0" data-testid="already-configured"> I already configured this </span></div>
+</div>"
+`;

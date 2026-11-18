@@ -15,6 +15,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
+HOST_COOKIE_PREFIX = "__Host-"
+
 _STATE_EXEMPT_PATHS = "csrf_exempt_paths"
 _STATE_EXEMPT_PREFIXES = "csrf_exempt_prefixes"
 
@@ -71,8 +73,13 @@ class CSRFProtectionMiddleware:
 
         return None
 
+    def _cookie_name_for(self, request: Request) -> str:
+        if request.url.scheme == "https":
+            return f"{HOST_COOKIE_PREFIX}{self.cookie_name}"
+        return self.cookie_name
+
     def _get_token_from_cookie(self, request: Request) -> str:
-        return request.cookies.get(self.cookie_name)
+        return request.cookies.get(self._cookie_name_for(request))
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -118,7 +125,7 @@ class CSRFProtectionMiddleware:
                 await response(scope, receive, send)
                 return
 
-            if request_token != cookie_token:
+            if not secrets.compare_digest(request_token.encode(), cookie_token.encode()):
                 logger.warning(
                     f"CSRF validation failed - token mismatch: "
                     f"path={request.url.path}, method={request.method}, "
@@ -131,13 +138,12 @@ class CSRFProtectionMiddleware:
                 await response(scope, receive, send)
                 return
 
-        existing_token = request.cookies.get(self.cookie_name)
-        set_cookie_value: str | None = None
+        existing_token = self._get_token_from_cookie(request)
+        cookie_carrier = Response()
         if not existing_token or request.method == "GET":
             token = existing_token or self._generate_token()
-            cookie_carrier = Response()
             cookie_carrier.set_cookie(
-                key=self.cookie_name,
+                key=self._cookie_name_for(request),
                 value=token,
                 httponly=False,
                 secure=request.url.scheme == "https",
@@ -145,21 +151,27 @@ class CSRFProtectionMiddleware:
                 path="/",
                 max_age=86400,
             )
-            set_cookie_value = cookie_carrier.headers["set-cookie"]
             if not existing_token:
                 logger.debug(f"Generated new CSRF token for IP: {request.client.host if request.client else 'unknown'}")
+        if request.url.scheme == "https" and self.cookie_name in request.cookies:
+            cookie_carrier.delete_cookie(key=self.cookie_name, path="/", secure=True, samesite="lax")
 
-        if set_cookie_value is None:
+        set_cookie_values = [
+            value.decode("latin-1") for key, value in cookie_carrier.raw_headers if key == b"set-cookie"
+        ]
+        if not set_cookie_values:
             await self.app(scope, receive, send)
             return
 
         async def send_with_cookie(message: Message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(raw=message["headers"]).append("set-cookie", set_cookie_value)
+                headers = MutableHeaders(raw=message["headers"])
+                for value in set_cookie_values:
+                    headers.append("set-cookie", value)
             await send(message)
 
         await self.app(scope, receive, send_with_cookie)
 
 
 def get_csrf_token(request: Request) -> str:
-    return request.cookies.get("csrf_token", "")
+    return request.cookies.get(f"{HOST_COOKIE_PREFIX}csrf_token") or request.cookies.get("csrf_token", "")

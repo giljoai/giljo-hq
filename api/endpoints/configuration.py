@@ -126,8 +126,6 @@ async def get_frontend_configuration(request: Request):
     ws_url = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
     ws_protocol = "wss" if ws_url.startswith("wss://") else "ws"
 
-    default_tenant_key = state.config.tenant.default_tenant_key or ""
-
     return {
         "api": {
             "host": api_host,
@@ -140,7 +138,6 @@ async def get_frontend_configuration(request: Request):
         },
         "security": {
             "api_keys_required": api_keys_required,
-            "default_tenant_key": default_tenant_key,
         },
         "edition": {"ce": "community", "saas": "saas"}.get(GILJO_MODE, "community"),
         "giljo_mode": GILJO_MODE,

@@ -2,26 +2,11 @@
 
 ## Supported Versions
 
-Active support is on the 1.1.x line; older majors are not maintained.
-
-| Version | Supported          |
-|---------|--------------------|
-| 1.1.x   | Yes (current)      |
-| < 1.1   | No                 |
+Community Edition is frozen. 2.14.0 is the final release. No version gets security fixes.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please report it responsibly:
-
-1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Email security concerns to **abuse@giljo.ai**
-3. Include a description of the vulnerability, steps to reproduce, and potential impact
-
-## Response Timeline
-
-- **Acknowledgment**: Within 48 hours of report
-- **Assessment**: Within 7 days
-- **Fix/Mitigation**: Depends on severity (critical: 48h, high: 7 days, medium: 30 days)
+We no longer fix Community Edition. If you find a problem that may also affect Giljo HQ hosted, email **admin@giljo.ai**. Do not open a public issue.
 
 ## Security Architecture
 

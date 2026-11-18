@@ -18,7 +18,7 @@ export const PROMPT_META = Object.freeze({
 
 export function buildPromptD({ productId = '', saas = false } = {}) {
   const connection = saas
-    ? 'You are connected to my GiljoAI workspace (browser sign-in) as an MCP server.'
+    ? 'You are connected to my Giljo HQ workspace (browser sign-in) as an MCP server.'
     : `You are connected to my self-hosted ${PRODUCT_NAME} server (the API-key connection you were configured with).`
   return `${connection}
 My product card is empty. Its product_id is "${productId}".
@@ -27,7 +27,7 @@ My product card is empty. Its product_id is "${productId}".
 
 2. VISION DOCUMENT: write a vision document in markdown (save it as VISION.md at the repository root unless one already exists) covering: what the product is and who it is for, the core value proposition, main features, current tech stack, architecture overview, quality and testing approach, and where the product is heading.
 
-3. POPULATE MY PRODUCT CARD PROGRESSIVELY: make FIVE update_product_context calls with product_id="${productId}", one per section, in EXACTLY this order — I watch the card fill in on my screen between calls, and the FINAL call is what tells GiljoAI you are done:
+3. POPULATE MY PRODUCT CARD PROGRESSIVELY: make FIVE update_product_context calls with product_id="${productId}", one per section, in EXACTLY this order — I watch the card fill in on my screen between calls, and the FINAL call is what tells Giljo HQ you are done:
    Call 1 — Info: product_name (only if the card has no name yet — the name is user-owned), product_description, core_features, and project_path (the absolute path of the repository folder you are working in — OMIT it if you have no filesystem access inside the repo, never guess).
    Call 2 — Tech: tech_stack: { programming_languages, frontend_frameworks, backend_frameworks, databases, infrastructure, target_platforms (subset of: windows, linux, macos, android, ios, web, all) }.
    Call 3 — Architecture: architecture: { architecture_pattern, design_patterns, api_style, architecture_notes, coding_conventions, brand_guidelines }.
@@ -35,14 +35,14 @@ My product card is empty. Its product_id is "${productId}".
    Call 5 — STRICTLY LAST: consolidated_vision: { light: a ~150-word summary of your vision document, medium: a ~400-word summary }. Do NOT include consolidated_vision in any earlier call — this write advances my screen to the review step.
    tech_stack / architecture / quality / testing are NESTED JSON objects, not flat parameters.
 
-4. Work in one pass — no follow-up questions unless something is genuinely blocking. After call 5 succeeds, report done; I will review and activate the product from the GiljoAI dashboard.`
+4. Work in one pass — no follow-up questions unless something is genuinely blocking. After call 5 succeeds, report done; I will review and activate the product from the Giljo HQ dashboard.`
 }
 
 export function buildPromptB({ saas = false } = {}) {
   const uploadTarget = saas
-    ? `my GiljoAI workspace (${window.location.origin})`
-    : 'my self-hosted GiljoAI server'
-  return `Act as my product-shaping partner. Interview me ONE question at a time — never a wall of questions. Walk these areas in order (they mirror how GiljoAI's product card is organized):
+    ? `my Giljo HQ workspace (${window.location.origin})`
+    : 'my self-hosted Giljo HQ server'
+  return `Act as my product-shaping partner. Interview me ONE question at a time — never a wall of questions. Walk these areas in order (they mirror how Giljo HQ's product card is organized):
 
 1. Product info — what I am building, for whom, and what "done" looks like (a name, a description, the core features).
 2. Tech stack — programming languages, frontend frameworks, backend frameworks, databases and storage, infrastructure, and target platforms.

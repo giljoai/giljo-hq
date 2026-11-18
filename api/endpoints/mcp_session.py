@@ -4,6 +4,7 @@
 # [CE] Community Edition.
 
 
+import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.endpoints.mcp_transport import _DECLARED_PROFILE_CLIENT_INFO_KEY
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.harness_resolver import harness_for_connection, preset_from_client_info
 from giljo_mcp.models import MCPSession
@@ -22,6 +24,25 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 logger = logging.getLogger(__name__)
 
+_CLIENT_INFO_FIELD_CAPS = {"name": 128, "version": 64, _DECLARED_PROFILE_CLIENT_INFO_KEY: 32}
+_MAX_CAPABILITIES_JSON_BYTES = 2048
+_MAX_CAPABILITY_KEYS = 32
+_MAX_CAPABILITY_KEY_LENGTH = 64
+
+
+def _bounded_client_info(client_info: dict[str, Any] | None) -> dict[str, Any]:
+    info = client_info or {}
+    return {key: info[key][:cap] for key, cap in _CLIENT_INFO_FIELD_CAPS.items() if isinstance(info.get(key), str)}
+
+
+def _bounded_capabilities(capabilities: dict[str, Any] | None) -> dict[str, Any] | None:
+    if capabilities is None:
+        return None
+    if len(json.dumps(capabilities, default=str)) <= _MAX_CAPABILITIES_JSON_BYTES:
+        return capabilities
+    names = [key[:_MAX_CAPABILITY_KEY_LENGTH] for key in capabilities][:_MAX_CAPABILITY_KEYS]
+    return {name: {} for name in names}
+
 
 def _client_info_patch(
     client_info: dict[str, Any] | None,
@@ -29,14 +50,14 @@ def _client_info_patch(
     capabilities: dict[str, Any] | None = None,
     oauth_client_id: str | None = None,
 ) -> dict[str, Any]:
-    info = client_info or {}
+    info = _bounded_client_info(client_info)
     return {
         "client_info": info,
         "oauth_client_id": oauth_client_id,
         "resolved_harness": harness_for_connection(info, oauth_client_id),
         "resolved_preset": preset_from_client_info(info.get("name"), info.get("version")),
         "protocol_version": protocol_version,
-        "client_capabilities": capabilities,
+        "client_capabilities": _bounded_capabilities(capabilities),
     }
 
 
@@ -55,6 +76,7 @@ class MCPSessionManager:
 
     DEFAULT_SESSION_LIFETIME_HOURS = 24
     SESSION_CLEANUP_THRESHOLD_HOURS = 48
+    MAX_SESSIONS_PER_TENANT = 500
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -146,11 +168,24 @@ class MCPSessionManager:
         new_session.extend_expiration(self.DEFAULT_SESSION_LIFETIME_HOURS)
 
         self.db.add(new_session)
+        await self.db.flush()
+        await self._evict_beyond_cap(tenant_key)
         await self.db.commit()
         await self.db.refresh(new_session)
 
         logger.info(f"Created new MCP session: {new_session.session_id} (tenant: {tenant_key})")
         return new_session
+
+    async def _evict_beyond_cap(self, tenant_key: str) -> None:
+        newest = (
+            select(MCPSession.id)
+            .where(MCPSession.tenant_key == tenant_key)
+            .order_by(MCPSession.last_accessed.desc(), MCPSession.created_at.desc())
+            .limit(self.MAX_SESSIONS_PER_TENANT)
+        )
+        await self.db.execute(
+            delete(MCPSession).where(MCPSession.tenant_key == tenant_key, MCPSession.id.not_in(newest))
+        )
 
     async def touch_or_create_client_session(
         self,

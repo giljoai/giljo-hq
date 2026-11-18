@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import secrets
+import string
 import uuid
 
 import pytest
@@ -104,3 +106,51 @@ async def test_a_foreign_project_type_id_is_not_found(api_client, auth_headers, 
             text("SELECT count(*) FROM projects WHERE project_type_id = :tid"), {"tid": foreign_type_id}
         )
     assert count == 0
+
+
+async def _own_project(api_client, auth_headers) -> str:
+    product_resp = await api_client.post(
+        "/api/v1/products/",
+        headers=auth_headers,
+        json={"name": f"own product {uuid.uuid4().hex[:6]}", "description": "fixture"},
+    )
+    assert product_resp.status_code == 200, product_resp.text
+    resp = await api_client.post(
+        "/api/v1/projects/",
+        headers=auth_headers,
+        json={"name": "own", "description": "fixture", "product_id": product_resp.json()["id"]},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+async def test_patch_to_a_foreign_project_type_id_is_not_found(api_client, auth_headers, db_manager):
+    foreign_type_id = await _seed_foreign_project_type(db_manager)
+    project_id = await _own_project(api_client, auth_headers)
+
+    resp = await api_client.patch(
+        f"/api/v1/projects/{project_id}", headers=auth_headers, json={"project_type_id": foreign_type_id}
+    )
+
+    assert resp.status_code == 404, f"expected 404, got {resp.status_code}: {resp.text}"
+    async with db_manager.get_session_async() as session:
+        stored = await session.scalar(text("SELECT project_type_id FROM projects WHERE id = :pid"), {"pid": project_id})
+    assert stored is None
+
+
+async def test_patch_to_an_own_project_type_id_still_applies(api_client, auth_headers, db_manager):
+    project_id = await _own_project(api_client, auth_headers)
+    type_resp = await api_client.post(
+        "/api/v1/taxonomy-types/",
+        headers=auth_headers,
+        json={"abbreviation": "".join(secrets.choice(string.ascii_uppercase) for _ in range(4)), "label": "Own"},
+    )
+    assert type_resp.status_code in (200, 201), type_resp.text
+    own_type_id = type_resp.json()["id"]
+
+    resp = await api_client.patch(
+        f"/api/v1/projects/{project_id}", headers=auth_headers, json={"project_type_id": own_type_id}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["project_type_id"] == own_type_id

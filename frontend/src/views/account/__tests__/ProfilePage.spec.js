@@ -142,7 +142,64 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
     expect(routerPushMock).toHaveBeenCalledWith('/login')
   })
 
-  it('surfaces a friendly error when the current password is wrong (401)', async () => {
+  it('surfaces a friendly error when the current password is wrong (400)', async () => {
+    changePasswordMock.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error_code: 'CURRENT_PASSWORD_INCORRECT', message: 'Current password is incorrect' },
+      },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.pwForm.current = 'WrongPass1'
+    wrapper.vm.pwForm.next = 'NewPass456'
+    wrapper.vm.pwForm.confirm = 'NewPass456'
+    await wrapper.vm.changePassword()
+    await flushPromises()
+
+    expect(wrapper.vm.pwError).toBe('Current password is incorrect.')
+    expect(logoutMock).not.toHaveBeenCalled()
+    expect(routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('does not call another 400 a wrong password (no wrong-password code)', async () => {
+    changePasswordMock.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error_code: 'VALIDATIONERROR', message: 'Current password is required' },
+      },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.pwForm.current = 'WrongPass1'
+    wrapper.vm.pwForm.next = 'NewPass456'
+    wrapper.vm.pwForm.confirm = 'NewPass456'
+    await wrapper.vm.changePassword()
+    await flushPromises()
+
+    expect(wrapper.vm.pwError).not.toBe('Current password is incorrect.')
+    expect(wrapper.vm.pwError).toBe('Current password is required')
+  })
+
+  it('shows the wrong-password sentence for the code whatever message text the server sends', async () => {
+    changePasswordMock.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error_code: 'CURRENT_PASSWORD_INCORRECT', message: 'Some other made-up wording' },
+      },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.pwForm.current = 'WrongPass1'
+    wrapper.vm.pwForm.next = 'NewPass456'
+    wrapper.vm.pwForm.confirm = 'NewPass456'
+    await wrapper.vm.changePassword()
+    await flushPromises()
+
+    expect(wrapper.vm.pwError).toBe('Current password is incorrect.')
+  })
+
+  it('does not call a 401 a wrong password (a 401 here means the session is bad)', async () => {
     changePasswordMock.mockRejectedValue({ response: { status: 401 } })
     const wrapper = await mountPage()
 
@@ -152,13 +209,27 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
     await wrapper.vm.changePassword()
     await flushPromises()
 
-    expect(wrapper.vm.pwError).toMatch(/incorrect/i)
-    expect(logoutMock).not.toHaveBeenCalled()
-    expect(routerPushMock).not.toHaveBeenCalled()
+    expect(wrapper.vm.pwError).not.toMatch(/incorrect/i)
   })
 
-  it('sets the recovery PIN via updateUser({ recovery_pin })', async () => {
+  it('sets the recovery PIN with the current password via updateUser', async () => {
     updateUserMock.mockResolvedValue({ data: {} })
+    const wrapper = await mountPage()
+
+    wrapper.vm.pinForm.current = 'OldPassword1!'
+    wrapper.vm.pinForm.next = '1234'
+    wrapper.vm.pinForm.confirm = '1234'
+    await wrapper.vm.changePin()
+    await flushPromises()
+
+    expect(updateUserMock).toHaveBeenCalledTimes(1)
+    expect(updateUserMock).toHaveBeenCalledWith('user-1', {
+      recovery_pin: '1234',
+      current_password: 'OldPassword1!',
+    })
+  })
+
+  it('does not send a PIN change without the current password', async () => {
     const wrapper = await mountPage()
 
     wrapper.vm.pinForm.next = '1234'
@@ -166,8 +237,26 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
     await wrapper.vm.changePin()
     await flushPromises()
 
-    expect(updateUserMock).toHaveBeenCalledTimes(1)
-    expect(updateUserMock).toHaveBeenCalledWith('user-1', { recovery_pin: '1234' })
+    expect(updateUserMock).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="pin-current-password"]').exists()).toBe(true)
+  })
+
+  it('shows the server refusal when the current password is wrong', async () => {
+    updateUserMock.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error_code: 'HTTP_ERROR', message: 'Current password is incorrect' },
+      },
+    })
+    const wrapper = await mountPage()
+
+    wrapper.vm.pinForm.current = 'WrongPassword1!'
+    wrapper.vm.pinForm.next = '1234'
+    wrapper.vm.pinForm.confirm = '1234'
+    await wrapper.vm.changePin()
+    await flushPromises()
+
+    expect(wrapper.vm.pinError).toMatch(/incorrect/i)
   })
 
   it('clearing the last name sends "" and the store follows the server', async () => {
@@ -188,7 +277,12 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
 
   it('updates the store from the server response, not from what was typed', async () => {
     updateUserMock.mockResolvedValue({
-      data: { first_name: 'Ada', last_name: 'Byron', full_name: 'Ada Byron', email: 'solo@example.com' },
+      data: {
+        first_name: 'Ada',
+        last_name: 'Byron',
+        full_name: 'Ada Byron',
+        email: 'solo@example.com',
+      },
     })
     const wrapper = await mountPage()
 
@@ -197,7 +291,10 @@ describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
     await wrapper.vm.save()
     await flushPromises()
 
-    expect(updateUserMock).toHaveBeenCalledWith('user-1', { first_name: 'Ada', last_name: 'byron (typed)' })
+    expect(updateUserMock).toHaveBeenCalledWith('user-1', {
+      first_name: 'Ada',
+      last_name: 'byron (typed)',
+    })
     expect(storeState.currentUser.first_name).toBe('Ada')
     expect(storeState.currentUser.last_name).toBe('Byron')
     expect(storeState.currentUser.full_name).toBe('Ada Byron')

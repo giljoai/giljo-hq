@@ -44,18 +44,28 @@
       />
     </v-main>
 
+    <GuidePane v-if="!route.meta.hideDrawer" />
+
     <ToastManager />
 
-    <LicensingDialog />
+    <IntroVideoDialog :model-value="introVideoPending" gated @close="markIntroVideoSeen" />
 
-    <component :is="TrialExpiredOverlayComponent" v-if="TrialExpiredOverlayComponent" />
+    <LicensingDialog v-if="!introVideoPending" />
 
-    <component :is="AnnouncementModalComponent" v-if="AnnouncementModalComponent" />
+    <component
+      :is="TrialExpiredOverlayComponent"
+      v-if="TrialExpiredOverlayComponent && !introVideoPending"
+    />
+
+    <component
+      :is="AnnouncementModalComponent"
+      v-if="AnnouncementModalComponent && !introVideoPending"
+    />
   </v-app>
 </template>
 
 <script setup>
-import { ref, computed, shallowRef, onMounted, onUnmounted } from 'vue'
+import { ref, computed, shallowRef, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useProductStore } from '@/stores/products'
@@ -76,6 +86,12 @@ import ToastManager from '@/components/ToastManager.vue'
 import { defineAsyncComponent } from 'vue'
 const LicensingDialog = defineAsyncComponent(() => import('@/components/LicensingDialog.vue'))
 import SystemStatusBanner from '@/components/system/SystemStatusBanner.vue'
+import IntroVideoDialog from '@/components/onboarding/IntroVideoDialog.vue'
+import GuidePane from '@/components/onboarding/GuidePane.vue'
+import { useStartListLive } from '@/composables/useStartListLive'
+import { useSetupAutoSave } from '@/composables/useSetupAutoSave'
+import { useGuideStore } from '@/stores/guide'
+import { useIntroVideo } from '@/composables/useIntroVideo'
 import setupService from '@/services/setupService'
 import { useGiljoMode } from '@/composables/useGiljoMode'
 
@@ -87,9 +103,17 @@ const SetPasswordNudgeBannerComponent = shallowRef(null)
 const AnnouncementModalComponent = shallowRef(null)
 
 const { isSaasMode } = useGiljoMode()
+const { pending: introVideoPending, markSeen: markIntroVideoSeen } = useIntroVideo()
 
 const route = useRoute()
 const router = useRouter()
+
+useStartListLive()
+useSetupAutoSave()
+const guide = useGuideStore()
+watch(introVideoPending, (now, was) => {
+  if (was && !now) guide.offerConnectOnce(router)
+})
 const userStore = useUserStore()
 const productStore = useProductStore()
 const jobsScope = useJobsScopeStore()
@@ -260,8 +284,6 @@ onMounted(async () => {
 
   if (userLoaded && currentUser.value) {
     try {
-      await wsStore.connect()
-
       initWebsocketEventRouter()
 
       resyncUnregisters.push(
@@ -269,6 +291,8 @@ onMounted(async () => {
       )
 
       resyncUnregisters.push(useActiveProductReconciliation().stop)
+
+      await wsStore.connect()
     } catch (error) {
       console.error('[DefaultLayout] Failed to initialize WebSocket:', error)
     }

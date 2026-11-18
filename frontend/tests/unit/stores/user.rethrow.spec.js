@@ -21,7 +21,6 @@ vi.mock('@/services/api', () => ({
     tasks: { list: vi.fn() },
   },
   apiClient: {},
-  setTenantKey: vi.fn(),
 }))
 
 vi.mock('@/sentry', () => ({

@@ -17,7 +17,6 @@ vi.mock('@/services/api', () => ({
       logout: vi.fn(),
     },
   },
-  setTenantKey: vi.fn(),
 }))
 
 describe('User Store', () => {
@@ -286,20 +285,6 @@ describe('User Store', () => {
         expect(store.orgName).toBeNull()
         expect(store.orgRole).toBeNull()
         expect(store.isAuthenticated).toBe(false)
-      })
-
-      it('should invalidate the API client tenant key on logout', async () => {
-        const { setTenantKey } = await import('@/services/api')
-        const store = useUserStore()
-        store.currentUser = { id: 'u1', username: 'x', role: 'user', tenant_key: 'tk-xyz' }
-
-        api.auth.logout.mockResolvedValue({ data: { success: true } })
-
-        await store.logout()
-
-        // setTenantKey must be called with null so subsequent requests
-        // don't reuse the logged-out user's tenant header.
-        expect(setTenantKey).toHaveBeenCalledWith(null)
       })
 
       it('should clear remembered_username from localStorage on logout', async () => {

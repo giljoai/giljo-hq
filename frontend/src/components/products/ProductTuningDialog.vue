@@ -21,6 +21,7 @@
         Select the product sections you want to retune and generate a prompt for the next pass.
       </div>
       <ProductTuningMenu
+        :key="product.id"
         :product-id="product.id"
         hide-trigger
         initially-open

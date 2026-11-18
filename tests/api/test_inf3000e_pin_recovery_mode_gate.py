@@ -53,6 +53,15 @@ class _FakeDB:
         return None
 
 
+async def _bcrypt_only_check(db, user, supplied):
+    return bcrypt.checkpw(supplied.encode("utf-8"), user.password_hash.encode("utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def _no_guess_limit_table(monkeypatch):
+    monkeypatch.setattr("api.endpoints.auth_pin_recovery.verify_current_password", _bcrypt_only_check)
+
+
 def _patch_repo_user(monkeypatch, user):
 
     async def _fake_lookup(self, db, identifier):
@@ -114,8 +123,10 @@ async def test_verify_pin_reachable_in_ce_empty(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_first_login_requires_pin_setup_in_ce_empty(monkeypatch):
     monkeypatch.setattr(_GILJO_MODE_ATTR, "")
-    _patch_repo_user(monkeypatch, _FakeUser(must_set_pin=True, must_change_password=True))
-    resp = await check_first_login(request_data=CheckFirstLoginRequest(username="first_login_user"), db=object())
+    resp = await check_first_login(
+        request_data=CheckFirstLoginRequest(username="first_login_user"),
+        current_user=_FakeUser(must_set_pin=True, must_change_password=True),
+    )
     assert resp.must_set_pin is True
     assert resp.must_change_password is True
 
@@ -123,8 +134,10 @@ async def test_check_first_login_requires_pin_setup_in_ce_empty(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_first_login_suppresses_pin_setup_in_saas(monkeypatch):
     monkeypatch.setattr(_GILJO_MODE_ATTR, "saas")
-    _patch_repo_user(monkeypatch, _FakeUser(must_set_pin=True, must_change_password=True))
-    resp = await check_first_login(request_data=CheckFirstLoginRequest(username="first_login_user"), db=object())
+    resp = await check_first_login(
+        request_data=CheckFirstLoginRequest(username="first_login_user"),
+        current_user=_FakeUser(must_set_pin=True, must_change_password=True),
+    )
     assert resp.must_set_pin is False
     assert resp.must_change_password is True
 

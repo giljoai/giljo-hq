@@ -5,6 +5,7 @@
 
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -22,13 +23,19 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.auth import TOGGLEABLE_CATEGORIES, User, UserFieldPriority
 from giljo_mcp.repositories.user_repository import UserRepository
 from giljo_mcp.services._session_helpers import tenant_context_session
-from giljo_mcp.services.session_eviction import close_live_user_sockets, evict_user_tokens
+from giljo_mcp.services.account_identifiers import normalize_email, require_username_without_at
+from giljo_mcp.services.session_eviction import SESSION_REVOKED, close_live_user_sockets, evict_user_tokens
 from giljo_mcp.services.user_auth_service import UserAuthService
 from giljo_mcp.utils.log_sanitizer import sanitize
 from giljo_mcp.utils.password_helper import async_hash_password
 
 
 logger = logging.getLogger(__name__)
+
+_UNPROVEN_EMAIL_CHANGE = (
+    "Email changes need verification: enter the new address on your Profile page "
+    "and confirm it from the link we email to it."
+)
 
 
 class UserService:
@@ -139,6 +146,7 @@ class UserService:
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> User:
+        username, email = require_username_without_at(username), normalize_email(email)
         if await self._repo.check_username_exists(session, username):
             raise ValidationError(message=f"Username '{username}' already exists", context={"username": username})
 
@@ -191,30 +199,42 @@ class UserService:
             self._logger.exception("Failed to update user")
             raise BaseGiljoError(message=str(e), context={"operation": "update_user", "user_id": user_id}) from e
 
+    async def apply_verified_email(self, user_id: str, new_email: str) -> User:
+        async with self._get_session() as session:
+            return await self._update_user_impl(session, user_id, {"email": new_email}, email_proven=True)
+
     async def _update_user_impl(
-        self, session: AsyncSession, user_id: str, updates: dict, include_all_tenants: bool = False
+        self,
+        session: AsyncSession,
+        user_id: str,
+        updates: dict,
+        include_all_tenants: bool = False,
+        email_proven: bool = False,
     ) -> User:
         user = await self._repo.get_user_by_id(session, user_id, self.tenant_key, include_all_tenants)
 
         if not user:
             raise ResourceNotFoundError(message="User not found", context={"user_id": user_id})
 
-        if (
-            "username" in updates
-            and updates["username"]
-            and updates["username"] != user.username
-            and await self._repo.check_username_exists(session, updates["username"])
-        ):
-            raise ValidationError(
-                message=f"Username '{updates['username']}' already taken",
-                context={"username": updates["username"], "user_id": user_id},
-            )
+        if updates.get("email"):
+            updates["email"] = normalize_email(updates["email"])
+            if updates["email"] == normalize_email(user.email):
+                del updates["email"]
 
-        if (
-            "email" in updates
-            and updates["email"]
-            and updates["email"] != user.email
-            and await self._repo.check_email_exists(session, updates["email"])
+        hosted = os.environ.get("GILJO_MODE", "").strip().lower() == "saas"
+        if hosted and not email_proven and "email" in updates and updates["email"] != user.email:
+            raise ValidationError(message=_UNPROVEN_EMAIL_CHANGE, error_code="EMAIL_CHANGE_NEEDS_VERIFICATION")
+
+        if updates.get("username") and updates["username"] != user.username:
+            require_username_without_at(updates["username"])
+            if await self._repo.check_username_exists(session, updates["username"]):
+                raise ValidationError(
+                    message=f"Username '{updates['username']}' already taken",
+                    context={"username": updates["username"], "user_id": user_id},
+                )
+
+        if updates.get("email") and await self._repo.check_email_exists(
+            session, updates["email"], exclude_user_id=user.id
         ):
             raise ValidationError(
                 message=f"Email '{updates['email']}' already exists",
@@ -248,8 +268,9 @@ class UserService:
 
         self._logger.info(f"Updated user {sanitize(user_id)}")
 
-        if deactivating:
-            await close_live_user_sockets(user.tenant_key, self._logger)
+        if deactivating or updates.get("password"):
+            reason = "account deactivated" if deactivating else SESSION_REVOKED
+            await close_live_user_sockets(user.tenant_key, self._logger, reason=reason)
 
         if "email" in updates and updates["email"] and updates["email"] != old_email:
             await self._emit_email_changed(user, old_email)

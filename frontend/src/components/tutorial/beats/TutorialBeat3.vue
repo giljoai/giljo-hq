@@ -3,7 +3,7 @@
     <div class="beat-eyebrow">03 · Missions</div>
     <h2 class="beat-title">Missions, not monologues.</h2>
     <p class="beat-sub">
-      Stage a project from Home; it becomes work orders your agents pick up. You watch it all on the Jobs board.
+      Stage a project on the Jobs board; it becomes work orders your agents pick up. You watch it all there.
       <router-link class="beat-readmore" :to="{ path: '/guide', hash: '#projects' }" target="_blank" rel="noopener">Read more →</router-link>
     </p>
 

@@ -51,6 +51,7 @@ export const routes = [
       layout: 'auth',
       title: 'Complete Account Setup',
       requiresAuth: true,
+      loadSession: true,
       requiresSetup: false,
       requiresPasswordChange: false,
     },

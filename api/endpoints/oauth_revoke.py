@@ -88,7 +88,9 @@ async def revoke(
         (RFC 6749 §10.4 / OAuth 2.1 Security BCP).
     """
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_revoke"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(
+        request, limit=limit_for("oauth_revoke"), window=60, raise_on_limit=True, policy="oauth_revoke"
+    )
 
     from giljo_mcp.services import oauth_revocation_service as _revoke
 

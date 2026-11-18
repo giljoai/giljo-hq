@@ -224,7 +224,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import api, { apiClient } from '@/services/api'
 import configService from '@/services/configService'
@@ -234,6 +234,7 @@ import { PRODUCT_NAME } from '@/branding'
 const productName = PRODUCT_NAME
 
 const router = useRouter()
+const route = useRoute()
 
 const isCeEdition = computed(() => configService.getGiljoMode() === 'ce')
 
@@ -333,7 +334,12 @@ async function handleSubmit() {
       try {
         const orgStatus = await fetchEditionOrgSetupStatus()
         if (orgStatus?.data?.needs_setup) {
-          router.push('/org-setup')
+          const returnTo = route.query.redirect
+          router.push(
+            typeof returnTo === 'string' && returnTo
+              ? { path: '/org-setup', query: { redirect: returnTo } }
+              : '/org-setup',
+          )
           return
         }
       } catch (orgErr) {

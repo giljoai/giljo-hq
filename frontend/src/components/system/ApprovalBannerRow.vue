@@ -29,9 +29,22 @@
       >
         +{{ approvalPillOverflowCount }}
       </span>
-      <span class="approval-banner-row__text" data-testid="approval-banner-text">
+      <span
+        :id="messageId"
+        ref="messageEl"
+        class="approval-banner-row__text"
+        :class="{ 'is-expanded': expanded }"
+        data-testid="approval-banner-text"
+        @click="onTextClick"
+      >
         {{ approvalMessage }}
       </span>
+      <BannerExpandToggle
+        v-if="expandable"
+        :expanded="expanded"
+        :controls="messageId"
+        @toggle="toggle"
+      />
     </div>
 
     <div class="approval-banner-row__actions">
@@ -57,6 +70,8 @@
 <script setup>
 import { computed } from 'vue'
 import { useApprovalBannerState } from '@/composables/useApprovalBannerState'
+import { useBannerExpand } from '@/composables/useBannerExpand'
+import BannerExpandToggle from './BannerExpandToggle.vue'
 
 const props = defineProps({
   approvals: {
@@ -68,6 +83,8 @@ defineEmits(['open', 'dismiss'])
 
 const approvalsRef = computed(() => props.approvals)
 const { approvalMessage, visibleApprovalPills, approvalPillOverflowCount } = useApprovalBannerState(approvalsRef)
+const { messageEl, messageId, expanded, expandable, toggle, onTextClick } =
+  useBannerExpand(approvalMessage)
 </script>
 
 <style scoped lang="scss">

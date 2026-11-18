@@ -224,75 +224,81 @@
             Managing credentials for: <strong>{{ passwordUser?.username }}</strong>
           </v-alert>
 
-          <div class="text-title-small mb-2">Password</div>
-          <v-text-field
-            v-model="newPassword"
-            label="New Password"
-            variant="outlined"
-            type="password"
-            :rules="[rules.minLength]"
-            density="compact"
-            class="mb-1"
-          />
-          <v-text-field
-            v-model="confirmPassword"
-            label="Confirm Password"
-            variant="outlined"
-            type="password"
-            :rules="newPassword ? [(v) => v === newPassword || 'Passwords do not match'] : []"
-            density="compact"
-            class="mb-2"
-          />
-          <v-btn
-            color="primary"
-            variant="flat"
-            size="small"
-            :loading="changingPassword"
-            :disabled="!newPassword || newPassword.length < 8 || newPassword !== confirmPassword"
-            @click="changePassword"
-          >
-            Save Password
-          </v-btn>
+          <v-alert v-if="passwordUserIsSelf" type="info" variant="tonal" density="compact">
+            Change your own password and recovery PIN on your
+            <router-link to="/account/profile">Profile</router-link> page.
+          </v-alert>
+          <template v-else>
+            <div class="text-title-small mb-2">Password</div>
+            <v-text-field
+              v-model="newPassword"
+              label="New Password"
+              variant="outlined"
+              type="password"
+              :rules="[rules.minLength]"
+              density="compact"
+              class="mb-1"
+            />
+            <v-text-field
+              v-model="confirmPassword"
+              label="Confirm Password"
+              variant="outlined"
+              type="password"
+              :rules="newPassword ? [(v) => v === newPassword || 'Passwords do not match'] : []"
+              density="compact"
+              class="mb-2"
+            />
+            <v-btn
+              color="primary"
+              variant="flat"
+              size="small"
+              :loading="changingPassword"
+              :disabled="!newPassword || newPassword.length < 8 || newPassword !== confirmPassword"
+              @click="changePassword"
+            >
+              Save Password
+            </v-btn>
 
-          <v-divider class="my-4" />
+            <v-divider class="my-4" />
 
-          <div class="text-title-small mb-2">Recovery PIN</div>
-          <v-text-field
-            v-model="newPin"
-            label="New PIN (4 digits)"
-            variant="outlined"
-            type="text"
-            inputmode="numeric"
-            pattern="[0-9]{4}"
-            maxlength="4"
-            :rules="[(v) => !v || /^\d{4}$/.test(v) || 'PIN must be exactly 4 digits']"
-            density="compact"
-            class="mb-1"
-            @keypress="onlyNumbers"
-          />
-          <v-text-field
-            v-model="confirmPin"
-            label="Confirm PIN"
-            variant="outlined"
-            type="text"
-            inputmode="numeric"
-            pattern="[0-9]{4}"
-            maxlength="4"
-            :rules="newPin ? [(v) => v === newPin || 'PINs do not match'] : []"
-            density="compact"
-            class="mb-2"
-            @keypress="onlyNumbers"
-          />
-          <v-btn
-            color="primary"
-            variant="flat"
-            size="small"
-            :loading="changingPin"
-            :disabled="!newPin || !/^\d{4}$/.test(newPin) || newPin !== confirmPin"
-            @click="changePin"
-          >
-            Save PIN
-          </v-btn>
+            <div class="text-title-small mb-2">Recovery PIN</div>
+            <v-text-field
+              v-model="newPin"
+              label="New PIN (4 digits)"
+              variant="outlined"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]{4}"
+              maxlength="4"
+              :rules="[(v) => !v || /^\d{4}$/.test(v) || 'PIN must be exactly 4 digits']"
+              density="compact"
+              class="mb-1"
+              @keypress="onlyNumbers"
+            />
+            <v-text-field
+              v-model="confirmPin"
+              label="Confirm PIN"
+              variant="outlined"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]{4}"
+              maxlength="4"
+              :rules="newPin ? [(v) => v === newPin || 'PINs do not match'] : []"
+              density="compact"
+              class="mb-2"
+              @keypress="onlyNumbers"
+            />
+            <v-btn
+              color="primary"
+              variant="flat"
+              size="small"
+              :loading="changingPin"
+              :disabled="!newPin || !/^\d{4}$/.test(newPin) || newPin !== confirmPin"
+              @click="changePin"
+            >
+              Save PIN
+            </v-btn>
+          </template>
         </v-card-text>
 
         <div class="dlg-footer">
@@ -488,6 +494,7 @@ const userForm = ref({
 })
 
 const passwordUser = ref(null)
+const passwordUserIsSelf = computed(() => passwordUser.value?.id === currentUser.value?.id)
 const newPassword = ref('')
 const confirmPassword = ref('')
 const newPin = ref('')

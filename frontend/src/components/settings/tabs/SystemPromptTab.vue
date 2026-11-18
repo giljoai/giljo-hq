@@ -137,7 +137,7 @@ const NOOP_SAVE_WARNING =
 const productStore = useProductStore()
 const templateProposals = useTemplateProposalsStore()
 const { showToast } = useToast()
-const { sanitizeMarkdown } = useSanitizeMarkdown()
+const { sanitizeMarkdown } = useSanitizeMarkdown({ trusted: true })
 
 const selectedProductId = ref(null)
 const builtIn = ref('')

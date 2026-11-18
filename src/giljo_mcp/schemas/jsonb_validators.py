@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from giljo_mcp.schemas.jsonb_notification_payloads import (  # noqa: F401
     NOTIFICATION_PAYLOAD_VALIDATORS,
@@ -42,6 +42,7 @@ from giljo_mcp.schemas.jsonb_validators_settings import (  # noqa: F401
     SettingsData,
     validate_settings_by_category,
 )
+from giljo_mcp.schemas.web_link import web_link_or_blank
 
 
 
@@ -177,7 +178,9 @@ class AgentExecutionResult(BaseModel):
     artifacts: list[str] | None = None
     commits: list[str] | None = None
     branch: str | None = Field(default=None, max_length=_EXEC_RESULT_BRANCH_MAX)
-    pr_url: str | None = Field(default=None, max_length=_EXEC_RESULT_PR_URL_MAX)
+    pr_url: Annotated[str | None, AfterValidator(web_link_or_blank)] = Field(
+        default=None, max_length=_EXEC_RESULT_PR_URL_MAX
+    )
 
 
 def validate_agent_execution_result(data: dict) -> dict:

@@ -76,8 +76,7 @@ class TestEnsureDefaultTypesSeeded:
 
         await ensure_default_types_seeded(session, "tenant_abc")
 
-        assert session.add.call_count == len(DEFAULT_TAXONOMY_TYPES)
-        session.flush.assert_awaited_once()
+        assert session.execute.await_count == 1 + len(DEFAULT_TAXONOMY_TYPES)
 
     @pytest.mark.asyncio
     async def test_tenant_key_isolation(self):

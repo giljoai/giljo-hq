@@ -12,7 +12,6 @@ vi.mock('@/services/api', () => ({
     auth: { login: vi.fn(), me: vi.fn(), checkFirstLogin: vi.fn().mockResolvedValue({ data: {} }) },
   },
   apiClient: {},
-  setTenantKey: vi.fn(),
 }))
 
 vi.mock('@/sentry', () => ({ setSentryTenantKey: vi.fn() }))

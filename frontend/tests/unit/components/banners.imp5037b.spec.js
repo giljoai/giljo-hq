@@ -58,12 +58,12 @@ function makeSystemBanner(overrides = {}) {
   }
 }
 
-/** A banner that deep-links to an in-app route (skills_drift still uses Tools). */
+/** A banner that deep-links to an in-app route (pending_migrations uses Tools). */
 function makeRouteBanner(overrides = {}) {
   return makeSystemBanner({
-    id: 'drift-1',
-    type: 'system.skills_drift',
-    cta_label: 'Update bundle',
+    id: 'migr-1',
+    type: 'system.pending_migrations',
+    cta_label: 'Open Tools',
     cta_route: 'Tools',
     payload: null,
     ...overrides,
@@ -287,7 +287,7 @@ describe('SystemStatusBanner (CE) — notification-driven', () => {
   // the component navigates via router.push({ name: n.cta_route }).
   it('FE-6011 regression: CE system banner CTA navigates to route "Tools" (not "SystemSettings")', async () => {
     const store = useNotificationStore()
-    // An in-app banner (skills_drift) with cta_route='Tools' — this asserts the
+    // An in-app banner (pending_migrations) with cta_route='Tools' — this asserts the
     // correct route name flows through to router.push, proving FE-6011 is wired
     // end-to-end. (update_available now links out to GitHub, so it is no longer
     // the right fixture for an in-app routing assertion — see FE-6020.)

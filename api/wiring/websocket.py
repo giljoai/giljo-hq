@@ -7,16 +7,36 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import WebSocket
 from fastapi.exceptions import WebSocketException
 
 from api.app_state import state
-from api.auth_utils import authenticate_websocket
+from api.auth_utils import (
+    authenticate_websocket,
+    extract_ws_credentials,
+    registered_middleware_kwargs,
+    websocket_setup_mode,
+)
+from api.middleware._proxy_aware_ip import ProxyAwareIpResolver
+from api.middleware.rate_limiter import RateLimiter, RateLimitMiddleware, is_test_bypass_enabled
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger("api.app")
+
+_HANDSHAKE_SCOPE = "ws_handshake"
+
+
+async def _admit_handshake(websocket: WebSocket) -> bool:
+    if is_test_bypass_enabled():
+        return True
+    configured = registered_middleware_kwargs(websocket.scope.get("app"), RateLimitMiddleware)
+    if configured is None:
+        return True
+    limiter = RateLimiter(configured.get("requests_per_minute", 100), scope=_HANDSHAKE_SCOPE)
+    return await limiter.is_allowed(ProxyAwareIpResolver().resolve(websocket))
 
 
 async def authenticate_ws_connection(
@@ -25,7 +45,13 @@ async def authenticate_ws_connection(
     api_key: str | None,
     token: str | None,
 ) -> dict | None:
+    validation_started = time.monotonic()
     try:
+        if not await _admit_handshake(websocket):
+            raise WebSocketException(code=1008, reason="Too many requests")
+        if state.ws_setup_complete and extract_ws_credentials(websocket) is None:
+            raise WebSocketException(code=1008, reason="Authentication required")
+
         session = None
         session_cm = None
         if state.db_manager:
@@ -33,7 +59,10 @@ async def authenticate_ws_connection(
             session = await session_cm.__aenter__()
 
         try:
-            auth_result = await authenticate_websocket(websocket, db=session)
+            setup_mode = False if state.ws_setup_complete else await websocket_setup_mode(session)
+            if session is not None and not setup_mode:
+                state.ws_setup_complete = True
+            auth_result = await authenticate_websocket(websocket, db=session, setup_mode=setup_mode)
 
             await websocket.accept()
 
@@ -50,6 +79,8 @@ async def authenticate_ws_connection(
                 "user": user_info,
                 "context": auth_result.get("context", "normal"),
                 "tenant_key": tenant_key_from_user,
+                "authenticated_at": validation_started,
+                "expires_at": auth_result.get("expires_at"),
             }
             if token:
                 auth_context["auth_type"] = "jwt"

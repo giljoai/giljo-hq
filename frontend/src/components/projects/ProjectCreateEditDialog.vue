@@ -143,6 +143,8 @@
             hint="User-written description of what you want to accomplish. This will be shown to the orchestrator."
             :persistent-hint="descriptionHintPersistent"
             rows="4"
+            auto-grow
+            max-rows="14"
             required
             class="mb-3"
             aria-label="Project description"

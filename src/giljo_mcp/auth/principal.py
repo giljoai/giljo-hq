@@ -128,6 +128,9 @@ async def _validate_jwt(
         )
         raise PrincipalValidationError(reason, str(exc.detail)) from exc
 
+    if expected_audience is None and JWTManager.is_resource_token(payload):
+        raise PrincipalValidationError(AuthErrorReason.INVALID_AUDIENCE, "Resource token outside its resource")
+
     user_id = payload.get("sub")
     tenant_key = payload.get("tenant_key")
     if not user_id or not tenant_key:

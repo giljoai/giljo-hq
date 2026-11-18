@@ -12,7 +12,7 @@ import pytest
 
 
 def _resolved(permissions):
-    key = SimpleNamespace(name="k", tenant_key="tk_pinned", permissions=permissions)
+    key = SimpleNamespace(name="k", tenant_key="tk_pinned", permissions=permissions, expires_at=None)
     return key, SimpleNamespace(id="u1")
 
 

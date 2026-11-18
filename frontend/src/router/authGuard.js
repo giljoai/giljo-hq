@@ -30,7 +30,7 @@ export function createAuthGuard({ setupService, configService }) {
     const isBareRootVisit = to.redirectedFrom?.path === '/'
 
     let isAuthenticated = !!userStore.currentUser
-    if (requiresAuth) {
+    if (requiresAuth || (isAuthRouteLayout && to.meta?.loadSession === true)) {
       try {
         isAuthenticated = await userStore.checkAuth()
       } catch {

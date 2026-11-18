@@ -13,6 +13,14 @@ vi.mock('@/stores/websocket', () => ({
   }),
 }))
 
+const reconnectResyncs = new Set()
+vi.mock('@/stores/websocketEventRouter', () => ({
+  registerReconnectResync: (callback) => {
+    reconnectResyncs.add(callback)
+    return () => reconnectResyncs.delete(callback)
+  },
+}))
+
 let mockConnectedHarnesses = {}
 
 const justNow = () => new Date(Date.now() + 60_000).toISOString()
@@ -89,6 +97,7 @@ async function mountStep(selectedTools, giljoMode = 'saas') {
 
 beforeEach(() => {
   wsHandlers = {}
+  reconnectResyncs.clear()
   mockGiljoMode = 'saas'
   mockConnectedHarnesses = {}
 })
@@ -201,11 +210,58 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
   })
 
-  it('BE-9591: a HISTORICAL connection does NOT satisfy this flow', async () => {
+  it('BE-9591: a HISTORICAL record never shows the fresh green state; it says connected_before, with Next enabled', async () => {
     mockConnectedHarnesses = { 'claude-code': longAgo() }
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Waiting for')
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('connected_before')
+    expect(wrapper.text()).not.toContain('Waiting for')
+    expect(wrapper.find('[data-testid="hero-before-title"]').text()).toBe('Claude Code is already connected to your account.')
+    expect(wrapper.find('[data-testid="hero-before-sub"]').text()).toBe(
+      'Setting up another computer? Paste the command there. This turns green when it connects.',
+    )
+    expect(wrapper.find('[data-testid="hero-dot"]').exists()).toBe(false)
+    expect(wrapper.emitted('can-proceed').at(-1)).toEqual([true])
+  })
+
+  it('no stored record: waiting, Next disabled, as before', async () => {
+    mockConnectedHarnesses = {}
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('waiting')
+    expect(wrapper.emitted('can-proceed').at(-1)).toEqual([false])
+  })
+
+  it('a FRESH connection is the green state', async () => {
+    mockConnectedHarnesses = { 'claude-code': justNow() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('connected')
+  })
+
+  it('a live announce after connected_before flips it to the green state', async () => {
+    mockConnectedHarnesses = { 'claude-code': longAgo() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('connected_before')
+    wsHandlers['setup:tool_connected']({ tool_name: 'claude-code' })
+    await nextTick()
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('connected')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="hero-before-title"]').exists()).toBe(false)
+  })
+
+  it('the command and the copy button stay visible in connected_before', async () => {
+    mockConnectedHarnesses = { 'claude-code': longAgo() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('.command-code').exists()).toBe(true)
+  })
+
+  it('a re-read of an old record never downgrades a fresh connection', async () => {
+    mockConnectedHarnesses = {}
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    wsHandlers['setup:tool_connected']({ tool_name: 'claude-code' })
+    mockConnectedHarnesses = { 'claude-code': longAgo() }
+    await Promise.all(Array.from(reconnectResyncs).map((resync) => resync()))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="connect-card-claude_code"]').attributes('data-state')).toBe('connected')
   })
 
   it('BE-9591: a live WS announce still flips it, history or not', async () => {
@@ -217,6 +273,20 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
     await nextTick()
 
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+  })
+
+  it('a socket reconnect re-reads status, so a connect announced while it was down still flips the dot', async () => {
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
+
+    mockConnectedHarnesses = { 'claude-code': justNow() }
+    expect(reconnectResyncs.size).toBe(1)
+    await Promise.all(Array.from(reconnectResyncs).map((resync) => resync()))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+    wrapper.unmount()
+    expect(reconnectResyncs.size).toBe(0)
   })
 
   it('a credential-status fetch failure degrades gracefully to the pre-fix waiting state', async () => {
@@ -287,7 +357,7 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
     expect(latest).not.toContain('codex_cli')
   })
 
-  it('advance label is "Next tool" mid-walk and "Install agents & skills" on the last tool', async () => {
+  it('advance button is "Next tool" mid-walk and absent on the last tool (the footer Done is the one way forward)', async () => {
     const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
     wsHandlers['setup:tool_connected']({ tool_name: 'generic' })
     await nextTick()
@@ -297,7 +367,10 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
     expect(wrapper.find('.connect-eyebrow').text()).toContain('TOOL 2 OF 2')
     wsHandlers['setup:tool_connected']({ tool_name: 'generic' })
     await nextTick()
-    expect(wrapper.find('[data-testid="hero-advance"]').text()).toContain('Install agents & skills')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="hero-advance"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('All tools connected. Next on your list: install the skills.')
+    expect(wrapper.text()).not.toContain('Agents and skills')
   })
 
   it('"I already configured this" marks the ACTIVE tool only (ratified change from marks-all)', async () => {
@@ -309,13 +382,12 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
     expect(latest).toEqual(['claude_code'])
   })
 
-  it('advancing to the last tool then advancing again emits advance-step (wizard forward)', async () => {
+  it('the last tool connected shows no in-box button and the step itself never advances the wizard', async () => {
     const wrapper = await mountStep(['claude_code'], 'saas')
     wsHandlers['setup:tool_connected']({ tool_name: 'generic' })
     await nextTick()
-    await wrapper.find('[data-testid="hero-advance"]').trigger('click')
-    await nextTick()
-    expect(wrapper.emitted('advance-step')).toBeTruthy()
+    expect(wrapper.find('[data-testid="hero-advance"]').exists()).toBe(false)
+    expect(wrapper.emitted('advance-step')).toBeFalsy()
   })
 })
 

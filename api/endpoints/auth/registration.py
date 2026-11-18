@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from api.endpoints.dependencies import get_auth_service
+from api.middleware._proxy_aware_ip import ProxyAwareIpResolver
 from api.middleware.auth_rate_limiter import get_rate_limiter
 from api.middleware.auth_rate_limits import limit_for
 from giljo_mcp.auth.dependencies import require_admin
@@ -65,15 +66,12 @@ async def register_user(
         )
 
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(http_request, limit=limit_for("register"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(
+        http_request, limit=limit_for("register"), window=60, raise_on_limit=True, policy="register"
+    )
 
-    forwarded = http_request.headers.get("X-Forwarded-For")
-    if forwarded:
-        registration_ip: str | None = forwarded.split(",")[0].strip()
-    else:
-        registration_ip = http_request.headers.get("X-Real-IP") or (
-            http_request.client.host if http_request.client else None
-        )
+    resolved_ip = ProxyAwareIpResolver().resolve(http_request)
+    registration_ip: str | None = None if resolved_ip == "unknown" else resolved_ip
 
     user_data = await auth_service.register_user(
         username=request.username,
@@ -154,7 +152,9 @@ async def create_first_admin_user(
         )
 
     rate_limiter = get_rate_limiter()
-    await rate_limiter.check_rate_limit(request, limit=limit_for("create_first_admin"), window=60, raise_on_limit=True)
+    await rate_limiter.check_rate_limit(
+        request, limit=limit_for("create_first_admin"), window=60, raise_on_limit=True, policy="create_first_admin"
+    )
 
     async with _first_admin_creation_lock:
         admin_data = await auth_service.create_first_admin(

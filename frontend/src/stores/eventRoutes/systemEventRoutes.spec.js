@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 
 const mockGet = vi.fn()
 const mockList = vi.fn()
+const mockGetDefault = vi.fn()
 const mockTasksList = vi.fn()
 const mockGetMemoryEntries = vi.fn()
 
@@ -11,6 +12,7 @@ vi.mock('@/services/api', () => {
     products: {
       get: (...a) => mockGet(...a),
       list: (...a) => mockList(...a),
+      getDefault: (...a) => mockGetDefault(...a),
       getMemoryEntries: (...a) => mockGetMemoryEntries(...a),
     },
     tasks: {
@@ -193,12 +195,47 @@ describe('systemEventRoutes — FE-9501c (D10) product:created / product:updated
 
   it('product:created refreshes the products list', async () => {
     await SYSTEM_EVENT_ROUTES['product:created'].handler({ product_id: 'p-1', name: 'New Product' })
-    expect(mockList).toHaveBeenCalledTimes(1)
+    expect(mockList).toHaveBeenCalled()
   })
 
   it('product:updated refreshes both the list and the specific product', async () => {
     await SYSTEM_EVENT_ROUTES['product:updated'].handler({ product_id: 'p-1' })
     expect(mockList).toHaveBeenCalledTimes(1)
     expect(mockGet).toHaveBeenCalledWith('p-1')
+  })
+})
+
+describe('systemEventRoutes -- product:created makes the first product show as active', () => {
+  const created = { id: 'p-1', name: 'Recipe Box', is_active: true }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    localStorage.clear()
+    mockList.mockResolvedValue({ data: [created] })
+    mockGet.mockResolvedValue({ data: created })
+    mockGetDefault.mockResolvedValue({ data: { has_active_product: true, product: created } })
+    mockTasksList.mockResolvedValue({ data: { tasks: [] } })
+  })
+
+  it('sets the active product the server reports', async () => {
+    const store = useProductStore()
+    await SYSTEM_EVENT_ROUTES['product:created'].handler({ product_id: 'p-1', name: 'Recipe Box' })
+    expect(store.activeProduct?.id).toBe('p-1')
+  })
+
+  it('opens the product in the sidebar when no product was open', async () => {
+    const store = useProductStore()
+    await SYSTEM_EVENT_ROUTES['product:created'].handler({ product_id: 'p-1', name: 'Recipe Box' })
+    expect(store.currentProduct?.name).toBe('Recipe Box')
+  })
+
+  it('does not switch the viewed product when one is already open', async () => {
+    const store = useProductStore()
+    store.currentProductId = 'p-0'
+    store.currentProduct = { id: 'p-0', name: 'Old' }
+    await SYSTEM_EVENT_ROUTES['product:created'].handler({ product_id: 'p-1', name: 'Recipe Box' })
+    expect(store.currentProductId).toBe('p-0')
+    expect(store.currentProduct.name).toBe('Old')
   })
 })

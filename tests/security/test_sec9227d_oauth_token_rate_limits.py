@@ -55,9 +55,9 @@ def _build_app() -> FastAPI:
     return app
 
 
-async def _prefilled_limiter(count: int) -> arl.RateLimiter:
+async def _prefilled_limiter(count: int, policy: str = "oauth_token") -> arl.RateLimiter:
     rl = arl.RateLimiter()
-    bucket = rl._bucket_key("127.0.0.1", 60)
+    bucket = rl._bucket_key(f"{policy}:127.0.0.1", 60)
     for _ in range(count):
         await rl._backend.incr(arl._RATE_LIMIT_TENANT_SENTINEL, bucket, ttl_seconds=60)
     return rl
@@ -103,7 +103,7 @@ class TestOverLimit429:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("path,name", _ENDPOINTS)
     async def test_over_limit_returns_429_not_oauth_envelope(self, path, name):
-        rl = await _prefilled_limiter(_WAY_OVER)
+        rl = await _prefilled_limiter(_WAY_OVER, name)
         app = _build_app()
         p1, p2 = _patched(rl)
         with p1, p2:
@@ -117,7 +117,7 @@ class TestOverLimit429:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("path,name", _ENDPOINTS)
     async def test_exactly_at_limit_blocks_the_next_request(self, path, name):
-        rl = await _prefilled_limiter(arlimits.limit_for(name))
+        rl = await _prefilled_limiter(arlimits.limit_for(name), name)
         app = _build_app()
         p1, p2 = _patched(rl)
         with p1, p2:
@@ -161,7 +161,7 @@ class TestCeLoopbackExemption:
     @pytest.mark.parametrize("path,name", _ENDPOINTS)
     async def test_ce_loopback_is_unthrottled(self, monkeypatch, path, name):
         monkeypatch.setattr("api.app_state.GILJO_MODE", "ce")
-        rl = await _prefilled_limiter(_WAY_OVER)
+        rl = await _prefilled_limiter(_WAY_OVER, name)
         app = _build_app()
         p1, p2 = _patched(rl)
         with p1, p2:
@@ -212,9 +212,9 @@ class TestInvalidClientPathUnthrottled:
         calls: list[int] = []
         original_check = rl.check_rate_limit
 
-        async def counting_check(request, limit, window=60, raise_on_limit=False):
-            calls.append(limit)
-            return await original_check(request, limit, window=window, raise_on_limit=raise_on_limit)
+        async def counting_check(request, limit=None, window=60, raise_on_limit=False, *, policy=None):
+            calls.append(limit if limit is not None else arlimits.limit_for(policy))
+            return await original_check(request, limit, window=window, raise_on_limit=raise_on_limit, policy=policy)
 
         rl.check_rate_limit = counting_check
 

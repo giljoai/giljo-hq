@@ -107,3 +107,23 @@ describe('HubThreadHeader dates (FE-9593)', () => {
     expect(html.indexOf('thread-header-serial')).toBeLessThan(html.indexOf('thread-header-dates'))
   })
 })
+
+describe('last message date stays live while the thread is open', () => {
+  it('uses the newer of last_message and last_activity_at', async () => {
+    const { threadDates, lastMessageAt } = await import('@/components/hub/hubDateTime')
+    const thread = {
+      created_at: '2026-11-07T16:50:08Z',
+      last_message: { created_at: '2026-11-07T16:52:48Z' },
+      last_activity_at: '2026-11-07T17:01:50Z',
+    }
+    expect(lastMessageAt(thread)).toBe('2026-11-07T17:01:50Z')
+    expect(threadDates(thread).lastMessage).toBe(threadDates({ last_activity_at: '2026-11-07T17:01:50Z' }).lastMessage)
+  })
+
+  it('falls back to whichever one exists', async () => {
+    const { lastMessageAt } = await import('@/components/hub/hubDateTime')
+    expect(lastMessageAt({ last_message: { created_at: '2026-11-07T16:52:48Z' } })).toBe('2026-11-07T16:52:48Z')
+    expect(lastMessageAt({ last_activity_at: '2026-11-07T17:01:50Z' })).toBe('2026-11-07T17:01:50Z')
+    expect(lastMessageAt({})).toBe(null)
+  })
+})

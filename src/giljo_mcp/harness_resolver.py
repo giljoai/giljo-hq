@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urlparse
 
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,32 @@ _HUB_SURFACE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("openai-mcp", HUB_SURFACE_CHATGPT),
     ("hermes-agent", HUB_SURFACE_HERMES),
 )
+
+
+_CONNECTOR_SURFACE_BY_CLIENT_NAME: dict[str, str] = {
+    "Anthropic/ClaudeAI": HUB_SURFACE_CLAUDE,
+    "openai-mcp": HUB_SURFACE_CHATGPT,
+    "openai-mcp (ChatGPT)": HUB_SURFACE_CHATGPT,
+}
+
+
+def connector_surface_from_client_name(client_name: str | None) -> str | None:
+    return _CONNECTOR_SURFACE_BY_CLIENT_NAME.get((client_name or "").strip())
+
+
+_CONNECTOR_SURFACE_BY_CLIENT_HOST: dict[str, str] = {
+    "claude.ai": HUB_SURFACE_CLAUDE,
+    "chatgpt.com": HUB_SURFACE_CHATGPT,
+}
+
+
+def connector_surface_from_oauth_client_id(client_id: str | None, mcp_client_name: str | None = None) -> str | None:
+    if harness_from_oauth_client_id(client_id) != GENERIC_HARNESS:
+        return None
+    surface = _CONNECTOR_SURFACE_BY_CLIENT_HOST.get(urlparse(client_id or "").hostname or "")
+    if surface == HUB_SURFACE_CLAUDE and harness_from_client_info(mcp_client_name) == HARNESS_CLAUDE_CODE:
+        return None
+    return surface
 
 
 def hub_participant_harness(detected: str | None, client_name: str | None) -> str:

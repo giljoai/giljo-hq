@@ -3,6 +3,7 @@ import { useNotificationStore } from '../notifications'
 import { useProductStore } from '../products'
 import { useTaskStore } from '../tasks'
 import { useMemoryStore } from '../memoryStore'
+import { useTemplateProposalsStore } from '../templateProposalsStore'
 
 function dispatchWindowEvent(name, detail) {
   window.dispatchEvent(new CustomEvent(name, { detail }))
@@ -39,10 +40,14 @@ export const SYSTEM_EVENT_ROUTES = {
   'product:status:changed': { store: 'products', action: 'handleProductStatusChanged' },
 
   'product:created': {
-    handler: async (_payload, { storeRegistry } = {}) => {
+    handler: async (payload, { storeRegistry } = {}) => {
       const productStore = storeRegistry?.products?.() ?? useProductStore()
       try {
         await productStore.fetchProducts()
+        await productStore.fetchActiveProduct()
+        if (!productStore.currentProductId && payload?.product_id) {
+          await productStore.setCurrentProduct(payload.product_id)
+        }
       } catch (err) {
         console.warn('[systemEventRoutes] product:created store refresh failed:', err)
       }
@@ -149,6 +154,12 @@ export const SYSTEM_EVENT_ROUTES = {
   'template:updated': {
     handler: async (payload) => {
       dispatchWindowEvent('template:updated', payload)
+    },
+  },
+
+  'template:proposal_decided': {
+    handler: async (payload) => {
+      await useTemplateProposalsStore().handleDecided(payload?.proposal_id)
     },
   },
 

@@ -15,11 +15,25 @@ SCANNED_DIRS = ("tests", "internal")
 FIELDS = frozenset({"series_number", "serial"})
 
 
+_NONDETERMINISTIC_MODULES = frozenset({"random", "secrets", "uuid", "time"})
+_NONDETERMINISTIC_FUNCTIONS = frozenset(
+    {"uuid1", "uuid4", "hash", "id", "urandom", "time", "time_ns", "monotonic", "perf_counter", "getrandbits"}
+)
+_CLOCK_METHODS = frozenset({"now", "utcnow", "today"})
+
+
 def _draws_randomly(node: ast.AST) -> bool:
     for sub in ast.walk(node):
-        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
-            owner = sub.func.value
-            if isinstance(owner, ast.Name) and owner.id == "random":
+        if not isinstance(sub, ast.Call):
+            continue
+        func = sub.func
+        if isinstance(func, ast.Name) and func.id in _NONDETERMINISTIC_FUNCTIONS:
+            return True
+        if isinstance(func, ast.Attribute):
+            owner = func.value
+            if isinstance(owner, ast.Name) and owner.id in _NONDETERMINISTIC_MODULES:
+                return True
+            if func.attr in _CLOCK_METHODS or func.attr in _NONDETERMINISTIC_FUNCTIONS:
                 return True
     return False
 
@@ -59,7 +73,7 @@ def test_no_test_seeds_a_project_or_thread_serial_with_a_random_draw():
                 continue
             found.extend(_violations_in(path.read_text(encoding="utf-8"), str(path.relative_to(REPO_ROOT))))
     assert not found, (
-        "serial drawn at random (collides under uq_project_taxonomy_active or uq_comm_thread_serial); "
+        "serial drawn at random, from a uuid, a hash or the clock (collides under uq_project_taxonomy_active or uq_comm_thread_serial); "
         "use tests.helpers.taxonomy_seeds.next_series_number() for projects or "
         "next_thread_serial() for Hub threads instead:\n  " + "\n  ".join(found)
     )
@@ -73,6 +87,14 @@ def test_the_scan_sees_every_shape_the_draw_was_written_in():
         "assignment": "project.series_number = random.randint(1, 9000)",
         "thread kwarg": "CommThread(serial=random.randint(1, 90000))",
         "thread assignment": "thread.serial = random.randint(1, 90000)",
+        "uuid modulo": "Project(series_number=uuid.uuid4().int % 9000 + 1)",
+        "bare uuid4": "Project(series_number=(uuid4().int % (10**9)))",
+        "wrapped uuid": "Project(series_number=int(uuid.uuid4().int % 9000) + 1)",
+        "hash": "Project(series_number=hash(name) % 9000)",
+        "clock": "project.series_number = int(time.time()) % 9000",
+        "datetime clock": "Project(series_number=datetime.now(UTC).microsecond)",
+        "entropy pool": "CommThread(serial=int.from_bytes(os.urandom(2), 'big'))",
+        "secrets": "CommThread(serial=secrets.randbelow(9000))",
     }
     for name, source in shapes.items():
         assert _violations_in(source, name), f"scan missed the {name} shape"
@@ -85,6 +107,8 @@ def test_the_scan_leaves_the_allocator_and_literals_alone():
         "CommThread(serial=next_thread_serial())\n"
         "CommThread(serial=1)\n"
         "Agent(name=random.choice(names))\n"
+        "Project(id=str(uuid.uuid4()), series_number=index + 1)\n"
+        "Project(series_number=kwargs.pop('series_number', next_series_number()))\n"
     )
     assert _violations_in(clean, "clean") == []
 

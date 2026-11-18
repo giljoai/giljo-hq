@@ -15,7 +15,6 @@ from giljo_mcp.domain.project_status import VALID_UPDATE_STATUSES, ProjectStatus
 from giljo_mcp.exceptions import AlreadyExistsError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.schemas.service_responses import ProjectData
-from giljo_mcp.services.project_helpers import _build_ws_project_data
 
 
 logger = logging.getLogger(__name__)
@@ -59,22 +58,6 @@ async def route_active_inactive_status_transition(
     return None
 
 
-async def _broadcast_revival(service: Any, tenant_key: str, project_id: str) -> None:
-    ws = service._websocket_manager
-    if not ws:
-        return
-    async with service._get_session(tenant_key) as session:
-        project = await service._repo.get_by_id(session, tenant_key, project_id)
-    if project is None:
-        return
-    await ws.broadcast_project_update(
-        project_id=project_id,
-        update_type="status_changed",
-        project_data=_build_ws_project_data(project),
-        tenant_key=tenant_key,
-    )
-
-
 async def _revive_deleted(
     service: Any, project_id: str, updates: dict[str, Any], websocket_manager: Any | None
 ) -> ProjectData:
@@ -82,7 +65,6 @@ async def _revive_deleted(
     async with service._get_session(tenant_key) as preflight_session:
         await preflight_supersede_target(service, project_id, updates, tenant_key, preflight_session)
     await service.deletion.restore_project(project_id=project_id, tenant_key=tenant_key)
-    await _broadcast_revival(service, tenant_key, project_id)
     remaining = {k: v for k, v in updates.items() if k != "status"}
     target = updates["status"]
     if target == ProjectStatus.INACTIVE:

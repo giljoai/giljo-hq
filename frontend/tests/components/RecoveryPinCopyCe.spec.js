@@ -13,7 +13,6 @@ vi.mock('@/services/api', () => ({
     post: vi.fn(() => Promise.resolve({ data: {} })),
     auth: { createFirstAdmin: vi.fn() },
   },
-  setTenantKey: vi.fn(),
 }))
 
 vi.mock('@/services/setupService', () => ({

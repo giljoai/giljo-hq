@@ -10,8 +10,11 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.platform_registry import is_subagent_mode
 from giljo_mcp.services.orchestrator_caller_guard import NEVER_STARTED_STATUSES
 
 
@@ -41,6 +44,49 @@ async def start_staging_session(
         await _broadcast_started(websocket_manager, execution, job, tenant_key, old_status)
     except Exception:  # noqa: BLE001 - the dashboard refetches; never fail instruction delivery
         logger.warning("staging start broadcast failed for job %s", job.job_id, exc_info=True)
+
+
+async def start_parked_orchestrator_on_launch(
+    session: AsyncSession, project: Any, tenant_key: str
+) -> tuple[Any, Any, str] | None:
+    if not is_subagent_mode(project.execution_mode):
+        return None
+    rows = (
+        await session.execute(
+            select(AgentExecution, AgentJob)
+            .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
+            .where(
+                AgentJob.project_id == str(project.id),
+                AgentJob.job_type == "orchestrator",
+                AgentJob.tenant_key == tenant_key,
+                AgentExecution.tenant_key == tenant_key,
+                AgentExecution.status.in_(NEVER_STARTED_STATUSES),
+            )
+            .order_by(AgentJob.created_at.desc().nulls_last(), AgentExecution.id.desc())
+        )
+    ).all()
+    started = next(((e, j) for e, j in rows if e.result is not None), None)
+    if started is None:
+        return None
+    execution, job = started
+    old_status = execution.status
+    now = datetime.now(UTC)
+    execution.status = "working"
+    execution.started_at = execution.started_at or now
+    execution.last_progress_at = now
+    await session.flush()
+    return execution, job, old_status
+
+
+async def broadcast_orchestrator_started(
+    websocket_manager: Any | None, execution: Any, job: Any, tenant_key: str, old_status: str
+) -> None:
+    if websocket_manager is None:
+        return
+    try:
+        await _broadcast_started(websocket_manager, execution, job, tenant_key, old_status)
+    except Exception:  # noqa: BLE001 - the dashboard refetches; never fail the launch
+        logger.warning("orchestrator start broadcast failed for job %s", job.job_id, exc_info=True)
 
 
 async def _broadcast_started(

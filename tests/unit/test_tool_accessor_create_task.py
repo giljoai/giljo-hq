@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.product_lifecycle_service import NO_PRODUCT_YET, ProductLifecycleService
 from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
 
@@ -68,6 +69,9 @@ class TestToolAccessorCreateTaskValidation:
         with (
             patch.object(ProductService, "get_default_product", new_callable=AsyncMock, return_value=None),
             patch.object(ProductService, "list_products", new_callable=AsyncMock, return_value=[]),
+            patch.object(
+                ProductLifecycleService, "missing_default_message", new_callable=AsyncMock, return_value=NO_PRODUCT_YET
+            ),
         ):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._task_service.create_task_for_mcp(
@@ -76,7 +80,7 @@ class TestToolAccessorCreateTaskValidation:
                     priority="medium",
                     tenant_key="tenant-abc",
                 )
-            assert "default product" in str(exc_info.value).lower()
+            assert "create_product" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_uses_tenant_manager_when_tenant_key_not_provided(self):

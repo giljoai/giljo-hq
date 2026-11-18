@@ -130,11 +130,30 @@
             <template v-if="hasPendingDeletion">
               Your account is scheduled for permanent deletion on
               <strong>{{ accountStateStoreRef?.purgeAfterFormatted }}</strong
-              >. You can still cancel and restore full access.
+              >.
+              <template v-if="!deletionBannerShowing">
+                Limited records are kept as described in our
+                <a
+                  href="https://giljo.ai/privacy.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="privacy-link"
+                  data-test="danger-privacy-link"
+                >Privacy Policy</a>.
+              </template>
+              You can still cancel and restore full access.
             </template>
             <template v-else>
-              Permanently remove your account and tenant data. We'll email you a confirmation link
-              with a 24-hour window before anything is changed.
+              Permanently remove your account and tenant data. Limited records are kept as described
+              in our
+              <a
+                href="https://giljo.ai/privacy.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="privacy-link"
+                data-test="danger-privacy-link"
+              >Privacy Policy</a>. We'll email you a confirmation link with a 24-hour window before
+              anything is changed.
             </template>
           </div>
         </div>
@@ -217,6 +236,7 @@ import api from '@/services/api'
 import { parseErrorResponse } from '@/utils/errorMessages'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useUserStore } from '@/stores/user'
+import { useNotificationStore } from '@/stores/notifications'
 
 const router = useRouter()
 
@@ -336,6 +356,10 @@ async function onGenerateExport() {
 const accountStateStoreRef = shallowRef(null)
 const hasPendingDeletion = computed(
   () => accountStateStoreRef.value?.isAccountScheduledForDeletion ?? false,
+)
+const notificationStore = useNotificationStore()
+const deletionBannerShowing = computed(() =>
+  notificationStore.bannerNotifications.some((n) => n.type === 'saas.account_deletion_scheduled'),
 )
 const cardAccent = computed(() =>
   hasPendingDeletion.value ? 'var(--color-accent-primary)' : 'rgb(var(--v-theme-error))',
@@ -556,6 +580,11 @@ onMounted(async () => {
   font-size: 0.8rem;
   color: var(--text-secondary);
   line-height: 1.45;
+}
+
+.privacy-link {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
 }
 
 .danger-card-action {

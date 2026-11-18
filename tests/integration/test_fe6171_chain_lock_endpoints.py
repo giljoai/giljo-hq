@@ -23,6 +23,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models import Product, Project, User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import seed_projects
 
 
 pytestmark = [
@@ -166,8 +167,11 @@ def _payload(pids: list[str], extra: dict | None = None) -> dict:
     return body
 
 
-async def _create_run(api_client, headers, pids: list[str], extra: dict | None = None) -> dict:
-    resp = await api_client.post("/api/v1/sequence-runs", json=_payload(pids, extra), headers=headers)
+async def _create_run(api_client, db_manager, tenant: dict, pids: list[str], extra: dict | None = None) -> dict:
+    async with db_manager.get_session_async(tenant_key=tenant["tenant_key"]) as session:
+        await seed_projects(session, tenant["tenant_key"], pids)
+        await session.commit()
+    resp = await api_client.post("/api/v1/sequence-runs", json=_payload(pids, extra), headers=tenant["headers"])
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -177,7 +181,7 @@ async def _create_run(api_client, headers, pids: list[str], extra: dict | None =
 async def test_patch_locked_stage_then_unstage(api_client, db_manager):
     tenant = await _seed_user(db_manager)
     pids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    run = await _create_run(api_client, tenant["headers"], pids)
+    run = await _create_run(api_client, db_manager, tenant, pids)
     assert run["locked"] is False
 
     staged = await api_client.patch(
@@ -198,7 +202,7 @@ async def test_patch_locked_stage_then_unstage(api_client, db_manager):
 async def test_delete_member_removes_one(api_client, db_manager):
     tenant = await _seed_user(db_manager)
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
-    run = await _create_run(api_client, tenant["headers"], [p1, p2, p3])
+    run = await _create_run(api_client, db_manager, tenant, [p1, p2, p3])
 
     resp = await api_client.delete(f"/api/v1/sequence-runs/{run['id']}/members/{p2}", headers=tenant["headers"])
     assert resp.status_code == 200, resp.text
@@ -211,7 +215,7 @@ async def test_delete_member_reduce_to_one_dissolves_no_activate(api_client, db_
     tenant = await _seed_user(db_manager)
     lone = await _seed_project(db_manager, tenant["tenant_key"])
     other = str(uuid.uuid4())
-    run = await _create_run(api_client, tenant["headers"], [lone, other])
+    run = await _create_run(api_client, db_manager, tenant, [lone, other])
 
     resp = await api_client.delete(f"/api/v1/sequence-runs/{run['id']}/members/{other}", headers=tenant["headers"])
     assert resp.status_code == 200, resp.text
@@ -229,7 +233,7 @@ async def test_delete_member_reduce_to_one_dissolves_no_activate(api_client, db_
 async def test_delete_member_ultralock_running_422(api_client, db_manager):
     tenant = await _seed_user(db_manager)
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
-    run = await _create_run(api_client, tenant["headers"], [p1, p2, p3], extra={"status": "running"})
+    run = await _create_run(api_client, db_manager, tenant, [p1, p2, p3], extra={"status": "running"})
 
     resp = await api_client.delete(f"/api/v1/sequence-runs/{run['id']}/members/{p2}", headers=tenant["headers"])
     assert resp.status_code == 422, "member edit must be refused on a running (ultralocked) run"
@@ -238,7 +242,7 @@ async def test_delete_member_ultralock_running_422(api_client, db_manager):
 async def test_patch_unstage_ultralock_running_422(api_client, db_manager):
     tenant = await _seed_user(db_manager)
     pids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    run = await _create_run(api_client, tenant["headers"], pids, extra={"status": "running", "locked": True})
+    run = await _create_run(api_client, db_manager, tenant, pids, extra={"status": "running", "locked": True})
 
     resp = await api_client.patch(
         f"/api/v1/sequence-runs/{run['id']}", json={"locked": False}, headers=tenant["headers"]
@@ -258,7 +262,7 @@ async def test_delete_member_tenant_isolation(api_client, db_manager):
     tenant_a = await _seed_user(db_manager)
     tenant_b = await _seed_user(db_manager)
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
-    run_a = await _create_run(api_client, tenant_a["headers"], [p1, p2, p3])
+    run_a = await _create_run(api_client, db_manager, tenant_a, [p1, p2, p3])
 
     resp = await api_client.delete(f"/api/v1/sequence-runs/{run_a['id']}/members/{p2}", headers=tenant_b["headers"])
     assert resp.status_code == 404, "TENANT LEAK: B reached A's run"

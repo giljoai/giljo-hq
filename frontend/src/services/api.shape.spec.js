@@ -12,7 +12,6 @@ const MODULE_EXPORTS = [
   'default',
   'getErrorMessage',
   'parseErrorResponse',
-  'setTenantKey',
   'updateApiBaseURL',
 ]
 
@@ -157,6 +156,7 @@ const GROUPS = {
   apiKeys: ['list', 'getActive', 'create', 'delete'],
   connectedApps: ['list', 'logOut', 'logOutAll'],
   connect: ['credentialStatus', 'removeConnection'],
+  onboarding: ['startList'],
   git: ['getSettings', 'toggle'],
   agentJobs: ['list', 'listMany', 'get', 'spawn', 'status', 'updateMission', 'messages'],
   organizations: [
@@ -242,5 +242,16 @@ describe('BE-9808 api surface is unchanged by the split', () => {
         .map(([name]) => `${group}.${name}`),
     )
     expect(notFunctions).toEqual([])
+  })
+})
+
+describe('SEC-0055 the dashboard sends no tenant header', () => {
+  it('neither the client defaults nor the request interceptor add X-Tenant-Key', async () => {
+    const { apiClient } = apiModule
+    const [interceptor] = apiClient.interceptors.request.handlers.filter(Boolean)
+    const sent = await interceptor.fulfilled({ method: 'post', headers: {} })
+
+    expect(Object.keys(apiClient.defaults.headers)).not.toContain('X-Tenant-Key')
+    expect(Object.keys(sent.headers)).not.toContain('X-Tenant-Key')
   })
 })

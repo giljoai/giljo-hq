@@ -84,7 +84,7 @@ async def _seed_divergent_chain(
                 tenant_key=tenant_key,
                 product_id=product.id,
                 status="inactive",
-                series_number=uuid.uuid4().int % 9000 + 1,
+                series_number=index + 1,
                 execution_mode=member_mode,
                 staging_status=member_staging_status,
                 implementation_launched_at=(datetime.now(UTC) if index < launched_members else None),

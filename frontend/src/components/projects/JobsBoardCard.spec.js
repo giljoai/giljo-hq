@@ -113,7 +113,7 @@ describe('JobsBoardCard', () => {
     const staged = mountCard({ project: stagedProject, agents: stagedAgents, headlessAllowed: false })
     const note = staged.find('[data-testid="jb-gate-note"]')
     expect(note.exists()).toBe(true)
-    expect(note.text()).toContain('Your launch required')
+    expect(note.text()).toContain('Your go is needed')
     expect(note.text()).toContain('Tools → Agents')
     expect(staged.find('[data-testid="jb-gate-note-link"]').exists()).toBe(true)
 
@@ -369,24 +369,23 @@ describe('JobsBoardCard staging layout (FE-9679)', () => {
     expect(wrapper.find('[data-testid="jb-stat-crew"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-stat-steps"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-stat-mode"]').text()).toMatch(/not picked/i)
-    expect(wrapper.find('[data-testid="jb-row-description"]').text()).toContain('blocky card')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toMatch(/No mission yet/)
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toBe('No mission yet')
     expect(wrapper.find('[data-testid="jb-row-crew"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="jb-agents-list"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="jb-agent-row"]')).toHaveLength(0)
   })
 
-  it('Planning: the mission row shows the orchestrator writing, live', () => {
+  it('Planning: the mission pill shows the orchestrator writing, live', () => {
     const wrapper = mountCard({
       project: { ...base, id: 'p-planning', staging_status: 'staging', execution_mode: 'subagent' },
       agents: [{ agent_id: 'a-or', job_id: 'j-or', agent_name: 'orchestrator', agent_display_name: 'orchestrator', status: 'working' }],
     })
     expect(wrapper.find('[data-testid="jb-mission-state"]').attributes('data-state')).toBe('writing')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toMatch(/Orchestrator writing/)
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toMatch(/Writing mission/)
     expect(wrapper.find('[data-testid="jb-stat-mode"]').text()).toMatch(/Subagent/)
   })
 
-  it('Staged: the written mission on its row, and one agent-pane row per agent', () => {
+  it('Staged: the mission pill says written, and one agent-pane row per agent', () => {
     const wrapper = mountCard({
       project: {
         ...base,
@@ -402,15 +401,17 @@ describe('JobsBoardCard staging layout (FE-9679)', () => {
       ],
     })
     expect(wrapper.find('[data-testid="jb-mission-state"]').attributes('data-state')).toBe('written')
-    expect(wrapper.find('[data-testid="jb-row-mission"]').text()).toContain('build the panels')
+    expect(wrapper.find('[data-testid="jb-mission-state"]').text()).toBe('Mission written')
     expect(wrapper.findAll('[data-testid="jb-agent-row"]')).toHaveLength(3)
     expect(wrapper.find('[data-testid="jb-stat-phases"]').text()).toContain('2')
   })
 
-  it('the description pencil asks the board to open the one project edit dialog', async () => {
+  it('the card has no pencil outside its panel and never asks the board for the edit dialog (FE-0076)', async () => {
     const wrapper = mountCard({ project: { ...base, staging_status: null } })
+    expect(wrapper.find('[data-testid="jb-edit-description"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="jb-details-btn"]').trigger('click')
     await wrapper.find('[data-testid="jb-edit-description"]').trigger('click')
-    expect(wrapper.emitted('edit-description')?.[0]?.[0]).toMatchObject({ id: 'p-stage' })
+    expect(wrapper.emitted('edit-description')).toBeUndefined()
   })
 
   it('a launched card keeps the implementation layout (steps, agent rows)', () => {

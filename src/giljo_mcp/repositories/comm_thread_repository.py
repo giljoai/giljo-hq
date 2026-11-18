@@ -63,8 +63,7 @@ class CommThreadRepository(
         row = await self._taxonomy.get_by_abbreviation(session, tenant_key, CHT_TAXONOMY_ABBR)
         if row is None:
             raise ValidationError(
-                f"The '{CHT_TAXONOMY_ABBR}' chat-thread taxonomy type is missing for this "
-                "tenant. Run database migrations (ce_0054 backfill) before creating threads.",
+                "This account is missing the thread type needed to create a thread. Please try again.",
                 context={"operation": "comm_thread.create", "abbreviation": CHT_TAXONOMY_ABBR},
             )
 

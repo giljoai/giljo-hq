@@ -12,11 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.exceptions import (
-    BaseGiljoError,
-    ResourceNotFoundError,
-    ValidationError,
-)
+from giljo_mcp.exceptions import BaseGiljoError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.models.projects import Project
@@ -24,7 +20,6 @@ from giljo_mcp.models.sequence_runs import (
     CHAIN_TERMINAL_PROJECT_STATUSES,
     SequenceRun,
 )
-from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.jsonb_validators import (
     VALID_REVIEWED_VIA,
     validate_sequence_run_project_ids,
@@ -35,12 +30,15 @@ from giljo_mcp.schemas.jsonb_validators import (
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.conductor_job_minter import broadcast_conductor_created, mint_conductor_job
 from giljo_mcp.services.next_action import STAGING_COMPLETE
+from giljo_mcp.services.project_helpers import broadcast_deferred_events
+from giljo_mcp.services.project_review import stamp_review
 from giljo_mcp.services.sequence_run_backout_mixin import SequenceRunBackoutMixin
 from giljo_mcp.services.sequence_run_query_mixin import SequenceRunQueryMixin
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 from giljo_mcp.services.sequence_run_validation import (
     MAX_CHAIN_MISSION_CHARS,
     refuse_mode_change_if_live,
+    require_own_ids,
     validate_create_fields,
     validate_update_fields,
 )
@@ -119,6 +117,8 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
 
             run_id = generate_uuid()
             async with self._get_session(effective_tenant_key) as session:
+                references = [*validated_project_ids, *validated_resolved_order, *ps]
+                await require_own_ids(session, effective_tenant_key, references)
                 async with session.begin_nested():
                     run = SequenceRun(
                         id=run_id,
@@ -244,6 +244,8 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                     )
                 if execution_mode is not None:
                     await refuse_mode_change_if_live(session, run, run_id, effective_tenant_key)
+                references = [*(resolved_order or []), *(project_statuses or {}), conductor_project_id]
+                await require_own_ids(session, effective_tenant_key, references, stored_run=run)
 
                 if current_index is not None:
                     run.current_index = current_index
@@ -532,10 +534,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
             if not effective_tenant_key:
                 raise ValidationError(message="tenant_key is required", context={"operation": "mark_member_reviewed"})
             if not isinstance(project_id, str) or not project_id.strip():
-                raise ValidationError(
-                    message="project_id must be a non-empty string",
-                    context={"field": "project_id"},
-                )
+                raise ValidationError(message="project_id must be a non-empty string", context={"field": "project_id"})
             if via not in VALID_REVIEWED_VIA:
                 raise ValidationError(
                     message=f"via must be one of {sorted(VALID_REVIEWED_VIA)}, got {via!r}",
@@ -552,7 +551,7 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                         context={"field": "project_id", "run_id": run_id},
                     )
 
-                await ProjectRepository().stamp_reviewed(session, effective_tenant_key, project_id)
+                await stamp_review(session, self._websocket_manager, effective_tenant_key, project_id)
 
                 current = list(run.reviewed_project_ids or [])
                 if project_id in current:
@@ -570,6 +569,8 @@ class SequenceRunService(SequenceRunBackoutMixin, SequenceRunQueryMixin):
                 serialized = _serialize(run)
 
             await self._broadcast_after_commit(run_id, effective_tenant_key)
+            if self._session is None:
+                await broadcast_deferred_events(session)
             if via == "ui":
                 from giljo_mcp.services.chain_member_detach import finish_chain_after_review
 

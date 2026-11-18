@@ -123,7 +123,7 @@ async def test_locked_out_user_gets_the_same_generic_message(db_manager, monkeyp
 
     async with db_manager.get_session_async(tenant_key=tk) as session:
         resp = await verify_pin(
-            http_request=_fake_request(),
+            http_request=_fake_request(ip="198.51.100.40"),
             request_data=VerifyPinRequest(username=username, recovery_pin=PIN),
             db=session,
         )

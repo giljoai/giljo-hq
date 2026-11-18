@@ -1,0 +1,11 @@
+{
+  "advisories": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "Build-time glob matching only (vite, vue-router file routing). Patterns come from our own config, never from users, and picomatch is not in the browser bundle. No patched version exists (all versions <= 4.0.7 affected).",
+      "approved": "2026-11-17",
+      "remove_when": "picomatch publishes a fixed version"
+    }
+  ]
+}

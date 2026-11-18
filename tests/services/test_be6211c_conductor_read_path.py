@@ -38,6 +38,7 @@ async def test_resolve_default_product_id_raises_when_none() -> None:
     with patch("giljo_mcp.services.product_service.ProductService") as svc_cls:
         instance = svc_cls.return_value
         instance.get_default_product = AsyncMock(return_value=None)
+        instance.lifecycle.missing_default_message = AsyncMock(return_value="no default")
         with pytest.raises(ValidationError):
             await fc._resolve_default_product_id("tk_6211c", db_manager)
 

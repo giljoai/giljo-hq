@@ -24,6 +24,7 @@ from giljo_mcp.repositories.task_repository import TaskRepository
 from giljo_mcp.schemas.service_responses import ConversionResult
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.project_service._mutation_mixin import insert_new_project
+from giljo_mcp.services.text_field_validation import require_single_line
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -78,6 +79,10 @@ class TaskConversionService:
         if not tenant_key:
             raise ValidationError(
                 message="No tenant context available", context={"operation": "convert_to_project", "task_id": task_id}
+            )
+        if project_name:
+            require_single_line(
+                project_name, field="name", operation="convert_to_project", entity="Project", task_id=task_id
             )
 
         task = await self._repo.get_task_by_id(session, task_id, tenant_key)

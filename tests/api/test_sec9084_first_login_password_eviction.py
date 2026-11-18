@@ -147,6 +147,20 @@ def _oauth_err_text(body: dict) -> str:
 AUTH_PROBE = "/api/auth/me"
 
 
+def _record_socket_closes(monkeypatch) -> list[str]:
+    from api.app_state import state
+
+    closed: list[str] = []
+
+    class _Recorder:
+        async def disconnect_tenant(self, tenant_key: str, **_) -> int:
+            closed.append(tenant_key)
+            return 0
+
+    monkeypatch.setattr(state, "websocket_manager", _Recorder())
+    return closed
+
+
 @pytest.mark.asyncio
 async def test_complete_first_login_password_set_evicts_sessions_and_refresh_tokens(
     api_client, db_manager, monkeypatch
@@ -158,6 +172,7 @@ async def test_complete_first_login_password_set_evicts_sessions_and_refresh_tok
     clear_revocation_cache()
 
     user_id, username, tk = await _seed_user(db_manager)
+    closed_tenants = _record_socket_closes(monkeypatch)
 
     device_a = _mint(user_id, username, tk, revocation_epoch=0)
     device_b = _mint(user_id, username, tk, revocation_epoch=0)
@@ -187,6 +202,7 @@ async def test_complete_first_login_password_set_evicts_sessions_and_refresh_tok
             headers=_cookie_headers(device_a),
         )
         assert complete.status_code == 200, complete.text
+        assert closed_tenants == [tk]
 
         epoch, password_hash = await _get_user_state(db_manager, tenant_key=tk, user_id=user_id)
         assert epoch == 1

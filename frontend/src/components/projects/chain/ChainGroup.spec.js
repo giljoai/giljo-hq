@@ -450,14 +450,13 @@ describe('ChainGroup forwards every member-card event (FE-9681 B1)', () => {
   const emittingCard = {
     props: ['project', 'agents', 'showStaging', 'chainCtx'],
     template: `<div class="card-stub" :data-project="project.id">
-      <button class="e-edit" @click="$emit('edit-description', project)">edit</button>
       <button class="e-mission" @click="$emit('agent-mission-edit', { agent_id: 'a-1' })">mission</button>
       <button class="e-steps" @click="$emit('steps', { agent_id: 'a-1' })">steps</button>
       <button class="e-role" @click="$emit('agent-role', { agent_id: 'a-1' })">role</button>
     </div>`,
   }
 
-  it('re-emits edit-description, agent-mission-edit and steps with their payloads', async () => {
+  it('re-emits agent-mission-edit, steps and agent-role with their payloads', async () => {
     seed(makeRun({ status: 'running', current_index: 0 }))
     const wrapper = mount(ChainGroup, {
       props: { runId: 'run-1', agentsByProject: {}, now: Date.parse('2026-09-24T20:00:00Z') },
@@ -467,12 +466,10 @@ describe('ChainGroup forwards every member-card event (FE-9681 B1)', () => {
     const first = wrapper.find('.card-stub')
     expect(first.exists()).toBe(true)
 
-    await first.find('.e-edit').trigger('click')
     await first.find('.e-mission').trigger('click')
     await first.find('.e-steps').trigger('click')
     await first.find('.e-role').trigger('click')
 
-    expect(wrapper.emitted('edit-description')?.[0]?.[0]).toMatchObject({ id: first.attributes('data-project') })
     expect(wrapper.emitted('agent-mission-edit')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })
     expect(wrapper.emitted('steps')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })
     expect(wrapper.emitted('agent-role')?.[0]?.[0]).toEqual({ agent_id: 'a-1' })

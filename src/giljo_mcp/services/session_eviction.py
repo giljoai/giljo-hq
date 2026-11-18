@@ -27,12 +27,17 @@ async def evict_user_tokens(session: AsyncSession, user: User) -> int:
     return await revoke_all_for_user(session, user_id=str(user.id), tenant_key=user.tenant_key)
 
 
-async def close_live_user_sockets(tenant_key: str, logger: logging.Logger) -> None:
+SESSION_REVOKED = "session revoked"
+
+
+async def close_live_user_sockets(
+    tenant_key: str, logger: logging.Logger, *, reason: str = "account deactivated"
+) -> None:
     try:
         from api.app_state import state
 
         ws_manager = getattr(state, "websocket_manager", None)
         if ws_manager is not None:
-            await ws_manager.disconnect_tenant(tenant_key, reason="account deactivated")
-    except Exception:  # noqa: BLE001 - fire-and-forget; never fail the deactivation
-        logger.warning("Failed to close live WebSocket sockets on deactivation", exc_info=True)
+            await ws_manager.disconnect_tenant(tenant_key, reason=reason)
+    except Exception:  # noqa: BLE001 - fire-and-forget; never fail the committed change
+        logger.warning("Failed to close live WebSocket sockets (%s)", reason, exc_info=True)

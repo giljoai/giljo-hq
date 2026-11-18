@@ -80,6 +80,8 @@ class User(Base):
     setup_selected_tools = Column(JSONB, nullable=True)
     setup_step_completed = Column(Integer, default=0, nullable=False, server_default="0")
     learning_complete = Column(Boolean, default=False, nullable=False, server_default="false")
+    intro_video_seen = Column(Boolean, default=False, nullable=False, server_default="false")
+    guide_closed = Column(Boolean, default=False, nullable=False, server_default="false")
     learning_beat = Column(Integer, nullable=True)
     router_choice = Column(String(8), nullable=True)
 

@@ -23,13 +23,13 @@ PROTECTED = [
     ("DELETE", "/api/auth/api-keys/some-key-id"),
     ("PATCH", "/api/auth/me/setup-state"),
     ("POST", "/api/auth/complete-first-login"),
+    ("POST", "/api/auth/register"),
 ]
 
 EXEMPT = [
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
     ("POST", "/api/auth/refresh"),
-    ("POST", "/api/auth/register"),
     ("POST", "/api/auth/create-first-admin"),
     ("POST", "/api/auth/check-first-login"),
     ("POST", "/api/auth/verify-pin"),

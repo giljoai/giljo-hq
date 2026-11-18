@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, Project, Task
 from giljo_mcp.repositories.product_statistics_repository import ProductStatisticsRepository
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = [pytest.mark.stress, pytest.mark.integration]
@@ -82,7 +83,7 @@ async def seeded_tenant(db_manager):
                     description="be6063b spike seed",
                     mission="seed",
                     status="active",
-                    series_number=(uuid4().int % (10**9)),
+                    series_number=next_series_number(),
                 )
                 session.add(project)
                 await session.flush()

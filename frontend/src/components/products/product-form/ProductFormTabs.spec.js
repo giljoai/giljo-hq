@@ -152,13 +152,22 @@ describe('ProductSetupTab', () => {
     expect(wrapper.find('[data-test="ctx-staleness-banner"]').exists()).toBe(false)
   })
 
+  it('hides skip checkbox in create mode while no document is attached', () => {
+    const wrapper = mount(ProductSetupTab, {
+      props: { form: makeForm(), isEdit: false, skipAiAnalysis: false, existingVisionDocuments: [] },
+      global: { stubs: baseStubs },
+    })
+    expect(wrapper.html()).not.toContain('Skip AI Analysis')
+    expect(wrapper.find('[data-test="create-blank-toggle"]').exists()).toBe(false)
+  })
+
   it('shows skip checkbox in create mode', () => {
     const wrapper = mount(ProductSetupTab, {
       props: {
         form: makeForm(),
         isEdit: false,
         skipAiAnalysis: false,
-        existingVisionDocuments: [],
+        existingVisionDocuments: [{ id: 'd1', document_name: 'a.md', created_at: '2026-01-01' }],
         uploadingVision: false,
         uploadProgress: 0,
         visionUploadError: null,

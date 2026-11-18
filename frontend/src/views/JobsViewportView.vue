@@ -24,6 +24,7 @@
         v-if="hasBoard"
         :side="side"
         :side-counts="sideCounts"
+        :review-count="soloUnreviewed.length"
         :status-counts="statusCounts"
         :is-compact="isCompact"
         @select-side="selectSide"
@@ -64,7 +65,6 @@
             @agent-messages="(agent, project) => handleMessages(agent, project.id)"
             @agent-role="handleAgentRole"
             @agent-job="handleAgentJob"
-            @edit-description="openEditDialog"
             @review="board.openReview"
             @steps="handleStepsClick"
             @agent-mission-edit="openMissionEdit"
@@ -112,7 +112,6 @@
           @agent-messages="(agent, project) => handleMessages(agent, project.id)"
           @agent-role="handleAgentRole"
           @agent-job="handleAgentJob"
-          @edit-description="openEditDialog"
           @steps="handleStepsClick"
           @agent-mission-edit="openMissionEdit"
         />
@@ -143,31 +142,6 @@
         </JobsBoardDoneGroup>
       </template>
     </template>
-
-    <div v-if="editingProject" data-testid="jobs-board-edit-dialog">
-      <ProjectCreateEditDialog
-        ref="editDialogRef"
-        v-model="editDialogOpen"
-        :editing-project="editingProject"
-        :active-product="productStore.currentProduct || productStore.activeProduct"
-        :project-types="projectTypes"
-        @saved="onEditSaved"
-        @clear-mission="clearMissionOpen = true"
-        @update:model-value="(open) => !open && (editingProject = null)"
-      />
-    </div>
-    <BaseDialog
-      v-model="clearMissionOpen"
-      type="warning"
-      title="Clear Mission?"
-      confirm-label="Clear"
-      size="sm"
-      data-testid="jobs-board-clear-mission-dialog"
-      @confirm="onClearMissionConfirmed"
-      @cancel="clearMissionOpen = false"
-    >
-      <p>Clear the mission? It will be regenerated on next staging.</p>
-    </BaseDialog>
 
     <JobsBoardDetailModal
       v-model="detailModalOpen"
@@ -236,7 +210,6 @@ import { useBoardDensity } from '@/composables/useBoardDensity'
 import JobsBoardCard from '@/components/projects/JobsBoardCard.vue'
 import JobsBoardDetailModal from '@/components/projects/JobsBoardDetailModal.vue'
 import ChainGroup from '@/components/projects/chain/ChainGroup.vue'
-import ProjectCreateEditDialog from '@/components/projects/ProjectCreateEditDialog.vue'
 import JobsBoardDoneGroup from '@/components/projects/JobsBoardDoneGroup.vue'
 import JobsBoardProductGroup from '@/components/projects/JobsBoardProductGroup.vue'
 import JobsBoardToolbar from '@/components/projects/JobsBoardToolbar.vue'
@@ -254,7 +227,6 @@ import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
 import { useToast } from '@/composables/useToast'
 import { useNotificationStore } from '@/stores/notifications'
 import { notifyFailure } from '@/utils/notifyFailure'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useJobsBoardLiveRefresh } from '@/composables/useJobsBoardLiveRefresh'
 import { coalesceAsync } from '@/utils/coalesceAsync'
@@ -441,33 +413,6 @@ const productGroups = computed(() =>
     : [],
 )
 const productGroupsTotal = computed(() => productGroups.value.length)
-const editingProject = ref(null)
-const editDialogOpen = ref(false)
-const projectTypes = ref([])
-async function openEditDialog(project) {
-  if (!projectTypes.value.length) {
-    try {
-      const response = await api.taxonomyTypes.list()
-      projectTypes.value = response?.data || []
-    } catch {
-      projectTypes.value = []
-    }
-  }
-  editingProject.value = project
-  editDialogOpen.value = true
-}
-async function onEditSaved() {
-  editDialogOpen.value = false
-  editingProject.value = null
-  await fetchBoard()
-}
-const editDialogRef = ref(null)
-const clearMissionOpen = ref(false)
-function onClearMissionConfirmed() {
-  editDialogRef.value?.clearMissionData?.()
-  clearMissionOpen.value = false
-}
-
 function cardShared(project) {
   return {
     project,
@@ -477,6 +422,7 @@ function cardShared(project) {
     density: density.value,
     gitEnabled: gitEnabled.value,
     integrationsResolved: integrationsResolved.value,
+    focused: project.id === board.focusProject?.id,
     'data-testid': 'jobs-board-card-wrap',
     'data-arrival': project.id === arrivalProjectId.value ? 'true' : undefined,
     class: { 'jb-card--arrival': project.id === arrivalProjectId.value },
@@ -486,7 +432,6 @@ const cardListeners = {
   'open-detail': openDetail,
   'open-hub': openHub,
   changed: () => fetchBoard(),
-  'edit-description': openEditDialog,
   review: (project) => board.openReview(project),
   steps: handleStepsClick,
   'agent-mission-edit': openMissionEdit,

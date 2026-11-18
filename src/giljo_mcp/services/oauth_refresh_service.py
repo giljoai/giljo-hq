@@ -22,8 +22,9 @@ from sqlalchemy import and_, case, func, select, update
 
 from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
+from giljo_mcp.harness_resolver import connector_surface_from_oauth_client_id
 from giljo_mcp.models.auth import User
-from giljo_mcp.models.oauth import OAuthRefreshToken
+from giljo_mcp.models.oauth import OAuthLogin, OAuthRefreshToken
 from giljo_mcp.services._idem_crypto import decrypt_payload, encrypt_payload
 from giljo_mcp.services.cache_backends import OAUTH_REFRESH_BACKEND_NAME, get_cache_backend
 from giljo_mcp.services.oauth_cimd import is_cimd_client_id
@@ -228,6 +229,25 @@ async def get_oauth_credential_status(session: AsyncSession, tenant_key: str) ->
     has_valid_oauth = valid > 0
     has_expired_oauth = total > 0 and not has_valid_oauth
     return has_valid_oauth, has_expired_oauth
+
+
+async def get_connected_surfaces(session: AsyncSession, tenant_key: str) -> list[str]:
+    stmt = (
+        select(OAuthRefreshToken.client_id, OAuthLogin.last_mcp_client_name)
+        .outerjoin(
+            OAuthLogin,
+            and_(OAuthLogin.family_id == OAuthRefreshToken.family_id, OAuthLogin.tenant_key == tenant_key),
+        )
+        .where(
+            OAuthRefreshToken.tenant_key == tenant_key,
+            OAuthRefreshToken.revoked.is_(False),
+            OAuthRefreshToken.expires_at > datetime.now(UTC),
+        )
+        .distinct()
+    )
+    rows = (await session.execute(stmt)).all()
+    surfaces = {connector_surface_from_oauth_client_id(client_id, mcp_name) for client_id, mcp_name in rows}
+    return sorted(surfaces - {None})
 
 
 async def lock_user_for_update(session: AsyncSession, *, user_id: str, tenant_key: str) -> User | None:

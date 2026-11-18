@@ -26,6 +26,8 @@ export function projectDurationSeconds(project, nowMs) {
   return elapsedSecondsSince(project.implementation_launched_at, endMs)
 }
 
+export const PROMPT_COPIED_LINE = 'Prompt copied. Paste it in your AI tool. Your tool writes the plan.'
+
 export function jobsBoardMetaLine(project, sectionLabel, nowMs, { chainMember = false } = {}) {
   if (sectionLabel === JOBS_SECTION_LABELS.STAGED) {
     const created = formatTimeOfDay(project?.created_at)
@@ -33,6 +35,7 @@ export function jobsBoardMetaLine(project, sectionLabel, nowMs, { chainMember = 
     return created ? `created ${created} · awaiting your go` : 'awaiting your go'
   }
   if (sectionLabel === JOBS_SECTION_LABELS.PLANNING) {
+    if (project?.staging_status === 'staged') return PROMPT_COPIED_LINE
     return 'staging in progress'
   }
   if (sectionLabel === JOBS_SECTION_LABELS.ACTIVATED) {

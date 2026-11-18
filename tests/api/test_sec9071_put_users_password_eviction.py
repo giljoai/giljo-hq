@@ -29,12 +29,12 @@ NEW_PASSWORD = "NewPassword2@"
 _CSRF = secrets.token_urlsafe(32)
 
 
-async def _seed_user(db_manager) -> tuple[str, str, str]:
+async def _seed_user(db_manager, *, tenant_key: str | None = None, role: str = "developer") -> tuple[str, str, str]:
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
 
-    tk = TenantManager.generate_tenant_key()
+    tk = tenant_key or TenantManager.generate_tenant_key()
     unique = uuid4().hex[:8]
     user_id = str(uuid4())
     username = f"sec9071_user_{unique}"
@@ -55,7 +55,7 @@ async def _seed_user(db_manager) -> tuple[str, str, str]:
                 email=f"sec9071_{unique}@example.com",
                 password_hash=bcrypt.hashpw(OLD_PASSWORD.encode("utf-8"), bcrypt.gensalt()).decode("utf-8"),
                 tenant_key=tk,
-                role="developer",
+                role=role,
                 org_id=org.id,
                 is_active=True,
                 token_revocation_epoch=0,
@@ -270,17 +270,20 @@ async def test_generic_put_cookie_nonsensitive_fields_succeed(api_client, db_man
 
 
 @pytest.mark.asyncio
-async def test_generic_put_cookie_password_change_still_succeeds_and_evicts(api_client, db_manager, monkeypatch):
+async def test_generic_put_cookie_admin_password_reset_still_succeeds_and_evicts(api_client, db_manager, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     clear_revocation_cache()
 
-    user_id, username, tk = await _seed_user(db_manager)
-    device = _mint(user_id, username, tk, revocation_epoch=0)
+    user_id, _username, tk = await _seed_user(db_manager)
+    admin_id, admin_name, _ = await _seed_user(db_manager, tenant_key=tk, role="admin")
+    admin_token = JWTManager.create_access_token(
+        user_id=admin_id, username=admin_name, role="admin", tenant_key=tk, revocation_epoch=0
+    )
 
     resp = await api_client.put(
         f"/api/v1/users/{user_id}",
         json={"password": NEW_PASSWORD},
-        headers=_cookie_headers(device),
+        headers=_cookie_headers(admin_token),
     )
 
     assert resp.status_code == 200, resp.text
@@ -319,7 +322,7 @@ async def test_recovery_pin_write_allowed_in_ce(api_client, db_manager, monkeypa
 
     resp = await api_client.put(
         f"/api/v1/users/{user_id}",
-        json={"recovery_pin": "1234"},
+        json={"recovery_pin": "1234", "current_password": OLD_PASSWORD},
         headers=_cookie_headers(token),
     )
 

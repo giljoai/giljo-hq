@@ -13,7 +13,11 @@
           class="mb-3"
         />
 
-        <div v-if="isCe" class="mb-4 pa-4 bg-surface-variant rounded" data-test="workspace-role-box">
+        <div
+          v-if="isCe"
+          class="mb-4 pa-4 bg-surface-variant rounded"
+          data-test="workspace-role-box"
+        >
           <div v-if="userStore.currentOrg" class="d-flex align-center mb-3">
             <v-icon size="small" color="primary" class="mr-2">mdi-office-building</v-icon>
             <div class="text-body-small text-muted-a11y mr-2">Workspace</div>
@@ -72,7 +76,9 @@
         >
           <div class="d-flex align-center mb-2">
             <v-icon size="18" color="warning" class="mr-2">mdi-email-clock</v-icon>
-            <span class="text-body-medium font-weight-medium">Email change pending confirmation</span>
+            <span class="text-body-medium font-weight-medium"
+              >Email change pending confirmation</span
+            >
           </div>
           <p class="text-body-medium mb-2" style="color: var(--text-secondary)">
             A verification link was sent to
@@ -196,6 +202,16 @@
 
         <v-form ref="pinFormRef" @submit.prevent="changePin">
           <v-text-field
+            v-model="pinForm.current"
+            label="Current password"
+            type="password"
+            variant="outlined"
+            density="comfortable"
+            autocomplete="current-password"
+            data-test="pin-current-password"
+            class="mb-3"
+          />
+          <v-text-field
             v-model="pinForm.next"
             label="New 4-digit PIN"
             :rules="pinRules"
@@ -265,7 +281,8 @@ const isCe = ref(true)
 const pwFormRef = ref(null)
 const pinFormRef = ref(null)
 const pwForm = ref({ current: '', next: '', confirm: '' })
-const pinForm = ref({ next: '', confirm: '' })
+const pinForm = ref({ current: '', next: '', confirm: '' })
+const WRONG_CURRENT_PASSWORD_CODE = 'CURRENT_PASSWORD_INCORRECT'
 const pwError = ref('')
 const pinError = ref('')
 const changingPw = ref(false)
@@ -285,7 +302,10 @@ const canSubmitPassword = computed(
     pwForm.value.next === pwForm.value.confirm,
 )
 const canSubmitPin = computed(
-  () => /^[0-9]{4}$/.test(pinForm.value.next) && pinForm.value.next === pinForm.value.confirm,
+  () =>
+    pinForm.value.current.length > 0 &&
+    /^[0-9]{4}$/.test(pinForm.value.next) &&
+    pinForm.value.next === pinForm.value.confirm,
 )
 
 const emailPending = ref(null)
@@ -293,6 +313,8 @@ const resending = ref(false)
 const cancelling = ref(false)
 
 let emailChangeApi = null
+const isHosted = ref(false)
+let editionReady = Promise.resolve()
 
 const firstNameRules = [
   (v) => (!!v && String(v).trim().length >= 1) || 'First name is required',
@@ -317,11 +339,17 @@ function loadFromUser() {
 
 watch(() => userStore.currentUser?.id, loadFromUser, { immediate: true })
 
-onMounted(async () => {
+onMounted(() => {
+  editionReady = detectEdition()
+  return editionReady
+})
+
+async function detectEdition() {
   try {
     const status = await setupService.checkEnhancedStatus()
     const isSaas = isSaasModeValue(status?.mode)
     isCe.value = isCeModeValue(status?.mode ?? 'ce')
+    isHosted.value = isSaas
     if (isSaas) {
       const loaders = import.meta.glob('@/saas/services/emailChange.js')
       const [loader] = Object.values(loaders)
@@ -337,7 +365,7 @@ onMounted(async () => {
   } catch (err) {
     console.warn('[ProfilePage] setupService error, defaulting to CE mode:', err)
   }
-})
+}
 
 function reset() {
   loadFromUser()
@@ -354,9 +382,10 @@ async function save() {
 
   saving.value = true
   error.value = ''
+  await editionReady
 
   const emailChanged = form.value.email !== (u.email || '')
-  const ceModeEmailChange = emailChanged && !emailChangeApi
+  const ceModeEmailChange = emailChanged && !isHosted.value
 
   try {
     const payload = {
@@ -377,7 +406,8 @@ async function save() {
       }
     }
 
-    if (emailChanged && emailChangeApi) {
+    if (emailChanged && isHosted.value) {
+      if (!emailChangeApi) throw new Error('Update failed')
       const res = await emailChangeApi.request(form.value.email)
       emailPending.value = res?.data?.new_email || form.value.email
       form.value.email = u.email || ''
@@ -442,11 +472,11 @@ async function changePassword() {
     await userStore.logout()
     router.push('/login')
   } catch (err) {
-    const httpStatus = err?.response?.status
+    const parsed = parseErrorResponse(err)
     pwError.value =
-      httpStatus === 401
+      parsed.errorCode === WRONG_CURRENT_PASSWORD_CODE
         ? 'Current password is incorrect.'
-        : parseErrorResponse(err).message || 'Failed to change password'
+        : parsed.message || 'Failed to change password'
   } finally {
     changingPw.value = false
   }
@@ -458,8 +488,11 @@ async function changePin() {
   changingPin.value = true
   pinError.value = ''
   try {
-    await api.auth.updateUser(u.id, { recovery_pin: pinForm.value.next })
-    pinForm.value = { next: '', confirm: '' }
+    await api.auth.updateUser(u.id, {
+      recovery_pin: pinForm.value.next,
+      current_password: pinForm.value.current,
+    })
+    pinForm.value = { current: '', next: '', confirm: '' }
     showToast({ message: 'Recovery PIN updated.', type: 'success' })
   } catch (err) {
     pinError.value = parseErrorResponse(err).message || 'Failed to update PIN'

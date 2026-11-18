@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import re
@@ -372,6 +373,38 @@ class TenantExportService:
             },
         )
         await self.websocket_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
+
+
+
+
+def portability_copy(fidelity_artifact: bytes) -> bytes:
+    out = io.BytesIO()
+    entries: list[dict[str, Any]] = []
+
+    def add(dst: zipfile.ZipFile, arcname: str, blob: bytes) -> None:
+        dst.writestr(arcname, blob)
+        entries.append({"zip_path": arcname, "sha256": hashlib.sha256(blob).hexdigest(), "bytes": len(blob)})
+
+    with zipfile.ZipFile(io.BytesIO(fidelity_artifact)) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        manifest = json.loads(src.read("manifest.json"))
+        model_counts: dict[str, int] = {}
+        for name, info in manifest.get("models", {}).items():
+            rows = json.loads(src.read(info["file"]))
+            kept = [{k: v for k, v in row.items() if k not in _ALL_STRIP_FIELDS} for row in rows]
+            add(dst, info["file"], _redact_tenant_key_values(json.dumps(kept, indent=2, sort_keys=True).encode()))
+            model_counts[name] = len(kept)
+        for arcname in src.namelist():
+            if arcname.startswith("files/"):
+                add(dst, arcname, src.read(arcname))
+        add(dst, "schema.md", TenantExportService._build_schema_md(model_counts).encode("utf-8"))
+        rebuilt = TenantExportService._build_manifest(
+            tenant_key=manifest["tenant_key"],
+            model_counts=model_counts,
+            file_entries=entries,
+            alembic_revision=str(manifest.get("alembic_revision", "unknown")),
+        )
+        dst.writestr("manifest.json", json.dumps(rebuilt, indent=2, sort_keys=True).encode("utf-8"))
+    return out.getvalue()
 
 
 

@@ -236,6 +236,7 @@ class SetupToolConnectedData(BaseModel):
     user_id: str = Field(..., min_length=1, description="User identifier")
     tool_name: str = Field(..., min_length=1, description="AI tool name (claude_code, codex_cli, opencode, generic)")
     connected_at: str = Field(..., description="ISO 8601 timestamp of connection")
+    surface: str | None = Field(default=None, description="Hosted chat app that connected (claude, chatgpt), else null")
 
 
 class SetupToolConnectedEvent(BaseModel):

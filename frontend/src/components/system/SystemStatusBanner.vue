@@ -39,45 +39,21 @@
         />
 
         <LifecycleBannerRow
-          :rows="visibleLifecycleRows"
+          v-for="row in visibleLifecycleRows"
+          :key="row.id"
+          :row="row"
           @open="openLifecycleRow"
           @dismiss="lifecycleBannerStore.dismiss"
         />
 
-        <div
+        <SystemNoticeBannerRow
           v-for="n in visibleSystemBanners"
           :key="n.id"
-          class="system-banner-alert"
-          :class="`system-banner-alert--${n.severity}`"
-          role="alert"
-          data-testid="system-banner"
-        >
-          <div class="system-banner-alert__content">
-            <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
-            <span class="system-banner-alert__text">{{ n.body || n.title }}</span>
-          </div>
-
-          <div class="system-banner-alert__actions">
-            <button
-              v-if="hasCta(n)"
-              data-testid="banner-cta-btn"
-              class="system-banner-btn system-banner-btn--cta"
-              @click="goTo(n)"
-            >
-              {{ n.cta_label || 'Go to settings' }}
-            </button>
-
-            <button
-              v-if="n.dismissible"
-              data-testid="banner-dismiss-btn"
-              class="system-banner-btn system-banner-btn--dismiss"
-              aria-label="Dismiss notification"
-              @click="dismiss(n)"
-            >
-              <v-icon icon="mdi-close" size="16" />
-            </button>
-          </div>
-        </div>
+          :notice="n"
+          :has-cta="hasCta(n)"
+          @cta="goTo(n)"
+          @dismiss="dismiss(n)"
+        />
 
         <OnboardingNudgeRow
           v-if="showTutorialRow && isBannerVisible('tutorial')"
@@ -113,6 +89,18 @@
           @dismiss="dismissAgentRow"
         >
           Tune your agent templates and product context in Tools — make the defaults yours.
+        </OnboardingNudgeRow>
+
+        <OnboardingNudgeRow
+          v-if="isBannerVisible('intro-video')"
+          row-testid="intro-video-banner"
+          cta-testid="intro-video-banner-cta"
+          cta-label="Take a look"
+          dismiss-testid="intro-video-banner-dismiss"
+          @cta="onIntroVideoCta"
+          @dismiss="dismissIntroVideoRow"
+        >
+          New: a getting started guide and a short video are in Tools, Learning. Get familiar with Giljo HQ.
         </OnboardingNudgeRow>
       </div>
     </div>
@@ -158,6 +146,9 @@ import ApprovalBannerRow from './ApprovalBannerRow.vue'
 import ThreadPostBannerRow from './ThreadPostBannerRow.vue'
 import LifecycleBannerRow from './LifecycleBannerRow.vue'
 import OnboardingNudgeRow from './OnboardingNudgeRow.vue'
+import { useBannerDismissStore } from '@/stores/bannerDismissStore'
+import { isPreReleaseAccount } from '@/composables/useIntroVideo'
+import SystemNoticeBannerRow from './SystemNoticeBannerRow.vue'
 import BannerFoldControls from './BannerFoldControls.vue'
 import TemplateProposalsBannerRow from './TemplateProposalsBannerRow.vue'
 import { useTemplateProposalsStore } from '@/stores/templateProposalsStore'
@@ -187,7 +178,7 @@ onMounted(async () => {
 
 const ALLOWED_TYPES = computed(() => {
   if (isSaasModeValue(giljoMode.value)) {
-    return new Set(['system.skills_drift', 'system.context_tuning_due'])
+    return new Set(['system.skills_drift', 'system.context_tuning_due', 'saas.legal_updated'])
   }
   return CE_SYSTEM_TYPES
 })
@@ -448,6 +439,22 @@ function openLifecycleRow(row) {
   lifecycleBannerStore.dismiss(row.id)
 }
 
+const INTRO_VIDEO_ROW_KEY = 'intro-video:banner'
+const bannerDismissals = useBannerDismissStore()
+const showIntroVideoRow = computed(
+  () =>
+    userStore.currentUser?.intro_video_seen === true &&
+    isPreReleaseAccount(userStore.currentUser?.created_at) &&
+    !bannerDismissals.isDismissed(INTRO_VIDEO_ROW_KEY),
+)
+function dismissIntroVideoRow() {
+  bannerDismissals.dismiss(INTRO_VIDEO_ROW_KEY)
+}
+function onIntroVideoCta() {
+  router.push({ path: '/tools', query: { tab: 'learning' } })
+  dismissIntroVideoRow()
+}
+
 const { totalBannerCount, foldExpanded, visibleBannerKeys, isBannerVisible } = useBannerFold({
   yourTurnCount: computed(() => openNextThreads.value.length),
   approvalCount: computed(() => visibleApprovals.value.length),
@@ -460,6 +467,7 @@ const { totalBannerCount, foldExpanded, visibleBannerKeys, isBannerVisible } = u
   showTutorial: showTutorialRow,
   showInteg: showIntegRow,
   showAgent: showAgentRow,
+  showIntroVideo: showIntroVideoRow,
 })
 const visibleLifecycleRows = computed(() => lifecycleBannerStore.rows.filter((row) => isBannerVisible(`lifecycle:${row.id}`)))
 const visibleSystemBanners = computed(() => visibleBanners.value.filter((n) => isBannerVisible(`system:${n.id}`)))
@@ -490,90 +498,11 @@ const { BANNER_ROW_PX, renderedRowCount, pendingReserveRows } = useBannerSpaceRe
   min-width: 0;
 }
 
-.system-banner-alert {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 16px;
-  font-size: 13px;
-  border-radius: 0;
-  // FE-6012: tint-over-surface fill (matches avatar-menu account-status notice exactly)
-  background: var(--banner-bg);
-  --smooth-border-color: var(--banner-border);
-
-  &__content {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  // FE-9202: Gil avatar — the banner speaks in Gil's voice (generic-agent branding rule).
-  &__avatar {
-    flex-shrink: 0;
-    width: 18px;
-    height: 18px;
-    display: block;
-  }
-
-  &__text {
-    // Light text on the translucent tint over the dark app surface → high contrast.
-    color: var(--color-text-primary);
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-}
-
 // FE-9377: reserved space while row eligibility resolves, inert to the pointer.
 // Transparent: when a remembered banner does not come back, an empty tinted
 // strip read as a broken bar for the seconds before it collapses.
 .system-banner-skeleton {
   background: transparent;
   pointer-events: none;
-}
-
-.system-banner-btn {
-  border: none;
-  cursor: pointer;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  transition: opacity 0.15s ease;
-  line-height: 1;
-
-  &:hover {
-    opacity: 0.85;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--color-accent-primary);
-    outline-offset: 2px;
-  }
-
-  &--cta {
-    background-color: var(--color-accent-primary);
-    color: var(--badge-text);
-    padding: 5px 12px;
-  }
-
-  &--dismiss {
-    background: transparent;
-    color: rgba(255, 255, 255, 0.7);
-    padding: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
 }
 </style>

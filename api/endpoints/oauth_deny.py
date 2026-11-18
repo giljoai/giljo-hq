@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends
 
 from api.endpoints.oauth import AuthorizeRequest, append_query_params, validate_consent_request
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_browser_session
 from giljo_mcp.models import User
 from giljo_mcp.services.oauth_service import OAuthService
 
@@ -22,6 +22,7 @@ async def deny(
     body: AuthorizeRequest,
     current_user: User = Depends(get_current_active_user),
     db=Depends(get_db_session),
+    _browser: None = Depends(require_browser_session),
 ):
     """Decline an OAuth authorization request.
 

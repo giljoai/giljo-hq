@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { createVuetify } from 'vuetify'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import JobsBoardAgentRow from './JobsBoardAgentRow.vue'
-import JobsBoardSummaryRows from './JobsBoardSummaryRows.vue'
+import JobsBoardDetailsLine from './JobsBoardDetailsLine.vue'
 import JobsBoardCardSummary from './JobsBoardCardSummary.vue'
 import JobsBoardCardDrawer from './JobsBoardCardDrawer.vue'
 import JobsBoardDetailModal from './JobsBoardDetailModal.vue'
@@ -95,13 +95,13 @@ describe('folded summary and drawer crew row (FE-9684)', () => {
     expect(staged.find('.live-badge').exists()).toBe(false)
   })
 
-  it('"Orchestrator writing" ends in the dots while the mission is being written', () => {
-    const wrapper = mount(JobsBoardSummaryRows, {
-      props: { project: { id: 'p' }, missionState: 'writing' },
+  it('"Writing mission" ends in the dots while the mission is being written', () => {
+    const wrapper = mount(JobsBoardDetailsLine, {
+      props: { missionState: 'writing' },
     })
-    expect(wrapper.find('[data-testid="jb-row-mission"] [data-testid="live-dots"]').exists()).toBe(true)
-    const written = mount(JobsBoardSummaryRows, {
-      props: { project: { id: 'p' }, missionState: 'written', mission: 'Do it' },
+    expect(wrapper.find('[data-testid="jb-mission-state"] [data-testid="live-dots"]').exists()).toBe(true)
+    const written = mount(JobsBoardDetailsLine, {
+      props: { missionState: 'written' },
     })
     expect(written.find('[data-testid="live-dots"]').exists()).toBe(false)
   })

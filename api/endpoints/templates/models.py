@@ -8,6 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from giljo_mcp.services.text_field_validation import has_line_break_or_control
 from giljo_mcp.template_validation import validate_harness_name
 
 
@@ -42,6 +43,13 @@ class _TemplateFieldRules(BaseModel):
         if v is None:
             return None
         return v.strip() or "inherit"
+
+    @field_validator("name", check_fields=False)
+    @classmethod
+    def validate_name_is_one_line(cls, v: str | None) -> str | None:
+        if v is not None and has_line_break_or_control(v):
+            raise ValueError("Agent name must be a single line: line breaks and control characters are not allowed")
+        return v
 
     @field_validator("cli_tool", mode="before", check_fields=False)
     @classmethod

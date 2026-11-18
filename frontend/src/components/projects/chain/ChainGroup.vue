@@ -95,7 +95,6 @@
           @agent-messages="(a, p) => emit('agent-messages', a, p)"
           @agent-role="(a) => emit('agent-role', a)"
           @agent-job="(a) => emit('agent-job', a)"
-          @edit-description="(p) => emit('edit-description', p)"
           @agent-mission-edit="(a) => emit('agent-mission-edit', a)"
           @steps="(a) => emit('steps', a)"
           @review="handleTabReview(member.tab)"
@@ -185,7 +184,6 @@ const emit = defineEmits([
   'agent-messages',
   'agent-role',
   'agent-job',
-  'edit-description',
   'agent-mission-edit',
   'steps',
 ])

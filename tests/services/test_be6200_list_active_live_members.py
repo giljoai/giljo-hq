@@ -14,13 +14,13 @@ import pytest_asyncio
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
-from tests.helpers.taxonomy_seeds import next_series_number
+from tests.helpers.taxonomy_seeds import next_series_number, seed_projects
 
 
 pytestmark = pytest.mark.asyncio
@@ -133,7 +133,11 @@ async def test_soft_deleted_member_counts_as_terminal(db_session: AsyncSession) 
 
 async def test_missing_member_rows_count_as_terminal(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
-    run = await _create_run(db_session, tenant, [str(uuid.uuid4()), str(uuid.uuid4())], status="pending")
+    members = [str(uuid.uuid4()), str(uuid.uuid4())]
+    await seed_projects(db_session, tenant, members)
+    run = await _create_run(db_session, tenant, members, status="pending")
+    with tenant_session_context(db_session, tenant):
+        await db_session.execute(delete(Project).where(Project.tenant_key == tenant, Project.id.in_(members)))
 
     active = await _seq_svc(db_session).list_active(tenant_key=tenant)
     assert run["id"] not in {r["id"] for r in active}, "run with no live member rows must not surface"

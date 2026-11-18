@@ -7,7 +7,7 @@
         data-testid="tutorial-overlay"
         role="dialog"
         aria-modal="true"
-        aria-label="GiljoAI tour"
+        aria-label="Giljo HQ tour"
         @keydown.escape="handleSkip"
       >
         <div class="tutorial-backdrop" />
@@ -57,6 +57,26 @@
               />
             </div>
 
+            <div
+              v-if="showMotionNotice"
+              class="tutorial-motion-notice"
+              data-testid="tutorial-motion-notice"
+              role="status"
+            >
+              <v-icon size="16">mdi-information-outline</v-icon>
+              <span>Animations are off on this device.</span>
+              <v-btn
+                variant="text"
+                size="small"
+                class="motion-notice-play"
+                prepend-icon="mdi-play"
+                data-testid="tutorial-play-animations"
+                @click="playAnimations"
+              >
+                Play animations
+              </v-btn>
+            </div>
+
             <TutorialFooter
               :show-back="showBack"
               :show-next="showNext"
@@ -89,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TutorialRail from './TutorialRail.vue'
 import TutorialFooter from './TutorialFooter.vue'
@@ -107,10 +127,18 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { armActivateBreadcrumb, useTutorialState } from '@/composables/useTutorialState'
 import { useProductStore } from '@/stores/products'
 
-defineProps({
+const props = defineProps({
   modelValue: {
     type: Boolean,
     required: true,
+  },
+  startOver: {
+    type: Boolean,
+    default: false,
+  },
+  startAt: {
+    type: Number,
+    default: null,
   },
 })
 
@@ -128,6 +156,8 @@ const {
   next,
   back,
   goTo,
+  restart,
+  openAt,
   pick,
   setProduct,
   goToUpload,
@@ -137,6 +167,15 @@ const {
   releaseAbandonedDraft,
 } = useTutorialState()
 
+watch(
+  () => props.modelValue,
+  (open) => {
+    if (!open) return
+    if (props.startAt) openAt(props.startAt)
+    else if (props.startOver) restart()
+  },
+)
+
 const replayKey = ref(0)
 
 const reducedMotion = ref(
@@ -144,6 +183,13 @@ const reducedMotion = ref(
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches,
 )
+
+const showMotionNotice = computed(() => reducedMotion.value && s.screen === 'beats' && s.beat < 6)
+
+function playAnimations() {
+  reducedMotion.value = false
+  replayKey.value++
+}
 
 function close() {
   releaseAbandonedDraft()
@@ -283,14 +329,27 @@ async function goManual() {
   }
 }
 
-/* Reduced motion — final frames instead of animation, both via the user's
-   OS preference and via the class-driven gate above. */
-@media (prefers-reduced-motion: reduce) {
-  .tutorial-panel :deep(*) {
-    animation: none !important;
-  }
+.tutorial-motion-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 44px 0;
+  padding: 4px 8px 4px 14px;
+  border-radius: $border-radius-default;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
+.motion-notice-play {
+  margin-left: auto;
+  color: $color-brand-yellow !important;
+  font-weight: 600;
+}
+
+/* Final frames instead of animation, until the user presses Play animations.
+   The class is the only gate: a media query here could not be switched off. */
 .tutorial--reduced :deep(*) {
   animation: none !important;
 }

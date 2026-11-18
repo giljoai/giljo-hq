@@ -131,7 +131,7 @@ class JobCompletionService:
                 result = validate_agent_execution_result(result)
             except PydanticValidationError as exc:
                 raise ValidationError(
-                    message="complete_job result has an invalid shape (summary/artifacts/commits)",
+                    message="complete_job result has an invalid shape (summary/artifacts/commits/branch/pr_url)",
                     context={"method": "complete_job", "errors": exc.errors(include_url=False)},
                 ) from exc
 

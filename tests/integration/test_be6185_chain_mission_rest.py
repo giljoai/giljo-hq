@@ -21,6 +21,7 @@ from giljo_mcp.models import User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.services.sequence_run_service import MAX_CHAIN_MISSION_CHARS
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import seed_projects
 
 
 pytestmark = [
@@ -130,8 +131,11 @@ async def api_client(db_manager):
         del app.state.auth
 
 
-def _run_payload(status: str = "pending") -> dict:
+async def _run_payload(db_manager, tenant: dict, status: str = "pending") -> dict:
     a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    async with db_manager.get_session_async(tenant_key=tenant["tenant_key"]) as session:
+        await seed_projects(session, tenant["tenant_key"], [a, b])
+        await session.commit()
     return {
         "project_ids": [a, b],
         "resolved_order": [a, b],
@@ -145,7 +149,9 @@ def _run_payload(status: str = "pending") -> dict:
 
 async def test_patch_chain_mission_round_trips(api_client, db_manager):
     tenant = await _seed_user(db_manager)
-    create = await api_client.post("/api/v1/sequence-runs", json=_run_payload(), headers=tenant["headers"])
+    create = await api_client.post(
+        "/api/v1/sequence-runs", json=await _run_payload(db_manager, tenant), headers=tenant["headers"]
+    )
     assert create.status_code == 201, create.text
     run_id = create.json()["id"]
     assert create.json()["chain_mission"] is None
@@ -165,7 +171,9 @@ async def test_patch_chain_mission_round_trips(api_client, db_manager):
 
 async def test_patch_over_cap_chain_mission_returns_422(api_client, db_manager):
     tenant = await _seed_user(db_manager)
-    create = await api_client.post("/api/v1/sequence-runs", json=_run_payload(), headers=tenant["headers"])
+    create = await api_client.post(
+        "/api/v1/sequence-runs", json=await _run_payload(db_manager, tenant), headers=tenant["headers"]
+    )
     assert create.status_code == 201, create.text
     run_id = create.json()["id"]
 
@@ -180,7 +188,9 @@ async def test_patch_over_cap_chain_mission_returns_422(api_client, db_manager):
 async def test_patch_chain_mission_refused_on_running_run(api_client, db_manager):
     tenant = await _seed_user(db_manager)
     create = await api_client.post(
-        "/api/v1/sequence-runs", json=_run_payload(status="running"), headers=tenant["headers"]
+        "/api/v1/sequence-runs",
+        json=await _run_payload(db_manager, tenant, status="running"),
+        headers=tenant["headers"],
     )
     assert create.status_code == 201, create.text
     run_id = create.json()["id"]

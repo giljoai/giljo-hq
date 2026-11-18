@@ -17,7 +17,36 @@ describe('retryOnThrottle', () => {
     const sleep = vi.fn().mockResolvedValue()
     const fn = vi.fn().mockRejectedValueOnce(throttled(429, 3)).mockResolvedValue('ok')
     await expect(retryOnThrottle(fn, { sleep })).resolves.toBe('ok')
-    expect(sleep).toHaveBeenCalledWith(3000)
+    const [waited] = sleep.mock.calls[0]
+    expect(waited).toBeGreaterThanOrEqual(3000)
+    expect(waited).toBeLessThan(3500)
+  })
+
+  it('adds jitter on top of Retry-After, never less than the header', async () => {
+    const sleep = vi.fn().mockResolvedValue()
+    const fn = vi.fn().mockRejectedValueOnce(throttled(429, 3)).mockResolvedValue('ok')
+    await retryOnThrottle(fn, { sleep, jitter: () => 120 })
+    expect(sleep).toHaveBeenCalledWith(3120)
+  })
+
+  it('retries at most 3 times, then rethrows the last error (no request storm)', async () => {
+    const sleep = vi.fn(async () => {
+      if (sleep.mock.calls.length > 20) throw new Error('storm: still retrying after 20 waits')
+    })
+    const err = throttled(429, 0)
+    const fn = vi.fn().mockRejectedValue(err)
+    await expect(retryOnThrottle(fn, { sleep, maxWaitMs: 1000000 })).rejects.toBe(err)
+    expect(fn).toHaveBeenCalledTimes(4)
+    expect(sleep).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([401, 403])('never retries a %i', async (status) => {
+    const sleep = vi.fn()
+    const err = throttled(status)
+    const fn = vi.fn().mockRejectedValue(err)
+    await expect(retryOnThrottle(fn, { sleep })).rejects.toBe(err)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it('retries a 503', async () => {

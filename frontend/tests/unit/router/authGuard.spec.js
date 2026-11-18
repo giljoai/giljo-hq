@@ -24,7 +24,6 @@ vi.mock('@/services/api', () => ({
       logout: vi.fn(),
     },
   },
-  setTenantKey: vi.fn(),
 }))
 
 import api from '@/services/api'
@@ -268,6 +267,72 @@ describe('createAuthGuard — Option A (verify /api/auth/me on every protected n
           query: { redirect: p },
         })
       }
+    })
+  })
+
+  describe('org setup survives a cold page load (session cookie only)', () => {
+    const orgSetup = {
+      path: '/org-setup',
+      fullPath: '/org-setup',
+      meta: { layout: 'auth', requiresAuth: true, loadSession: true },
+    }
+    const authPage = (path) => ({ path, fullPath: path, meta: { layout: 'auth', requiresAuth: false } })
+
+    beforeEach(() => {
+      setupService.checkEnhancedStatus.mockResolvedValue({
+        is_fresh_install: false,
+        total_users_count: 2,
+        route_signal: 'public_landing',
+        show_public_landing: true,
+        mode: 'saas',
+      })
+    })
+
+    it('keeps a signed-in person on /org-setup when the store is empty', async () => {
+      expect(useUserStore().currentUser).toBeNull()
+      api.auth.me.mockResolvedValue({ data: { id: 1, username: 'new', role: 'admin' } })
+
+      await guard(orgSetup, { path: '/', fullPath: '/', matched: [] }, next)
+
+      expect(api.auth.me).toHaveBeenCalledTimes(1)
+      expect(next).toHaveBeenCalledWith()
+      expect(useUserStore().currentUser).toMatchObject({ username: 'new' })
+    })
+
+    it('sends a signed-out visitor of /org-setup to /landing (unchanged)', async () => {
+      api.auth.me.mockRejectedValue({ response: { status: 401 } })
+
+      await guard(orgSetup, { path: '/', fullPath: '/', matched: [] }, next)
+
+      expect(next).toHaveBeenCalledWith('/landing')
+    })
+
+    it.each(['/login', '/register', '/reset-password', '/welcome', '/privacy', '/terms'])(
+      'does not load the session for %s',
+      async (path) => {
+        api.auth.me.mockResolvedValue({ data: { id: 1, username: 'x', role: 'admin' } })
+
+        await guard(authPage(path), { path: '/', fullPath: '/', matched: [] }, next)
+
+        expect(api.auth.me).not.toHaveBeenCalled()
+      },
+    )
+
+    it.each([
+      ['/login', undefined],
+      ['/register', undefined],
+      ['/reset-password', undefined],
+      ['/privacy', undefined],
+      ['/terms', undefined],
+      ['/welcome', '/landing'],
+      ['/oauth/authorize', undefined],
+    ])('signed-out visit to %s still goes to %s', async (path, target) => {
+      api.auth.me.mockRejectedValue({ response: { status: 401 } })
+
+      await guard(authPage(path), { path: '/', fullPath: '/', matched: [] }, next)
+
+      if (target) expect(next).toHaveBeenCalledWith(target)
+      else expect(next).toHaveBeenCalledWith()
     })
   })
 

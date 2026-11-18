@@ -306,6 +306,7 @@ class TestApiKeyTenantKeyConsistency:
         mock_request = MagicMock()
         mock_request.url.path = "/mcp/test"
         mock_request.client = None
+        mock_request.state.tenant_key = tenant_key
 
         with patch("giljo_mcp.auth.principal.verify_api_key_cached", new=AsyncMock(return_value=True)):
             result = await get_current_user(
